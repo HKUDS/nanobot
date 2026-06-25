@@ -5,35 +5,10 @@ import os
 import select
 import signal
 import sys
-import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
-
-from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.application import run_in_terminal
-from prompt_toolkit.formatted_text import ANSI, HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.patch_stdout import patch_stdout
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.table import Table
-from rich.text import Text
-
-from blackcat import __logo__, __version__
-from blackcat.agent.loop import AgentLoop
-from blackcat.cli.stream import StreamRenderer, ThinkingSpinner
-from blackcat.config.paths import get_workspace_path, is_default_workspace
-from blackcat.config.schema import Config
-from blackcat.utils.evaluator import evaluate_response
-from blackcat.utils.helpers import sync_workspace_templates
-from blackcat.utils.restart import (
-    consume_restart_notice_from_env,
-    format_restart_completed_message,
-    should_show_cli_restart_notice,
-)
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -44,8 +19,9 @@ if sys.platform == "win32":
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-import typer
-from loguru import logger
+# Keep console encoding setup before importing CLI UI/logging libraries.
+import typer  # noqa: E402
+from loguru import logger  # noqa: E402
 
 # Remove default handler and re-add with unified blackcat format
 logger.remove()
@@ -62,6 +38,28 @@ _log_handler_id = logger.add(
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )
 
+from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
+from prompt_toolkit.application import run_in_terminal  # noqa: E402
+from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
+from prompt_toolkit.history import FileHistory  # noqa: E402
+from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.markdown import Markdown  # noqa: E402
+from rich.table import Table  # noqa: E402
+from rich.text import Text  # noqa: E402
+
+from blackcat import __logo__, __version__  # noqa: E402
+from blackcat.agent.loop import AgentLoop  # noqa: E402
+from blackcat.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
+from blackcat.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
+from blackcat.config.schema import Config  # noqa: E402
+from blackcat.utils.evaluator import evaluate_response  # noqa: E402
+from blackcat.utils.helpers import sync_workspace_templates  # noqa: E402
+from blackcat.utils.restart import (  # noqa: E402
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -86,31 +84,7 @@ class SafeFileHistory(FileHistory):
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
 
-_WEBUI_TURN_META_KEY = "webui_turn_id"
-_WEBUI_MESSAGE_SOURCE_META_KEY = "_webui_message_source"
-_PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
-    "proactive_webui_metadata",
-    default=None,
-)
 
-
-def _proactive_delivery_metadata(
-    channel: str,
-    metadata: dict[str, Any] | None,
-    *,
-    turn_seed: str,
-    source_label: str | None = None,
-) -> dict[str, Any]:
-    """Return channel metadata for a fresh proactive delivery turn."""
-    out = dict(metadata or {})
-    out.pop(_WEBUI_TURN_META_KEY, None)
-    if channel == "websocket":
-        out[_WEBUI_TURN_META_KEY] = f"{turn_seed}:{uuid.uuid4().hex}"
-        source: dict[str, str] = {"kind": "cron"}
-        if source_label:
-            source["label"] = source_label
-        out[_WEBUI_MESSAGE_SOURCE_META_KEY] = source
-    return out
 app = typer.Typer(
     name="blackcat",
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -175,6 +149,7 @@ def _flush_pending_tty_input() -> None:
 
     with suppress(Exception):
         import termios
+
         termios.tcflush(fd, termios.TCIFLUSH)
         return
 
@@ -193,6 +168,7 @@ def _restore_terminal() -> None:
         return
     with suppress(Exception):
         import termios
+
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
 
 
@@ -203,6 +179,7 @@ def _init_prompt_session() -> None:
     # Save terminal state so we can restore it on exit
     with suppress(Exception):
         import termios
+
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
 
     from blackcat.config.paths import get_cli_history_path
@@ -458,15 +435,15 @@ def main(
 @app.command()
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config_file: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
     """Initialize blackcat configuration and workspace."""
     from blackcat.config.loader import get_config_path, load_config, save_config, set_config_path
     from blackcat.config.schema import Config
 
-    if config_file:
-        config_path = Path(config_file).expanduser().resolve()
+    if config:
+        config_path = Path(config).expanduser().resolve()
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
     else:
@@ -549,7 +526,7 @@ def onboard(
         console.print("     Get one at: https://openrouter.ai/keys")
         console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
     console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
+        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/blackcat#-chat-apps[/dim]"
     )
 
 
@@ -650,6 +627,7 @@ def _migrate_cron_store(config: "Config") -> None:
     if legacy_path.is_file() and not new_path.exists():
         new_path.parent.mkdir(parents=True, exist_ok=True)
         import shutil
+
         shutil.move(str(legacy_path), str(new_path))
 
 
@@ -762,197 +740,6 @@ def gateway(
     _run_gateway(cfg, port=port)
 
 
-DESKTOP_BOOTSTRAP_PROVIDER = "openai_codex"
-DESKTOP_BOOTSTRAP_MODEL = "openai-codex/gpt-5.1-codex"
-
-
-def _desktop_provider_error_is_recoverable(error: ValueError) -> bool:
-    message = str(error)
-    return "No API key configured" in message or "requires api_key and api_base" in message
-
-
-def _desktop_provider_needs_bootstrap(config: Config) -> bool:
-    from blackcat.providers.factory import make_provider
-
-    try:
-        make_provider(config)
-        return False
-    except ValueError as e:
-        if not _desktop_provider_error_is_recoverable(e):
-            raise
-        return True
-
-
-def _reset_desktop_config_to_unconfigured(config: Config) -> bool:
-    defaults = config.agents.defaults
-    changed = False
-    if defaults.model_preset is not None:
-        defaults.model_preset = None
-        changed = True
-    if defaults.provider:
-        defaults.provider = ""
-        changed = True
-    if defaults.model:
-        defaults.model = ""
-        changed = True
-    return changed
-
-
-def _is_persisted_desktop_bootstrap(config: Config) -> bool:
-    defaults = config.agents.defaults
-    return (
-        defaults.model_preset is None
-        and defaults.provider == DESKTOP_BOOTSTRAP_PROVIDER
-        and defaults.model == DESKTOP_BOOTSTRAP_MODEL
-        and not config.model_presets
-    )
-
-
-def _apply_desktop_runtime_bootstrap(config: Config) -> None:
-    defaults = config.agents.defaults
-    config.agents.defaults.model_preset = None
-    defaults.provider = DESKTOP_BOOTSTRAP_PROVIDER
-    defaults.model = DESKTOP_BOOTSTRAP_MODEL
-
-
-def _load_or_create_desktop_config(config: str | None, workspace: str | None) -> Config:
-    """Load the desktop-owned config, creating it on first launch."""
-    from blackcat.config.loader import (
-        get_config_path,
-        load_config,
-        resolve_config_env_vars,
-        save_config,
-        set_config_path,
-    )
-    from blackcat.config.schema import Config as BlackcatConfig
-
-    config_path = Path(config).expanduser().resolve() if config else get_config_path()
-    set_config_path(config_path)
-    changed = False
-    if config_path.exists():
-        try:
-            loaded = resolve_config_env_vars(load_config(config_path))
-        except ValueError as e:
-            console.print(f"[red]Error: {e}[/red]")
-            raise typer.Exit(1)
-    else:
-        loaded = BlackcatConfig()
-        changed = True
-
-    if workspace:
-        workspace_path = Path(workspace).expanduser()
-        loaded.agents.defaults.workspace = str(workspace_path)
-        changed = True
-
-    if _is_persisted_desktop_bootstrap(loaded):
-        changed = _reset_desktop_config_to_unconfigured(loaded) or changed
-    elif _desktop_provider_needs_bootstrap(loaded):
-        changed = _reset_desktop_config_to_unconfigured(loaded) or changed
-
-    if changed:
-        save_config(loaded, config_path)
-
-    runtime_config = loaded.model_copy(deep=True)
-    if _desktop_provider_needs_bootstrap(runtime_config):
-        _apply_desktop_runtime_bootstrap(runtime_config)
-    return runtime_config
-
-
-def _configure_desktop_gateway(
-    config: Config,
-    *,
-    webui_port: int,
-    webui_socket: str | None,
-    token_issue_secret: str,
-) -> None:
-    """Force a local WebSocket-only gateway for the desktop app process."""
-    config.gateway.host = "127.0.0.1"
-    config.gateway.port = webui_port
-    config.gateway.heartbeat.enabled = False
-
-    extras = dict(getattr(config.channels, "__pydantic_extra__", None) or {})
-    for name, section in list(extras.items()):
-        if name == "websocket":
-            continue
-        if isinstance(section, dict):
-            extras[name] = {**section, "enabled": False}
-        else:
-            with suppress(Exception):
-                setattr(section, "enabled", False)
-            extras[name] = section
-
-    websocket_cfg = extras.get("websocket")
-    if not isinstance(websocket_cfg, dict):
-        websocket_cfg = {}
-    websocket_cfg.update(
-        {
-            "enabled": True,
-            "host": "127.0.0.1",
-            "port": webui_port,
-            "unix_socket_path": webui_socket or "",
-            "path": "/",
-            "token_issue_secret": token_issue_secret,
-            "websocket_requires_token": True,
-            "allow_from": ["*"],
-            "streaming": True,
-        }
-    )
-    extras["websocket"] = websocket_cfg
-    config.channels.__pydantic_extra__ = extras
-
-
-@app.command("desktop-gateway", hidden=True)
-def desktop_gateway(
-    webui_port: int = typer.Option(0, "--webui-port", min=0, max=65535),
-    webui_socket: str | None = typer.Option(None, "--webui-socket", help="Unix socket path for desktop IPC"),
-    token_issue_secret: str = typer.Option(..., "--token-issue-secret"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Desktop workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Desktop config file"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-):
-    """Start the private local gateway used by blackcat Desktop."""
-    if not token_issue_secret.strip():
-        console.print("[red]Error: --token-issue-secret is required[/red]")
-        raise typer.Exit(1)
-    if webui_port <= 0 and not (webui_socket or "").strip():
-        console.print("[red]Error: --webui-port or --webui-socket is required[/red]")
-        raise typer.Exit(1)
-    if verbose:
-        logger.remove(_log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-        )
-    cfg = _load_or_create_desktop_config(config, workspace)
-    _configure_desktop_gateway(
-        cfg,
-        webui_port=webui_port,
-        webui_socket=webui_socket,
-        token_issue_secret=token_issue_secret,
-    )
-    _run_gateway(
-        cfg,
-        port=webui_port,
-        webui_static_dist=False,
-        webui_runtime_surface="native",
-        webui_runtime_capabilities={
-            "can_restart_engine": True,
-            "can_pick_folder": True,
-            "can_open_logs": True,
-            "can_export_diagnostics": True,
-        },
-        health_server_enabled=False,
-    )
-
-
 def _run_gateway(
     config: Config,
     *,
@@ -964,12 +751,13 @@ def _run_gateway(
     health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from blackcat.agent.tools.cron import CronTool
     from blackcat.agent.tools.message import MessageTool
     from blackcat.bus.queue import MessageBus
     from blackcat.bus.runtime_events import RuntimeEventBus
     from blackcat.channels.manager import ChannelManager
-    from blackcat.cron.service import CronService
+    from blackcat.cron.bound_runner import run_bound_cron_job
+    from blackcat.cron.service import CronJobSkippedError, CronService
+    from blackcat.cron.session_turns import is_bound_cron_job
     from blackcat.cron.types import CronJob
     from blackcat.providers.factory import build_provider_snapshot, load_provider_snapshot
     from blackcat.providers.image_generation import image_gen_provider_configs
@@ -980,26 +768,6 @@ def _run_gateway(
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting blackcat gateway version {__version__} on port {port}...")
-
-    # Add file-based logging for runtime debugging (rotated at 10MB, keep 3 backups)
-    from pathlib import Path
-    log_dir = Path.home() / ".blackcat" / ".logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger.add(
-        log_dir / "blackcat.log",
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-            "<level>{level: <5}</level> | "
-            "<cyan>{extra[channel]}</cyan> | "
-            "<level>{message}</level>"
-        ),
-        level="DEBUG",
-        rotation="10 MB",
-        retention=3,
-        enqueue=True,
-        filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-    )
-
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
@@ -1038,14 +806,14 @@ def _run_gateway(
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
 
-    from blackcat.agent.loop import UNIFIED_SESSION_KEY
     from blackcat.bus.events import OutboundMessage
+    from blackcat.session.keys import session_key_for_channel
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
-        return (
-            UNIFIED_SESSION_KEY
-            if config.agents.defaults.unified_session
-            else f"{channel}:{chat_id}"
+        return session_key_for_channel(
+            channel,
+            chat_id,
+            unified_session=config.agents.defaults.unified_session,
         )
 
     async def _deliver_to_channel(
@@ -1054,9 +822,6 @@ def _run_gateway(
         """Publish a user-visible message and mirror it into that channel's session."""
         metadata = dict(msg.metadata or {})
         record = record or bool(metadata.pop("_record_channel_delivery", False))
-        proactive_webui_metadata = _PROACTIVE_WEBUI_METADATA.get()
-        if record and msg.channel == "websocket" and proactive_webui_metadata:
-            metadata = {**metadata, **proactive_webui_metadata}
         if metadata != (msg.metadata or {}):
             msg = OutboundMessage(
                 channel=msg.channel,
@@ -1208,73 +973,17 @@ def _run_gateway(
                 logger.info("Heartbeat: silenced by post-run evaluation")
             return response
 
-        reminder_note = (
-            "The scheduled time has arrived. Deliver this reminder to the user now, "
-            "as a brief and natural message in their language. Speak directly to them — "
-            "do not narrate progress, summarize, include user IDs, or add status reports "
-            "like 'Done' or 'Reminded'.\n\n"
-            f"Reminder: {job.payload.message}"
+        if is_bound_cron_job(job):
+            return await run_bound_cron_job(job, agent=agent, cron=cron)
+
+        reason = "unbound agent cron job must be recreated from a chat session"
+        logger.warning(
+            "Cron: skipped unbound agent job '{}' ({}): {}",
+            job.name,
+            job.id,
+            reason,
         )
-
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-
-        message_record_token = None
-        if isinstance(message_tool, MessageTool):
-            message_record_token = message_tool.set_record_channel_delivery(True)
-
-        proactive_webui_metadata = _proactive_delivery_metadata(
-            "websocket",
-            None,
-            turn_seed=f"cron:{job.id}",
-            source_label=job.name,
-        )
-        proactive_token = _PROACTIVE_WEBUI_METADATA.set(proactive_webui_metadata)
-
-        try:
-            resp = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
-                on_progress=_silent,
-            )
-        finally:
-            _PROACTIVE_WEBUI_METADATA.reset(proactive_token)
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
-            if isinstance(message_tool, MessageTool) and message_record_token is not None:
-                message_tool.reset_record_channel_delivery(message_record_token)
-
-        response = resp.content if resp else ""
-
-        if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
-
-        if job.payload.deliver and job.payload.to and response:
-            should_notify = await evaluate_response(
-                response, reminder_note, agent.provider, agent.model,
-            )
-            if should_notify:
-                proactive_metadata = _proactive_delivery_metadata(
-                    job.payload.channel or "cli",
-                    job.payload.channel_meta,
-                    turn_seed=f"cron:{job.id}",
-                    source_label=job.name,
-                )
-                await _deliver_to_channel(
-                    OutboundMessage(
-                        channel=job.payload.channel or "cli",
-                        chat_id=job.payload.to,
-                        content=response,
-                        metadata=proactive_metadata,
-                    ),
-                    record=True,
-                    session_key=job.payload.session_key,
-                )
-        return response
+        raise CronJobSkippedError(reason)
 
     cron.on_job = on_cron_job
 
@@ -1293,6 +1002,7 @@ def _run_gateway(
         session_manager=session_manager,
         cron_service=cron,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
@@ -1435,6 +1145,7 @@ def _run_gateway(
             console.print("\nShutting down...")
         except Exception:
             import traceback
+
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
@@ -1462,7 +1173,7 @@ def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config_file: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show blackcat runtime logs during chat"),
 ):
@@ -1473,7 +1184,7 @@ def agent(
     from blackcat.cron.service import CronService
     from blackcat.providers.image_generation import image_gen_provider_configs
 
-    config = _load_runtime_config(config_file, workspace)
+    config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
@@ -1571,7 +1282,8 @@ def agent(
         from blackcat.bus.events import InboundMessage
         _init_prompt_session()
         _model, _preset_tag = _model_display(config)
-        console.print(f"{__logo__} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        _icon = config.agents.defaults.bot_icon or __logo__
+        console.print(f"{_icon} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1902,6 +1614,7 @@ def _register_login(name: str):
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
+
     return decorator
 
 
@@ -1962,6 +1675,7 @@ def provider_logout(
 def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
+
         token = None
         with suppress(Exception):
             token = get_token()

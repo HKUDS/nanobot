@@ -101,6 +101,61 @@ async def test_runner_returns_max_iterations_fallback():
     )
     assert result.messages[-1]["role"] == "assistant"
     assert result.messages[-1]["content"] == result.final_content
+    assert provider.chat_with_retry.await_count == 3
+    assert provider.chat_with_retry.await_args_list[-1].kwargs["tools"] is None
+    assert tools.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_no_tools_finalization_after_max_iterations():
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    calls: list[dict] = []
+
+    async def chat_with_retry(*, messages, tools=None, **kwargs):
+        calls.append({"messages": messages, "tools": tools})
+        if len(calls) <= 2:
+            return LLMResponse(
+                content="still working",
+                tool_calls=[
+                    ToolCallRequest(
+                        id=f"call_{len(calls)}",
+                        name="list_dir",
+                        arguments={"path": "."},
+                    )
+                ],
+            )
+        return LLMResponse(
+            content="Read the directory twice. More investigation remains.",
+            tool_calls=[],
+            usage={"prompt_tokens": 10, "completion_tokens": 7},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "inspect the repo"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.final_content == "Read the directory twice. More investigation remains."
+    assert result.messages[-1] == {
+        "role": "assistant",
+        "content": "Read the directory twice. More investigation remains.",
+    }
+    assert len(calls) == 3
+    assert calls[-1]["tools"] is None
+    assert "tool-call budget" in calls[-1]["messages"][-1]["content"]
+    assert tools.execute.await_count == 2
 
 
 @pytest.mark.asyncio

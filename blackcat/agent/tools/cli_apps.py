@@ -16,7 +16,7 @@ from blackcat.agent.tools.schema import (
     tool_parameters_schema,
 )
 from blackcat.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
-from blackcat.config.schema import Base
+from blackcat.config_base import Base
 from blackcat.security.workspace_access import current_tool_workspace
 
 

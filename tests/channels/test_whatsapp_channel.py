@@ -292,6 +292,30 @@ async def test_voice_message_transcription_uses_media_path():
 
 
 @pytest.mark.asyncio
+async def test_forwarded_voice_message_preserves_metadata_after_transcription():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+    ch._handle_message = AsyncMock()
+    ch.transcribe_audio = AsyncMock(return_value="Forwarded audio text")
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "v-forwarded",
+            "sender": "12345@s.whatsapp.net",
+            "pn": "",
+            "content": "[Voice Message]",
+            "timestamp": 1,
+            "media": ["/tmp/voice.ogg"],
+            "isForwarded": True,
+        })
+    )
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["content"] == "Forwarded audio text"
+    assert kwargs["metadata"]["is_forwarded"] is True
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_voice_message_does_not_transcribe() -> None:
     ch = WhatsAppChannel({"enabled": True, "allowFrom": ["allowed"]}, MagicMock())
     ch._handle_message = AsyncMock()

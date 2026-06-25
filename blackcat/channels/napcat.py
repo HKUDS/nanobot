@@ -428,7 +428,7 @@ class NapcatChannel(BaseChannel):
     # Outbound
     # ------------------------------------------------------------------
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         if self._ws is None:
             logger.warning("napcat: not connected, dropping outbound message")
             return

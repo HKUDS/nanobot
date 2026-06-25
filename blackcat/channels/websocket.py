@@ -34,6 +34,7 @@ from blackcat.utils.media_decode import (
     save_base64_data_url,
 )
 from blackcat.webui.cli_apps_api import normalize_cli_app_mentions
+from blackcat.webui.forking import handle_webui_fork_chat
 from blackcat.webui.gateway_services import GatewayServices
 from blackcat.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -668,6 +669,9 @@ class WebSocketChannel(BaseChannel):
             )
             await self._hydrate_after_subscribe(new_id)
             return
+        if t == "fork_chat":
+            await handle_webui_fork_chat(self, connection, envelope)
+            return
         if t == "attach":
             cid = envelope.get("chat_id")
             if not _is_valid_chat_id(cid):
@@ -842,7 +846,7 @@ class WebSocketChannel(BaseChannel):
             self.logger.exception("send failed{}", label)
             raise
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         if msg.metadata.get("_runtime_model_updated"):
             await self.send_runtime_model_updated(
                 model_name=msg.metadata.get("model"),
@@ -892,6 +896,7 @@ class WebSocketChannel(BaseChannel):
                 goal_state=gs_blob,
                 metadata=msg.metadata,
             )
+            await self.send_session_updated(msg.chat_id, scope="thread")
             return
         if msg.metadata.get("_session_updated"):
             if conns:
@@ -1142,8 +1147,8 @@ class WebSocketChannel(BaseChannel):
             await self._safe_send_to(connection, raw, label=" goal_status ")
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
-        """Notify clients that session metadata changed outside the main turn."""
-        conns = list(self._subs.get(chat_id, ()))
+        """Notify WebUI clients that a session row should refresh."""
+        conns = list(self._conn_chats)
         if not conns:
             return
         body: dict[str, Any] = {"event": "session_updated", "chat_id": chat_id}

@@ -740,8 +740,12 @@ class EmailChannel(BaseChannel):
             if status == "OK":
                 return
             self.logger.warning("UID EXPUNGE failed for UID {}, falling back to EXPUNGE", uid)
-        if self.config.post_action_expunge:
-            client.expunge()
+            if not self.config.post_action_expunge:
+                return
+        # No UIDPLUS: a plain EXPUNGE is the only way to actually remove
+        # messages marked \Deleted via the sequence-number STORE fallback —
+        # without it the delete post-action silently no-ops on such servers.
+        client.expunge()
 
     @classmethod
     def _is_stale_imap_error(cls, exc: Exception) -> bool:

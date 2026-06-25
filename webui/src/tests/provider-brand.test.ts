@@ -52,4 +52,14 @@ describe("provider brand logos", () => {
     expect(providerBrand("assemblyai")?.logoUrls).toContain("https://assemblyai.com/favicon.ico");
     expect(providerBrand("assemblyai")?.initials).toBe("AA");
   });
+
+  it("keeps Bocha web search settings on the first-party brand domain", () => {
+    expect(providerBrand("bocha")?.logoUrls).toContain("https://bochaai.com/favicon.ico");
+    expect(providerBrand("bocha")?.initials).toBe("B");
+  });
+
+  it("keeps Keenable web search settings on the first-party brand domain", () => {
+    expect(providerBrand("keenable")?.logoUrls).toContain("https://keenable.ai/favicon.ico");
+    expect(providerBrand("keenable")?.initials).toBe("K");
+  });
 });

@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "サイドバーのナビゲーション",
+    "mobileNavigation": "モバイルサイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
     "newChat": "新しいチャット",
     "searchAria": "検索",
@@ -55,6 +56,7 @@
       "ariaLabel": "言語を変更"
     },
     "apps": "アプリ",
+    "automations": "自動タスク",
     "skills": {
       "title": "スキル"
     }
@@ -80,12 +82,14 @@
       "cliApps": "CLI アプリ",
       "mcp": "MCP",
       "apps": "アプリ",
+      "automations": "自動タスク",
       "skills": "スキル"
     },
     "sections": {
       "interface": "インターフェース",
       "ai": "AI",
       "system": "システム",
+      "about": "情報",
       "status": "状態",
       "localPreferences": "ローカル設定",
       "presets": "プリセット",
@@ -248,7 +252,7 @@
       "exporting": "書き出しています..."
     },
     "byok": {
-      "description": "自分の provider キーを使います。Blackcat は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
+      "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
       "configured": "設定済み",
       "notConfigured": "未設定",
       "configuredSection": "設定済み",
@@ -391,6 +395,13 @@
       "unavailable": "利用不可",
       "noDescription": "説明はありません。"
     },
+    "about": {
+      "version": "バージョン",
+      "checking": "確認中...",
+      "checkForUpdates": "アップデートを確認",
+      "upToDate": "最新の状態です",
+      "updateAvailable": "アップデートがあります v{{version}}"
+    },
     "mcp": {
       "allCategories": "すべてのカテゴリ",
       "summary": "{{total}} 個中 {{installed}} 個のプリセットが有効",
@@ -461,6 +472,127 @@
       "loading": "アプリを読み込み中...",
       "empty": "一致するアプリはありません。"
     },
+    "automations": {
+      "filters": {
+        "all": "すべて",
+        "active": "実行中",
+        "paused": "一時停止",
+        "failed": "要対応",
+        "system": "システム"
+      },
+      "sort": {
+        "next": "次回実行",
+        "last": "前回実行",
+        "updated": "更新日時",
+        "name": "名前"
+      },
+      "search": "タスク、メッセージ、関連チャット、予定を検索",
+      "queue": "キュー",
+      "loading": "自動タスクを読み込み中...",
+      "noMatches": "この表示に一致する自動タスクはありません。",
+      "empty": "自動タスクはまだありません。",
+      "emptyHint": "実行元から作成すると、nanobot が正しいコンテキストを保持できます。",
+      "oneShot": "一回限り",
+      "systemTask": "システム管理の自動タスク",
+      "labels": {
+        "schedule": "スケジュール",
+        "next": "次回",
+        "origin": "関連チャット",
+        "created": "作成",
+        "updated": "更新"
+      },
+      "runNow": "今すぐ実行",
+      "pause": "一時停止",
+      "resume": "再開",
+      "edit": "編集",
+      "delete": "削除",
+      "protected": "保護済み",
+      "editTitle": "自動タスクを編集",
+      "save": "保存",
+      "deleteTitle": "自動タスクを削除",
+      "deleteDescription": "{{name}} を cron ストアから削除します。過去のチャットメッセージはセッションに残ります。",
+      "cancel": "キャンセル",
+      "status": {
+        "system": "システム",
+        "running": "実行中",
+        "paused": "一時停止",
+        "failed": "失敗",
+        "completed": "完了",
+        "noSchedule": "スケジュールなし",
+        "active": "実行中"
+      },
+      "origin": {
+        "system": "システム",
+        "unknown": "関連チャットなし"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}} ごと",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "毎日 {{time}}",
+        "weekdaysAt": "平日 {{time}}",
+        "hourlyAt": "毎時 :{{minute}}",
+        "hourlyWindow": "{{start}}-{{end}} の毎時 :{{minute}}",
+        "custom": "カスタムスケジュール"
+      },
+      "next": {
+        "paused": "一時停止",
+        "pending": "実行中",
+        "none": "次回実行なし"
+      },
+      "message": {
+        "showMore": "メッセージ全文を表示",
+        "showLess": "折りたたむ"
+      },
+      "fields": {
+        "name": "名前",
+        "message": "メッセージ",
+        "scheduleType": "スケジュール種別",
+        "every": "間隔",
+        "unit": "単位",
+        "cronExpression": "Cron 式",
+        "timezone": "タイムゾーン",
+        "runAt": "実行日時"
+      },
+      "scheduleTypes": {
+        "every": "間隔",
+        "cron": "Cron",
+        "at": "一回限り"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分",
+        "hour": "時間",
+        "day": "日"
+      },
+      "validation": {
+        "nameRequired": "名前は必須です。",
+        "messageRequired": "メッセージは必須です。",
+        "intervalRequired": "間隔は正の数で指定してください。",
+        "cronRequired": "Cron 式は必須です。",
+        "timeRequired": "実行日時は必須です。",
+        "futureRequired": "実行日時は現在より後にしてください。"
+      }
+    },
     "oauth": {
       "authentication": "OAuth 認証",
       "signIn": "サインイン",
@@ -509,6 +641,7 @@
   },
   "chat": {
     "fallbackTitle": "チャット {{id}}",
+    "forkTitle": "分岐：{{title}}",
     "loading": "読み込み中…",
     "noSessions": "まだセッションがありません。",
     "showMore": "さらに {{count}} 件表示",
@@ -518,7 +651,8 @@
     "newInProject": "「{{project}}」で新しいチャットを開始",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -550,7 +684,22 @@
     "title": "このチャットを削除しますか？",
     "description": "この操作は元に戻せません。",
     "cancel": "キャンセル",
-    "confirm": "削除"
+    "confirm": "削除",
+    "automationsDescription": "このチャットにはスケジュール済みの自動タスクがあります。削除するとそれらも削除されます。",
+    "moreAutomations": "他 {{count}} 件",
+    "confirmWithAutomations": "削除",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "{{duration}} ごと",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "カスタムスケジュール"
+    },
+    "next": {
+      "label": "次回: {{time}}",
+      "disabled": "一時停止中",
+      "none": "次回実行なし"
+    }
   },
   "connection": {
     "idle": "待機中",
@@ -647,6 +796,7 @@
       },
       "next": {
         "label": "次回 {{time}}",
+        "pending": "まもなく実行",
         "disabled": "一時停止",
         "none": "次回実行なし"
       }
@@ -810,6 +960,7 @@
     },
     "scrollToBottom": "一番下へスクロール",
     "loadEarlier": "以前のメッセージを読み込む",
+    "forkedFromHistory": "履歴から分岐",
     "promptNavigator": {
       "open": "プロンプトナビゲーターを開く",
       "title": "プロンプト",
@@ -835,12 +986,16 @@
     "agentActivityLiveSummary": "実行中… · {{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
     "agentActivityLiveToolsOnly": "実行中… · ツール呼び出し {{tools}} 回",
     "imageAttachment": "画像の添付",
-    "copyReply": "返信をコピー",
-    "copiedReply": "返信をコピーしました",
+    "forkFromHere": "分岐",
+    "copyReply": "コピー",
+    "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",
     "activityThoughtFor": "{{duration}}考えました",
+    "activityWorkingFor": "{{duration}}作業中",
+    "activityWorked": "作業しました",
+    "activityWorkedFor": "{{duration}}作業しました",
     "cliActivityRunningOne": "@{{name}} を使用中",
     "cliActivityRanOne": "@{{name}} を使用しました",
     "cliActivityFailedOne": "@{{name}} が失敗しました",
@@ -885,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

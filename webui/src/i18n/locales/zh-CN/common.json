@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "侧边栏导航",
+    "mobileNavigation": "移动端侧边栏导航",
     "collapse": "收起侧边栏",
     "newChat": "新建对话",
     "searchAria": "搜索",
@@ -55,6 +56,7 @@
       "ariaLabel": "切换语言"
     },
     "apps": "应用",
+    "automations": "自动任务",
     "skills": {
       "title": "技能"
     }
@@ -80,12 +82,14 @@
       "runtime": "系统",
       "advanced": "安全",
       "apps": "应用",
+      "automations": "自动任务",
       "skills": "技能"
     },
     "sections": {
       "interface": "界面",
       "ai": "AI",
       "system": "系统",
+      "about": "关于",
       "status": "状态",
       "localPreferences": "本地偏好",
       "presets": "预设",
@@ -251,6 +255,13 @@
       "unavailable": "不可用",
       "noDescription": "暂无描述。"
     },
+    "about": {
+      "version": "版本",
+      "checking": "正在检查...",
+      "checkForUpdates": "检查更新",
+      "upToDate": "已是最新版本",
+      "updateAvailable": "有可用更新 v{{version}}"
+    },
     "mcp": {
       "allCategories": "全部分类",
       "summary": "已启用 {{installed}} / {{total}} 个预设",
@@ -356,7 +367,7 @@
       "exporting": "正在导出..."
     },
     "byok": {
-      "description": "自带服务商密钥。Blackcat 会从当前 config 读取这些值，只有已配置的服务商才能在通用设置里选择。",
+      "description": "自带服务商密钥。Nanobot 会从当前 config 读取这些值，只有已配置的服务商才能在通用设置里选择。",
       "configured": "已配置",
       "notConfigured": "未配置",
       "configuredSection": "已配置",
@@ -461,6 +472,127 @@
       "loading": "正在加载应用...",
       "empty": "没有匹配的应用。"
     },
+    "automations": {
+      "filters": {
+        "all": "全部",
+        "active": "运行中",
+        "paused": "已暂停",
+        "failed": "异常",
+        "system": "系统"
+      },
+      "sort": {
+        "next": "下次运行",
+        "last": "上次运行",
+        "updated": "更新时间",
+        "name": "名称"
+      },
+      "search": "搜索任务、消息、关联会话或计划",
+      "queue": "任务队列",
+      "loading": "正在加载自动任务...",
+      "noMatches": "当前视图没有匹配的自动任务。",
+      "empty": "暂无自动任务。",
+      "emptyHint": "请从它应该运行的来源处创建，这样 nanobot 才能保留正确上下文。",
+      "oneShot": "一次性",
+      "systemTask": "系统管理的自动任务",
+      "labels": {
+        "schedule": "计划",
+        "next": "下次",
+        "origin": "关联会话",
+        "created": "创建于",
+        "updated": "更新于"
+      },
+      "runNow": "立即运行",
+      "pause": "暂停",
+      "resume": "恢复",
+      "edit": "编辑",
+      "delete": "删除",
+      "protected": "受保护",
+      "editTitle": "编辑自动任务",
+      "save": "保存",
+      "deleteTitle": "删除自动任务",
+      "deleteDescription": "这会从 cron 存储中删除 {{name}}，历史聊天消息会保留在会话中。",
+      "cancel": "取消",
+      "status": {
+        "system": "系统",
+        "running": "正在运行",
+        "paused": "已暂停",
+        "failed": "失败",
+        "completed": "已完成",
+        "noSchedule": "无计划",
+        "active": "运行中"
+      },
+      "origin": {
+        "system": "系统",
+        "unknown": "未关联会话"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "钉钉",
+        "discord": "Discord",
+        "email": "邮件",
+        "feishu": "飞书",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "微信",
+        "wecom": "企业微信",
+        "weixin": "微信",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "在 {{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "每天 {{time}}",
+        "weekdaysAt": "工作日 {{time}}",
+        "hourlyAt": "每小时第 {{minute}} 分钟",
+        "hourlyWindow": "{{start}}-{{end}} 点每小时第 {{minute}} 分钟",
+        "custom": "自定义计划"
+      },
+      "next": {
+        "paused": "已暂停",
+        "pending": "正在运行",
+        "none": "没有下次运行"
+      },
+      "message": {
+        "showMore": "查看完整消息",
+        "showLess": "收起消息"
+      },
+      "fields": {
+        "name": "名称",
+        "message": "消息",
+        "scheduleType": "计划类型",
+        "every": "每隔",
+        "unit": "单位",
+        "cronExpression": "Cron 表达式",
+        "timezone": "时区",
+        "runAt": "运行时间"
+      },
+      "scheduleTypes": {
+        "every": "间隔",
+        "cron": "Cron",
+        "at": "一次性"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分钟",
+        "hour": "小时",
+        "day": "天"
+      },
+      "validation": {
+        "nameRequired": "名称不能为空。",
+        "messageRequired": "消息不能为空。",
+        "intervalRequired": "间隔必须是正整数。",
+        "cronRequired": "Cron 表达式不能为空。",
+        "timeRequired": "运行时间不能为空。",
+        "futureRequired": "运行时间必须晚于当前时间。"
+      }
+    },
     "oauth": {
       "authentication": "OAuth 认证",
       "signIn": "登录",
@@ -509,6 +641,7 @@
   },
   "chat": {
     "fallbackTitle": "对话 {{id}}",
+    "forkTitle": "分叉：{{title}}",
     "loading": "加载中…",
     "noSessions": "还没有会话。",
     "showMore": "再显示 {{count}} 个",
@@ -518,7 +651,8 @@
     "newInProject": "在 {{project}} 中开始新对话",
     "activity": {
       "running": "Agent 正在运行",
-      "complete": "Agent 已完成"
+      "complete": "Agent 已完成",
+      "updated": "有新内容"
     },
     "pin": "置顶",
     "unpin": "取消置顶",
@@ -550,7 +684,22 @@
     "title": "删除这个对话？",
     "description": "此操作无法撤销。",
     "cancel": "取消",
-    "confirm": "删除"
+    "confirm": "删除",
+    "automationsDescription": "这个对话有关联的自动任务。删除对话也会删除这些自动任务。",
+    "moreAutomations": "另有 {{count}} 个",
+    "confirmWithAutomations": "删除",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "每 {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "自定义计划"
+    },
+    "next": {
+      "label": "下次：{{time}}",
+      "disabled": "已暂停",
+      "none": "没有下次运行"
+    }
   },
   "connection": {
     "idle": "空闲",
@@ -647,6 +796,7 @@
       },
       "next": {
         "label": "下次 {{time}}",
+        "pending": "即将执行",
         "disabled": "已暂停",
         "none": "没有下次运行"
       }
@@ -810,6 +960,7 @@
     },
     "scrollToBottom": "滚动到底部",
     "loadEarlier": "加载更早消息",
+    "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {
       "open": "打开输入导航",
       "title": "输入列表",
@@ -837,6 +988,9 @@
     "activityThinkingFor": "思考中 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "思考了 {{duration}}",
+    "activityWorkingFor": "处理中 {{duration}}",
+    "activityWorked": "已处理",
+    "activityWorkedFor": "处理了 {{duration}}",
     "cliActivityRunningOne": "正在使用 @{{name}}",
     "cliActivityRanOne": "已使用 @{{name}}",
     "cliActivityFailedOne": "使用 @{{name}} 失败",
@@ -849,8 +1003,9 @@
     "imageAttachment": "图片附件",
     "automationSourceFallback": "自动化",
     "automationTriggered": "自动触发",
-    "copyReply": "复制回复",
-    "copiedReply": "已复制回复",
+    "forkFromHere": "分叉",
+    "copyReply": "复制",
+    "copiedReply": "已复制",
     "turnLatencyTitle": "本轮耗时（端到端）"
   },
   "lightbox": {
@@ -885,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "工作区未更改",
-      "body": "网关拒绝了请求的项目或访问权限，Blackcat 已继续使用之前的工作区。"
+      "body": "网关拒绝了请求的项目或访问权限，Nanobot 已继续使用之前的工作区。"
     }
   },
   "workspace": {

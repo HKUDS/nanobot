@@ -538,7 +538,7 @@ class SignalChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through Signal."""
         is_progress_message = bool(msg.metadata.get("_progress"))
         try:

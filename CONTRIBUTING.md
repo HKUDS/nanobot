@@ -46,7 +46,7 @@ git pull --ff-only upstream main
 git switch -c your-topic-branch
 ```
 
-Use your primary HKUDS/nanobot remote in place of `upstream` if your checkout
+Use your primary HKUDS/blackcat remote in place of `upstream` if your checkout
 uses a different remote name.
 
 Keep unrelated local changes out of the topic branch. If your checkout already has
@@ -59,7 +59,7 @@ Keep setup boring and reliable. The goal is to get you into the code quickly:
 
 ```bash
 # Clone the repository
-git clone https://github.com/HKUDS/nanobot.git
+git clone https://github.com/HKUDS/blackcat.git
 cd blackcat
 
 # Install with dev dependencies
@@ -72,9 +72,6 @@ pytest
 ruff check blackcat/
 
 # Format code — optional. The existing tree predates `ruff format`,
-# so running it across `blackcat/` produces a large unrelated diff
-# (E501 is ignored, so many existing lines exceed the 100-char setting).
-# Format only files you've actually touched, not the whole package.
 # so running it broadly produces large unrelated diffs.
 # Do not mix mechanical formatting churn into a functional PR.
 # Use formatting only for the exact code your change intentionally touches.
@@ -129,7 +126,7 @@ explicitly in the PR description so it can be discussed before merge.
 
 If you have questions, ideas, or half-formed insights, you are warmly welcome here.
 
-Please feel free to open an [issue](https://github.com/HKUDS/nanobot/issues), join the community, or simply reach out:
+Please feel free to open an [issue](https://github.com/HKUDS/blackcat/issues), join the community, or simply reach out:
 
 - [Discord](https://discord.gg/MnCvHqpUGB)
 - [Feishu/WeChat](./COMMUNICATION.md)

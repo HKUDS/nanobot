@@ -25,7 +25,7 @@ def _make_workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-async def test_bootstrap_files_are_backed_by_templates() -> None:
+def test_bootstrap_files_are_backed_by_templates() -> None:
     template_dir = pkg_files("blackcat") / "templates"
 
     for filename in ContextBuilder.BOOTSTRAP_FILES:
@@ -156,6 +156,58 @@ async def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None
     assert re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", prompt)
 
 
+async def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("legacy entry without session")
+    builder.memory.append_history("telegram history", session_key="telegram:chat-1")
+    builder.memory.append_history("slack history", session_key="slack:chat-2")
+
+    prompt = await builder.build_system_prompt(session_key="telegram:chat-1")
+
+    assert "# Recent History" in prompt
+    assert "telegram history" in prompt
+    assert "slack history" not in prompt
+    assert "legacy entry without session" not in prompt
+
+
+async def test_recent_history_injection_unified_excludes_cron_internals(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("unified user history", session_key="unified:default")
+    builder.memory.append_history("channel user history", session_key="telegram:chat-1")
+    builder.memory.append_history("cron internal history", session_key="cron:job-1")
+
+    prompt = await builder.build_system_prompt(
+        session_key="unified:default",
+        unified_session=True,
+    )
+
+    assert "unified user history" in prompt
+    assert "channel user history" in prompt
+    assert "cron internal history" not in prompt
+
+
+async def test_cron_recent_history_can_see_own_history_and_unified_context(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("unified user history", session_key="unified:default")
+    builder.memory.append_history("own cron history", session_key="cron:job-1")
+    builder.memory.append_history("other cron history", session_key="cron:job-2")
+
+    prompt = await builder.build_system_prompt(
+        session_key="cron:job-1",
+        unified_session=True,
+    )
+
+    assert "unified user history" in prompt
+    assert "own cron history" in prompt
+    assert "other cron history" not in prompt
+
+
 async def test_recent_history_capped_at_max(tmp_path) -> None:
     """Only the most recent _MAX_RECENT_HISTORY entries are injected."""
     workspace = _make_workspace(tmp_path)
@@ -170,22 +222,22 @@ async def test_recent_history_capped_at_max(tmp_path) -> None:
     assert f"entry-{builder._MAX_RECENT_HISTORY + 19}" in prompt
 
 
-async def test_recent_history_truncated_at_max_chars(tmp_path) -> None:
-    """Recent History section must be truncated at _MAX_HISTORY_CHARS."""
+async def test_recent_history_truncated_at_max_tokens(tmp_path) -> None:
+    """Recent History section must be truncated to _MAX_HISTORY_TOKENS."""
+    import tiktoken
+
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    big_entry = "x" * (builder._MAX_HISTORY_CHARS + 5_000)
+    big_entry = "word " * (builder._MAX_HISTORY_CHARS * 4 + 5_000)
     builder.memory.append_history(big_entry)
 
     prompt = await builder.build_system_prompt()
     history_section = prompt.split("# Recent History\n\n", 1)
     assert len(history_section) == 2
-    # The split captures everything after the history header, including runtime blocks.
-    # Truncation applies to history text alone, so the total section can exceed
-    # _MAX_HISTORY_CHARS by the size of the appended non-history blocks.
-    # A reasonable upper bound: history (≤ _MAX_HISTORY_CHARS) + runtime overhead.
-    assert len(history_section[1]) < builder._MAX_HISTORY_CHARS + 2_000
+
+    enc = tiktoken.get_encoding("cl100k_base")
+    assert len(enc.encode(history_section[1])) <= builder._MAX_HISTORY_CHARS * 4
 
 
 async def test_no_recent_history_when_dream_has_processed_all(tmp_path) -> None:
@@ -205,7 +257,7 @@ async def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    c1 = builder.memory.append_history("old conversation about Python")
+    builder.memory.append_history("old conversation about Python")
     c2 = builder.memory.append_history("old conversation about Rust")
     builder.memory.append_history("recent question about Docker")
     builder.memory.append_history("recent question about K8s")
@@ -235,7 +287,7 @@ async def test_execution_rules_in_system_prompt(tmp_path) -> None:
     assert "verify the result" in prompt
 
 
-async def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
+def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
     """Identity template should not contain behavioral rules or hardcoded name."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -257,7 +309,7 @@ async def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) 
     assert "Message Time" not in prompt
 
 
-async def test_default_soul_template_contains_execution_rules() -> None:
+def test_default_soul_template_contains_execution_rules() -> None:
     """Default SOUL.md template must contain execution rules with act/plan layering."""
     soul = (pkg_files("blackcat") / "templates" / "SOUL.md").read_text(encoding="utf-8")
     assert "## Execution Rules" in soul

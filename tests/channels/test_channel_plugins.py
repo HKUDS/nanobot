@@ -36,7 +36,7 @@ class _FakePlugin(BaseChannel):
     async def stop(self) -> None:
         pass
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         pass
 
     async def login(self, force: bool = False) -> bool:
@@ -55,7 +55,7 @@ class _FakeTelegram(BaseChannel):
     async def stop(self) -> None:
         pass
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         pass
 
 
@@ -614,7 +614,7 @@ async def test_send_with_retry_succeeds_first_try():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             nonlocal call_count
             call_count += 1
             # Succeeds on first try
@@ -651,7 +651,7 @@ async def test_send_with_retry_retries_on_failure():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             nonlocal call_count
             call_count += 1
             raise RuntimeError("simulated failure")
@@ -692,7 +692,7 @@ async def test_send_with_retry_no_retry_when_max_is_zero():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             nonlocal call_count
             call_count += 1
             raise RuntimeError("simulated failure")
@@ -731,7 +731,7 @@ async def test_send_with_retry_calls_send_delta():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             pass  # Should not be called
 
         async def send_delta(self, chat_id: str, delta: str, metadata: dict | None = None) -> None:
@@ -774,7 +774,7 @@ async def test_send_with_retry_skips_send_when_streamed():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             nonlocal send_called
             send_called = True
 
@@ -861,7 +861,7 @@ async def test_send_with_retry_propagates_cancelled_error():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             raise asyncio.CancelledError("simulated cancellation")
 
     fake_config = SimpleNamespace(
@@ -896,7 +896,7 @@ async def test_send_with_retry_propagates_cancelled_error_during_sleep():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             nonlocal call_count
             call_count += 1
             raise RuntimeError("simulated failure")
@@ -948,7 +948,7 @@ class _ChannelWithAllowFrom(BaseChannel):
     async def stop(self) -> None:
         pass
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         pass
 
 
@@ -968,7 +968,7 @@ class _StartableChannel(BaseChannel):
     async def stop(self) -> None:
         self.stopped = True
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         pass
 
 
@@ -1046,7 +1046,7 @@ async def test_validate_allow_from_allows_missing_allow_from():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             pass
 
     mgr = ChannelManager.__new__(ChannelManager)
@@ -1167,7 +1167,7 @@ async def test_start_channel_logs_error_on_failure():
         async def stop(self) -> None:
             pass
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             pass
 
     fake_config = SimpleNamespace(
@@ -1202,7 +1202,7 @@ async def test_stop_all_handles_channel_exception():
         async def stop(self) -> None:
             raise RuntimeError("stop failed")
 
-        async def send(self, msg: OutboundMessage) -> None:
+        async def _send_impl(self, msg: OutboundMessage) -> None:
             pass
 
     fake_config = SimpleNamespace(

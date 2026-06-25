@@ -381,3 +381,87 @@ class TestBuildMessages:
         user_msg = messages[-1]["content"]
         assert isinstance(user_msg, list)
         assert any(b.get("type") == "image_url" for b in user_msg)
+
+
+# ---------------------------------------------------------------------------
+# resolve_author
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAuthor:
+    def _builder_with_authors(self, tmp_path, authors):
+        return ContextBuilder(workspace=tmp_path, authors=authors)
+
+    def test_matches_known_sender_id(self, tmp_path):
+        from blackcat.config.schema import PlatformIdentity
+
+        builder = self._builder_with_authors(
+            tmp_path, {"skye": PlatformIdentity(telegram="123456789", cli="skye")}
+        )
+        assert builder.resolve_author("123456789", "telegram") == "skye"
+        assert builder.resolve_author("skye", "cli") == "skye"
+
+    def test_int_sender_id_coerced_to_str(self, tmp_path):
+        from blackcat.config.schema import PlatformIdentity
+
+        builder = self._builder_with_authors(
+            tmp_path, {"skye": PlatformIdentity(telegram=123456789)}
+        )
+        assert builder.resolve_author(123456789, "telegram") == "skye"
+        assert builder.resolve_author("123456789", "telegram") == "skye"
+
+    def test_unknown_sender_id_returns_unknown(self, tmp_path):
+        from blackcat.config.schema import PlatformIdentity
+
+        builder = self._builder_with_authors(
+            tmp_path, {"skye": PlatformIdentity(telegram="123456789")}
+        )
+        assert builder.resolve_author("999", "telegram") == "unknown"
+        assert builder.resolve_author("123456789", "discord") == "unknown"
+
+    def test_no_authors_returns_unknown(self, tmp_path):
+        builder = _builder(tmp_path)
+        assert builder.resolve_author("anyone", "telegram") == "unknown"
+
+    def test_missing_args_returns_unknown(self, tmp_path):
+        from blackcat.config.schema import PlatformIdentity
+
+        builder = self._builder_with_authors(
+            tmp_path, {"skye": PlatformIdentity(telegram="123")}
+        )
+        assert builder.resolve_author(None, "telegram") == "unknown"
+        assert builder.resolve_author("123", None) == "unknown"
+
+
+class TestBuildSystemPromptAuthorTrust:
+    @pytest.mark.asyncio
+    async def test_known_author_resolves_to_trusted(self, tmp_path):
+        from blackcat.config.schema import PlatformIdentity
+
+        (tmp_path / "IDENTITY.toml").write_text(
+            "[trust]\ndefault = 0.3\n\n[trust.known]\nskye = 0.95\n",
+            encoding="utf-8",
+        )
+        builder = ContextBuilder(
+            workspace=tmp_path,
+            authors={"skye": PlatformIdentity(telegram="123456789")},
+        )
+        prompt = await builder.build_system_prompt(sender_id="123456789", channel="telegram")
+        assert "Author: skye" in prompt
+        assert "Trust level: trusted" in prompt
+
+    @pytest.mark.asyncio
+    async def test_unknown_author_falls_to_low_trust(self, tmp_path):
+        from blackcat.config.schema import PlatformIdentity
+
+        (tmp_path / "IDENTITY.toml").write_text(
+            "[trust]\ndefault = 0.3\n\n[trust.known]\nskye = 0.95\n",
+            encoding="utf-8",
+        )
+        builder = ContextBuilder(
+            workspace=tmp_path,
+            authors={"skye": PlatformIdentity(telegram="123456789")},
+        )
+        prompt = await builder.build_system_prompt(sender_id="999", channel="telegram")
+        assert "Author: unknown" in prompt
+        assert "Trust level: low" in prompt

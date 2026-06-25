@@ -33,6 +33,8 @@ class TranscriptionProviderSpec:
     default_model: str
     adapter: str
     aliases: tuple[str, ...] = ()
+    env_key: str = ""
+    default_api_base: str = ""
 
     def load_adapter(self) -> type[TranscriptionProviderAdapter]:
         module_name, _, class_name = self.adapter.partition(":")
@@ -47,27 +49,52 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         name="groq",
         default_model="whisper-large-v3",
         adapter="blackcat.providers.transcription:GroqTranscriptionProvider",
+        env_key="GROQ_API_KEY",
+        default_api_base="https://api.groq.com/openai/v1",
     ),
     TranscriptionProviderSpec(
         name="openai",
         default_model="whisper-1",
         adapter="blackcat.providers.transcription:OpenAITranscriptionProvider",
+        env_key="OPENAI_API_KEY",
+        default_api_base="https://api.openai.com/v1",
     ),
     TranscriptionProviderSpec(
         name="openrouter",
         default_model="openai/whisper-1",
         adapter="blackcat.providers.transcription:OpenRouterTranscriptionProvider",
+        env_key="OPENROUTER_API_KEY",
+        default_api_base="https://openrouter.ai/api/v1",
+    ),
+    TranscriptionProviderSpec(
+        name="siliconflow",
+        default_model="FunAudioLLM/SenseVoiceSmall",
+        adapter="blackcat.providers.transcription:OpenAITranscriptionProvider",
+        aliases=("silicon",),
+        env_key="SILICONFLOW_API_KEY",
+        default_api_base="https://api.siliconflow.cn/v1",
     ),
     TranscriptionProviderSpec(
         name="xiaomi_mimo",
         default_model="mimo-v2.5-asr",
         adapter="blackcat.providers.transcription:XiaomiMiMoTranscriptionProvider",
         aliases=("mimo", "xiaomi"),
+        env_key="XIAOMIMIMO_API_KEY",
+        default_api_base="https://api.xiaomimimo.com/v1",
+    ),
+    TranscriptionProviderSpec(
+        name="stepfun",
+        default_model="stepaudio-2.5-asr",
+        adapter="blackcat.providers.transcription:StepFunTranscriptionProvider",
+        env_key="STEPFUN_API_KEY",
+        default_api_base="https://api.stepfun.com/v1",
     ),
     TranscriptionProviderSpec(
         name="assemblyai",
         default_model="universal-3-pro,universal-2",
         adapter="blackcat.providers.transcription:AssemblyAITranscriptionProvider",
+        env_key="ASSEMBLYAI_API_KEY",
+        default_api_base="https://api.assemblyai.com/v2",
     ),
 )
 

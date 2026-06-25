@@ -22,10 +22,11 @@ from blackcat.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
+from blackcat.cron.session_turns import CRON_HISTORY_META
 from blackcat.providers.base import LLMProvider
 from blackcat.session.goal_state import goal_state_ws_blob
 from blackcat.session.manager import Session, SessionManager
-from blackcat.utils.formatting import strip_think, truncate_text
+from blackcat.utils.helpers import strip_think, truncate_text
 from blackcat.utils.llm_runtime import LLMRuntime
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -67,6 +68,8 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     assistant_text = ""
     for message in session.messages:
         if message.get("_command") is True:
+            continue
+        if message.get(CRON_HISTORY_META) is True:
             continue
         role = message.get("role")
         content = message.get("content")

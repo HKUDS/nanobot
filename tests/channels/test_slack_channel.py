@@ -655,3 +655,62 @@ def test_slack_channel_uses_channel_aware_allow_policy() -> None:
     channel = SlackChannel(SlackConfig(enabled=True, allow_from=[]), MessageBus())
     assert channel.is_allowed("U1") is True
     assert channel._is_allowed("U1", "C123", "channel") is True
+
+
+def test_mention_policy_responds_to_mentions_in_any_channel() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, group_policy="mention"), MessageBus())
+    channel._bot_user_id = "UBOT"
+
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C123") is True
+    assert channel._should_respond_in_channel("message", "<@UBOT> hi", "C999") is True
+    assert channel._should_respond_in_channel("message", "no mention here", "C123") is False
+
+
+def test_allowlist_policy_restricts_to_approved_channels() -> None:
+    channel = SlackChannel(
+        SlackConfig(enabled=True, group_policy="allowlist", group_allow_from=["C_OK"]),
+        MessageBus(),
+    )
+    channel._bot_user_id = "UBOT"
+
+    # In an approved channel without require_mention, respond to anything.
+    assert channel._should_respond_in_channel("message", "anything", "C_OK") is True
+    # An unapproved channel is always rejected.
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_NOPE") is False
+    # _is_allowed also gates on the channel allowlist.
+    assert channel._is_allowed("U1", "C_OK", "channel") is True
+    assert channel._is_allowed("U1", "C_NOPE", "channel") is False
+
+
+def test_allowlist_with_require_mention_needs_both_channel_and_mention() -> None:
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            group_policy="allowlist",
+            group_allow_from=["C_OK"],
+            group_require_mention=True,
+        ),
+        MessageBus(),
+    )
+    channel._bot_user_id = "UBOT"
+
+    # Approved channel + mention -> respond.
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_OK") is True
+    assert channel._should_respond_in_channel("message", "<@UBOT> hi", "C_OK") is True
+    # Approved channel but no mention -> stay quiet.
+    assert channel._should_respond_in_channel("message", "just chatting", "C_OK") is False
+    # Mention in an unapproved channel -> stay quiet.
+    assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_NOPE") is False
+
+
+def test_group_require_mention_accepts_camel_case_alias() -> None:
+    config = SlackConfig.model_validate(
+        {
+            "enabled": True,
+            "groupPolicy": "allowlist",
+            "groupAllowFrom": ["C_OK"],
+            "groupRequireMention": True,
+        }
+    )
+    assert config.group_require_mention is True
+    assert config.group_allow_from == ["C_OK"]

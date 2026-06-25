@@ -37,6 +37,19 @@ def _populated_session(n: int) -> Session:
     return session
 
 
+def _tool_round(call_id: str) -> list[dict]:
+    return [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": call_id, "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
+    ]
+
+
 class TestMaxMessagesInit:
     """Verify AgentLoop stores the config value correctly."""
 
@@ -111,6 +124,7 @@ class TestMaxMessagesIntegration:
         assert result is not None
         assert mock_hist.call_count == 1
         assert mock_hist.call_args.kwargs["max_messages"] == 25
+        assert mock_hist.call_args.kwargs["extend_to_user"] is False
 
     @pytest.mark.asyncio
     async def test_zero_config_passes_builtin_limit_to_history_call(self, tmp_path: Path) -> None:
@@ -129,6 +143,45 @@ class TestMaxMessagesIntegration:
 
         assert result is not None
         assert mock_hist.call_args.kwargs["max_messages"] == DEFAULT_MAX_MESSAGES
+        assert mock_hist.call_args.kwargs["extend_to_user"] is False
+
+    @pytest.mark.asyncio
+    async def test_process_message_uses_current_user_as_replay_boundary(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A live user turn should not extend history to an older long tool turn."""
+        loop = _make_loop(tmp_path, max_messages=6)
+        loop.provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(content="ok", tool_calls=[], usage={})
+        )
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "long older turn")
+        for i in range(8):
+            session.messages.extend(_tool_round(f"older-{i}"))
+        session.add_message("assistant", "older final")
+
+        with patch.object(session, "get_history", wraps=session.get_history) as mock_hist:
+            result = await loop._process_message(
+                InboundMessage(
+                    channel="cli",
+                    sender_id="user",
+                    chat_id="test",
+                    content="new question",
+                )
+            )
+
+        assert result is not None
+        assert mock_hist.call_args.kwargs["extend_to_user"] is False
+        sent_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+        sent_text = "\n".join(str(message.get("content")) for message in sent_messages)
+        assert "new question" in sent_text
+        assert "long older turn" not in sent_text
 
 
 class TestSchemaConfig:

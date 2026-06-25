@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BlackcatClient } from "@/lib/blackcat-client";
 
 /**
- * Minimal fake WebSocket implementing the subset BlackcatClient touches.
+ * Minimal fake WebSocket implementing the subset NanobotClient touches.
  * Every instance is retrievable via ``FakeSocket.instances`` so tests can
  * drive open/close/message lifecycles deterministically.
  */
@@ -65,11 +65,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-Reflect.deleteProperty(window, "blackcatHost");
+  Reflect.deleteProperty(window, "blackcatHost");
   vi.useRealTimers();
 });
 
-describe("BlackcatClient", () => {
+describe("NanobotClient", () => {
   it("routes events to the matching chat handler", () => {
     const client = new BlackcatClient({
       url: "ws://test",
@@ -90,7 +90,281 @@ describe("BlackcatClient", () => {
     });
   });
 
-it("resolves newChat() via the server-assigned chat_id", async () => {
+  it("can swap the socket factory when the runtime URL changes", () => {
+    const browserFactory = vi.fn(
+      (url: string) => new FakeSocket(`browser:${url}`) as unknown as WebSocket,
+    );
+    const hostFactory = vi.fn(
+      (url: string) => new FakeSocket(`host:${url}`) as unknown as WebSocket,
+    );
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: browserFactory,
+    });
+
+    client.connect();
+    expect(lastSocket().url).toBe("browser:ws://test");
+    client.close();
+    client.updateUrl("blackcat-host://engine/", hostFactory);
+    client.connect();
+
+    expect(hostFactory).toHaveBeenCalledWith("blackcat-host://engine/");
+    expect(lastSocket().url).toBe("host:blackcat-host://engine/");
+  });
+
+  it("uses the host socket bridge for native host URLs", async () => {
+    let socketEventHandler:
+      | ((event: { id: string; type: "open" | "close" | "error"; message?: string }) => void)
+      | null = null;
+    const openSocket = vi.fn(async () => "host-socket-1");
+    Object.defineProperty(window, "blackcatHost", {
+      configurable: true,
+      value: {
+        openSocket,
+        sendSocket: vi.fn(async () => undefined),
+        closeSocket: vi.fn(async () => undefined),
+        onSocketEvent: vi.fn((handler) => {
+          socketEventHandler = handler;
+          return vi.fn();
+        }),
+      },
+    });
+    const client = new BlackcatClient({
+      url: "blackcat-host://engine/",
+      reconnect: false,
+    });
+    const status = vi.fn();
+    client.onStatus(status);
+
+    client.connect();
+    await Promise.resolve();
+    socketEventHandler?.({ id: "host-socket-1", type: "open" });
+
+    expect(openSocket).toHaveBeenCalledWith("blackcat-host://engine/");
+    expect(status).toHaveBeenLastCalledWith("open");
+  });
+
+  it("buffers chat events while no chat handler is registered and replays on subscribe", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    // Nobody listening yet — deltas must not be dropped (user switched away).
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "a" });
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "b" });
+    const handler = vi.fn();
+    client.onChat("chat-queue", handler);
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler.mock.calls[0][0]).toMatchObject({ event: "delta", text: "a" });
+    expect(handler.mock.calls[1][0]).toMatchObject({ event: "delta", text: "b" });
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "c" });
+    expect(handler).toHaveBeenCalledTimes(3);
+  });
+
+  it("records goal_status run strip without an onChat subscriber", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "running",
+      started_at: 12_345,
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "idle",
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+  });
+
+  it("clears run strip when a turn_end arrives without idle", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "running",
+      started_at: 12_345,
+    });
+    lastSocket().fakeMessage({
+      event: "turn_end",
+      chat_id: "chat-strip",
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+  });
+
+  it("notifies run status subscribers and replays running chats", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-status",
+      status: "running",
+      started_at: 12_345,
+    });
+    expect(handler).toHaveBeenCalledWith("chat-status", 12_345);
+
+    const lateHandler = vi.fn();
+    client.onRunStatus(lateHandler);
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", 12_345);
+
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-status",
+      status: "idle",
+    });
+    expect(handler).toHaveBeenCalledWith("chat-status", null);
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", null);
+  });
+
+  it("records goal_state per chat_id without an onChat subscriber", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_state",
+      chat_id: "chat-goal-a",
+      goal_state: { active: true, ui_summary: "Docs" },
+    });
+    lastSocket().fakeMessage({
+      event: "goal_state",
+      chat_id: "chat-goal-b",
+      goal_state: { active: true, objective: "Ship API" },
+    });
+    expect(client.getGoalState("chat-goal-a")).toEqual({ active: true, ui_summary: "Docs" });
+    expect(client.getGoalState("chat-goal-b")).toEqual({
+      active: true,
+      objective: "Ship API",
+    });
+    lastSocket().fakeMessage({
+      event: "goal_state",
+      chat_id: "chat-goal-a",
+      goal_state: { active: false },
+    });
+    expect(client.getGoalState("chat-goal-a")).toEqual({ active: false });
+  });
+
+  it("records goal_state from turn_end payload when present", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "turn_end",
+      chat_id: "chat-te",
+      goal_state: { active: true, objective: "Long task" },
+    });
+    expect(client.getGoalState("chat-te")).toEqual({ active: true, objective: "Long task" });
+  });
+
+  it("buffers after unsubscribe until the chat is subscribed again", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const h1 = vi.fn();
+    const unsub = client.onChat("chat-rejoin", h1);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "live" });
+    expect(h1).toHaveBeenCalledTimes(1);
+    unsub();
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "queued" });
+    expect(h1).toHaveBeenCalledTimes(1);
+    const h2 = vi.fn();
+    client.onChat("chat-rejoin", h2);
+    expect(h2).toHaveBeenCalledTimes(1);
+    expect(h2.mock.calls[0][0]).toMatchObject({ event: "delta", text: "queued" });
+  });
+
+  it("dispatches runtime model updates globally", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRuntimeModelUpdate(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "runtime_model_updated",
+      model_name: "openai/gpt-4.1",
+      model_preset: "fast",
+    });
+
+    expect(handler).toHaveBeenCalledWith("openai/gpt-4.1", "fast");
+  });
+
+  it("dispatches session updates globally", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const globalHandler = vi.fn();
+    const chatHandler = vi.fn();
+    client.onSessionUpdate(globalHandler);
+    client.onChat("chat-title", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "session_updated",
+      chat_id: "chat-title",
+      scope: "metadata",
+      workspace_scope: {
+        project_path: "/tmp/project",
+        project_name: "project",
+        access_mode: "restricted",
+        restrict_to_workspace: true,
+      },
+    });
+
+    expect(globalHandler).toHaveBeenCalledWith(
+      "chat-title",
+      "metadata",
+      expect.objectContaining({ project_path: "/tmp/project" }),
+    );
+    expect(chatHandler).not.toHaveBeenCalled();
+  });
+
+  it("resolves newChat() via the server-assigned chat_id", async () => {
     const client = new BlackcatClient({
       url: "ws://test",
       reconnect: false,
@@ -104,7 +378,7 @@ it("resolves newChat() via the server-assigned chat_id", async () => {
     await expect(promise).resolves.toBe("fresh-id");
   });
 
-it("serializes workspace scope for new chats and messages", async () => {
+  it("serializes workspace scope for new chats and messages", async () => {
     const client = new BlackcatClient({
       url: "ws://test",
       reconnect: false,
@@ -457,6 +731,52 @@ it("serializes workspace scope for new chats and messages", async () => {
     // Server rejected an outbound frame as too large.
     lastSocket().fakeCloseWithCode(1009);
     expect(errors).toEqual([{ kind: "message_too_big" }]);
+  });
+
+  it("emits workspace scope rejection errors from server frames", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const errors: Array<{ kind: string; reason?: string; chatId?: string }> = [];
+    client.onError((e) => errors.push(e));
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "error",
+      chat_id: "chat-a",
+      detail: "workspace_scope_rejected",
+      reason: "chat_running",
+    });
+    expect(errors).toEqual([
+      {
+        kind: "workspace_scope_rejected",
+        reason: "chat_running",
+        chatId: "chat-a",
+      },
+    ]);
+  });
+
+  it("rejects pending new chats when workspace scope is rejected", async () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    const pending = client.newChat(5_000, {
+      project_path: "/missing",
+      project_name: "missing",
+      access_mode: "restricted",
+    });
+    lastSocket().fakeMessage({
+      event: "error",
+      detail: "workspace_scope_rejected",
+      reason: "project_path must be an existing directory",
+    });
+    await expect(pending).rejects.toThrow("workspace_scope_rejected");
   });
 
   it("isolates throwing error handlers so reconnect bookkeeping still runs", async () => {

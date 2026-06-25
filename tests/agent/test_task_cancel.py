@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from blackcat.config.schema import AgentDefaults
+from blackcat.session.keys import UNIFIED_SESSION_KEY
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -27,8 +28,8 @@ def _make_loop(*, tools_config=None):
 
     with patch("blackcat.agent.loop.ContextBuilder"), \
          patch("blackcat.agent.loop.SessionManager"), \
-         patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("blackcat.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
     return loop, bus
 
@@ -450,12 +451,12 @@ class TestSubagentAnnounceSessionKey:
         so the result matches the pending queue key."""
         mgr, bus = self._make_mgr()
 
-        origin = {"channel": "telegram", "chat_id": "111", "session_key": "unified:default"}
+        origin = {"channel": "telegram", "chat_id": "111", "session_key": UNIFIED_SESSION_KEY}
         await mgr._announce_result("sub-1", "label", "task", "result", origin, "ok")
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == "unified:default"
-        assert msg.session_key == "unified:default"
+        assert msg.session_key_override == UNIFIED_SESSION_KEY
+        assert msg.session_key == UNIFIED_SESSION_KEY
 
     @pytest.mark.asyncio
     async def test_announce_uses_raw_key_in_normal_mode(self):
@@ -505,9 +506,9 @@ class TestSubagentAnnounceSessionKey:
         )
         await mgr._run_subagent(
             "sub-4", "task", "label",
-            {"channel": "telegram", "chat_id": "444", "session_key": "unified:default"},
+            {"channel": "telegram", "chat_id": "444", "session_key": UNIFIED_SESSION_KEY},
             status,
         )
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == "unified:default"
+        assert msg.session_key_override == UNIFIED_SESSION_KEY

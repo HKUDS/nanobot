@@ -1,5 +1,6 @@
-import { fetchWithTimeout } from "./http";
 import type {
+  AutomationsPayload,
+  AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
@@ -10,6 +11,7 @@ import type {
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
+  SessionDeleteResult,
   SessionAutomationsPayload,
   SettingsPayload,
   SettingsUpdate,
@@ -19,10 +21,11 @@ import type {
   SlashCommand,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
+  WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
-  WorkspacesPayload,
 } from "./types";
+import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
 
@@ -86,6 +89,10 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
   return { "X-Blackcat-MCP-Values": JSON.stringify(payload) };
 }
 
+function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
+  return { "X-Blackcat-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
+}
+
 function splitKey(key: string): { channel: string; chatId: string } {
   const idx = key.indexOf(":");
   if (idx === -1) return { channel: "", chatId: key };
@@ -124,12 +131,27 @@ export async function listSessions(
 }
 
 /** Disk-backed WebUI display thread snapshot (separate from agent session). */
+export interface FetchWebuiThreadOptions {
+  limit?: number;
+  direction?: "latest";
+  before?: string | null;
+}
+
 export async function fetchWebuiThread(
   token: string,
   key: string,
+  optionsOrBase?: FetchWebuiThreadOptions | string,
   base: string = "",
 ): Promise<WebuiThreadPersistedPayload | null> {
-  const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread`;
+  const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
+  const resolvedBase = typeof optionsOrBase === "string" ? optionsOrBase : base;
+  const params = new URLSearchParams();
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.direction) params.set("direction", options.direction);
+  if (options?.before) params.set("before", options.before);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
@@ -168,6 +190,52 @@ export async function fetchSessionAutomations(
   );
 }
 
+export async function fetchAutomations(
+  token: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runAutomationAction(
+  token: string,
+  action: "enable" | "disable" | "delete" | "run",
+  id: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/${action}?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateAutomation(
+  token: string,
+  id: string,
+  values: AutomationUpdatePayload,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/update?${query}`,
+    token,
+    {
+      headers: automationValuesHeader(values),
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function fetchSkills(
   token: string,
   base: string = "",
@@ -196,13 +264,18 @@ export async function fetchSkillDetail(
 export async function deleteSession(
   token: string,
   key: string,
+  optionsOrBase?: { deleteAutomations?: boolean } | string,
   base: string = "",
-): Promise<boolean> {
-  const body = await request<{ deleted: boolean }>(
-    `${base}/api/sessions/${encodeURIComponent(key)}/delete`,
+): Promise<SessionDeleteResult> {
+  const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
+  const resolvedBase = typeof optionsOrBase === "string" ? optionsOrBase : base;
+  const query = new URLSearchParams();
+  if (options?.deleteAutomations) query.set("delete_automations", "true");
+  const suffix = query.toString() ? `?${query}` : "";
+  return request<SessionDeleteResult>(
+    `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
     token,
   );
-  return body.deleted;
 }
 
 export async function fetchSettings(
@@ -267,6 +340,18 @@ export async function fetchCliApps(
 ): Promise<CliAppsPayload> {
   return request<CliAppsPayload>(
     `${base}/api/settings/cli-apps`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchInstalledCliApps(
+  token: string,
+  base: string = "",
+): Promise<CliAppsPayload> {
+  return request<CliAppsPayload>(
+    `${base}/api/settings/cli-apps?installed_only=1`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/blackcat-client";
 import { toMediaAttachment } from "@/lib/media";
 import {
-  mergeToolProgressEvents,
-  mergeUniqueToolTraceLines,
-  normalizeToolProgressEvents,
-  toolTraceLinesFromEvents,
+    mergeToolProgressEvents,
+    mergeUniqueToolTraceLines,
+    normalizeToolProgressEvents,
+    toolTraceLinesFromEvents,
 } from "@/lib/tool-traces";
 import type {
-  GoalStateWsPayload,
-  InboundEvent,
-  OutboundCliAppMention,
-  OutboundImageGeneration,
-  OutboundMcpPresetMention,
-  OutboundMedia,
-  ToolProgressEvent,
-  UIFileEdit,
-  UIImage,
-  UIMessage,
-  UITurnPhase,
-  WorkspaceScopePayload
+    GoalStateWsPayload,
+    InboundEvent,
+    OutboundCliAppMention,
+    OutboundImageGeneration,
+    OutboundMcpPresetMention,
+    OutboundMedia,
+    ToolProgressEvent,
+    UIFileEdit,
+    UIImage,
+    UIMessage,
+    UITurnPhase,
+    WorkspaceScopePayload,
 } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -404,7 +405,7 @@ function findFileEditTraceIndex(
 /**
  * Subscribe to a chat by ID. Returns the in-memory message list for the chat,
  * a streaming flag, and a ``send`` function. Initial history must be seeded
-* separately (e.g. via ``fetchWebuiThread``) since the server only replays
+ * separately (e.g. via ``fetchWebuiThread``) since the server only replays
  * live events.
  */
 /** Payload passed to ``send`` when the user attaches one or more images.
@@ -450,12 +451,8 @@ export function useBlackcatStream(
 } {
   const { client } = useClient();
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
-  /** If the last loaded message is a trace row (e.g. "Using 2 tools"),
-   * the model was still processing when the page loaded — keep the
-   * loading spinner alive so the user sees the model is active. */
-  const initialStreaming = initialMessages.length > 0
-    ? initialMessages[initialMessages.length - 1].kind === "trace"
-    : false;
+  /** If history ends in unfinished agent activity, keep the loading spinner alive. */
+  const initialStreaming = hasPendingAgentActivity(initialMessages);
   const [isStreaming, setIsStreaming] = useState(initialStreaming || hasPendingToolCalls);
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
@@ -485,7 +482,7 @@ export function useBlackcatStream(
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
-const clearPendingStreamWork = useCallback(() => {
+  const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
       streamFrameRef.current = null;
@@ -694,9 +691,7 @@ const clearPendingStreamWork = useCallback(() => {
   useEffect(() => {
     setMessages(initialMessages);
     setIsStreaming(
-      (initialMessages.length > 0
-        ? initialMessages[initialMessages.length - 1].kind === "trace"
-        : false) || hasPendingToolCalls,
+      hasPendingAgentActivity(initialMessages) || hasPendingToolCalls,
     );
     setStreamError(null);
     setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
@@ -925,7 +920,7 @@ const clearPendingStreamWork = useCallback(() => {
         const media = ev.media_urls?.length
           ? ev.media_urls.map((m) => toMediaAttachment(m))
           : ev.media?.map((url) => toMediaAttachment({ url }));
-const hasMedia = !!media && media.length > 0;
+        const hasMedia = !!media && media.length > 0;
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
@@ -1042,7 +1037,6 @@ const hasMedia = !!media && media.length > 0;
       // the image blocks via ``media`` paths.
       if (!hasImages && !content.trim()) return;
 
-flushPendingStreamEvents();
       flushPendingStreamEvents();
       const turnId = crypto.randomUUID();
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;

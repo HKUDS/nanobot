@@ -9,16 +9,16 @@ from typing import Any
 from blackcat.agent.tools.base import Tool, tool_parameters
 from blackcat.agent.tools.context import ContextAware, RequestContext
 from blackcat.agent.tools.schema import (
-    BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
 from blackcat.cron.service import CronService
 from blackcat.cron.types import CronJob, CronJobState, CronSchedule
+from blackcat.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
-    action=StringSchema("Action to perform", enum=["add", "list", "remove", "update", "pause", "resume"]),
+    action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
     name=StringSchema(
         "Optional short human-readable label for the job "
         "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
@@ -37,10 +37,6 @@ _CRON_PARAMETERS = tool_parameters_schema(
     at=StringSchema(
         "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
         "Naive values use the tool's default timezone."
-    ),
-    deliver=BooleanSchema(
-        description="Whether to deliver the execution result to the user channel (default true)",
-        default=True,
     ),
     job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
     required=["action"],
@@ -61,10 +57,13 @@ class CronTool(Tool, ContextAware):
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
         self._default_timezone = default_timezone
-        self._channel: ContextVar[str] = ContextVar("cron_channel", default="")
-        self._chat_id: ContextVar[str] = ContextVar("cron_chat_id", default="")
-        self._metadata: ContextVar[dict] = ContextVar("cron_metadata", default={})
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
+        self._origin_channel: ContextVar[str] = ContextVar("cron_origin_channel", default="")
+        self._origin_chat_id: ContextVar[str] = ContextVar("cron_origin_chat_id", default="")
+        self._origin_metadata: ContextVar[dict[str, Any] | None] = ContextVar(
+            "cron_origin_metadata",
+            default=None,
+        )
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
     @classmethod
@@ -76,11 +75,14 @@ class CronTool(Tool, ContextAware):
         return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
 
     def set_context(self, ctx: RequestContext) -> None:
-        """Set the current session context for delivery."""
-        self._channel.set(ctx.channel)
-        self._chat_id.set(ctx.chat_id)
-        self._metadata.set(ctx.metadata)
-        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
+        """Set the current session context for scheduled cron job ownership."""
+        raw_key = f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else ""
+        self._session_key.set(
+            raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
+        )
+        self._origin_channel.set(ctx.channel or "")
+        self._origin_chat_id.set(ctx.chat_id or "")
+        self._origin_metadata.set(dict(ctx.metadata or {}))
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -111,21 +113,6 @@ class CronTool(Tool, ContextAware):
         dt = datetime.fromtimestamp(ms / 1000, tz=ZoneInfo(tz_name))
         return f"{dt.isoformat()} ({tz_name})"
 
-    @staticmethod
-    def _encode_tool_message(message: str, tool_name: str) -> str:
-        """Encode a message as a tool call JSON payload."""
-        import json
-        return json.dumps({"tool_name": tool_name, "message": message})
-
-    @staticmethod
-    def _safe_metadata(metadata: dict | None) -> dict:
-        """Ensure metadata is a safe dict (defensive copy)."""
-        if metadata is None:
-            return {}
-        if not isinstance(metadata, dict):
-            return {}
-        return dict(metadata)
-
     @property
     def name(self) -> str:
         return "cron"
@@ -133,15 +120,9 @@ class CronTool(Tool, ContextAware):
     @property
     def description(self) -> str:
         return (
-            f"Schedule reminders and recurring tasks. Actions: add, list, remove, update, pause, resume. "
+            "Schedule reminders and recurring tasks. Actions: add, list, remove. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
-
-    @property
-    def parameters(self) -> dict:
-        # Delegate to the schema defined by @tool_parameters decorator
-        # This ensures consistency between runtime validation and LLM schema
-        return _CRON_PARAMETERS
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         errors = super().validate_params(params)
@@ -163,61 +144,17 @@ class CronTool(Tool, ContextAware):
         at: str | None = None,
         job_id: str | None = None,
         deliver: bool = True,
-        tool_name: str | None = None,
-        metadata: dict | None = None,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at, tool_name, metadata, deliver)
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
-        elif action == "update":
-            return self._update_job(job_id, message, every_seconds, cron_expr, tz, at, tool_name, metadata)
-        elif action == "pause":
-            return self._pause_job(job_id)
-        elif action == "resume":
-            return self._resume_job(job_id)
         return f"Unknown action: {action}"
-
-    def _build_schedule(
-        self,
-        every_seconds: int | None,
-        cron_expr: str | None,
-        tz: str | None,
-        at: str | None,
-    ) -> tuple[CronSchedule, bool]:
-        """Build a CronSchedule from parameters. Returns (schedule, delete_after_run)."""
-        if tz and not cron_expr:
-            raise ValueError("tz can only be used with cron_expr")
-        if tz:
-            from zoneinfo import ZoneInfo
-            try:
-                ZoneInfo(tz)
-            except (KeyError, Exception) as e:
-                raise ValueError(f"unknown timezone '{tz}'") from e
-
-        delete_after = False
-        if every_seconds:
-            schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
-        elif cron_expr:
-            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz or self._default_timezone)
-        elif at:
-            from zoneinfo import ZoneInfo
-            dt = datetime.fromisoformat(at)
-            # Apply default timezone if naive datetime
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
-            at_ms = int(dt.timestamp() * 1000)
-            schedule = CronSchedule(kind="at", at_ms=at_ms)
-            delete_after = True
-        else:
-            raise ValueError("either every_seconds, cron_expr, or at is required")
-
-        return schedule, delete_after
 
     def _add_job(
         self,
@@ -227,47 +164,63 @@ class CronTool(Tool, ContextAware):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
-        tool_name: str | None = None,
-        metadata: dict | None = None,
-        deliver: bool = True,
     ) -> str:
-        if not message and not tool_name:
-            return "Error: action='add' requires a non-empty 'message' (or 'tool_name'). Retry including message='...' in your request."
+        if not message:
+            return (
+                "Error: cron action='add' requires a non-empty 'message' parameter "
+                "describing what to do when the job triggers "
+                "(e.g. the reminder text). Retry including message=\"...\"."
+            )
+        session_key = self._session_key.get()
+        if not session_key:
+            return "Error: scheduled cron jobs must be created from a chat session"
+        origin_channel = self._origin_channel.get()
+        origin_chat_id = self._origin_chat_id.get()
+        if not origin_channel or not origin_chat_id:
+            return "Error: scheduled cron jobs must be created from a chat session"
+        if tz and not cron_expr:
+            return "Error: tz can only be used with cron_expr"
+        if tz:
+            if err := self._validate_timezone(tz):
+                return err
 
-        channel = self._channel.get()
-        chat_id = self._chat_id.get()
-        if not channel or not chat_id:
-            return "Error: no session context (channel/chat_id)"
+        # Build schedule
+        delete_after = False
+        if every_seconds:
+            schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+        elif cron_expr:
+            effective_tz = tz or self._default_timezone
+            if err := self._validate_timezone(effective_tz):
+                return err
+            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=effective_tz)
+        elif at:
+            from zoneinfo import ZoneInfo
 
-        try:
-            schedule, delete_after = self._build_schedule(every_seconds, cron_expr, tz, at)
-        except ValueError as e:
-            return f"Error: {e}"
-
-        # Encode tool execution if specified
-        job_message = self._encode_tool_message(message, tool_name) if tool_name else message
-
-        # Build metadata with internal flags
-        job_metadata = self._safe_metadata(metadata)
-        job_metadata["_paused"] = False
-        if tool_name:
-            job_metadata["_tool_name"] = tool_name
+            try:
+                dt = datetime.fromisoformat(at)
+            except ValueError:
+                return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
+            if dt.tzinfo is None:
+                if err := self._validate_timezone(self._default_timezone):
+                    return err
+                dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
+            at_ms = int(dt.timestamp() * 1000)
+            schedule = CronSchedule(kind="at", at_ms=at_ms)
+            delete_after = True
+        else:
+            return "Error: either every_seconds, cron_expr, or at is required"
 
         job = self._cron.add_job(
-            name=name or (message[:30] if message else (tool_name or "untitled")),
+            name=name or message[:30],
             schedule=schedule,
-            message=job_message,
-            deliver=deliver,
-            channel=channel,
-            to=chat_id,
-            channel_meta=self._metadata.get() or None,
-            session_key=self._session_key.get() or None,
+            message=message,
             delete_after_run=delete_after,
-            metadata=job_metadata,
+            session_key=session_key,
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
+            origin_metadata=dict(self._origin_metadata.get() or {}),
         )
-
-        tool_info = f" → execute {tool_name}" if tool_name else ""
-        return f"Created job '{job.name}' (id: {job.id}){tool_info}"
+        return f"Created job '{job.name}' (id: {job.id})"
 
     def _format_timing(self, schedule: CronSchedule) -> str:
         """Format schedule as a human-readable timing string."""
@@ -286,17 +239,6 @@ class CronTool(Tool, ContextAware):
         if schedule.kind == "at" and schedule.at_ms:
             return f"at {self._format_timestamp(schedule.at_ms, self._display_timezone(schedule))}"
         return schedule.kind
-
-    def _require_job(
-        self, job_id: str | None, action: str
-    ) -> tuple[CronJob, None] | tuple[None, str]:
-        """Fetch a job or return an error. Returns (job, None) or (None, error_message)."""
-        if not job_id or job_id is None:
-            return None, f"Error: job_id is required for {action}"
-        job = self._cron.get_job(job_id)
-        if not job:
-            return None, f"Job {job_id} not found"
-        return job, None
 
     def _format_state(self, state: CronJobState, schedule: CronSchedule) -> list[str]:
         """Format job run state as display lines."""
@@ -338,127 +280,19 @@ class CronTool(Tool, ContextAware):
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:
             return "Error: job_id is required for remove"
-
-        # Check for protected system jobs first
-        job = self._cron.get_job(job_id)
-        if job and job.name == "dream":
-            return (
-                "Cannot remove job `dream`.\n"
-                "This is a system-managed Dream memory consolidation job for long-term memory.\n"
-                "It remains visible so you can inspect it, but it cannot be removed."
-            )
-
         result = self._cron.remove_job(job_id)
-        if result:
+        if result == "removed":
             return f"Removed job {job_id}"
+        if result == "protected":
+            job = self._cron.get_job(job_id)
+            if job and job.name == "dream":
+                return (
+                    "Cannot remove job `dream`.\n"
+                    "This is a system-managed Dream memory consolidation job for long-term memory.\n"
+                    "It remains visible so you can inspect it, but it cannot be removed."
+                )
+            return (
+                f"Cannot remove job `{job_id}`.\n"
+                "This is a protected system-managed cron job."
+            )
         return f"Job {job_id} not found"
-
-    def _update_job(
-        self,
-        job_id: str | None,
-        message: str | None,
-        every_seconds: int | None,
-        cron_expr: str | None,
-        tz: str | None,
-        at: str | None,
-        tool_name: str | None,
-        metadata: dict | None,
-    ) -> str:
-        """Update an existing job. Only specified fields are changed."""
-        job, error = self._require_job(job_id, "update")
-        if error:
-            return error
-
-        if job is not None and job_id is not None:
-            # Build new schedule if any timing params provided
-            new_schedule = None
-            delete_after = job.delete_after_run
-            if any(p is not None for p in [every_seconds, cron_expr, at]):
-                try:
-                    new_schedule, delete_after = self._build_schedule(every_seconds, cron_expr, tz, at)
-                except ValueError as e:
-                    return f"Error: {e}"
-
-            # Update message (preserve tool encoding if applicable)
-            new_message = job.payload.message if job.payload else ""
-
-            # Update metadata
-            new_metadata = self._safe_metadata(job.metadata)
-            if metadata:
-                new_metadata.update(metadata)
-            if tool_name:
-                new_metadata["_tool_name"] = tool_name
-            # Preserve pause state
-            if job.metadata and "_paused" in job.metadata:
-                new_metadata["_paused"] = job.metadata["_paused"]
-
-            # Remove old and add new (since CronService likely doesn't support true updates)
-            self._cron.remove_job(job_id)
-            new_job = self._cron.add_job(
-                name=job.name,
-                schedule=new_schedule or job.schedule,
-                message=new_message,
-                deliver=job.payload.deliver,
-                channel=job.payload.channel,
-                to=job.payload.to,
-                delete_after_run=delete_after,
-                metadata=new_metadata,
-            )
-
-            return f"Updated job (new id: {new_job.id})"
-        else:
-            return "No job to update"
-
-    def _pause_job(self, job_id: str | None) -> str:
-        """Pause a job without removing it."""
-        job, error = self._require_job(job_id, "pause")
-        if error:
-            return error
-
-        if job_id is not None and job is not None:
-            # Get current metadata and add paused flag
-            metadata = self._safe_metadata(job.metadata)
-            metadata["_paused"] = True
-
-            # Update via remove/add pattern (CronService doesn't have metadata update)
-            self._cron.remove_job(job_id)
-            new_job = self._cron.add_job(
-                name=job.name,
-                schedule=job.schedule,
-                message=job.payload.message if job.payload else "",
-                deliver=job.payload.deliver if job.payload else True,
-                channel=job.payload.channel if job.payload else "",
-                to=job.payload.to if job.payload else "",
-                delete_after_run=job.delete_after_run,
-                metadata=metadata,
-            )
-            return f"Paused job {job_id} (id: {new_job.id})"
-        else:
-            return "No job to pause"
-
-    def _resume_job(self, job_id: str | None) -> str:
-        """Resume a paused job."""
-        job, error = self._require_job(job_id, "resume")
-        if error:
-            return error
-
-        if job is not None and job_id is not None:
-            # Get current metadata and remove paused flag
-            metadata = self._safe_metadata(job.metadata)
-            metadata["_paused"] = False
-
-            # Update via remove/add pattern
-            self._cron.remove_job(job_id)
-            new_job = self._cron.add_job(
-                name=job.name,
-                schedule=job.schedule,
-                message=job.payload.message if job.payload else "",
-                deliver=job.payload.deliver if job.payload else True,
-                channel=job.payload.channel if job.payload else "",
-                to=job.payload.to if job.payload else "",
-                delete_after_run=job.delete_after_run,
-                metadata=metadata,
-            )
-            return f"Resumed job {job_id} (id: {new_job.id})"
-        else:
-            return "No job to resume"

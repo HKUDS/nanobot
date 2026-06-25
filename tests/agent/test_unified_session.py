@@ -25,6 +25,7 @@ from blackcat.bus.queue import MessageBus
 from blackcat.command.builtin import cmd_new, register_builtin_commands
 from blackcat.command.router import CommandContext, CommandRouter
 from blackcat.config.schema import AgentDefaults, Config
+from blackcat.session.keys import UNIFIED_SESSION_KEY
 from blackcat.session.manager import Session, SessionManager
 
 # ---------------------------------------------------------------------------
@@ -38,8 +39,8 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
 
     with patch("blackcat.agent.loop.SessionManager"), \
-         patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("blackcat.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -300,8 +301,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
     @pytest.mark.asyncio
     async def test_consolidation_skips_empty_session_for_unified_key(self):
         """Empty unified:default session → consolidation exits immediately, archive not called."""
-        from blackcat.agent.consolidate import Consolidator
-        from blackcat.agent.memory import MemoryStore
+        from blackcat.agent.memory import Consolidator, MemoryStore
 
         store = MagicMock(spec=MemoryStore)
         mock_provider = MagicMock()
@@ -333,8 +333,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
     async def test_consolidation_behaviour_identical_for_any_key(self):
         """archive call count is the same for 'telegram:123' and 'unified:default'
         under identical token conditions."""
-        from blackcat.agent.consolidate import Consolidator
-        from blackcat.agent.memory import MemoryStore
+        from blackcat.agent.memory import Consolidator, MemoryStore
 
         archive_calls: dict[str, int] = {}
 
@@ -368,8 +367,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
     async def test_consolidation_triggers_when_over_budget_unified_key(self):
         """When tokens exceed budget, consolidation attempts to find a boundary —
         behaviour is identical to any other session key."""
-        from blackcat.agent.consolidate import Consolidator
-        from blackcat.agent.memory import MemoryStore
+        from blackcat.agent.memory import Consolidator, MemoryStore
 
         store = MagicMock(spec=MemoryStore)
         mock_provider = MagicMock()
@@ -391,7 +389,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
         sessions.get_or_create.return_value = session
 
         # Simulate over-budget: estimated > budget
-        consolidator.estimate_session_prompt_tokens = AsyncMock(return_value=(950, "tiktoken"))
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))
         # No valid boundary found → returns gracefully without archiving
         consolidator.pick_consolidation_boundary = MagicMock(return_value=None)
         consolidator.archive = AsyncMock()
@@ -417,8 +415,6 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_active_tasks_use_effective_key_in_unified_mode(self, tmp_path: Path):
         """When unified_session=True, tasks are stored under UNIFIED_SESSION_KEY."""
-        from blackcat.agent.loop import UNIFIED_SESSION_KEY
-
         loop = _make_loop(tmp_path, unified_session=True)
 
         # Create a message from telegram channel
@@ -445,7 +441,6 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_finds_task_in_unified_mode(self, tmp_path: Path):
         """cmd_stop can cancel tasks when unified_session=True."""
-        from blackcat.agent.loop import UNIFIED_SESSION_KEY
         from blackcat.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)
@@ -478,7 +473,6 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_uses_effective_key_without_session_override(self, tmp_path: Path):
         """Priority /stop must cancel the unified session even before dispatch rewrites the message."""
-        from blackcat.agent.loop import UNIFIED_SESSION_KEY
         from blackcat.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)
@@ -504,7 +498,6 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_cross_channel_in_unified_mode(self, tmp_path: Path):
         """In unified mode, /stop from one channel cancels tasks from another channel."""
-        from blackcat.agent.loop import UNIFIED_SESSION_KEY
         from blackcat.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)

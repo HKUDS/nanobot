@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 
 from blackcat.config.schema import Config
@@ -46,6 +48,91 @@ def test_provider_api_type_is_openai_only() -> None:
                 }
             }
         })
+
+    with pytest.raises(ValueError, match="only supported"):
+        Config.model_validate({
+            "providers": {
+                "my-company-api": {
+                    "apiBase": "https://example.test/v1",
+                    "apiType": "responses",
+                }
+            }
+        })
+
+
+@pytest.mark.parametrize("provider_name", ["openai-codex", "github-copilot", "lm-studio"])
+def test_dynamic_custom_provider_rejects_builtin_provider_aliases(provider_name: str) -> None:
+    with pytest.raises(ValueError, match="conflicts with built-in provider"):
+        Config.model_validate({
+            "providers": {
+                provider_name: {
+                    "apiBase": "https://example.test/v1",
+                }
+            }
+        })
+
+
+def test_custom_provider_fallback_uses_model_extra_without_pydantic_warnings() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "unmatched-model",
+            }
+        },
+        "providers": {
+            "my-company-api": {
+                "apiBase": "https://example.test/v1",
+            }
+        },
+    })
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert config.get_provider_name() == "my-company-api"
+
+
+def test_dynamic_custom_provider_prefix_matches_camel_case_key() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "provider": "auto",
+                "model": "companyProxy/gpt-4o-mini",
+            }
+        },
+        "providers": {
+            "otherProxy": {
+                "apiBase": "https://other.example.test/v1",
+            },
+            "companyProxy": {
+                "apiBase": "https://company.example.test/v1",
+            },
+        },
+    })
+
+    assert config.get_provider_name() == "companyProxy"
+    assert config.get_api_base() == "https://company.example.test/v1"
+
+
+def test_dynamic_custom_provider_prefix_does_not_fall_through_when_base_missing() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "provider": "auto",
+                "model": "companyProxy/gpt-4o-mini",
+            }
+        },
+        "providers": {
+            "otherProxy": {
+                "apiBase": "https://other.example.test/v1",
+            },
+            "companyProxy": {
+                "apiKey": "sk-company",
+            },
+        },
+    })
+
+    assert config.get_provider_name() == "companyProxy"
+    assert config.get_api_base() is None
 
 
 def test_legacy_defaults_config_without_presets_still_resolves() -> None:

@@ -2,10 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens — HSL form.
-   Light: white + neon orange (logo eyes).
-   Dark:  near-black + neon purple (logo eyes).
-   --primary stays neutral (shadcn semantics); --brand carries the accent. */
+/* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
     color-scheme: light;
@@ -21,16 +18,14 @@
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
     --muted-foreground: 0 0% 45.1%;
-    --accent: 24 60% 93%;
-    --accent-foreground: 24 60% 30%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
-    --ring: 24 100% 54%;
+    --ring: 0 0% 3.9%;
     --radius: 0.4375rem;
-    --brand: 24 100% 54%;
-    --brand-foreground: 0 0% 100%;
     --sidebar: 0 0% 98.5%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-accent: 0 0% 95.8%;
@@ -42,28 +37,25 @@
 
   .dark {
     color-scheme: dark;
-    --background: 260 6% 8%;
-    --foreground: 260 8% 94%;
-    --card: 260 6% 11%;
-    --card-foreground: 260 8% 94%;
-    --popover: 260 6% 11%;
-    --popover-foreground: 260 8% 94%;
+    --background: 0 0% 10%;
+    --foreground: 240 4% 96%;
+    --card: 0 0% 12%;
+    --card-foreground: 240 4% 96%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 240 4% 96%;
     --primary: 240 5% 98%;
     --primary-foreground: 0 0% 9%;
     --secondary: 0 0% 12%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 260 6% 13%;
-    --muted-foreground: 260 6% 60%;
-    --accent: 270 40% 16%;
-    --accent-foreground: 270 80% 85%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 270 100% 64%;
-    --radius: 0.4375rem;
-    --brand: 270 100% 64%;
-    --brand-foreground: 0 0% 100%;
+    --ring: 0 0% 83.1%;
     --sidebar: 0 0% 11.5%;
     --sidebar-foreground: 0 0% 98%;
     --sidebar-accent: 0 0% 15.5%;
@@ -368,7 +360,7 @@
     }
   }
   .run-pulse-icon {
-    color: hsl(var(--brand));
+    color: hsl(204 82% 46%);
   }
   .run-pulse-icon__ring,
   .run-pulse-icon__dot {
@@ -380,14 +372,14 @@
     position: absolute;
     height: 12px;
     width: 12px;
-    background: hsl(var(--brand) / 0.22);
+    background: hsl(204 82% 46% / 0.22);
     animation: run-pulse-ring 1.55s ease-out infinite;
   }
   .run-pulse-icon__dot {
     height: 6px;
     width: 6px;
     background: currentColor;
-    box-shadow: 0 0 0 1px hsl(var(--brand) / 0.14);
+    box-shadow: 0 0 0 1px hsl(204 82% 46% / 0.14);
     animation: run-pulse-dot 1.55s ease-in-out infinite;
   }
   @keyframes queued-prompt-row-enter {
@@ -427,16 +419,16 @@
     }
   }
 
-  /** Goal halo: breathes in the brand colour. */
+  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
   @keyframes goal-shell-glow-breathe {
     0%,
     100% {
-      filter: drop-shadow(0 0 10px hsl(var(--brand) / 0.22))
-        drop-shadow(0 0 24px hsl(var(--brand) / 0.14));
+      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
+        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
     }
     50% {
-      filter: drop-shadow(0 0 17px hsl(var(--brand) / 0.32))
-        drop-shadow(0 0 38px hsl(var(--brand) / 0.2));
+      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
+        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
     }
   }
   .goal-shell-glow {
@@ -445,12 +437,12 @@
   @keyframes goal-shell-glow-breathe-dark {
     0%,
     100% {
-      filter: drop-shadow(0 0 12px hsl(var(--brand) / 0.32))
-        drop-shadow(0 0 28px hsl(var(--brand) / 0.2));
+      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
+        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
     }
     50% {
-      filter: drop-shadow(0 0 20px hsl(var(--brand) / 0.45))
-        drop-shadow(0 0 42px hsl(var(--brand) / 0.28));
+      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
+        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
     }
   }
   .dark .goal-shell-glow {
@@ -459,10 +451,10 @@
   @media (prefers-reduced-motion: reduce) {
     .goal-shell-glow {
       animation: none;
-      filter: drop-shadow(0 0 14px hsl(var(--brand) / 0.24));
+      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
     }
     .dark .goal-shell-glow {
-      filter: drop-shadow(0 0 14px hsl(var(--brand) / 0.32));
+      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
     }
   }
 

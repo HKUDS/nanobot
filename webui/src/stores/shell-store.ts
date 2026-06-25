@@ -2,12 +2,14 @@ import { create } from "zustand";
 import { type ShellRoute, type ShellView, readShellRoute, writeShellRoute } from "@/utils/shell";
 import { readSidebarOpen } from "@/utils/helpers";
 import { SIDEBAR_STORAGE_KEY } from "@/constants";
+import type { SessionAutomationJob } from "@/lib/types";
 
 /* ── Types ───────────────────────────────────────── */
 
 export interface PendingAction {
   key: string;
   label: string;
+  automations?: SessionAutomationJob[];
 }
 
 export interface ShellStore {
@@ -18,6 +20,7 @@ export interface ShellStore {
 
   /* sidebar */
   hostSidebarOpen: boolean;
+  hostSidebarPreviewing: boolean;
   mobileSidebarOpen: boolean;
 
   /* dialogs */
@@ -34,13 +37,16 @@ export interface ShellStore {
   navigate: (route: ShellRoute, options?: { replace?: boolean }) => void;
   applyRoute: () => void;
   toggleSidebar: () => void;
+  toggleHostSidebar: () => void;
   openHostSidebar: () => void;
   closeHostSidebar: () => void;
+  openHostSidebarPreview: () => void;
+  scheduleHostSidebarPreviewClose: () => void;
   openMobileSidebar: () => void;
   closeMobileSidebar: () => void;
   openSessionSearch: () => void;
   closeSessionSearch: () => void;
-  openDeleteDialog: (key: string, label: string) => void;
+  openDeleteDialog: (key: string, label: string, automations?: SessionAutomationJob[]) => void;
   closeDeleteDialog: () => void;
   openRenameDialog: (key: string, label: string) => void;
   closeRenameDialog: () => void;
@@ -64,6 +70,7 @@ export const useShellStore = create<ShellStore>((set) => {
 
     /* sidebar */
     hostSidebarOpen: readSidebarOpen(),
+    hostSidebarPreviewing: false,
     mobileSidebarOpen: false,
 
     /* dialogs */
@@ -106,15 +113,33 @@ export const useShellStore = create<ShellStore>((set) => {
           try {
             window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
           } catch { /* ignore */ }
-          return { hostSidebarOpen: next };
+          return { hostSidebarOpen: next, hostSidebarPreviewing: false };
         });
       } else {
         set((s) => ({ mobileSidebarOpen: !s.mobileSidebarOpen }));
       }
     },
 
-    openHostSidebar: () => set({ hostSidebarOpen: true }),
-    closeHostSidebar: () => set({ hostSidebarOpen: false }),
+    toggleHostSidebar: () => {
+      set((s) => {
+        const next = !s.hostSidebarOpen;
+        try {
+          window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
+        } catch { /* ignore */ }
+        return { hostSidebarOpen: next, hostSidebarPreviewing: false };
+      });
+    },
+
+    openHostSidebar: () => set({ hostSidebarOpen: true, hostSidebarPreviewing: false }),
+    closeHostSidebar: () => set({ hostSidebarOpen: false, hostSidebarPreviewing: false }),
+
+    openHostSidebarPreview: () => set({ hostSidebarPreviewing: true }),
+
+    scheduleHostSidebarPreviewClose: () => {
+      setTimeout(() => {
+        set((s) => (s.hostSidebarPreviewing ? { hostSidebarPreviewing: false } : s));
+      }, 120);
+    },
 
     openMobileSidebar: () => set({ mobileSidebarOpen: true }),
     closeMobileSidebar: () => set({ mobileSidebarOpen: false }),
@@ -124,7 +149,8 @@ export const useShellStore = create<ShellStore>((set) => {
     },
     closeSessionSearch: () => set({ sessionSearchOpen: false }),
 
-    openDeleteDialog: (key, label) => set({ pendingDelete: { key, label } }),
+    openDeleteDialog: (key, label, automations) =>
+      set({ pendingDelete: { key, label, automations } }),
     closeDeleteDialog: () => set({ pendingDelete: null }),
 
     openRenameDialog: (key, label) => set({ pendingRename: { key, label } }),

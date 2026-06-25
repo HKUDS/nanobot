@@ -1,4 +1,4 @@
-"""On-demand version checker for nanobot-ai releases.
+"""On-demand version checker for blackcat-ai releases.
 
 Checks PyPI for newer versions when explicitly requested (no background polling).
 """
@@ -15,7 +15,7 @@ from blackcat import __version__
 
 logger = logging.getLogger(__name__)
 
-_PYPI_URL = "https://pypi.org/pypi/nanobot-ai/json"
+_PYPI_URL = "https://pypi.org/pypi/blackcat-ai/json"
 _CACHE_TTL_S = 300  # 5 minutes cache to avoid hammering PyPI
 
 _cache: tuple[float, str | None] = (0.0, None)
@@ -47,5 +47,5 @@ def check_for_update() -> dict[str, Any] | None:
     return {
         "currentVersion": __version__,
         "latestVersion": latest,
-        "pypiUrl": "https://pypi.org/project/nanobot-ai/",
+        "pypiUrl": "https://pypi.org/project/blackcat-ai/",
     }

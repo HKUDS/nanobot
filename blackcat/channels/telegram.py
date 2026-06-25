@@ -42,11 +42,84 @@ from blackcat.utils.formatting import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
-# safety margin for mid-stream edits (plain text).  For _stream_end, we
-# convert to HTML first and then split at the true 4096-char boundary so
-# the final rendered message never overflows.
+# safety margin for mid-stream edits (plain text).  For _stream_end, we split
+# raw markdown into chunks whose rendered HTML fits Telegram's true 4096-char
+# boundary so the final rendered message never overflows.
 TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
+
+
+def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
+    """Split raw Telegram Markdown without leaving fenced code blocks unbalanced."""
+    if not content:
+        return []
+    content = content.lstrip()
+    if not content:
+        return []
+    if len(content) <= max_len:
+        return [content]
+
+    def fence_line(fence_pos: int) -> str:
+        line_end = content.find("\n", fence_pos)
+        if line_end < 0:
+            return content[fence_pos:]
+        return content[fence_pos:line_end]
+
+    def split_inside_fenced_code_block(pos: int) -> tuple[bool, int, str]:
+        if content[:pos].count("```") % 2 == 0:
+            return False, -1, ""
+        opening = content.rfind("```", 0, pos)
+        if opening < 0:
+            return True, -1, "```"
+        return True, opening, fence_line(opening)
+
+    chunks: list[str] = []
+    while content:
+        if len(content) <= max_len:
+            chunks.append(content)
+            break
+
+        cut = content[:max_len]
+        pos = cut.rfind("\n")
+        if pos <= 0:
+            pos = cut.rfind(" ")
+        if pos <= 0:
+            pos = max_len
+
+        inside_code, opening, fence = split_inside_fenced_code_block(pos)
+        if inside_code:
+            if opening > 0:
+                pos = opening
+            else:
+                closing = "\n```"
+                min_code_pos = len(fence)
+                if content.startswith(fence + "\n"):
+                    min_code_pos += 1
+                if pos < min_code_pos and min_code_pos + len(closing) > max_len:
+                    chunks.append(content[:max_len])
+                    content = content[max_len:].lstrip()
+                    continue
+                if pos + len(closing) > max_len:
+                    budget = max_len - len(closing)
+                    if budget > 0:
+                        recut = content[:budget]
+                        adjusted = recut.rfind("\n")
+                        if adjusted <= 0:
+                            adjusted = recut.rfind(" ")
+                        pos = adjusted if adjusted > 0 else budget
+                    else:
+                        closing = "```"
+                        pos = max_len - len(closing)
+                chunks.append(content[:pos] + closing)
+                remainder = content[pos:]
+                if remainder.startswith("\n"):
+                    remainder = remainder[1:]
+                content = f"{fence}\n{remainder}"
+                continue
+
+        chunks.append(content[:pos])
+        content = content[pos:].lstrip()
+    return chunks
 
 
 def _escape_telegram_html(text: str) -> str:
@@ -216,6 +289,32 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
+
+
+def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
+    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
+    chunks: list[str] = []
+    pending = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
+    while pending:
+        chunk = pending.pop(0)
+        html = _markdown_to_telegram_html(chunk)
+        if len(html) <= max_html_len:
+            chunks.append(html)
+            continue
+
+        # Markdown can expand when rendered as HTML (tags/entities). Re-split
+        # the raw markdown with a smaller budget instead of slicing HTML tags.
+        next_limit = max(1, int(len(chunk) * max_html_len / len(html)) - 8)
+        next_limit = min(next_limit, len(chunk) - 1)
+        if next_limit <= 0:
+            chunks.extend(split_message(html, max_html_len))
+            continue
+        parts = _split_telegram_markdown(chunk, next_limit)
+        if len(parts) == 1 and parts[0] == chunk:
+            chunks.extend(split_message(html, max_html_len))
+            continue
+        pending = parts + pending
+    return chunks
 
 
 _SEND_MAX_RETRIES = 3
@@ -642,7 +741,7 @@ class TelegramChannel(BaseChannel):
             # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
-            chunks = split_message(text, TELEGRAM_MAX_MESSAGE_LEN)
+            chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
             for i, chunk in enumerate(chunks):
                 is_last = (i == len(chunks) - 1)
                 await self._send_text(
@@ -737,14 +836,9 @@ class TelegramChannel(BaseChannel):
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
-            html = _markdown_to_telegram_html(raw_text)
-            if len(html) <= TELEGRAM_HTML_MAX_LEN:
-                primary_html = html
-                extra_html_chunks = []
-            else:
-                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
-                primary_html = html_chunks[0]
-                extra_html_chunks = html_chunks[1:]
+            html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
+            primary_html = html_chunks[0]
+            extra_html_chunks = html_chunks[1:]
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
@@ -848,7 +942,7 @@ class TelegramChannel(BaseChannel):
         intermediate chunks as standalone messages, then opens a new message
         for the tail so subsequent deltas continue streaming into it.
         """
-        chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        chunks = _split_telegram_markdown(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
         if len(chunks) <= 1:
             return
         try:

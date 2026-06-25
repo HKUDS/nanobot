@@ -467,9 +467,6 @@ async def test_drain_pending_timeout(tmp_path):
 
     assert injection_callback is not None
 
-    # Patch the timeout to be very short for testing
-    with patch("blackcat.agent.loop.asyncio.wait_for") as mock_wait:
-        mock_wait.side_effect = asyncio.TimeoutError
     # Patch the timeout path without leaking the queue.get() coroutine.
     async def _timeout(awaitable, timeout):
         awaitable.close()

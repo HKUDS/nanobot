@@ -6,15 +6,6 @@
 .env
 .web
 .orion
-blackcat-desktop/
-desktop/
-
-# Desktop app generated artifacts
-desktop/build/
-desktop/dist/
-desktop/node_modules/
-desktop/package-lock.json
-desktop/resources/blackcat-engine/
 
 # Claude / AI assistant artifacts
 docs/superpowers/
@@ -26,6 +17,7 @@ webui/dist/
 webui/coverage/
 webui/.vite/
 *.tsbuildinfo
+node_modules/
 
 # Python bytecode & caches
 *.pyc
@@ -39,16 +31,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
-
-
-# Claude Docs
-CLAUDE.md
-.claude/*
-
-# Apple files
-.DS_Store
-
-test/
 .mypy_cache/
 .ruff_cache/
 .pytype/
@@ -118,3 +100,4 @@ temp/
 *.tmp
 exp/
 .playwright-mcp/
+bridge/node_modules/

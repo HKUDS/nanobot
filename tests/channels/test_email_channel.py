@@ -374,58 +374,6 @@ def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch)
     assert [call for call in fake.uid_calls if call[0] == "STORE"] == [("STORE", "123", "+FLAGS", "(\\Deleted)")]
     assert fake.search_calls == [(None, "UID", "123"), (None, "UID", "124")]
     assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
-    # With post_action_expunge=False (default), no broad expunge is called
-    assert fake.expunge_calls == 0
-
-
-def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplus(monkeypatch) -> None:
-    """When post_action_expunge=True and UIDPLUS is unsupported, broad expunge IS called."""
-    class FakeIMAP:
-        def __init__(self) -> None:
-            self.uid_calls: list[tuple] = []
-            self.store_calls: list[tuple[bytes, str, str]] = []
-            self.expunge_calls = 0
-
-        def login(self, _user: str, _pw: str):
-            return "OK", [b"logged in"]
-
-        def select(self, _mailbox: str):
-            return "OK", [b"2"]
-
-        def capability(self):
-            return "OK", [b"IMAP4rev1"]
-
-        def uid(self, command: str, *args):
-            self.uid_calls.append((command, *args))
-            if command == "STORE":
-                return "NO", [b"unsupported"]
-            return "BAD", [b""]
-
-        def search(self, *_args):
-            uid_to_seq = {"123": b"1", "124": b"2"}
-            uid = _args[-1]
-            seq = uid_to_seq.get(uid, b"")
-            return "OK", [seq]
-
-        def store(self, imap_id: bytes, op: str, flags: str):
-            self.store_calls.append((imap_id, op, flags))
-            return "OK", [b""]
-
-        def expunge(self):
-            self.expunge_calls += 1
-            return "OK", [b""]
-
-        def logout(self):
-            return "BYE", [b""]
-
-    fake = FakeIMAP()
-    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
-
-    channel = EmailChannel(_make_config(post_action="delete", post_action_expunge=True), MessageBus())
-    channel._apply_post_actions_batch(["123", "124"])
-
-    assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
-    # Broad expunge called because post_action_expunge=True
     assert fake.expunge_calls == 2
 
 

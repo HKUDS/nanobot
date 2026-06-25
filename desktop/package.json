@@ -1,5 +1,5 @@
 {
-  "name": "@nanobot/desktop",
+  "name": "@blackcat/desktop",
   "version": "0.2.1",
   "private": true,
   "type": "module",
@@ -25,8 +25,8 @@
     "typescript": "^5.7.2"
   },
   "build": {
-    "appId": "wiki.nanobot.desktop",
-    "productName": "nanobot",
+    "appId": "wiki.blackcat.desktop",
+    "productName": "blackcat",
     "asar": true,
     "files": [
       "build/**/*",
@@ -34,12 +34,12 @@
     ],
     "extraResources": [
       {
-        "from": "../nanobot/web/dist",
-        "to": "nanobot-webui"
+        "from": "../blackcat/web/dist",
+        "to": "blackcat-webui"
       },
       {
-        "from": "resources/nanobot-engine",
-        "to": "nanobot-engine",
+        "from": "resources/blackcat-engine",
+        "to": "blackcat-engine",
         "filter": [
           "**/*"
         ]
@@ -48,7 +48,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "nanobot uses the microphone to transcribe voice input before you send messages."
+        "NSMicrophoneUsageDescription": "blackcat uses the microphone to transcribe voice input before you send messages."
       },
       "target": [
         "dmg"

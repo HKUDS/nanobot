@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "Navigasi bilah samping",
+    "mobileNavigation": "Navigasi bilah samping seluler",
     "collapse": "Ciutkan sidebar",
     "newChat": "Obrolan baru",
     "searchAria": "Cari",
@@ -55,6 +56,7 @@
       "ariaLabel": "Ganti bahasa"
     },
     "apps": "Aplikasi",
+    "automations": "Otomasi",
     "skills": {
       "title": "Skill"
     }
@@ -80,12 +82,14 @@
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
       "apps": "Aplikasi",
+      "automations": "Otomasi",
       "skills": "Skill"
     },
     "sections": {
       "interface": "Antarmuka",
       "ai": "AI",
       "system": "Sistem",
+      "about": "Tentang",
       "status": "Status",
       "localPreferences": "Preferensi lokal",
       "presets": "Preset",
@@ -248,7 +252,7 @@
       "exporting": "Mengekspor..."
     },
     "byok": {
-      "description": "Gunakan kunci provider Anda sendiri. Blackcat membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
+      "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
       "configured": "Terkonfigurasi",
       "notConfigured": "Belum dikonfigurasi",
       "configuredSection": "Terkonfigurasi",
@@ -391,6 +395,13 @@
       "unavailable": "Tidak tersedia",
       "noDescription": "Tidak ada deskripsi."
     },
+    "about": {
+      "version": "Versi",
+      "checking": "Memeriksa pembaruan...",
+      "checkForUpdates": "Periksa pembaruan",
+      "upToDate": "Anda sudah menggunakan versi terbaru",
+      "updateAvailable": "Pembaruan tersedia v{{version}}"
+    },
     "mcp": {
       "allCategories": "Semua kategori",
       "summary": "{{installed}} dari {{total}} preset diaktifkan",
@@ -461,6 +472,127 @@
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada aplikasi yang cocok."
     },
+    "automations": {
+      "filters": {
+        "all": "Semua",
+        "active": "Aktif",
+        "paused": "Dijeda",
+        "failed": "Perlu ditangani",
+        "system": "Sistem"
+      },
+      "sort": {
+        "next": "Jalankan berikutnya",
+        "last": "Jalankan terakhir",
+        "updated": "Diperbarui",
+        "name": "Nama"
+      },
+      "search": "Cari tugas, pesan, chat terkait, atau jadwal",
+      "queue": "Antrean",
+      "loading": "Memuat otomasi...",
+      "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
+      "empty": "Belum ada otomasi.",
+      "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
+      "oneShot": "Satu kali",
+      "systemTask": "Automasi yang dikelola sistem",
+      "labels": {
+        "schedule": "Jadwal",
+        "next": "Berikutnya",
+        "origin": "Chat tertaut",
+        "created": "Dibuat",
+        "updated": "Diperbarui"
+      },
+      "runNow": "Jalankan sekarang",
+      "pause": "Jeda",
+      "resume": "Lanjutkan",
+      "edit": "Edit",
+      "delete": "Hapus",
+      "protected": "Terlindungi",
+      "editTitle": "Edit otomasi",
+      "save": "Simpan",
+      "deleteTitle": "Hapus otomasi",
+      "deleteDescription": "Ini menghapus {{name}} dari penyimpanan cron. Pesan chat sebelumnya tetap ada di sesi.",
+      "cancel": "Batal",
+      "status": {
+        "system": "Sistem",
+        "running": "Sedang berjalan",
+        "paused": "Dijeda",
+        "failed": "Gagal",
+        "completed": "Selesai",
+        "noSchedule": "Tanpa jadwal",
+        "active": "Aktif"
+      },
+      "origin": {
+        "system": "Sistem",
+        "unknown": "Tidak ada chat tertaut"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Setiap hari pukul {{time}}",
+        "weekdaysAt": "Hari kerja pukul {{time}}",
+        "hourlyAt": "Setiap jam pada :{{minute}}",
+        "hourlyWindow": "Setiap jam {{start}}-{{end}} pada :{{minute}}",
+        "custom": "Jadwal khusus"
+      },
+      "next": {
+        "paused": "Dijeda",
+        "pending": "Sedang berjalan",
+        "none": "Tidak ada jadwal berikutnya"
+      },
+      "message": {
+        "showMore": "Tampilkan pesan lengkap",
+        "showLess": "Tampilkan lebih sedikit"
+      },
+      "fields": {
+        "name": "Nama",
+        "message": "Pesan",
+        "scheduleType": "Jenis jadwal",
+        "every": "Setiap",
+        "unit": "Unit",
+        "cronExpression": "Ekspresi cron",
+        "timezone": "Zona waktu",
+        "runAt": "Jalankan pada"
+      },
+      "scheduleTypes": {
+        "every": "Interval",
+        "cron": "Cron",
+        "at": "Sekali"
+      },
+      "everyUnits": {
+        "second": "Detik",
+        "minute": "Menit",
+        "hour": "Jam",
+        "day": "Hari"
+      },
+      "validation": {
+        "nameRequired": "Nama wajib diisi.",
+        "messageRequired": "Pesan wajib diisi.",
+        "intervalRequired": "Interval harus berupa angka positif.",
+        "cronRequired": "Ekspresi cron wajib diisi.",
+        "timeRequired": "Waktu eksekusi wajib diisi.",
+        "futureRequired": "Waktu eksekusi harus berada di masa depan."
+      }
+    },
     "oauth": {
       "authentication": "Autentikasi OAuth",
       "signIn": "Masuk",
@@ -509,6 +641,7 @@
   },
   "chat": {
     "fallbackTitle": "Obrolan {{id}}",
+    "forkTitle": "Cabang: {{title}}",
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
     "showMore": "Tampilkan {{count}} lagi",
@@ -518,7 +651,8 @@
     "newInProject": "Mulai obrolan baru di {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -550,7 +684,22 @@
     "title": "Hapus obrolan ini?",
     "description": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
-    "confirm": "Hapus"
+    "confirm": "Hapus",
+    "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
+    "moreAutomations": "+ {{count}} lagi",
+    "confirmWithAutomations": "Hapus",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Setiap {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Jadwal khusus"
+    },
+    "next": {
+      "label": "Berikutnya: {{time}}",
+      "disabled": "Dijeda",
+      "none": "Tidak ada jadwal berikutnya"
+    }
   },
   "connection": {
     "idle": "Idle",
@@ -647,6 +796,7 @@
       },
       "next": {
         "label": "Berikutnya {{time}}",
+        "pending": "Segera berjalan",
         "disabled": "Dijeda",
         "none": "Tidak ada jadwal berikutnya"
       }
@@ -810,6 +960,7 @@
     },
     "scrollToBottom": "Gulir ke bawah",
     "loadEarlier": "Muat pesan sebelumnya",
+    "forkedFromHistory": "Fork dari riwayat",
     "promptNavigator": {
       "open": "Buka navigator prompt",
       "title": "Prompt",
@@ -835,12 +986,16 @@
     "agentActivityLiveSummary": "Berjalan… · {{reasoning}} langkah · {{tools}} panggilan alat",
     "agentActivityLiveToolsOnly": "Berjalan… · {{tools}} panggilan alat",
     "imageAttachment": "Lampiran gambar",
-    "copyReply": "Salin balasan",
-    "copiedReply": "Balasan disalin",
+    "forkFromHere": "Fork",
+    "copyReply": "Salin",
+    "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",
     "activityThoughtFor": "Selesai berpikir dalam {{duration}}",
+    "activityWorkingFor": "Memproses selama {{duration}}",
+    "activityWorked": "Selesai memproses",
+    "activityWorkedFor": "Diproses selama {{duration}}",
     "cliActivityRunningOne": "Menggunakan @{{name}}",
     "cliActivityRanOne": "Menggunakan @{{name}} selesai",
     "cliActivityFailedOne": "@{{name}} gagal",
@@ -885,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

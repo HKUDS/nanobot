@@ -1,6 +1,5 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
@@ -10,11 +9,12 @@ interface ThreadMessagesProps {
   messages: UIMessage[];
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
-  hiddenMessageCount?: number;
-  onLoadEarlier?: () => void;
+  hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
+  onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
 export type DisplayUnit = TurnUnit;
@@ -63,36 +63,28 @@ export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
 export function ThreadMessages({
   messages,
   isStreaming = false,
-  hiddenMessageCount = 0,
-  onLoadEarlier,
+  hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
+  forkBoundaryMessageCount = null,
   onOpenFilePreview,
+  onForkFromMessage,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
+  const forkBoundaryAfterUnitIndex = useMemo(
+    () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
+    [forkBoundaryMessageCount, units],
+  );
   const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
   );
+  let nextUserIndex = hiddenUserMessageCount;
 
   return (
     <div className="flex w-full flex-col">
-      {hiddenMessageCount > 0 && onLoadEarlier ? (
-        <div className="mb-4 flex justify-center">
-          <button
-            type="button"
-            onClick={onLoadEarlier}
-            className="rounded-full border border-border/60 bg-background/85 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/55 hover:text-foreground"
-          >
-            {t("thread.loadEarlier", {
-              count: hiddenMessageCount,
-              defaultValue: "Load earlier messages",
-            })}
-          </button>
-        </div>
-      ) : null}
       {units.map((unit, index) => {
         const prev = units[index - 1];
         const marginTop =
@@ -109,39 +101,74 @@ export function ThreadMessages({
           unit.type === "message" && unit.message.role === "user"
             ? unit.message.id
             : undefined;
+        const forkIndex =
+          unit.type === "message" && unit.message.role === "assistant" && copyFlags[index]
+            ? nextUserIndex
+            : undefined;
+        if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
 
         return (
-          <div
-            key={unitKey(unit, index)}
-            className={marginTop}
-            data-user-prompt-id={userPromptId}
-          >
-            {unit.type === "activity" ? (
-              <AgentActivityCluster
-                messages={unit.messages}
-                isTurnStreaming={liveActivityClusterIndices.has(index)}
-                hasBodyBelow={hasBodyBelow}
-                turnLatencyMs={unit.turnLatencyMs}
-                cliApps={cliApps}
-                mcpPresets={mcpPresets}
-                onOpenFilePreview={onOpenFilePreview}
-              />
-            ) : (
-              <MessageBubble
-                message={unit.message}
-                showAssistantCopyAction={
-                  unit.message.role === "assistant"
-                    ? copyFlags[index]
-                    : true
-                }
-                cliApps={cliApps}
-                mcpPresets={mcpPresets}
-                onOpenFilePreview={onOpenFilePreview}
-              />
-            )}
-          </div>
+          <Fragment key={unitKey(unit, index)}>
+            <div className={marginTop} data-user-prompt-id={userPromptId}>
+              {unit.type === "activity" ? (
+                <AgentActivityCluster
+                  messages={unit.messages}
+                  isTurnStreaming={liveActivityClusterIndices.has(index)}
+                  hasBodyBelow={hasBodyBelow}
+                  turnLatencyMs={unit.turnLatencyMs}
+                  cliApps={cliApps}
+                  mcpPresets={mcpPresets}
+                  onOpenFilePreview={onOpenFilePreview}
+                />
+              ) : (
+                <MessageBubble
+                  message={unit.message}
+                  showAssistantCopyAction={
+                    unit.message.role === "assistant"
+                      ? copyFlags[index]
+                      : true
+                  }
+                  cliApps={cliApps}
+                  mcpPresets={mcpPresets}
+                  onOpenFilePreview={onOpenFilePreview}
+                  onForkFromHere={
+                    onForkFromMessage && forkIndex !== undefined
+                      ? () => onForkFromMessage(forkIndex)
+                      : undefined
+                  }
+                />
+              )}
+            </div>
+            {index === forkBoundaryAfterUnitIndex ? (
+              <ForkBoundaryDivider label={t("thread.forkedFromHistory")} />
+            ) : null}
+          </Fragment>
         );
       })}
+    </div>
+  );
+}
+
+function unitIndexAfterMessageCount(
+  units: DisplayUnit[],
+  messageCount: number | null | undefined,
+): number | null {
+  if (messageCount == null || messageCount <= 0) return null;
+  let seen = 0;
+  for (let i = 0; i < units.length; i += 1) {
+    const unit = units[i];
+    seen += unit.type === "activity" ? unit.messages.length : 1;
+    if (seen >= messageCount) return i;
+  }
+  return null;
+}
+
+function ForkBoundaryDivider({ label }: { label: string }) {
+  return (
+    <div className="my-5 flex items-center gap-3 text-[11px] text-muted-foreground/80">
+      <span aria-hidden className="h-px flex-1 bg-border/70" />
+      <span className="shrink-0">{label}</span>
+      <span aria-hidden className="h-px flex-1 bg-border/70" />
     </div>
   );
 }

@@ -8,7 +8,6 @@
 - Stale detection with content-equality fallback
 """
 
-
 import os
 
 import pytest
@@ -316,7 +315,6 @@ class TestFileSizeProtection:
     async def test_rejects_file_over_size_limit(self, tool, tmp_path):
         f = tmp_path / "huge.txt"
         f.write_text("x", encoding="utf-8")
-        # Monkey-patch the file size check by creating a stat mock
 
         class FakeStat:
             def __init__(self, real_stat):
