@@ -1961,9 +1961,22 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 }
 ```
 
+Subagents also stop immediately when one of their tools returns an execution error. That default keeps failures visible to the parent agent. If your subagent workflows use tools that can fail transiently and should be retried or worked around by the model, disable hard-stop behavior:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "failOnToolError": false
+    }
+  }
+}
+```
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
+| `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
 
 ## Auto Compact
