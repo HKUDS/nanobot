@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import base64
 import json
 import os
 import re
@@ -422,16 +423,33 @@ class SessionManager:
 
     @staticmethod
     def safe_key(key: str) -> str:
-        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
-        return safe_filename(key.replace(":", "_"))
+        """Collision-resistant encoding of a session key for use as a filename stem.
+
+        Uses base64url (no padding) so distinct keys always map to distinct
+        filenames, unlike the previous replace(":", "_") approach which
+        could collide (e.g. telegram:a_b vs telegram:a:b).
+        """
+        return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
 
     def _get_session_path(self, key: str) -> Path:
-        """Get the file path for a session."""
-        return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
+        """Get the file path for a session, with backward compatibility."""
+        new_path = self.sessions_dir / f"{self.safe_key(key)}.jsonl"
+        if new_path.exists():
+            return new_path
+        old_path = self.sessions_dir / f"{safe_filename(key.replace(":", "_"))}.jsonl"
+        if old_path.exists():
+            return old_path
+        return new_path
 
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
-        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+        new_path = self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+        if new_path.exists():
+            return new_path
+        old_path = self.legacy_sessions_dir / f"{safe_filename(key.replace(":", "_"))}.jsonl"
+        if old_path.exists():
+            return old_path
+        return new_path
 
     def get_or_create(self, key: str) -> Session:
         """
