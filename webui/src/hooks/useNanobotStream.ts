@@ -42,6 +42,7 @@ type PendingStreamEvent =
 type UIMessageTurnFields = Pick<UIMessage, "turnId" | "turnPhase" | "turnSeq">;
 
 const FILE_EDIT_TOOL_NAMES = new Set(["write_file", "edit_file", "apply_patch"]);
+const ASK_CLARIFICATION_TOOL_NAME = "ask_clarification";
 
 function turnFieldsFromEvent(
   ev: { turn_id?: string; turn_phase?: UITurnPhase; turn_seq?: number },
@@ -61,6 +62,46 @@ function turnFieldsFromEvent(
 
 function matchesTurn(message: UIMessage, turn: UIMessageTurnFields): boolean {
   return !turn.turnId || !message.turnId || message.turnId === turn.turnId;
+}
+
+function toolEventName(event: ToolProgressEvent): string {
+  const fn = (event as { function?: { name?: unknown } }).function;
+  return typeof event.name === "string"
+    ? event.name
+    : typeof fn?.name === "string"
+      ? fn.name
+      : "";
+}
+
+function clarificationAnswerFromToolEvents(events: ToolProgressEvent[]): string | null {
+  for (const event of events) {
+    if (toolEventName(event) !== ASK_CLARIFICATION_TOOL_NAME) continue;
+    if (event.phase !== "end") continue;
+    if (typeof event.result !== "string") continue;
+    const answer = event.result.trim();
+    if (answer) return answer;
+  }
+  return null;
+}
+
+function hasAssistantAnswerInCurrentTurn(
+  messages: UIMessage[],
+  content: string,
+  turn: UIMessageTurnFields,
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user") break;
+    if (
+      message.role === "assistant"
+      && message.kind !== "trace"
+      && message.content === content
+      && matchesTurn(message, turn)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Find a still-open streamed assistant turn. Closed stream segments stay visible
@@ -249,7 +290,18 @@ function absorbCompleteAssistantMessage(
   message: Omit<UIMessage, "id" | "role" | "createdAt">,
 ): UIMessage[] {
   const last = prev[prev.length - 1];
-  if (!last || !isReasoningOnlyPlaceholder(last) || !matchesTurn(last, message)) {
+  if (last && isReasoningOnlyPlaceholder(last) && matchesTurn(last, message)) {
+    return [
+      ...prev.slice(0, -1),
+      {
+        ...last,
+        ...message,
+        isStreaming: false,
+        reasoningStreaming: false,
+      },
+    ];
+  }
+  if (!hasAssistantAnswerInCurrentTurn(prev, message.content, message)) {
     return [
       ...prev,
       {
@@ -260,15 +312,7 @@ function absorbCompleteAssistantMessage(
       },
     ];
   }
-  return [
-    ...prev.slice(0, -1),
-    {
-      ...last,
-      ...message,
-      isStreaming: false,
-      reasoningStreaming: false,
-    },
-  ];
+  return prev;
 }
 
 function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
@@ -879,6 +923,8 @@ export function useNanobotStream(
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
           const structuredEvents = normalizeToolProgressEvents(ev.tool_events);
           const turn = turnFieldsFromEvent(ev, "activity");
+          const answerTurn = turnFieldsFromEvent(ev, "answer");
+          const clarificationAnswer = clarificationAnswerFromToolEvents(structuredEvents);
           setMessages((prev) => {
             const segmentId = ensureActivitySegmentId();
             const base = prev;
@@ -891,50 +937,58 @@ export function useNanobotStream(
                 : ev.text
                   ? [ev.text]
                   : [];
-            if (lines.length === 0) return base;
-            const last = base[base.length - 1];
-            if (
-              last
-              && last.kind === "trace"
-              && !last.isStreaming
-              && (!last.activitySegmentId || last.activitySegmentId === segmentId)
-            ) {
-              const previousTraces = last.traces?.length
-                ? last.traces
-                : last.content
-                  ? [last.content]
-                  : [];
-              const mergedLines = visibleStructuredEvents.length > 0
-                ? mergeUniqueToolTraceLines(previousTraces, structuredLines)
-                : null;
-              const merged: UIMessage = {
-                ...last,
-                traces: mergedLines ? mergedLines.traces : [...previousTraces, ...lines],
-                content: mergedLines
-                  ? mergedLines.traces[mergedLines.traces.length - 1]
-                  : lines[lines.length - 1],
-                toolEvents: visibleStructuredEvents.length
-                  ? mergeToolProgressEvents(last.toolEvents, visibleStructuredEvents)
-                  : last.toolEvents,
-                activitySegmentId: last.activitySegmentId ?? segmentId,
-                ...turn,
-              };
-              return [...base.slice(0, -1), merged];
+            let next = base;
+            if (lines.length > 0) {
+              const last = base[base.length - 1];
+              if (
+                last
+                && last.kind === "trace"
+                && !last.isStreaming
+                && (!last.activitySegmentId || last.activitySegmentId === segmentId)
+              ) {
+                const previousTraces = last.traces?.length
+                  ? last.traces
+                  : last.content
+                    ? [last.content]
+                    : [];
+                const mergedLines = visibleStructuredEvents.length > 0
+                  ? mergeUniqueToolTraceLines(previousTraces, structuredLines)
+                  : null;
+                const merged: UIMessage = {
+                  ...last,
+                  traces: mergedLines ? mergedLines.traces : [...previousTraces, ...lines],
+                  content: mergedLines
+                    ? mergedLines.traces[mergedLines.traces.length - 1]
+                    : lines[lines.length - 1],
+                  toolEvents: visibleStructuredEvents.length
+                    ? mergeToolProgressEvents(last.toolEvents, visibleStructuredEvents)
+                    : last.toolEvents,
+                  activitySegmentId: last.activitySegmentId ?? segmentId,
+                  ...turn,
+                };
+                next = [...base.slice(0, -1), merged];
+              } else {
+                next = [
+                  ...base,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "tool",
+                    kind: "trace",
+                    content: lines[lines.length - 1],
+                    traces: lines,
+                    ...(visibleStructuredEvents.length ? { toolEvents: visibleStructuredEvents } : {}),
+                    activitySegmentId: segmentId,
+                    ...turn,
+                    createdAt: Date.now(),
+                  },
+                ];
+              }
             }
-            return [
-              ...base,
-              {
-                id: crypto.randomUUID(),
-                role: "tool",
-                kind: "trace",
-                content: lines[lines.length - 1],
-                traces: lines,
-                ...(visibleStructuredEvents.length ? { toolEvents: visibleStructuredEvents } : {}),
-                activitySegmentId: segmentId,
-                ...turn,
-                createdAt: Date.now(),
-              },
-            ];
+            if (!clarificationAnswer) return next;
+            return absorbCompleteAssistantMessage(next, {
+              content: clarificationAnswer,
+              ...answerTurn,
+            });
           });
           return;
         }

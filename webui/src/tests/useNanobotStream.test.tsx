@@ -419,6 +419,54 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("renders ask_clarification tool result as an assistant answer", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-clarify-tool", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-clarify-tool", {
+        event: "message",
+        chat_id: "chat-clarify-tool",
+        text: 'ask_clarification({"question":"Need span?"})',
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-clarify",
+          name: "ask_clarification",
+          arguments: { question: "Need span?" },
+        }],
+      });
+      fake.emit("chat-clarify-tool", {
+        event: "message",
+        chat_id: "chat-clarify-tool",
+        text: "",
+        kind: "progress",
+        tool_events: [{
+          phase: "end",
+          call_id: "call-clarify",
+          name: "ask_clarification",
+          arguments: { question: "Need span?" },
+          result: "Need span?\n\nOptions:\n1. 24m\n2. 30m",
+        }],
+      });
+      fake.emit("chat-clarify-tool", {
+        event: "message",
+        chat_id: "chat-clarify-tool",
+        text: "Need span?\n\nOptions:\n1. 24m\n2. 30m",
+      });
+    });
+
+    const clarificationMessages = result.current.messages.filter(
+      (message) =>
+        message.role === "assistant"
+        && message.content.includes("Need span?")
+        && message.content.includes("Options:"),
+    );
+    expect(clarificationMessages).toHaveLength(1);
+  });
+
   it("keeps phase updates when a tool event trace line is deduped", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-tool-phase", EMPTY_MESSAGES), {
