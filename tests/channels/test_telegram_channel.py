@@ -471,7 +471,7 @@ async def test_send_rich_capability_error_latches_and_falls_back() -> None:
     from telegram.error import BadRequest
 
     channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
@@ -490,7 +490,7 @@ async def test_send_rich_bad_request_does_not_latch_capability() -> None:
     from telegram.error import BadRequest
 
     channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
@@ -506,10 +506,10 @@ async def test_send_rich_bad_request_does_not_latch_capability() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rich_messages_config_disabled_skips_sendRichMessage() -> None:
-    """When rich_messages=False, sendRichMessage should not be called."""
+async def test_rich_messages_default_skips_send_rich_message() -> None:
+    """By default, sendRichMessage should not be called."""
     channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=False),
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
