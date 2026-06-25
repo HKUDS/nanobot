@@ -93,8 +93,8 @@ class _PreparedCommand:
             nullable=True,
         ),
         login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default true).",
-            default=True,
+            description="Whether to run bash/zsh with login shell semantics (default false).",
+            default=False,
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
@@ -432,7 +432,7 @@ class ExecTool(Tool):
             env=env,
             timeout=effective_timeout,
             shell_program=shell_program,
-            login=True if login is None else login,
+            login=False if login is None else login,
         )
 
     def _compose_path(self, current_path: str) -> str:
@@ -461,7 +461,7 @@ class ExecTool(Tool):
     async def _spawn(
         command: str, cwd: str, env: dict[str, str],
         shell_program: str | None = None,
-        login: bool = True,
+        login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
     ) -> asyncio.subprocess.Process:
