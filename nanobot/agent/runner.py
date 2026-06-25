@@ -129,6 +129,7 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    final_content_streamed: bool = False
 
 
 class AgentRunner:
@@ -367,6 +368,7 @@ class AgentRunner:
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
+        final_content_streamed = False
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
@@ -716,6 +718,7 @@ class AgentRunner:
             final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
+            final_content_streamed = context.streamed_content
             await hook.after_iteration(context)
             break
         else:
@@ -752,6 +755,7 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            final_content_streamed=final_content_streamed,
         )
 
     def _build_request_kwargs(
