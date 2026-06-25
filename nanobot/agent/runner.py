@@ -14,6 +14,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tools.base import SuspendTurn
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -488,6 +489,29 @@ class AgentRunner:
                     if should_continue:
                         had_injections = True
                         continue
+                    break
+                if results and all(isinstance(result, SuspendTurn) for result in results):
+                    # Every tool in this batch suspended (human-in-the-loop /
+                    # async continuation), so there is nothing for the model to
+                    # respond about. End the turn now: do NOT call the model
+                    # again (so it cannot emit a stray "waiting…" narration) and
+                    # leave `final_content` None so nothing is published. The
+                    # results are already in `messages`, so the assistant
+                    # tool_calls stay answered and history is valid; the next
+                    # inbound message continues the conversation.
+                    #
+                    # A *mixed* batch (some suspended, some not) deliberately
+                    # does NOT end the turn — it falls through to the normal
+                    # continuation below so the model can respond using the
+                    # completed tools' results while the suspended ones defer
+                    # and resume later. Their recorded `tool_content` should
+                    # tell the model they are handled separately so it does not
+                    # wait on or dwell on them.
+                    stop_reason = "suspended"
+                    final_content = None
+                    context.final_content = None
+                    context.stop_reason = stop_reason
+                    await hook.after_iteration(context)
                     break
                 await self._emit_checkpoint(
                     spec,
@@ -1341,6 +1365,11 @@ class AgentRunner:
         tool_name: str,
         result: Any,
     ) -> Any:
+        if isinstance(result, SuspendTurn):
+            # The turn is being suspended; record the short placeholder as the
+            # tool call's result so the assistant tool_call stays answered and
+            # history remains well-formed for the resuming turn.
+            result = result.tool_content
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in _TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             # Exempt tools bound their own output; skip generic offload and truncation.

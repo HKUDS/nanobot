@@ -1519,6 +1519,12 @@ class AgentLoop:
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
+        if stop_reason == "suspended":
+            # A tool suspended the turn (awaiting external input). Persist the
+            # history (the tool_call and its recorded result) so the next
+            # inbound resumes cleanly, but publish no user-facing message and
+            # skip the empty-response placeholder substitution.
+            ctx.suppress_response = True
         await turn_continuation.maybe_continue_turn(ctx)
         return "ok"
 

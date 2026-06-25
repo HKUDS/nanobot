@@ -5,6 +5,7 @@ import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 if typing.TYPE_CHECKING:
@@ -13,6 +14,80 @@ if typing.TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
+
+
+@dataclass(frozen=True)
+class SuspendTurn:
+    """Sentinel a tool returns to *suspend* the current agent turn.
+
+    When ``Tool.execute`` returns ``SuspendTurn``, the runner records
+    ``tool_content`` as that tool call's result so history stays well-formed,
+    then behaves based on the rest of the batch:
+
+    * If **every** tool in the batch suspended, the turn **ends**: the model is
+      not invoked again, no final assistant message is produced, and nothing is
+      sent to the user. (This is the common single-gated-action case — e.g. a
+      lone ``send_email`` awaiting approval.)
+    * If the batch is **mixed** (other tools returned normal results), the turn
+      **continues** so the model can respond using the completed results; the
+      suspended tools defer and resume later. Phrase ``tool_content`` so the
+      model treats the suspended action as handled separately (the application
+      usually surfaces it to the user itself, e.g. an approval card) and does
+      not wait on or dwell on it.
+
+    Either way the conversation resumes when a future inbound message arrives —
+    the ordinary message path, with no special resume machinery.
+
+    It is the building block for *human-in-the-loop* and *asynchronous*
+    continuations, where a turn must wait on something outside the agent loop:
+    approval gates, webhooks/callbacks, long-running external jobs, or hand-off
+    to another agent or a person.
+
+    Resuming is the application's job and uses the ordinary message path — the
+    framework keeps no suspension state. The suspended turn is persisted with
+    the ``tool_call`` answered by ``tool_content``, so history is well-formed.
+    When the awaited event arrives, the application sends a normal inbound
+    message on the same session (carrying whatever result it wants the model to
+    act on). Because the suspended turn has already ended, that inbound starts a
+    fresh turn which sees the saved history plus the new input and continues the
+    conversation. The application is responsible for persisting whatever it
+    needs to produce that inbound (e.g. a pending-approval record); ``nanobot``
+    only ends the turn cleanly and leaves valid history behind.
+
+    Why a return-value sentinel, rather than the obvious alternatives:
+
+    * **vs. blocking the tool until the event arrives** — blocking holds the
+      per-session turn open for an unbounded time: the session lock stays
+      pinned, LLM/turn resources stay allocated, tool timeouts fire, and
+      nothing survives a process restart. ``SuspendTurn`` instead *ends* the
+      turn, so idle waits cost nothing, scale to many concurrent suspensions,
+      and are naturally restart-safe — the framework keeps no suspension
+      state; the application persists whatever it needs and re-enters with a
+      normal inbound, like any other message.
+
+    * **vs. letting the model reply and filtering it afterwards** — once a tool
+      returns a normal result the loop calls the model again, and the model
+      narrates ("I've requested approval, waiting…"). Filtering that out after
+      the fact is racy and easy to get wrong (drop the real reply, or leak the
+      stale one). Never calling the model removes the failure mode entirely.
+
+    * **vs. raising an exception** — a raise unwinds before the tool result is
+      recorded, leaving the assistant ``tool_call`` unanswered and the
+      conversation history invalid for the next turn. Returning a value keeps
+      the ``tool_call``/result pair intact, so history stays well-formed.
+
+    ``tool_content`` is the placeholder recorded as the tool call's result;
+    keep it short and factual (e.g. ``"Approval requested; awaiting user."``).
+    In an all-suspended turn the model never reads it; in a mixed batch it does,
+    so phrase it to convey that the action is handled separately and should not
+    be waited on or described.
+    """
+
+    tool_content: str = (
+        "Awaiting external input; handled separately and will resume when it arrives. "
+        "Do not wait on or describe this action; continue with any other results."
+    )
+
 
 # Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
