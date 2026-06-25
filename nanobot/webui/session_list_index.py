@@ -231,21 +231,8 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
     }
 
 
-def _try_decode_storage_stem(stem: str) -> str | None:
-    """Try to decode a base64url (no-padding) session storage stem back to the original key."""
-    import base64
-
-    try:
-        padding = 4 - len(stem) % 4
-        if padding != 4:
-            stem += "=" * padding
-        return base64.urlsafe_b64decode(stem).decode("utf-8")
-    except Exception:
-        return None
-
-
 def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
-    storage_key = _try_decode_storage_stem(path.stem)
+    storage_key = SessionManager._decode_storage_key(path.stem)
     fallback_key = storage_key or path.stem.replace("_", ":", 1)
     try:
         with open(path, encoding="utf-8") as f:

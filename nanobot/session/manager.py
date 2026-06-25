@@ -431,6 +431,18 @@ class SessionManager:
         """Collision-resistant encoding for internal session storage filenames."""
         return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
 
+    @staticmethod
+    def _decode_storage_key(stem: str) -> str | None:
+        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
+        try:
+            # Restore padding stripped by rstrip("=")
+            padding = 4 - len(stem) % 4
+            if padding != 4:
+                stem += "=" * padding
+            return base64.urlsafe_b64decode(stem).decode("utf-8")
+        except Exception:
+            return None
+
     def _get_session_path(self, key: str) -> Path:
         """Get the collision-resistant workspace path for a session."""
         return self.sessions_dir / f"{self._storage_key(key)}.jsonl"
@@ -826,7 +838,8 @@ class SessionManager:
         sessions = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
-            fallback_key = path.stem.replace("_", ":", 1)
+            decoded = self._decode_storage_key(path.stem)
+            fallback_key = decoded or path.stem.replace("_", ":", 1)
             try:
                 # Read the metadata line and a small preview for session lists.
                 with open(path, encoding="utf-8") as f:
@@ -834,7 +847,7 @@ class SessionManager:
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
-                            key = data.get("key") or path.stem.replace("_", ":", 1)
+                            key = data.get("key") or fallback_key
                             metadata = data.get("metadata", {})
                             title = _metadata_title(metadata)
                             preview = ""
