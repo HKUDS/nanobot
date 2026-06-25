@@ -1,13 +1,13 @@
 {
   "app": {
-    "brand": "blackcat",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "Connexion à blackcat…",
-      "boot": "Chargement de blackcat…"
+      "connecting": "Connexion à nanobot…",
+      "boot": "Chargement de nanobot…"
     },
     "error": {
-      "title": "Impossible de joindre blackcat",
-      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`blackcat gateway`) et que cette page est ouverte sur la même machine."
+      "title": "Impossible de joindre nanobot",
+      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
     },
     "auth": {
       "title": "Authentification requise",
@@ -23,8 +23,8 @@
     },
     "system": {
       "section": "Système",
-      "restartHint": "Redémarrez blackcat pour appliquer les changements d’exécution.",
-      "restart": "Redémarrer blackcat",
+      "restartHint": "Redémarrez nanobot pour appliquer les changements d’exécution.",
+      "restart": "Redémarrer nanobot",
       "restarting": "Redémarrage...",
       "restartEngine": "Redémarrer le moteur",
       "restartingEngine": "Redémarrage du moteur..."
@@ -33,11 +33,11 @@
       "completed": "Redémarrage terminé en {{seconds}} s."
     },
     "documentTitle": {
-      "base": "blackcat",
-      "chat": "{{title}} · blackcat"
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
     },
     "meta": {
-      "description": "Interface web blackcat — discutez avec votre espace de travail blackcat."
+      "description": "Interface web nanobot — discutez avec votre espace de travail nanobot."
     }
   },
   "sidebar": {
@@ -112,7 +112,7 @@
       "language": "Langue",
       "provider": "Fournisseur",
       "model": "Modèle",
-      "restart": "Redémarrer blackcat",
+      "restart": "Redémarrer nanobot",
       "configPath": "Chemin de config",
       "activePreset": "Préréglage actif",
       "gateway": "Passerelle",
@@ -160,7 +160,7 @@
       "theme": "Basculer entre l’apparence claire et sombre.",
       "language": "Choisissez la langue utilisée par WebUI.",
       "provider": "Sélectionnez le fournisseur à utiliser pour les nouvelles requêtes de modèle.",
-      "model": "Définissez le nom du modèle utilisé par défaut par blackcat.",
+      "model": "Définissez le nom du modèle utilisé par défaut par nanobot.",
       "configPath": "Le fichier de configuration actuellement utilisé par la passerelle.",
       "selectedPreset": "Les préréglages nommés sont en lecture seule ici ; modifiez-les dans config.json.",
       "presetModel": "Passez à Default pour modifier le modèle et le fournisseur depuis WebUI.",
@@ -177,7 +177,7 @@
       "defaultAspectRatio": "Utilisé lorsque le prompt ne choisit pas de ratio.",
       "defaultImageSize": "Indication de taille envoyée aux fournisseurs compatibles.",
       "maxImagesPerTurn": "Limite supérieure pour une requête generate_image.",
-      "botName": "Affiché là où blackcat utilise un nom visible.",
+      "botName": "Affiché là où nanobot utilise un nom visible.",
       "botIcon": "Emoji ou texte court affiché avec le nom du bot.",
       "timezone": "Utilisé pour les horaires et les réponses tenant compte du temps.",
       "localServiceAccess": "Autorise les commandes shell Full Access à atteindre les services localhost.",
@@ -187,7 +187,7 @@
       "selectedModelProvider": "Défini par le modèle sélectionné.",
       "selectedModelValue": "Défini par le modèle sélectionné.",
       "brandLogos": "Affiche les logos de fournisseurs tiers et CLI dans les Réglages.",
-      "cliAppsCatalog": "Installe uniquement les adaptateurs CLI d’apps que blackcat peut exécuter localement ; les apps natives restent inchangées.",
+      "cliAppsCatalog": "Installe uniquement les adaptateurs CLI d’apps que nanobot peut exécuter localement ; les apps natives restent inchangées.",
       "cliAppsFilter": "Recherchez par app, catégorie ou capacité.",
       "logs": "Ouvre le dossier des journaux du moteur natif.",
       "diagnostics": "Exporte un petit rapport d’exécution pour le support.",
@@ -229,11 +229,11 @@
       "loadError": "Impossible de charger les réglages",
       "unsaved": "Modifications non enregistrées.",
       "upToDate": "À jour.",
-      "savedRestart": "Enregistré. Redémarrez blackcat pour appliquer.",
+      "savedRestart": "Enregistré. Redémarrez nanobot pour appliquer.",
       "restartAfterSaving": "Enregistrez les changements, puis redémarrez quand vous êtes prêt.",
       "savedRestartApply": "Enregistré. Redémarrez quand vous êtes prêt.",
       "imageProviderRestart": "Changements du fournisseur d’image enregistrés. Redémarrez quand vous êtes prêt.",
-      "hostRestartAfterSaving": "En enregistrant, blackcat redémarrera son moteur.",
+      "hostRestartAfterSaving": "En enregistrant, nanobot redémarrera son moteur.",
       "hostRestartPending": "Enregistré. Le moteur redémarrera lorsqu’il sera prêt.",
       "hostApiUnavailable": "Les actions de l’hôte ne sont disponibles que dans l’app native.",
       "logsOpened": "Dossier des journaux ouvert.",
@@ -428,7 +428,7 @@
       "saveCustom": "Enregistrer MCP",
       "configImport": "Importer mcp.json",
       "importConfig": "Importer",
-      "restartRequired": "Redémarrez blackcat pour connecter les outils MCP mis à jour.",
+      "restartRequired": "Redémarrez nanobot pour connecter les outils MCP mis à jour.",
       "toolsFound": "{{count}} outils",
       "loading": "Chargement des presets MCP...",
       "empty": "Aucun preset MCP ne correspond à ce filtre.",
@@ -459,7 +459,7 @@
       "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
     },
     "apps": {
-      "description": "Ajoutez des CLI d’apps et services MCP utilisables par blackcat depuis le chat.",
+      "description": "Ajoutez des CLI d’apps et services MCP utilisables par nanobot depuis le chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Tout",
@@ -747,7 +747,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "Créer une icône d’app",
-          "prompt": "Générez une icône d’application 1:1 propre pour blackcat : robot sympathique, style vectoriel simple, palette douce bleu et blanc, sans texte."
+          "prompt": "Générez une icône d’application 1:1 propre pour nanobot : robot sympathique, style vectoriel simple, palette douce bleu et blanc, sans texte."
         },
         "sticker": {
           "title": "Créer un sticker",
@@ -878,7 +878,7 @@
             "description": "Annuler le tour agent actif pour cette discussion."
           },
           "restart": {
-            "title": "Redémarrer blackcat",
+            "title": "Redémarrer nanobot",
             "description": "Redémarrer le processus du bot sur place."
           },
           "status": {
@@ -1020,7 +1020,7 @@
     "close": "Fermer l’aperçu du fichier",
     "loading": "Chargement de l’aperçu...",
     "failed": "Impossible de prévisualiser ce fichier.",
-    "routeMissing": "L’aperçu du fichier nécessite le dernier gateway. Redémarrez blackcat gateway puis réessayez.",
+    "routeMissing": "L’aperçu du fichier nécessite le dernier gateway. Redémarrez nanobot gateway puis réessayez.",
     "resize": "Redimensionner l’aperçu du fichier",
     "truncated": "L’aperçu est tronqué car le fichier est volumineux."
   },

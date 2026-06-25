@@ -26,17 +26,14 @@ from blackcat.utils.file_edit_events import (
 from blackcat.utils.file_edit_events import (
     prepare_file_edit_tracker as _prepare_file_edit_tracker,
 )
-from blackcat.utils.helpers import (
+from blackcat.utils.formatting import (
     IncrementalThinkExtractor,
     build_assistant_message,
-    estimate_message_tokens,
-    estimate_prompt_tokens_chain,
     extract_reasoning,
-    find_legal_message_start,
-    maybe_persist_tool_result,
     strip_think,
     truncate_text,
 )
+from blackcat.utils.helpers import find_legal_message_start
 from blackcat.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
@@ -53,8 +50,11 @@ from blackcat.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
-
-GoalContinueMessage = str | Callable[[], str | None]
+from blackcat.utils.tokens import (
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+)
+from blackcat.utils.tools import maybe_persist_tool_result
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -111,7 +111,7 @@ class AgentRunSpec:
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
-    goal_continue_message: GoalContinueMessage | None = None
+    goal_continue_message: str | None = None
     finalize_on_max_iterations: bool = True
 
 
@@ -200,7 +200,7 @@ class AgentRunner:
         if not injections and allow_goal_continue and assistant_message is not None:
             predicate = spec.goal_active_predicate
             if predicate is not None and predicate():
-                injections = [self._build_goal_continue_message(spec)]
+                injections = [build_goal_continue_message(spec.goal_continue_message)]
         if not injections:
             return False, injection_cycles
         if real_injection:
@@ -228,16 +228,6 @@ class AgentRunner:
         else:
             logger.info("Injected sustained-goal continuation {}", phase)
         return True, injection_cycles
-
-    def _build_goal_continue_message(self, spec: AgentRunSpec) -> dict[str, str]:
-        custom = spec.goal_continue_message
-        if callable(custom):
-            try:
-                custom = custom()
-            except Exception:
-                logger.exception("goal_continue_message callback failed")
-                custom = None
-        return build_goal_continue_message(custom)
 
     async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
         """Drain pending user messages via the injection callback.
@@ -269,17 +259,12 @@ class AgentRunner:
             return []
         injected_messages: list[dict[str, Any]] = []
         for item in items:
-            if item is None:
-                continue
             if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
-                if self._has_injection_content(item.get("content")):
-                    injected_messages.append(item)
+                injected_messages.append(item)
                 continue
-            if isinstance(item, dict):
-                continue
-            content = getattr(item, "content") if hasattr(item, "content") else str(item)
-            if self._has_injection_content(content):
-                injected_messages.append({"role": "user", "content": content})
+            text = getattr(item, "content", str(item))
+            if text.strip():
+                injected_messages.append({"role": "user", "content": text})
         if len(injected_messages) > _MAX_INJECTIONS_PER_TURN:
             dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
             logger.warning(
@@ -288,16 +273,6 @@ class AgentRunner:
             )
             injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
-
-    @staticmethod
-    def _has_injection_content(content: Any) -> bool:
-        if content is None:
-            return False
-        if isinstance(content, str):
-            return bool(content.strip())
-        if isinstance(content, list):
-            return bool(content)
-        return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
@@ -680,7 +655,16 @@ class AgentRunner:
                     usage,
                 )
             if final_content is None:
-                final_content = self._max_iterations_fallback(spec)
+                if spec.max_iterations_message:
+                    final_content = spec.max_iterations_message.format(
+                        max_iterations=spec.max_iterations,
+                    )
+                else:
+                    final_content = render_template(
+                        "agent/max_iterations_message.md",
+                        strip=True,
+                        max_iterations=spec.max_iterations,
+                    )
             self._append_final_message(messages, final_content)
 
         return AgentRunResult(
@@ -727,8 +711,8 @@ class AgentRunner:
         if timeout_s is None:
             # Default to a finite timeout to avoid per-session lock starvation when an LLM
             # request hangs indefinitely (e.g. gateway/network stall).
-            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
-            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
+            # Set BLACKCAT_LLM_TIMEOUT_S=0 to disable.
+            raw = os.environ.get("BLACKCAT_LLM_TIMEOUT_S", "300").strip()
             try:
                 timeout_s = float(raw)
             except (TypeError, ValueError):
@@ -825,9 +809,9 @@ class AgentRunner:
             coro = self.provider.chat_with_retry(**kwargs)
 
         # Streaming requests already have provider-level idle timeouts
-        # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
+        # (BLACKCAT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
         # LLM timeout here, or healthy long reasoning streams can be killed just
-        # because total elapsed time exceeded NANOBOT_LLM_TIMEOUT_S.
+        # because total elapsed time exceeded BLACKCAT_LLM_TIMEOUT_S.
         outer_timeout_s = None if (wants_streaming or wants_progress_streaming) else timeout_s
         try:
             response = (
@@ -864,7 +848,8 @@ class AgentRunner:
         messages: list[dict[str, Any]],
     ):
         retry_messages = self._finalization_retry_messages(messages)
-        return await self._request_no_tools(spec, retry_messages)
+        kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
+        return await self.provider.chat_with_retry(**kwargs)
 
     @staticmethod
     def _finalization_retry_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

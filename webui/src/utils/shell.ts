@@ -1,6 +1,6 @@
 import { SettingsSectionKey } from "@/components/settings/SettingsView";
 
-export type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+export type ShellView = "chat" | "settings" | "apps" | "skills";
 
 export type ShellRoute = {
   view: ShellView;
@@ -16,7 +16,6 @@ export const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "voice",
   "browser",
   "apps",
-  "automations",
   "skills",
   "runtime",
   "advanced",
@@ -62,11 +61,8 @@ export function readShellRoute(): ShellRoute {
   if (path === "/apps") {
     return { view: "apps", activeKey, settingsSection: "apps" };
   }
-  if (path === "/automations") {
-    return { view: "automations", activeKey, settingsSection: "automations" };
-  }
   if (path === "/skills") {
-    return { view: "skills", activeKey, settingsSection: "skills" };
+    return { view: "skills", activeKey, settingsSection: settingsSection === "overview" ? "skills" : settingsSection };
   }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
@@ -103,8 +99,6 @@ function isSettingsSectionKey(value: string | null): value is SettingsSectionKey
 }
 
 export function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills") {
-    return section;
-  }
+  if (section === "apps" || section === "skills") return section;
   return "settings";
 }

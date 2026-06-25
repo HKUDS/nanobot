@@ -21,6 +21,7 @@ from blackcat.audio.transcription_registry import (
     resolve_transcription_provider,
 )
 from blackcat.config.paths import get_media_dir
+from blackcat.providers.registry import find_by_name
 from blackcat.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
 TranscriptionProviderName = str
@@ -75,6 +76,33 @@ def _provider_config(config: Any, provider: str) -> Any:
     return getattr(getattr(config, "providers", None), provider, None)
 
 
+def _provider_default_api_base(provider: str) -> str | None:
+    spec = find_by_name(provider)
+    return spec.default_api_base if spec else None
+
+
+def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
+    api_key = getattr(provider_cfg, "api_key", None) if provider_cfg else None
+    if api_key:
+        return api_key
+
+    spec = find_by_name(provider)
+    if provider == "siliconflow":
+        env_key = os.environ.get("SILICONFLOW_API_KEY")
+        if env_key:
+            return env_key
+
+    env_key = spec.env_key if spec else ""
+    return os.environ.get(env_key) if env_key else ""
+
+
+def _resolve_transcription_api_base(provider: str, provider_cfg: Any) -> str:
+    api_base = getattr(provider_cfg, "api_base", None) if provider_cfg else None
+    if api_base:
+        return api_base
+    return _provider_default_api_base(provider) or ""
+
+
 def _extract_data_url_mime(url: str) -> str | None:
     header, _, _ = url.partition(",")
     if not header.startswith("data:") or ";base64" not in header:
@@ -98,15 +126,13 @@ def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
         spec = get_transcription_provider(provider)
     default_model = spec.default_model if spec else ""
     provider_cfg = _provider_config(config, provider)
-    env_key = spec.env_key if spec else ""
-    default_api_base = spec.default_api_base if spec else ""
     return EffectiveTranscriptionConfig(
         enabled=bool(getattr(top, "enabled", True)),
         provider=provider,
         model=(getattr(top, "model", None) or default_model).strip(),
         language=getattr(top, "language", None) or getattr(channels, "transcription_language", None),
-        api_key=getattr(provider_cfg, "api_key", None) or (os.environ.get(env_key) if env_key else "") or "",
-        api_base=getattr(provider_cfg, "api_base", None) or default_api_base or "",
+        api_key=_resolve_transcription_api_key(provider, provider_cfg),
+        api_base=_resolve_transcription_api_base(provider, provider_cfg),
         max_duration_sec=int(getattr(top, "max_duration_sec", 120)),
         max_upload_mb=int(getattr(top, "max_upload_mb", 25)),
     )

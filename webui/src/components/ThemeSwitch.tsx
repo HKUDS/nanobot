@@ -1,47 +1,63 @@
-import { PanelLeft } from "lucide-react";
-import { ReactNode } from "react";
+import { Menu, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
 
 export default function HostChrome({
   onToggleSidebar,
-  onSidebarPreviewEnter,
-  onSidebarPreviewLeave,
-  sidebarOpen = true,
-  rightAction,
+  theme,
+  onToggleTheme,
+  showThemeButton = true,
+  sidebarCollapsed,
+  onSidebarHoverStart,
+  onSidebarHoverEnd,
 }: {
   onToggleSidebar?: () => void;
-  onSidebarPreviewEnter?: () => void;
-  onSidebarPreviewLeave?: () => void;
-  sidebarOpen?: boolean;
-  rightAction?: ReactNode;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  showThemeButton?: boolean;
+  sidebarCollapsed?: boolean;
+  onSidebarHoverStart?: () => void;
+  onSidebarHoverEnd?: () => void;
 }) {
   const { t } = useTranslation();
 
   return (
-    <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 h-11 bg-transparent text-foreground/90">
-      {onToggleSidebar ? (
+    <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 flex h-11 items-start justify-between bg-transparent px-3 pt-2 text-foreground/90">
+      <div className="flex min-w-[8rem] items-center">
+        {onToggleSidebar ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            data-testid="host-sidebar-toggle"
+            aria-label={t("thread.header.toggleSidebar")}
+            onClick={onToggleSidebar}
+            onMouseEnter={sidebarCollapsed ? onSidebarHoverStart : undefined}
+            onMouseLeave={sidebarCollapsed ? onSidebarHoverEnd : undefined}
+            className="host-no-drag pointer-events-auto ml-[88px] h-8 w-8 rounded-xl text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
+      {showThemeButton ? (
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={t("thread.header.toggleSidebar")}
-          data-testid="host-sidebar-toggle"
-          onClick={onToggleSidebar}
-          onFocus={!sidebarOpen ? onSidebarPreviewEnter : undefined}
-          onBlur={!sidebarOpen ? onSidebarPreviewLeave : undefined}
-          onMouseEnter={!sidebarOpen ? onSidebarPreviewEnter : undefined}
-          onMouseLeave={!sidebarOpen ? onSidebarPreviewLeave : undefined}
-          className="host-no-drag pointer-events-auto absolute left-[88px] top-[8px] h-7 w-7 rounded-lg bg-transparent text-muted-foreground/85 shadow-none hover:bg-transparent hover:text-foreground"
+          aria-label={t("thread.header.toggleTheme")}
+          onClick={onToggleTheme}
+          className="host-no-drag pointer-events-auto h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
         >
-          <PanelLeft className="h-[15px] w-[15px]" strokeWidth={1.75} />
+          {theme === "dark" ? (
+            <Sun className="h-4 w-4" />
+          ) : (
+            <Moon className="h-4 w-4" />
+          )}
         </Button>
-      ) : null}
-      {rightAction ? (
-        <div className="host-no-drag pointer-events-auto absolute right-3 top-2">
-          {rightAction}
-        </div>
-      ) : null}
+      ) : (
+        <div aria-hidden className="host-no-drag pointer-events-none h-8 w-8" />
+      )}
     </header>
   );
 }

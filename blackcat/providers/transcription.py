@@ -20,11 +20,10 @@ from loguru import logger
 
 _CHAT_COMPLETIONS_PATH = "chat/completions"
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
+_STEPFUN_ASR_PATH = "audio/asr/sse"
 _ASSEMBLYAI_DEFAULT_API_BASE = "https://api.assemblyai.com/v2"
 _ASSEMBLYAI_POLL_ATTEMPTS = 60
 _ASSEMBLYAI_POLL_INTERVAL_S = 2.0
-_STEPFUN_ASR_PATH = "audio/asr/sse"
-
 _AUDIO_MIME_OVERRIDES = {
     ".m4a": "audio/mp4",
     ".mpga": "audio/mpeg",
@@ -74,6 +73,13 @@ def _resolve_api_path(api_base: str | None, default_base: str, path: str) -> str
     return f"{base}/{path.lstrip('/')}"
 
 
+def _resolve_stepfun_asr_url(api_base: str | None) -> str:
+    base = (api_base or "https://api.stepfun.com/v1").rstrip("/")
+    if base.endswith(_STEPFUN_ASR_PATH):
+        return base
+    return f"{base}/{_STEPFUN_ASR_PATH}"
+
+
 def _audio_mime_type(path: Path) -> str:
     return (
         _AUDIO_MIME_OVERRIDES.get(path.suffix.lower())
@@ -86,126 +92,6 @@ def _audio_format(path: Path) -> str:
     """Map an audio file's extension to an OpenRouter ``format`` value."""
     ext = path.suffix.lstrip(".").lower()
     return _FORMAT_ALIASES.get(ext, ext)
-
-
-def _resolve_stepfun_asr_url(api_base: str | None) -> str:
-    base = (api_base or "https://api.stepfun.com/v1").rstrip("/")
-    if base.endswith(_STEPFUN_ASR_PATH):
-        return base
-    return f"{base}/{_STEPFUN_ASR_PATH}"
-
-
-async def _post_stepfun_asr_with_retry(
-    url: str,
-    *,
-    api_key: str | None,
-    path: Path,
-    model: str,
-    provider_label: str,
-    language: str | None = None,
-) -> str:
-    """POST audio to StepFun ASR SSE endpoint and collect final text."""
-    try:
-        data = path.read_bytes()
-    except OSError as e:
-        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
-        return ""
-
-    suffix = path.suffix.lstrip(".").lower()
-    audio_type = suffix if suffix in ("ogg", "mp3", "wav", "pcm") else "wav"
-
-    body: dict[str, Any] = {
-        "audio": {
-            "data": base64.b64encode(data).decode("ascii"),
-            "input": {
-                "transcription": {
-                    "model": model,
-                    "enable_itn": True,
-                },
-                "format": {"type": audio_type},
-            },
-        },
-    }
-    if language:
-        body["audio"]["input"]["transcription"]["language"] = language
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-    }
-
-    async with httpx.AsyncClient() as client:
-        for attempt in range(_MAX_RETRIES + 1):
-            try:
-                async with client.stream(
-                    "POST", url, headers=headers, json=body, timeout=60.0
-                ) as resp:
-                    if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
-                        logger.warning(
-                            "{} transcription transient HTTP {} (attempt {}/{})",
-                            provider_label,
-                            resp.status_code,
-                            attempt + 1,
-                            _MAX_RETRIES + 1,
-                        )
-                        await asyncio.sleep(_BACKOFF_S[attempt])
-                        continue
-                    resp.raise_for_status()
-                    final_text = None
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload_str = line[len("data:") :].strip()
-                        if not payload_str:
-                            continue
-                        try:
-                            payload = json.loads(payload_str)
-                        except (json.JSONDecodeError, ValueError):
-                            continue
-                        event_type = payload.get("type", "")
-                        if event_type == "error":
-                            msg = payload.get("message", "unknown error")
-                            logger.error("{} ASR error: {}", provider_label, msg)
-                            return ""
-                        if event_type == "transcript.text.done":
-                            final_text = payload.get("text", "")
-                            break
-                    if final_text is not None:
-                        return final_text
-                    if attempt < _MAX_RETRIES:
-                        logger.warning(
-                            "{} transcription: no final event (attempt {}/{})",
-                            provider_label,
-                            attempt + 1,
-                            _MAX_RETRIES + 1,
-                        )
-                        await asyncio.sleep(_BACKOFF_S[attempt])
-                        continue
-                    logger.error(
-                        "{} transcription: stream ended without final text after {} attempts",
-                        provider_label,
-                        _MAX_RETRIES + 1,
-                    )
-                    return ""
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
-                    await asyncio.sleep(_BACKOFF_S[attempt])
-                    continue
-                logger.error(
-                    "{} transcription HTTP {}{}",
-                    provider_label,
-                    e.response.status_code,
-                    f" {e.response.reason_phrase}" if e.response.reason_phrase else "",
-                )
-                return ""
-            except (httpx.RequestError, Exception):
-                if attempt < _MAX_RETRIES:
-                    await asyncio.sleep(_BACKOFF_S[attempt])
-                    continue
-                logger.exception("{} transcription request error", provider_label)
-                return ""
-    return ""
 
 
 # Up to 3 retries (4 attempts total) with exponential backoff on transient
@@ -427,6 +313,120 @@ async def _post_xiaomi_mimo_asr_with_retry(
         return {"url": url, "headers": headers, "json": body, "timeout": 60.0}
 
     return await _post_with_retry(build_request, provider_label, _text_from_chat_payload)
+
+
+async def _post_stepfun_asr_with_retry(
+    url: str,
+    *,
+    api_key: str | None,
+    path: Path,
+    model: str,
+    provider_label: str,
+    language: str | None = None,
+) -> str:
+    """POST audio to StepFun ASR SSE endpoint and collect final text."""
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
+        return ""
+
+    suffix = path.suffix.lstrip(".").lower()
+    audio_type = suffix if suffix in ("ogg", "mp3", "wav", "pcm") else "wav"
+
+    body: dict[str, Any] = {
+        "audio": {
+            "data": base64.b64encode(data).decode("ascii"),
+            "input": {
+                "transcription": {
+                    "model": model,
+                    "enable_itn": True,
+                },
+                "format": {"type": audio_type},
+            },
+        },
+    }
+    if language:
+        body["audio"]["input"]["transcription"]["language"] = language
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                async with client.stream(
+                    "POST", url, headers=headers, json=body, timeout=60.0
+                ) as resp:
+                    if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                        logger.warning(
+                            "{} transcription transient HTTP {} (attempt {}/{})",
+                            provider_label,
+                            resp.status_code,
+                            attempt + 1,
+                            _MAX_RETRIES + 1,
+                        )
+                        await asyncio.sleep(_BACKOFF_S[attempt])
+                        continue
+                    resp.raise_for_status()
+                    final_text = None
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        payload_str = line[len("data:") :].strip()
+                        if not payload_str:
+                            continue
+                        try:
+                            payload = json.loads(payload_str)
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                        event_type = payload.get("type", "")
+                        if event_type == "error":
+                            msg = payload.get("message", "unknown error")
+                            logger.error("{} ASR error: {}", provider_label, msg)
+                            return ""
+                        if event_type == "transcript.text.done":
+                            final_text = payload.get("text", "")
+                            break
+                    if final_text is not None:
+                        return final_text
+                    # Stream ended without a final event — retry if attempts remain
+                    if attempt < _MAX_RETRIES:
+                        logger.warning(
+                            "{} transcription: no final event (attempt {}/{})",
+                            provider_label,
+                            attempt + 1,
+                            _MAX_RETRIES + 1,
+                        )
+                        await asyncio.sleep(_BACKOFF_S[attempt])
+                        continue
+                    logger.error(
+                        "{} transcription: stream ended without final text after {} attempts",
+                        provider_label,
+                        _MAX_RETRIES + 1,
+                    )
+                    return ""
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_BACKOFF_S[attempt])
+                    continue
+                logger.error(
+                    "{} transcription HTTP {}{}",
+                    provider_label,
+                    e.response.status_code,
+                    f" {e.response.reason_phrase}" if e.response.reason_phrase else "",
+                )
+                return ""
+            except (httpx.RequestError, Exception):
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_BACKOFF_S[attempt])
+                    continue
+                logger.exception("{} transcription request error", provider_label)
+                return ""
+    return ""
 
 
 async def _post_with_retry(
@@ -789,7 +789,9 @@ class XiaomiMiMoTranscriptionProvider:
 
 
 class StepFunTranscriptionProvider:
-    """StepFun ASR transcription provider (SSE streaming)."""
+    """Voice transcription provider using StepFun ASR SSE endpoint."""
+
+    _DEFAULT_URL = "https://api.stepfun.com/v1/audio/asr/sse"
 
     def __init__(
         self,
@@ -799,9 +801,8 @@ class StepFunTranscriptionProvider:
         model: str | None = None,
     ):
         self.api_key = api_key or os.environ.get("STEPFUN_API_KEY")
-        self.api_url = _resolve_stepfun_asr_url(
-            api_base or os.environ.get("STEPFUN_API_BASE")
-        )
+        # api_base accepts either a StepFun base URL or the full SSE endpoint.
+        self.api_url = _resolve_stepfun_asr_url(api_base)
         self.language = language or None
         self.model = model or "stepaudio-2.5-asr"
         logger.debug("StepFun transcription endpoint: {}", self.api_url)

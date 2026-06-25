@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 
-from blackcat import __version__
+from blackcat import __logo__, __name__, __version__
 from blackcat.bus.events import OutboundMessage
 from blackcat.command.router import CommandContext, CommandRouter
 from blackcat.utils.helpers import build_status_content
@@ -311,9 +311,6 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        async def _silent(*_args, **_kwargs):
-            pass
-
         from blackcat.agent.memory import MemoryStore
 
         dream_session_key = MemoryStore.dream_session_key
@@ -329,8 +326,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             if result is None:
                 await loop.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content=_format_dream_no_input_message(),
-                    metadata={"render_as": "text"},
+                    content="Dream: nothing to process.",
                 ))
                 return
             prompt, last_cursor = result
@@ -340,7 +336,6 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
-                on_progress=_silent,
             )
             elapsed = time.monotonic() - t0
             if MemoryStore.dream_run_completed(resp):
@@ -377,23 +372,6 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
     )
-
-
-def _format_dream_no_input_message() -> str:
-    return "\n".join([
-        "Dream has no conversation history to process yet.",
-        "",
-        "Dream reads new entries from `memory/history.jsonl` after the current Dream cursor.",
-        (
-            "Short chats only reach that file after token compaction or idle auto-compact, "
-            "so a fresh or short WebUI chat may leave Dream with no input."
-        ),
-        "",
-        "Next steps:",
-        "- Enable `agents.defaults.idleCompactAfterMinutes` so completed chats become Dream input automatically.",
-        "- Compact the current chat into memory once that manual action is available.",
-        "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
-    ])
 
 
 def _extract_changed_files(diff: str) -> list[str]:
@@ -708,7 +686,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = ["🐈 blackcat commands:"]
+    lines = [f"{__logo__} {__name__} commands:"] # TODO: check with Nyx
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:

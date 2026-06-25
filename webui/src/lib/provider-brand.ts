@@ -117,7 +117,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   atomic_chat: brand("atomic.chat", "#111827", "AC"),
   azure_openai: brand("azure.microsoft.com", "#0078D4", "AZ"),
   bedrock: brand("aws.amazon.com", "#FF9900", "AWS"),
-  bocha: brand("bochaai.com", "#3B82F6", "B"),
+  bocha: brand("bochaai.com", "#2563EB", "B"),
   brave: brand("brave.com", "#FB542B", "B"),
   byteplus: brand("byteplus.com", "#325CFF", "BP"),
   dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
@@ -130,7 +130,6 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   huggingface: brand("huggingface.co", "#FF9D00", "HF"),
   jina: brand("jina.ai", "#7C3AED", "J"),
   kagi: brand("kagi.com", "#FFB319", "K"),
-  keenable: brand("keenable.ai", "#0EA5E9", "K"),
   lm_studio: brand("lmstudio.ai", "#111827", "LM"),
   longcat: brand("longcatai.org", "#4F8CFF", "LC", [
     "https://www.longcatai.org/favicon.svg",

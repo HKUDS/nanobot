@@ -12,7 +12,7 @@ interface ThreadMessagesProps {
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
-  forkBoundaryMessageCount?: number | null;
+forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
@@ -66,7 +66,7 @@ export function ThreadMessages({
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
-  forkBoundaryMessageCount = null,
+forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
 }: ThreadMessagesProps) {
@@ -108,7 +108,7 @@ export function ThreadMessages({
         if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
 
         return (
-          <Fragment key={unitKey(unit, index)}>
+<Fragment key={unitKey(unit, index)}>
             <div className={marginTop} data-user-prompt-id={userPromptId}>
               {unit.type === "activity" ? (
                 <AgentActivityCluster

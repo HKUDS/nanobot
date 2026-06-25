@@ -1,43 +1,38 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useBlackcatStream, type SendImage, type SendOptions } from "@/hooks/useBlackcatStream";
 import { useSessionHistory } from "@/hooks/useSessions";
+import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
 import {
-    fetchInstalledCliApps,
-    fetchMcpPresets,
-    fetchSettings,
-    listSlashCommands,
-} from "@/lib/api";
-import {
-    CLI_APPS_CHANGED_EVENT,
-    installedCliAppsFromPayload,
-    isCliAppsPayload,
+  CLI_APPS_CHANGED_EVENT,
+  installedCliAppsFromPayload,
+  isCliAppsPayload,
 } from "@/lib/cli-app-events";
 import {
-    MCP_PRESETS_CHANGED_EVENT,
-    installedMcpPresetsFromPayload,
-    isMcpPresetsPayload,
+  MCP_PRESETS_CHANGED_EVENT,
+  installedMcpPresetsFromPayload,
+  isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import type {
-    ChatSummary,
-    SettingsPayload,
-    SlashCommand,
-    UIMessage,
-    WorkspaceScopePayload,
-    WorkspacesPayload,
+  ChatSummary,
+  SettingsPayload,
+  SlashCommand,
+  UIMessage,
+  WorkspaceScopePayload,
+  WorkspacesPayload,
 } from "@/lib/types";
+import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
@@ -270,7 +265,7 @@ export function ThreadShell({
   const cliApps = useInstalledSettingItems({
     token,
     eventName: CLI_APPS_CHANGED_EVENT,
-    fetchPayload: fetchInstalledCliApps,
+    fetchPayload: fetchCliApps,
     isPayload: isCliAppsPayload,
     selectItems: installedCliAppsFromPayload,
   });
@@ -725,7 +720,7 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <h1 className="max-w-[30rem] text-balance text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight">
+      <h1 className="text-balance text-[40px] font-normal leading-tight tracking-[-0.045em] text-foreground sm:text-[48px]">
         {t(heroGreetingKey)}
       </h1>
     </div>
