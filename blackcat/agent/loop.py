@@ -203,7 +203,7 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
-        author_identity: Mapping[str, Any] | None = None, # TODO: delete author params from the loops for future upstream merging (x1)
+        author: Mapping[str, Any] | None = None, # TODO: delete author params from the loops for future upstream merging (x1)
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -394,7 +394,6 @@ class AgentLoop:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
-            author_identity=config.author_identity, # TODO: delete author params from the loops for future upstream merging (x3)
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
