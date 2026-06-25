@@ -341,6 +341,31 @@ def test_get_history_does_not_annotate_tool_results_with_timestamps():
     assert tool_result["content"] == "ok"
 
 
+def test_get_history_includes_sender_identity_for_user_turns():
+    session = Session(key="discord:shared")
+    session.messages.append({
+        "role": "user",
+        "content": "please summarize this",
+        "timestamp": "2026-04-26T22:00:00",
+        "sender_id": "123",
+        "sender_display_name": "Alice Example",
+        "sender_username": "alice",
+    })
+
+    history = session.get_history(max_messages=500, include_timestamps=True)
+
+    assert history == [
+        {
+            "role": "user",
+            "content": (
+                "[Message Time: 2026-04-26T22:00:00]\n"
+                "[Message Sender: display_name=Alice Example; username=alice; id=123]\n"
+                "please summarize this"
+            ),
+        },
+    ]
+
+
 # --- Window cuts mid-group: assistant present but some tool results orphaned ---
 
 def test_window_cuts_mid_tool_group():

@@ -155,13 +155,20 @@ class _FakeInteractionResponse:
 def _make_interaction(
     *,
     user_id: int = 123,
+    username: str | None = None,
+    display_name: str | None = None,
     channel_id: int | None = 456,
     channel=None,
     guild_id: int | None = None,
     interaction_id: int = 999,
 ):
+    user = SimpleNamespace(id=user_id)
+    if username is not None:
+        user.name = username
+    if display_name is not None:
+        user.display_name = display_name
     return SimpleNamespace(
-        user=SimpleNamespace(id=user_id),
+        user=user,
         channel_id=channel_id,
         channel=channel,
         guild_id=guild_id,
@@ -174,6 +181,8 @@ def _make_interaction(
 def _make_message(
     *,
     author_id: int = 123,
+    username: str | None = None,
+    display_name: str | None = None,
     author_bot: bool = False,
     channel_id: int = 456,
     parent_channel_id: int | None = None,
@@ -198,8 +207,13 @@ def _make_message(
         if reply_to is not None
         else None
     )
+    author = SimpleNamespace(id=author_id, bot=author_bot)
+    if username is not None:
+        author.name = username
+    if display_name is not None:
+        author.display_name = display_name
     return SimpleNamespace(
-        author=SimpleNamespace(id=author_id, bot=author_bot),
+        author=author,
         channel=_FakeChannel(channel_id, parent_channel_id),
         content=content,
         guild=guild,
@@ -359,6 +373,30 @@ async def test_on_message_accepts_allowlisted_dm() -> None:
     assert len(handled) == 1
     assert handled[0]["chat_id"] == "456"
     assert handled[0]["metadata"] == {"message_id": "789", "guild_id": None, "reply_to": None}
+
+
+@pytest.mark.asyncio
+async def test_on_message_includes_author_identity_metadata() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(
+        _make_message(
+            author_id=123,
+            username="alice",
+            display_name="Alice Example",
+            channel_id=456,
+            message_id=789,
+        )
+    )
+
+    assert handled[0]["metadata"]["sender_display_name"] == "Alice Example"
+    assert handled[0]["metadata"]["sender_username"] == "alice"
 
 
 @pytest.mark.asyncio
@@ -777,6 +815,32 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     assert handled[0]["chat_id"] == "456"
     assert handled[0]["metadata"]["interaction_id"] == "321"
     assert handled[0]["metadata"]["is_slash_command"] is True
+
+
+@pytest.mark.asyncio
+async def test_slash_command_includes_user_identity() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction(
+        user_id=123,
+        username="alice",
+        display_name="Alice Example",
+        channel_id=456,
+        interaction_id=321,
+    )
+
+    status_cmd = client.tree.get_command("status")
+    assert status_cmd is not None
+    await status_cmd.callback(interaction)
+
+    assert handled[0]["metadata"]["sender_display_name"] == "Alice Example"
+    assert handled[0]["metadata"]["sender_username"] == "alice"
 
 
 @pytest.mark.asyncio

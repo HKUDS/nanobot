@@ -66,6 +66,10 @@ from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
 )
+from nanobot.utils.sender_identity import (
+    annotate_user_content_with_sender,
+    sender_session_extra,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -595,7 +599,11 @@ class AgentLoop:
         media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
         has_text = isinstance(msg.content, str) and msg.content.strip()
         if has_text or media_paths:
-            extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
+            extra: dict[str, Any] = (
+                ({"media": list(media_paths)} if media_paths else {})
+                | agent_context.session_extra(msg.metadata)
+                | sender_session_extra(msg.metadata, sender_id=msg.sender_id)
+            )
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
             text_override, cron_extra = cron_history_overrides(msg.metadata)
@@ -754,6 +762,13 @@ class AgentLoop:
                     content, media = self._prepare_message_media(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
+                user_content = annotate_user_content_with_sender(
+                    sender_session_extra(
+                        pending_msg.metadata,
+                        sender_id=pending_msg.sender_id,
+                    ),
+                    user_content,
+                )
                 return {"role": "user", "content": user_content}
 
             items: list[dict[str, Any]] = []

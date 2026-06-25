@@ -466,6 +466,59 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_loop_injected_followup_includes_sender_identity(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    captured_messages: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append(list(messages))
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage={})
+        return LLMResponse(content="second answer", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="discord",
+        sender_id="123",
+        chat_id="c",
+        content="another point",
+        metadata={
+            "sender_display_name": "Alice Example",
+            "sender_username": "alice",
+        },
+    ))
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        channel="discord",
+        chat_id="c",
+        pending_queue=pending_queue,
+    )
+
+    injected = [
+        message for message in captured_messages[-1]
+        if message.get("role") == "user"
+        and "another point" in str(message.get("content"))
+    ][-1]
+    assert (
+        "[Message Sender: display_name=Alice Example; username=alice; id=123]"
+        in str(injected["content"])
+    )
+
+
+@pytest.mark.asyncio
 async def test_runner_merges_multiple_injected_user_messages_without_losing_media():
     """Multiple injected follow-ups should not create lossy consecutive user messages."""
     from nanobot.agent.runner import AgentRunner, AgentRunSpec

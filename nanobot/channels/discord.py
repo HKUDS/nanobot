@@ -19,6 +19,7 @@ from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename, split_message
+from nanobot.utils.sender_identity import SENDER_DISPLAY_NAME_KEY, SENDER_USERNAME_KEY
 
 DISCORD_AVAILABLE = importlib.util.find_spec("discord") is not None
 if TYPE_CHECKING:
@@ -171,6 +172,7 @@ if DISCORD_AVAILABLE:
                 "interaction_id": str(interaction.id),
                 "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
                 "is_slash_command": True,
+                **self._channel._author_identity_metadata(interaction.user),
             }
             session_key = None
             if channel is not None:
@@ -702,7 +704,23 @@ class DiscordChannel(BaseChannel):
         return message_type not in {discord.MessageType.default, discord.MessageType.reply}
 
     @staticmethod
-    def _build_inbound_metadata(message: discord.Message) -> dict[str, str | None]:
+    def _author_identity_metadata(author: Any) -> dict[str, str]:
+        """Return model-visible Discord user identity metadata."""
+        username = getattr(author, "name", None)
+        display_name = (
+            getattr(author, "display_name", None)
+            or getattr(author, "global_name", None)
+            or username
+        )
+        metadata: dict[str, str] = {}
+        if display_name:
+            metadata[SENDER_DISPLAY_NAME_KEY] = str(display_name)
+        if username:
+            metadata[SENDER_USERNAME_KEY] = str(username)
+        return metadata
+
+    @classmethod
+    def _build_inbound_metadata(cls, message: discord.Message) -> dict[str, str | None]:
         """Build metadata for inbound Discord messages."""
         reply_to = (
             str(message.reference.message_id)
@@ -713,6 +731,7 @@ class DiscordChannel(BaseChannel):
             "message_id": str(message.id),
             "guild_id": str(message.guild.id) if message.guild else None,
             "reply_to": reply_to,
+            **cls._author_identity_metadata(message.author),
         }
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:

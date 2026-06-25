@@ -20,6 +20,7 @@ from nanobot.utils.helpers import (
     truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
+from nanobot.utils.sender_identity import sender_runtime_lines
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -30,6 +31,10 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
 def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) -> list[str]:
     """Return model-visible runtime annotations for turn-attached capabilities."""
     return [
+        *sender_runtime_lines(
+            getattr(msg, "metadata", None),
+            sender_id=getattr(msg, "sender_id", None),
+        ),
         *cli_app_utils.runtime_lines(msg, workspace, skip=skip),
         *mcp_tools.runtime_lines(
             msg,

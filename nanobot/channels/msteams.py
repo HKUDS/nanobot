@@ -39,6 +39,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Base
+from nanobot.utils.sender_identity import SENDER_DISPLAY_NAME_KEY
 
 MSTEAMS_AVAILABLE = (
     importlib.util.find_spec("jwt") is not None
@@ -346,6 +347,7 @@ class MSTeamsChannel(BaseChannel):
             chat_id=conversation_id,
             content=text,
             metadata={
+                SENDER_DISPLAY_NAME_KEY: from_user.get("name"),
                 "msteams": {
                     "activity_id": activity_id,
                     "conversation_id": conversation_id,

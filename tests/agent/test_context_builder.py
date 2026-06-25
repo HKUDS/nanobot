@@ -37,6 +37,20 @@ class TestBuildRuntimeContext:
         ctx = ContextBuilder._build_runtime_context("cli", "direct", sender_id="user1")
         assert "Sender ID: user1" in ctx
 
+    def test_with_sender_identity_lines(self):
+        ctx = ContextBuilder._build_runtime_context(
+            "discord",
+            "123",
+            sender_id="42",
+            supplemental_lines=[
+                "Sender Display Name: Alice Example",
+                "Sender Username: alice",
+            ],
+        )
+        assert "Sender Display Name: Alice Example" in ctx
+        assert "Sender Username: alice" in ctx
+        assert "Sender ID: 42" in ctx
+
     def test_with_timezone(self):
         ctx = ContextBuilder._build_runtime_context(None, None, timezone="Asia/Shanghai")
         assert "Current Time:" in ctx

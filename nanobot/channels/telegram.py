@@ -33,6 +33,7 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
+from nanobot.utils.sender_identity import SENDER_DISPLAY_NAME_KEY, SENDER_USERNAME_KEY
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
@@ -1122,11 +1123,18 @@ class TelegramChannel(BaseChannel):
     def _build_message_metadata(message, user) -> dict:
         """Build common Telegram inbound metadata payload."""
         reply_to = getattr(message, "reply_to_message", None)
+        display_name = getattr(user, "full_name", None) or " ".join(
+            part
+            for part in (getattr(user, "first_name", None), getattr(user, "last_name", None))
+            if part
+        )
         return {
             "message_id": message.message_id,
             "user_id": user.id,
             "username": user.username,
             "first_name": user.first_name,
+            SENDER_DISPLAY_NAME_KEY: display_name or None,
+            SENDER_USERNAME_KEY: user.username,
             "is_group": message.chat.type != "private",
             "message_thread_id": getattr(message, "message_thread_id", None),
             "is_forum": bool(getattr(message.chat, "is_forum", False)),

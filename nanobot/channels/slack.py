@@ -20,6 +20,7 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
+from nanobot.utils.sender_identity import SENDER_DISPLAY_NAME_KEY, SENDER_USERNAME_KEY
 
 
 class SlackDMConfig(Base):
@@ -436,12 +437,26 @@ class SlackChannel(BaseChannel):
             return
 
         try:
+            user_profile = event.get("user_profile") if isinstance(event, dict) else None
+            identity_meta: dict[str, Any] = {}
+            if isinstance(user_profile, dict):
+                display_name = (
+                    user_profile.get("display_name")
+                    or user_profile.get("real_name")
+                    or user_profile.get("name")
+                )
+                username = user_profile.get("name")
+                if display_name:
+                    identity_meta[SENDER_DISPLAY_NAME_KEY] = display_name
+                if username:
+                    identity_meta[SENDER_USERNAME_KEY] = username
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
                 media=media_paths,
                 metadata={
+                    **identity_meta,
                     "slack": {
                         "event": event,
                         "thread_ts": thread_ts,
