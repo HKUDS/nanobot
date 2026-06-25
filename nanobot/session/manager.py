@@ -432,24 +432,16 @@ class SessionManager:
         return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
 
     def _get_session_path(self, key: str) -> Path:
-        """Get the file path for a session, with backward compatibility."""
-        new_path = self.sessions_dir / f"{self.safe_key(key)}.jsonl"
-        if new_path.exists():
-            return new_path
-        old_path = self.sessions_dir / f"{safe_filename(key.replace(":", "_"))}.jsonl"
-        if old_path.exists():
-            return old_path
-        return new_path
+        """Get the collision-resistant workspace path for a session."""
+        return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
+
+    def _get_legacy_lossy_path(self, key: str) -> Path:
+        """Previous workspace session path using lossy ':' to '_' replacement."""
+        return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
 
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
-        new_path = self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
-        if new_path.exists():
-            return new_path
-        old_path = self.legacy_sessions_dir / f"{safe_filename(key.replace(":", "_"))}.jsonl"
-        if old_path.exists():
-            return old_path
-        return new_path
+        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -475,13 +467,19 @@ class SessionManager:
         """Load a session from disk."""
         path = self._get_session_path(key)
         if not path.exists():
-            legacy_path = self._get_legacy_session_path(key)
-            if legacy_path.exists():
+            fallback_paths = [
+                (self._get_legacy_lossy_path(key), "legacy lossy path"),
+                (self._get_legacy_session_path(key), "legacy path"),
+            ]
+            for fallback_path, description in fallback_paths:
+                if not fallback_path.exists():
+                    continue
                 try:
-                    shutil.move(str(legacy_path), str(path))
-                    logger.info("Migrated session {} from legacy path", key)
+                    shutil.move(str(fallback_path), str(path))
+                    logger.info("Migrated session {} from {}", key, description)
                 except Exception:
                     logger.exception("Failed to migrate session {}", key)
+                break
 
         if not path.exists():
             return None
@@ -663,7 +661,11 @@ class SessionManager:
 
         Returns True if at least one JSONL file was found and unlinked.
         """
-        paths = [self._get_session_path(key), self._get_legacy_session_path(key)]
+        paths = [
+            self._get_session_path(key),
+            self._get_legacy_lossy_path(key),
+            self._get_legacy_session_path(key),
+        ]
         self.invalidate(key)
         deleted = False
         for path in paths:
