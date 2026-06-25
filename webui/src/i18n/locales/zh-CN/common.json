@@ -913,6 +913,10 @@
             "title": "恢复记忆",
             "description": "将记忆恢复到之前的 Dream 快照。"
           },
+          "dream_prompt": {
+            "title": "Dream prompt",
+            "description": "查看或初始化当前工作区的 Dream prompt 覆盖文件。"
+          },
           "goal": {
             "title": "长期目标",
             "description": "让助手把当前请求当作需要多步骤持续推进的目标。"

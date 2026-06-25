@@ -375,6 +375,15 @@ class TestSyncWorkspaceTemplates:
 
         assert (workspace / "memory").exists() or (workspace / "skills").exists()
 
+    def test_creates_prompt_readme_without_dream_override(self, tmp_path):
+        workspace = tmp_path / "workspace"
+
+        added = sync_workspace_templates(workspace, silent=True)
+
+        assert "prompts/README.md" in {path.replace("\\", "/") for path in added}
+        assert (workspace / "prompts" / "README.md").exists()
+        assert not (workspace / "prompts" / "dream.md").exists()
+
     def test_returns_list_of_added_files(self, tmp_path):
         """Should return list of relative paths for added files."""
         workspace = tmp_path / "workspace"

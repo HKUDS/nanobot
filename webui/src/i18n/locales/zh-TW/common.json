@@ -904,6 +904,10 @@
             "title": "恢復記憶",
             "description": "將記憶恢復到之前的 Dream 快照。"
           },
+          "dream_prompt": {
+            "title": "Dream prompt",
+            "description": "查看或初始化目前工作區的 Dream prompt 覆寫檔。"
+          },
           "goal": {
             "title": "長期目標",
             "description": "請助理把這則請求當成需要多步驟持續推進的目標。"

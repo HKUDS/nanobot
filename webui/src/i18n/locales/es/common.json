@@ -904,6 +904,10 @@
             "title": "Restaurar memoria",
             "description": "Revierte la memoria a una instantánea Dream anterior."
           },
+          "dream_prompt": {
+            "title": "Prompt de Dream",
+            "description": "Muestra o inicializa la anulación del prompt de Dream del workspace."
+          },
           "goal": {
             "title": "Objetivo a largo plazo",
             "description": "Indica al agente que trate esto como un objetivo sostenido en varios pasos."

@@ -64,6 +64,9 @@ This is why nanobot's memory is not just archival. It is interpretive.
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
+├── prompts/
+│   ├── README.md        # Prompt override notes
+│   └── dream.md         # Optional workspace Dream prompt override
 └── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
@@ -120,6 +123,8 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 | `/dream-log <sha>` | Show a specific Dream change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-prompt` | Show whether Dream is using the bundled prompt or a workspace override |
+| `/dream-prompt init` | Copy the bundled Dream prompt to `prompts/dream.md` for editing |
 
 These commands exist for a reason: automatic memory is powerful, but users should always retain the right to inspect, understand, and restore it.
 
@@ -134,6 +139,26 @@ This gives memory a history of its own:
 - you can restore a previous state
 
 That turns memory from a silent mutation into an auditable process.
+
+## Customizing Dream
+
+Dream uses nanobot's bundled memory consolidation prompt by default. To customize how Dream classifies, prunes, and updates memory for one workspace, run:
+
+```text
+/dream-prompt init
+```
+
+This creates:
+
+```text
+workspace/prompts/dream.md
+```
+
+If that file exists and is not empty, it completely replaces the bundled Dream prompt for that workspace. Dream still appends the current `## Conversation History` block after the prompt.
+
+To return to the bundled default, delete `prompts/dream.md` or leave it empty.
+
+The override is workspace-local. Another nanobot workspace keeps using its own `prompts/dream.md` or the bundled default.
 
 ## Configuration
 

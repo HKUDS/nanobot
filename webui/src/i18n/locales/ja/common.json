@@ -904,6 +904,10 @@
             "title": "メモリを復元",
             "description": "以前の Dream スナップショットへメモリを戻します。"
           },
+          "dream_prompt": {
+            "title": "Dream prompt",
+            "description": "このワークスペースの Dream prompt 上書きを表示または初期化します。"
+          },
           "goal": {
             "title": "長期目標",
             "description": "持続的な複数ステップの目標として扱うようエージェントに伝えます。"

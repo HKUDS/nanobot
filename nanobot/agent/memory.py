@@ -479,13 +479,39 @@ class MemoryStore:
     def set_last_dream_cursor(self, cursor: int) -> None:
         self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
+    @property
+    def dream_prompt_file(self) -> Path:
+        return self.workspace / "prompts" / "dream.md"
+
+    def has_dream_prompt_override(self) -> bool:
+        with suppress(OSError):
+            return self.dream_prompt_file.is_file() and bool(
+                self.dream_prompt_file.read_text(encoding="utf-8").strip()
+            )
+        return False
+
+    @staticmethod
+    def default_dream_prompt() -> str:
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        return render_template(
+            "agent/dream.md",
+            strip=True,
+            skill_creator_path=str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"),
+        )
+
+    def _dream_template(self) -> str:
+        with suppress(OSError):
+            text = self.dream_prompt_file.read_text(encoding="utf-8")
+            if text.strip():
+                return text.rstrip()
+        return self.default_dream_prompt()
+
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
         """
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
         if not entries:
@@ -496,10 +522,7 @@ class MemoryStore:
             f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
             for e in batch
         )
-        skill_creator_path = str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md")
-        template = render_template(
-            "agent/dream.md", strip=True, skill_creator_path=skill_creator_path,
-        )
+        template = self._dream_template()
         prompt = f"{template}\n\n## Conversation History\n{history_text}"
         return (prompt, batch[-1]["cursor"])
 
