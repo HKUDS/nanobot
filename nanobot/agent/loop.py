@@ -212,6 +212,7 @@ class AgentLoop:
         model_presets: dict[str, ModelPresetConfig] | None = None,
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
+        spawn_presets: dict[str, ModelPresetConfig] | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
     ):
@@ -288,6 +289,8 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            spawn_presets=spawn_presets,
+            preset_snapshot_loader=preset_snapshot_loader,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -367,6 +370,8 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        all_presets = preset_helpers.configured_model_presets(config)
+        spawn_presets = {n: all_presets[n] for n in defaults.spawn_presets if n in all_presets}
         return cls(
             bus=bus,
             provider=provider,
@@ -389,10 +394,11 @@ class AgentLoop:
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
             tools_config=config.tools,
-            model_presets=preset_helpers.configured_model_presets(config),
+            model_presets=all_presets,
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            spawn_presets=spawn_presets,
             **extra,
         )
 

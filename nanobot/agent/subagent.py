@@ -11,6 +11,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.model_presets import PresetSnapshotLoader
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
@@ -18,7 +19,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
@@ -87,6 +88,8 @@ class SubagentManager:
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        spawn_presets: dict[str, ModelPresetConfig] | None = None,
+        preset_snapshot_loader: PresetSnapshotLoader | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -107,6 +110,9 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
+        self.spawn_presets: dict[str, ModelPresetConfig] = spawn_presets or {}
+        self._preset_snapshot_loader = preset_snapshot_loader
+        self._preset_cache: dict[str, tuple[tuple[object, ...], AgentRunner]] = {}
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -158,8 +164,20 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        model_preset: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
+        if model_preset is not None and model_preset not in self.spawn_presets:
+            available = ", ".join(sorted(self.spawn_presets)) or "(none)"
+            return (
+                f"Cannot spawn subagent with model_preset {model_preset!r}: "
+                f"not in allowed spawn_presets. Available: {available}"
+            )
+        if model_preset is not None and self._preset_snapshot_loader is None:
+            return (
+                f"Cannot spawn subagent with model_preset {model_preset!r}: "
+                f"no preset loader configured. Contact the operator."
+            )
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
@@ -182,6 +200,7 @@ class SubagentManager:
                 origin_message_id,
                 temperature,
                 workspace_scope,
+                model_preset,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -211,6 +230,7 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        model_preset: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -240,11 +260,32 @@ class SubagentManager:
             )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
-                result = await self.runner.run(AgentRunSpec(
+                if model_preset is not None and self._preset_snapshot_loader is not None:
+                    snapshot = self._preset_snapshot_loader(model_preset)
+                    cached = self._preset_cache.get(model_preset)
+                    if cached is None or cached[0] != snapshot.signature:
+                        run_runner = AgentRunner(snapshot.provider)
+                        self._preset_cache[model_preset] = (snapshot.signature, run_runner)
+                    else:
+                        run_runner = cached[1]
+                    run_model = snapshot.model
+                    gen = snapshot.provider.generation
+                    run_temperature = temperature if temperature is not None else gen.temperature
+                    run_max_tokens = gen.max_tokens
+                    run_reasoning = gen.reasoning_effort
+                    run_context_window = snapshot.context_window_tokens
+                else:
+                    run_runner = self.runner
+                    run_model = self.model
+                    run_temperature = temperature
+                    run_max_tokens = None
+                    run_reasoning = None
+                    run_context_window = None
+                result = await run_runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
-                    model=self.model,
-                    temperature=temperature,
+                    model=run_model,
+                    temperature=run_temperature,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
                     hook=_SubagentHook(task_id, status),
@@ -256,6 +297,9 @@ class SubagentManager:
                     session_key=sess_key,
                     workspace=root,
                     llm_timeout_s=llm_timeout,
+                    max_tokens=run_max_tokens,
+                    reasoning_effort=run_reasoning,
+                    context_window_tokens=run_context_window,
                 ))
             finally:
                 if token is not None:
@@ -285,7 +329,10 @@ class SubagentManager:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            preset_ctx = f" (model_preset={model_preset!r})" if model_preset else ""
+            await self._announce_result(
+                task_id, label, task, f"Error{preset_ctx}: {e}", origin, "error", origin_message_id,
+            )
 
     async def _announce_result(
         self,

@@ -347,3 +347,34 @@ def test_transcription_only_provider_is_not_chat_fallback() -> None:
     })
 
     assert config.get_provider_name() is None
+
+
+def test_spawn_presets_validator_rejects_unknown_entry() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="spawn_presets entry 'nonexistent' not found"):
+        Config.model_validate({
+            "modelPresets": {
+                "fast": {"model": "openai/gpt-4.1"},
+            },
+            "agents": {
+                "defaults": {
+                    "spawnPresets": ["fast", "nonexistent"],
+                }
+            },
+        })
+
+
+def test_spawn_presets_validator_accepts_valid_entries() -> None:
+    config = Config.model_validate({
+        "modelPresets": {
+            "fast": {"model": "openai/gpt-4.1"},
+            "smart": {"model": "anthropic/claude-opus-4-5"},
+        },
+        "agents": {
+            "defaults": {
+                "spawnPresets": ["fast", "smart"],
+            }
+        },
+    })
+    assert config.agents.defaults.spawn_presets == ["fast", "smart"]
