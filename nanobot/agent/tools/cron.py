@@ -39,6 +39,10 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "Naive values use the tool's default timezone."
     ),
     job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+    model_preset=StringSchema(
+        "Optional model preset name to use when this job runs. "
+        "When omitted, the job uses the agent's current model preset at run time."
+    ),
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
@@ -143,13 +147,15 @@ class CronTool(Tool, ContextAware):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        model_preset: str | None = None,
         deliver: bool = True,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at)
+            model_preset = model_preset if model_preset is not None else kwargs.get("modelPreset")
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at, model_preset)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -164,6 +170,7 @@ class CronTool(Tool, ContextAware):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        model_preset: str | None = None,
     ) -> str:
         if not message:
             return (
@@ -219,6 +226,7 @@ class CronTool(Tool, ContextAware):
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             origin_metadata=dict(self._origin_metadata.get() or {}),
+            model_preset=model_preset,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
@@ -270,6 +278,8 @@ class CronTool(Tool, ContextAware):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            if j.payload.model_preset:
+                parts.append(f"  Model preset: {j.payload.model_preset}")
             if j.payload.kind == "system_event":
                 parts.append(f"  Purpose: {self._system_job_purpose(j)}")
                 parts.append("  Protected: visible for inspection, but cannot be removed.")

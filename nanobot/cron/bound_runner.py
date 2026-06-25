@@ -92,6 +92,9 @@ async def run_bound_cron_job(
         ),
     }
     metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+    if job.payload.model_preset:
+        metadata["model_preset"] = job.payload.model_preset
+        metadata[CRON_TRIGGER_META]["model_preset"] = job.payload.model_preset
     run_record_base: dict[str, Any] = {
         "job_id": job.id,
         "job_name": job.name,
@@ -100,6 +103,8 @@ async def run_bound_cron_job(
         "prompt_vars": {"message": job.payload.message},
         "rendered_prompt": prompt,
     }
+    if job.payload.model_preset:
+        run_record_base["model_preset"] = job.payload.model_preset
 
     cron.write_run_record(
         run_id,
