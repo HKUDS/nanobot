@@ -1561,19 +1561,8 @@ class AgentRunner:
         if not spec.concurrent_tools:
             return [[tool_call] for tool_call in tool_calls]
 
-        batches: list[list[ToolCallRequest]] = []
-        current: list[ToolCallRequest] = []
-        for tool_call in tool_calls:
-            get_tool = getattr(spec.tools, "get", None)
-            tool = get_tool(tool_call.name) if callable(get_tool) else None
-            can_batch = bool(tool and tool.concurrency_safe)
-            if can_batch:
-                current.append(tool_call)
-                continue
-            if current:
-                batches.append(current)
-                current = []
-            batches.append([tool_call])
-        if current:
-            batches.append(current)
-        return batches
+        # When the LLM explicitly requests parallel tool calls, trust its
+        # judgment and batch all calls together.  The model understands
+        # which operations can safely run in parallel better than a static
+        # per-tool-class flag (which blocks harmless exec+read_file combos).
+        return [list(tool_calls)]

@@ -99,7 +99,8 @@ def _tool_message(result, tool_call_id: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_runner_batches_read_only_tools_before_exclusive_work():
+async def test_runner_batches_all_tools_when_llm_requests_parallel():
+    """All tools run concurrently when the LLM batches them — trust the LLM."""
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.05, read_only=True, shared_events=shared_events)
@@ -128,15 +129,13 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
         {},
     )
 
-    assert shared_events[0:2] == ["start:read_a", "start:read_b"]
-    assert "end:read_a" in shared_events and "end:read_b" in shared_events
-    assert shared_events.index("end:read_a") < shared_events.index("start:write_a")
-    assert shared_events.index("end:read_b") < shared_events.index("start:write_a")
-    assert shared_events[-2:] == ["start:write_a", "end:write_a"]
+    assert all(e in shared_events[:3] for e in ["start:read_a", "start:read_b", "start:write_a"])
+    assert all(e in shared_events for e in ["end:read_a", "end:read_b", "end:write_a"])
 
 
 @pytest.mark.asyncio
-async def test_runner_does_not_batch_exclusive_read_only_tools():
+async def test_runner_batches_exclusive_tools_when_llm_requests_parallel():
+    """Even exclusive tools run concurrently when the LLM batches them."""
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.03, read_only=True, shared_events=shared_events)
@@ -171,9 +170,8 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
         {},
     )
 
-    assert shared_events[0] == "start:read_a"
-    assert shared_events.index("end:read_a") < shared_events.index("start:ddg_like")
-    assert shared_events.index("end:ddg_like") < shared_events.index("start:read_b")
+    assert all(e in shared_events[:3] for e in ["start:read_a", "start:ddg_like", "start:read_b"])
+    assert all(e in shared_events for e in ["end:read_a", "end:ddg_like", "end:read_b"])
 
 
 @pytest.mark.asyncio
