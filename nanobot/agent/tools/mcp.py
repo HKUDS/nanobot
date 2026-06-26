@@ -797,31 +797,57 @@ async def connect_mcp_servers(
                         ", ".join(available_wrapped_names) or "(none)",
                     )
 
-            try:
-                resources_result = await session.list_resources()
-                for resource in resources_result.resources:
-                    wrapper = MCPResourceWrapper(
-                        session, name, resource, resource_timeout=cfg.tool_timeout
-                    )
-                    registry.register(wrapper)
-                    registered_count += 1
+            # Only register resources and prompts when no tool restriction is
+            # active.  enabledTools is a per-*tool* allowlist; resources and
+            # prompts have no equivalent name filter, so they must be skipped
+            # whenever the operator specified a tool subset.  An empty list
+            # (deny-all) or a list of specific tool names both indicate that
+            # the operator intended to restrict capabilities — registering
+            # unrestricted resource/prompt wrappers would violate that intent.
+            # The default ["*"] (allow-all) means no restriction was intended.
+            register_extras = allow_all_tools
+            if register_extras:
+                try:
+                    resources_result = await session.list_resources()
+                    for resource in resources_result.resources:
+                        wrapper = MCPResourceWrapper(
+                            session, name, resource, resource_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered resource '{}' from server '{}'",
+                            wrapper.name,
+                            name,
+                        )
+                except Exception as e:
                     logger.debug(
-                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+                        "MCP server '{}': resources not supported or failed: {}", name, e
                     )
-            except Exception as e:
-                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
 
-            try:
-                prompts_result = await session.list_prompts()
-                for prompt in prompts_result.prompts:
-                    wrapper = MCPPromptWrapper(
-                        session, name, prompt, prompt_timeout=cfg.tool_timeout
+                try:
+                    prompts_result = await session.list_prompts()
+                    for prompt in prompts_result.prompts:
+                        wrapper = MCPPromptWrapper(
+                            session, name, prompt, prompt_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered prompt '{}' from server '{}'",
+                            wrapper.name,
+                            name,
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "MCP server '{}': prompts not supported or failed: {}", name, e
                     )
-                    registry.register(wrapper)
-                    registered_count += 1
-                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
-            except Exception as e:
-                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+            else:
+                logger.info(
+                    "MCP server '{}': skipping resource/prompt registration "
+                    "(enabledTools does not include '*' — only tools allowed)",
+                    name,
+                )
 
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count

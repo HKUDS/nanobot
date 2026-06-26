@@ -195,7 +195,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -213,6 +213,8 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "volcengine_coding_plan",
 ]);
 const DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH = 2;
+const CLI_APPS_REFRESH_RETRY_MS = 2_000;
+const CLI_APPS_REFRESH_MAX_RETRIES = 30;
 
 const FALLBACK_TIMEZONES = [
   "UTC",
@@ -333,7 +335,7 @@ function defaultPreset(payload: SettingsPayload): SettingsPayload["model_presets
 }
 
 function normalizeContextWindowTokens(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 65_536;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 200_000;
 }
 
 function editableDefaultProvider(payload: SettingsPayload): string {
@@ -370,7 +372,7 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   provider: "",
   modelPreset: "default",
   presetLabel: "Default",
-  contextWindowTokens: 65_536,
+  contextWindowTokens: 200_000,
   timezone: "UTC",
   botName: "nanobot",
   botIcon: "",
@@ -454,6 +456,16 @@ function webSearchFormFromPayload(
     timeout: payload.web_search.timeout,
     useJinaReader: payload.web.fetch.use_jina_reader,
   };
+}
+
+type WebSearchProviderOption = SettingsPayload["web_search"]["providers"][number];
+
+function webSearchProviderAcceptsApiKey(provider?: WebSearchProviderOption): boolean {
+  return provider?.credential === "api_key" || provider?.credential === "optional_api_key";
+}
+
+function webSearchProviderRequiresApiKey(provider?: WebSearchProviderOption): boolean {
+  return provider?.credential === "api_key";
 }
 
 function imageGenerationFormFromPayload(payload: SettingsPayload): ImageGenerationSettingsUpdate {
@@ -685,22 +697,35 @@ export function SettingsView({
   useEffect(() => {
     if (activeSection !== "apps") return;
     let cancelled = false;
-    setCliAppsLoading(true);
-    fetchCliApps(token)
-      .then((payload) => {
-        if (!cancelled) {
+    let retry: number | null = null;
+    let retryCount = 0;
+    const loadCliApps = (showLoading: boolean) => {
+      if (showLoading) setCliAppsLoading(true);
+      fetchCliApps(token)
+        .then((payload) => {
+          if (cancelled) return;
+          if (payload.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
+            retryCount += 1;
+            retry = window.setTimeout(() => {
+              retry = null;
+              loadCliApps(false);
+            }, CLI_APPS_REFRESH_RETRY_MS);
+          }
           setCliApps(payload);
           setCliAppsError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setCliAppsError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setCliAppsLoading(false);
-      });
+          setCliAppsLoading(false);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setCliAppsError((err as Error).message);
+            setCliAppsLoading(false);
+          }
+        });
+    };
+    loadCliApps(true);
     return () => {
       cancelled = true;
+      if (retry !== null) window.clearTimeout(retry);
     };
   }, [activeSection, token]);
 
@@ -1154,11 +1179,11 @@ export function SettingsView({
     const apiKey = webSearchForm.apiKey?.trim() ?? "";
     const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
     const hasExistingSecret =
-      provider.credential === "api_key" &&
+      webSearchProviderAcceptsApiKey(provider) &&
       webSearchForm.provider === settings.web_search.provider &&
       !!settings.web_search.api_key_hint;
 
-    if (provider.credential === "api_key" && !apiKey && !hasExistingSecret) {
+    if (webSearchProviderRequiresApiKey(provider) && !apiKey && !hasExistingSecret) {
       setError(t("settings.byok.webSearch.apiKeyRequired"));
       return;
     }
@@ -1178,7 +1203,12 @@ export function SettingsView({
         timeout: webSearchForm.timeout,
         useJinaReader: webSearchForm.useJinaReader,
       };
-      if (provider.credential === "api_key" && apiKey) update.apiKey = apiKey;
+      if (
+        webSearchProviderAcceptsApiKey(provider) &&
+        (apiKey || (provider.credential === "optional_api_key" && webSearchKeyEditing))
+      ) {
+        update.apiKey = apiKey;
+      }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(token, update);
       applyPayload(payload);
@@ -1909,6 +1939,10 @@ function OverviewSettings({
   const webSearchCredentialStatus =
     webSearchProvider?.credential === "none"
       ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
+      : webSearchProvider?.credential === "optional_api_key"
+        ? settings.web_search.api_key_hint
+          ? tx("settings.values.configured", "Configured")
+          : tx("settings.byok.webSearch.noCredentialRequired", "No key required")
       : webSearchProvider?.credential === "base_url"
         ? settings.web_search.base_url
           ? tx("settings.values.configured", "Configured")
@@ -2518,7 +2552,8 @@ function ModelsSettings({
               value={String(form.contextWindowTokens)}
               options={CONTEXT_WINDOW_TOKEN_OPTIONS.map((tokens) => ({
                 value: String(tokens),
-                label: tokens === 262_144 ? "256K" : "64K",
+                label:
+                  tokens === 262_144 ? "256K" : tokens === 200_000 ? "200K" : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({
@@ -3218,10 +3253,10 @@ function WebSettings({
     settings.web_search.providers.find((provider) => provider.name === form.provider) ??
     settings.web_search.providers[0];
   const hasExistingSecret =
-    selectedProvider?.credential === "api_key" &&
+    webSearchProviderAcceptsApiKey(selectedProvider) &&
     form.provider === settings.web_search.provider &&
     !!settings.web_search.api_key_hint;
-  const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
+  const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
@@ -3234,7 +3269,7 @@ function WebSettings({
     effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const missingCredential =
-    selectedProvider?.credential === "api_key"
+    webSearchProviderRequiresApiKey(selectedProvider)
       ? !apiKey && !hasExistingSecret
       : selectedProvider?.credential === "base_url"
         ? !baseUrl
@@ -3267,7 +3302,7 @@ function WebSettings({
             </SettingsRow>
           ) : null}
 
-          {selectedProvider?.credential === "api_key" ? (
+          {webSearchProviderAcceptsApiKey(selectedProvider) ? (
             <SettingsRow
               title={t("settings.byok.apiKey")}
               description={t("settings.byok.webSearch.apiKeyHelp")}

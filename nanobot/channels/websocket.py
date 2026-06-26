@@ -827,6 +827,10 @@ class WebSocketChannel(BaseChannel):
         if self._server_task:
             try:
                 await self._server_task
+            except asyncio.CancelledError:
+                if asyncio.current_task() and asyncio.current_task().cancelling():
+                    raise
+                self.logger.debug("server task was already cancelled during shutdown")
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None

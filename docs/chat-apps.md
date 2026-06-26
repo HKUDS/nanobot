@@ -79,6 +79,8 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 ```
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
 **3. Run**
@@ -335,6 +337,25 @@ nanobot gateway
 
 > WhatsApp bridge updates are not applied automatically for existing installations. After upgrading nanobot, rebuild the local bridge with:
 > `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
+
+**Optional: static LID mappings**
+
+Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
+learns the LID→phone mapping at runtime (and reuses the ones the bridge persists on
+disk), but you can also seed mappings up front so the phone number resolves from the
+very first message:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "allowFrom": ["+1234567890"],
+      "lidMappings": { "123456789012345": "1234567890" }
+    }
+  }
+}
+```
 
 </details>
 
