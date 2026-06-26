@@ -302,6 +302,8 @@ class HeartbeatConfig(Base):
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
     keep_recent_messages: int = 8
+    channel: str = ""  # Fixed delivery channel (empty = most recently active)
+    chat_id: str = ""  # Fixed delivery chat_id (empty = most recently active)
 
 
 class ApiConfig(Base):
