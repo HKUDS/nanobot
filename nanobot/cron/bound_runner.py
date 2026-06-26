@@ -77,6 +77,8 @@ async def run_bound_cron_job(
     )
     prompt_ref = _cron_prompt_ref(prompt)
     run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
+    # Isolate each cron run's session so later runs don't see stale context.
+    session_key = f"{session_key}:{run_id}"
     channel, chat_id, metadata = _bound_session_delivery_context(
         job,
         turn_seed=f"cron:{job.id}",
