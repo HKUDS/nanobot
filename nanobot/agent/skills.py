@@ -1,5 +1,6 @@
 """Skills loader for agent capabilities."""
 
+import glob
 import json
 import os
 import re
@@ -83,7 +84,7 @@ class SkillsLoader:
         if self.builtin_skills:
             roots.append(self.builtin_skills)
         for root in roots:
-            matches = list(root.rglob(f"{name}/SKILL.md"))
+            matches = list(root.rglob(f"{glob.escape(name)}/SKILL.md"))
             if matches:
                 return matches[0].read_text(encoding="utf-8")
         return None
