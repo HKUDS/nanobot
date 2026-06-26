@@ -175,6 +175,26 @@ def repeated_tool_call_error(
     )
 
 
+def record_tool_call_result(
+    tool_name: str,
+    arguments: Any,
+    status: str,
+    seen_counts: dict[str, int],
+) -> None:
+    """Record tool execution outcome to track repeated failures.
+
+    A successful execution clears all tracked failures, as a state change
+    implies previously failing tools might now succeed (e.g. polling).
+    """
+    if status != "error":
+        seen_counts.clear()
+        return
+
+    signature = tool_call_signature(tool_name, arguments)
+    if signature is not None:
+        seen_counts[signature] = seen_counts.get(signature, 0) + 1
+
+
 # Workspace-boundary violations are soft errors, with per-target throttling.
 
 _OUTSIDE_PATH_PATTERN = re.compile(r"(?:^|[\s|>'\"])((?:/[^\s\"'>;|<]+)|(?:~[^\s\"'>;|<]+))")

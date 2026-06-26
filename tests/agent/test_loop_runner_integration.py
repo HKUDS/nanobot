@@ -299,14 +299,10 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    call_idx = {"n": 0}
-    async def fake_chat(*args, **kwargs):
-        call_idx["n"] += 1
-        return LLMResponse(
-            content="working",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": str(call_idx["n"])})],
-        )
-    provider.chat_with_retry = fake_chat
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="working",
+        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+    ))
     mgr = SubagentManager(
         provider=provider,
         workspace=tmp_path,
