@@ -287,6 +287,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
+    # Store per-session so this conversation keeps its own model preset.
+    session = ctx.session
+    if session is not None:
+        session.metadata["model_preset"] = name
+
     max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
     lines = [
         f"Switched model preset to `{loop.model_preset}`.",
