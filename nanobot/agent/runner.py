@@ -95,6 +95,7 @@ class AgentRunSpec:
     temperature: float | None = None
     max_tokens: int | None = None
     reasoning_effort: str | None = None
+    reasoning_effort_escalated: str | None = None
     hook: AgentHook | None = None
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
@@ -135,6 +136,20 @@ class AgentRunner:
 
     def __init__(self, provider: LLMProvider):
         self.provider = provider
+        self._escalated_reasoning = False
+
+    def escalate_reasoning(self) -> bool:
+        """Request escalated reasoning effort for subsequent LLM calls this turn.
+
+        Returns True if escalation was activated (i.e. an escalated level is configured).
+        """
+        self._escalated_reasoning = True
+        return True
+
+    def _effective_reasoning_effort(self, spec: AgentRunSpec) -> str | None:
+        if self._escalated_reasoning and spec.reasoning_effort_escalated:
+            return spec.reasoning_effort_escalated
+        return spec.reasoning_effort
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -301,6 +316,7 @@ class AgentRunner:
         return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        self._escalated_reasoning = False
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
         context = AgentRunHookContext(messages=deepcopy(messages))
@@ -713,8 +729,9 @@ class AgentRunner:
             kwargs["temperature"] = spec.temperature
         if spec.max_tokens is not None:
             kwargs["max_tokens"] = spec.max_tokens
-        if spec.reasoning_effort is not None:
-            kwargs["reasoning_effort"] = spec.reasoning_effort
+        effort = self._effective_reasoning_effort(spec)
+        if effort is not None:
+            kwargs["reasoning_effort"] = effort
         return kwargs
 
     async def _request_model(

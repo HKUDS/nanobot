@@ -91,6 +91,10 @@ class InlineFallbackConfig(Base):
     context_window_tokens: int | None = None
     temperature: float | None = None
     reasoning_effort: str | None = None
+    reasoning_effort_escalated: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reasoningEffortEscalated", "reasoning_effort_escalated"),
+    )
 
 
 FallbackCandidate = str | InlineFallbackConfig
@@ -106,6 +110,7 @@ class ModelPresetConfig(Base):
     context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
+    reasoning_effort_escalated: str | None = None
 
     def to_generation_settings(self) -> Any:
         from nanobot.providers.base import GenerationSettings
@@ -143,6 +148,10 @@ class AgentDefaults(Base):
         serialization_alias="toolHintMaxLength",
     )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
     reasoning_effort: str | None = None  # low / medium / high / adaptive / none — LLM thinking effort; None preserves the provider default
+    reasoning_effort_escalated: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reasoningEffortEscalated", "reasoning_effort_escalated"),
+    )
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
