@@ -44,7 +44,7 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Discord** | Bot token + Message Content intent |
 | **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
 | **WeChat (Weixin)** | QR code scan (`nanobot channels login weixin`) |
-| **Feishu** | App ID + App Secret |
+| **Feishu** | QR code scan (`nanobot channels login feishu`) or App ID + App Secret |
 | **DingTalk** | App Key + App Secret |
 | **Slack** | Bot token + App-Level token |
 | **Matrix** | Homeserver URL + Access token |
@@ -79,6 +79,8 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 ```
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
 **3. Run**
@@ -336,12 +338,44 @@ nanobot gateway
 > WhatsApp bridge updates are not applied automatically for existing installations. After upgrading nanobot, rebuild the local bridge with:
 > `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
 
+**Optional: static LID mappings**
+
+Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
+learns the LID→phone mapping at runtime (and reuses the ones the bridge persists on
+disk), but you can also seed mappings up front so the phone number resolves from the
+very first message:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "allowFrom": ["+1234567890"],
+      "lidMappings": { "123456789012345": "1234567890" }
+    }
+  }
+}
+```
+
 </details>
 
 <details>
 <summary><b>Feishu</b></summary>
 
 Uses **WebSocket** long connection — no public IP required.
+
+**Quick setup: QR login**
+
+```bash
+nanobot channels login feishu
+# Use --force to create/sign in with a new bot
+```
+
+Open the printed URL or scan the QR code with Feishu/Lark on your phone. If the optional `qrcode` package is installed, nanobot shows a terminal QR code; otherwise it prints the login URL. nanobot writes `appId`, `appSecret`, `domain`, and `enabled` under `channels.feishu` in the active config file. Use `--config <path>` to update a non-default config.
+
+If QR login is unavailable for your account, use manual setup below.
+
+**Manual setup**
 
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)

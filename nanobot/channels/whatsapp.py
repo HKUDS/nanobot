@@ -30,6 +30,11 @@ class WhatsAppConfig(Base):
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
+    # Optional static LID->phone mappings, e.g. {"123456789012345": "15551234567"}.
+    # Useful to resolve a sender's phone number from the very first message instead of
+    # only after a message that carries both phone and LID. Merged with mappings the
+    # bridge persists on disk (lid-mapping-*_reverse.json) under the auth directory.
+    lid_mappings: dict[str, str] = Field(default_factory=dict)
 
 
 def _bridge_token_path() -> Path:
@@ -75,8 +80,38 @@ class WhatsAppChannel(BaseChannel):
         self._ws = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
-        self._lid_to_phone: dict[str, str] = {}
+        self._lid_to_phone: dict[str, str] = self._load_lid_mappings()
         self._bridge_token: str | None = None
+
+    def _load_lid_mappings(self) -> dict[str, str]:
+        """Seed LID->phone mappings on startup.
+
+        Combines two sources so the sender's phone number can be resolved from the
+        very first message (instead of only after one that carries both phone and LID):
+
+        1. Reverse mapping files the bridge persists in the auth directory, named
+           ``lid-mapping-<lid>_reverse.json`` and containing the phone number string.
+        2. Static ``lid_mappings`` from the channel config (takes precedence).
+        """
+        from nanobot.config.paths import get_runtime_subdir
+
+        mapping: dict[str, str] = {}
+        auth_dir = get_runtime_subdir("whatsapp-auth")
+        if auth_dir.is_dir():
+            for path in auth_dir.glob("lid-mapping-*_reverse.json"):
+                lid = path.name[len("lid-mapping-"):-len("_reverse.json")]
+                try:
+                    phone = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if isinstance(phone, str) and phone.strip():
+                    mapping[lid] = phone.strip()
+
+        for lid, phone in getattr(self.config, "lid_mappings", {}).items():
+            if isinstance(phone, str) and phone.strip():
+                mapping[str(lid)] = phone.strip()
+
+        return mapping
 
     def _effective_bridge_token(self) -> str:
         """Resolve the bridge token, generating a local secret when needed."""
@@ -368,7 +403,7 @@ def _ensure_bridge_setup() -> Path:
 
     npm_path = shutil.which("npm")
     if not npm_path:
-        raise RuntimeError("npm not found. Please install Node.js >= 18.")
+        raise RuntimeError("npm not found. Please install Node.js >= 20.")
 
     logger.info("Setting up WhatsApp bridge...")
     user_bridge.parent.mkdir(parents=True, exist_ok=True)

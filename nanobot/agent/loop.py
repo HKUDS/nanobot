@@ -75,7 +75,6 @@ if TYPE_CHECKING:
     )
     from nanobot.cron.service import CronService
 
-
 class TurnState(Enum):
     RESTORE = auto()
     COMPACT = auto()
@@ -128,6 +127,8 @@ class TurnContext:
     pending_summary: str | None = None
 
     ephemeral: bool = False
+    run_extra_hooks_for_ephemeral: bool = False
+    hooks: list[AgentHook] = field(default_factory=list)
     tools: ToolRegistry | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
@@ -190,6 +191,7 @@ class AgentLoop:
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
         microcompact_tool_results: bool = True,
+        fail_on_tool_error: bool | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
@@ -289,6 +291,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             microcompact_tool_results=microcompact_tool_results,
+            fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
@@ -381,6 +384,7 @@ class AgentLoop:
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             microcompact_tool_results=defaults.microcompact_tool_results,
+            fail_on_tool_error=defaults.fail_on_tool_error,
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -698,6 +702,8 @@ class AgentLoop:
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
+        run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
@@ -724,9 +730,10 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
+        run_hooks = [*self._extra_hooks, *(hooks or [])]
         hook: AgentHook = loop_hook
-        if not ephemeral and self._extra_hooks:
-            hook = CompositeHook([loop_hook] + self._extra_hooks)
+        if run_hooks and (not ephemeral or run_extra_hooks_for_ephemeral):
+            hook = CompositeHook([loop_hook, *run_hooks])
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -875,89 +882,93 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
-        logger.info("Agent loop started")
+        try:
+            await self._connect_mcp()
+            logger.info("Agent loop started")
 
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-            except asyncio.TimeoutError:
-                self.auto_compact.check_expired(
-                    self._schedule_background,
-                    active_session_keys=self._pending_queues.keys(),
-                )
-                continue
-            except asyncio.CancelledError:
-                # Preserve real task cancellation so shutdown can complete cleanly.
-                # Only ignore non-task CancelledError signals that may leak from integrations.
-                if not self._running or asyncio.current_task().cancelling():
-                    raise
-                continue
-            except Exception as e:
-                logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
+            while self._running:
+                try:
+                    msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    self.auto_compact.check_expired(
+                        self._schedule_background,
+                        active_session_keys=self._pending_queues.keys(),
+                    )
+                    continue
+                except asyncio.CancelledError:
+                    # Preserve real task cancellation so shutdown can complete cleanly.
+                    # Only ignore non-task CancelledError signals that may leak from integrations.
+                    if not self._running or asyncio.current_task().cancelling():
+                        raise
+                    continue
+                except Exception as e:
+                    logger.warning("Error consuming inbound message: {}, continuing...", e)
+                    continue
 
-            raw = msg.content.strip()
-            effective_key = self._effective_session_key(msg)
-            if await agent_context.handle_runtime_control(self, msg, self.tools):
-                continue
-            if self.commands.is_priority(raw):
-                await self._dispatch_command_inline(
-                    msg, effective_key, raw,
-                    self.commands.dispatch_priority,
-                )
-                continue
-            if self._cron_turns.defer_if_active(
-                msg,
-                session_key=effective_key,
-                active_session_keys=self._pending_queues.keys(),
-            ):
-                logger.info(
-                    "Deferred cron turn for active session {}",
-                    effective_key,
-                )
-                continue
-            # If this session already has an active pending queue (i.e. a task
-            # is processing this session), route the message there for mid-turn
-            # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                # Non-priority commands must not be queued for injection;
-                # dispatch them directly (same pattern as priority commands).
-                if self.commands.is_dispatchable_command(raw):
+                raw = msg.content.strip()
+                effective_key = self._effective_session_key(msg)
+                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                    continue
+                if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
-                        self.commands.dispatch,
+                        self.commands.dispatch_priority,
                     )
                     continue
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                try:
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
+                if self._cron_turns.defer_if_active(
+                    msg,
+                    session_key=effective_key,
+                    active_session_keys=self._pending_queues.keys(),
+                ):
                     logger.info(
-                        "Routed follow-up message to pending queue for session {}",
+                        "Deferred cron turn for active session {}",
                         effective_key,
                     )
                     continue
-            # Compute the effective session key before dispatching
-            # This ensures /stop command can find tasks correctly when unified session is enabled
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
-            )
+                # If this session already has an active pending queue (i.e. a task
+                # is processing this session), route the message there for mid-turn
+                # injection instead of creating a competing task.
+                if effective_key in self._pending_queues:
+                    # Non-priority commands must not be queued for injection;
+                    # dispatch them directly (same pattern as priority commands).
+                    if self.commands.is_dispatchable_command(raw):
+                        await self._dispatch_command_inline(
+                            msg, effective_key, raw,
+                            self.commands.dispatch,
+                        )
+                        continue
+                    pending_msg = msg
+                    if effective_key != msg.session_key:
+                        pending_msg = dataclasses.replace(
+                            msg,
+                            session_key_override=effective_key,
+                        )
+                    try:
+                        self._pending_queues[effective_key].put_nowait(pending_msg)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Pending queue full for session {}, falling back to queued task",
+                            effective_key,
+                        )
+                    else:
+                        logger.info(
+                            "Routed follow-up message to pending queue for session {}",
+                            effective_key,
+                        )
+                        continue
+                # Compute the effective session key before dispatching
+                # This ensures /stop command can find tasks correctly when unified session is enabled
+                task = asyncio.create_task(self._dispatch(msg))
+                self._active_tasks.setdefault(effective_key, []).append(task)
+                task.add_done_callback(
+                    lambda t, k=effective_key: self._active_tasks.get(k, [])
+                    and self._active_tasks[k].remove(t)
+                    if t in self._active_tasks.get(k, [])
+                    else None
+                )
+        finally:
+            # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
+            await self.close_mcp()
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
@@ -1245,6 +1256,8 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
+        run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
@@ -1277,6 +1290,8 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
+            run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            hooks=list(hooks or []),
             tools=tools,
         )
 
@@ -1503,6 +1518,8 @@ class AgentLoop:
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
+            run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
+            hooks=ctx.hooks,
             tools=ctx.tools,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
@@ -1812,11 +1829,14 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str = "user",
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
+        _run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
     ) -> OutboundMessage | None:
@@ -1826,7 +1846,7 @@ class AgentLoop:
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id,
+            channel=channel, sender_id=sender_id, chat_id=chat_id,
             content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
@@ -1840,6 +1860,10 @@ class AgentLoop:
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
                 }
+                if _run_extra_hooks_for_ephemeral:
+                    kwargs["run_extra_hooks_for_ephemeral"] = True
+                if hooks is not None:
+                    kwargs["hooks"] = hooks
                 if tools is not None:
                     kwargs["tools"] = tools
                 return await self._process_message(

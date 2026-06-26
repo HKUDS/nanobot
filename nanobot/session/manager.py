@@ -641,20 +641,22 @@ class SessionManager:
         self._cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
-        """Remove a session from disk and the in-memory cache.
+        """Remove a session from disk (both workspace and legacy locations) and cache.
 
-        Returns True if a JSONL file was found and unlinked.
+        Returns True if at least one JSONL file was found and unlinked.
         """
-        path = self._get_session_path(key)
+        paths = [self._get_session_path(key), self._get_legacy_session_path(key)]
         self.invalidate(key)
-        if not path.exists():
-            return False
-        try:
-            path.unlink()
-            return True
-        except OSError as e:
-            logger.warning("Failed to delete session file {}: {}", path, e)
-            return False
+        deleted = False
+        for path in paths:
+            if not path.exists():
+                continue
+            try:
+                path.unlink()
+                deleted = True
+            except OSError as e:
+                logger.warning("Failed to delete session file {}: {}", path, e)
+        return deleted
 
     def fork_session_before_user_index(
         self,
@@ -841,11 +843,12 @@ class SessionManager:
                                 if not fallback_preview and item.get("role") == "assistant":
                                     fallback_preview = text
                             preview = preview or fallback_preview
+                            fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
                             sessions.append(
                                 {
                                     "key": key,
-                                    "created_at": data.get("created_at"),
-                                    "updated_at": data.get("updated_at"),
+                                    "created_at": data.get("created_at") or fallback_time,
+                                    "updated_at": data.get("updated_at") or fallback_time,
                                     "title": title,
                                     "preview": preview,
                                     "path": str(path),

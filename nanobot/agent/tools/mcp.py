@@ -46,6 +46,76 @@ _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 
 
+def _is_malformed_mcp_progress_notification(message: Any) -> bool:
+    payload = _mcp_jsonrpc_payload(message)
+    if _payload_value(payload, "method") != "notifications/progress":
+        return False
+
+    params = _payload_value(payload, "params")
+    return not _progress_params_have_token(params)
+
+
+def _mcp_jsonrpc_payload(message: Any) -> Any:
+    """Return the JSON-RPC payload across current and future MCP SDK shapes."""
+    envelope = getattr(message, "message", message)
+    return getattr(envelope, "root", None) or envelope
+
+
+def _payload_value(payload: Any, key: str) -> Any:
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return getattr(payload, key, None)
+
+
+def _progress_params_have_token(params: Any) -> bool:
+    if isinstance(params, Mapping):
+        return "progressToken" in params
+    return hasattr(params, "progressToken") or hasattr(params, "progress_token")
+
+
+class _MalformedProgressNotificationFilter:
+    def __init__(self, read_stream: Any, server_name: str) -> None:
+        self._read_stream = read_stream
+        self._server_name = server_name
+        self._iterator: Any | None = None
+
+    async def __aenter__(self) -> "_MalformedProgressNotificationFilter":
+        await self._read_stream.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
+        return await self._read_stream.__aexit__(exc_type, exc, tb)
+
+    def __aiter__(self) -> "_MalformedProgressNotificationFilter":
+        self._iterator = self._read_stream.__aiter__()
+        return self
+
+    async def __anext__(self) -> Any:
+        if self._iterator is None:
+            self._iterator = self._read_stream.__aiter__()
+
+        while True:
+            message = await self._iterator.__anext__()
+            if _is_malformed_mcp_progress_notification(message):
+                logger.debug(
+                    "MCP server '{}': dropped progress notification without progressToken",
+                    self._server_name,
+                )
+                continue
+            return message
+
+    async def aclose(self) -> None:
+        close = getattr(self._read_stream, "aclose", None)
+        if close is not None:
+            await close()
+
+
+def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: str) -> Any:
+    if not all(hasattr(read_stream, name) for name in ("__aenter__", "__aexit__", "__aiter__")):
+        return read_stream
+    return _MalformedProgressNotificationFilter(read_stream, server_name)
+
+
 def _sanitize_name(name: str) -> str:
     """Sanitize an MCP-derived name for model API compatibility."""
     return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
@@ -670,7 +740,7 @@ async def connect_mcp_servers(
                         headers=cfg.headers or None,
                         event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=httpx.Timeout(30.0, connect=10.0),
                     )
                 )
                 read, write, _ = await server_stack.enter_async_context(
@@ -681,6 +751,7 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
+            read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 
@@ -726,31 +797,57 @@ async def connect_mcp_servers(
                         ", ".join(available_wrapped_names) or "(none)",
                     )
 
-            try:
-                resources_result = await session.list_resources()
-                for resource in resources_result.resources:
-                    wrapper = MCPResourceWrapper(
-                        session, name, resource, resource_timeout=cfg.tool_timeout
-                    )
-                    registry.register(wrapper)
-                    registered_count += 1
+            # Only register resources and prompts when no tool restriction is
+            # active.  enabledTools is a per-*tool* allowlist; resources and
+            # prompts have no equivalent name filter, so they must be skipped
+            # whenever the operator specified a tool subset.  An empty list
+            # (deny-all) or a list of specific tool names both indicate that
+            # the operator intended to restrict capabilities — registering
+            # unrestricted resource/prompt wrappers would violate that intent.
+            # The default ["*"] (allow-all) means no restriction was intended.
+            register_extras = allow_all_tools
+            if register_extras:
+                try:
+                    resources_result = await session.list_resources()
+                    for resource in resources_result.resources:
+                        wrapper = MCPResourceWrapper(
+                            session, name, resource, resource_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered resource '{}' from server '{}'",
+                            wrapper.name,
+                            name,
+                        )
+                except Exception as e:
                     logger.debug(
-                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+                        "MCP server '{}': resources not supported or failed: {}", name, e
                     )
-            except Exception as e:
-                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
 
-            try:
-                prompts_result = await session.list_prompts()
-                for prompt in prompts_result.prompts:
-                    wrapper = MCPPromptWrapper(
-                        session, name, prompt, prompt_timeout=cfg.tool_timeout
+                try:
+                    prompts_result = await session.list_prompts()
+                    for prompt in prompts_result.prompts:
+                        wrapper = MCPPromptWrapper(
+                            session, name, prompt, prompt_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered prompt '{}' from server '{}'",
+                            wrapper.name,
+                            name,
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "MCP server '{}': prompts not supported or failed: {}", name, e
                     )
-                    registry.register(wrapper)
-                    registered_count += 1
-                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
-            except Exception as e:
-                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+            else:
+                logger.info(
+                    "MCP server '{}': skipping resource/prompt registration "
+                    "(enabledTools does not include '*' — only tools allowed)",
+                    name,
+                )
 
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count

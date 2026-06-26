@@ -863,6 +863,58 @@ def test_replay_file_edit_absorbs_matching_write_tool_event() -> None:
     ]
 
 
+def test_replay_keeps_every_file_from_one_apply_patch_call() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-file",
+            "text": "apply_patch()",
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-patch",
+                    "name": "apply_patch",
+                    "arguments": {"edits": []},
+                },
+            ],
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-patch",
+                    "tool": "apply_patch",
+                    "path": "USER.md",
+                    "phase": "end",
+                    "added": 0,
+                    "deleted": 3,
+                    "approximate": False,
+                    "status": "done",
+                },
+                {
+                    "version": 1,
+                    "call_id": "call-patch",
+                    "tool": "apply_patch",
+                    "path": "MEMORY.md",
+                    "phase": "end",
+                    "added": 0,
+                    "deleted": 4,
+                    "approximate": False,
+                    "status": "done",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 1
+    assert msgs[0]["traces"] == []
+    assert "toolEvents" not in msgs[0]
+    assert [edit["path"] for edit in msgs[0]["fileEdits"]] == ["USER.md", "MEMORY.md"]
+
+
 def test_replay_keeps_interrupted_pre_tool_text_in_activity() -> None:
     msgs = replay_transcript_to_ui_messages([
         {"event": "delta", "chat_id": "t-stream", "text": "I will inspect first."},

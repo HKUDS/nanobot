@@ -172,6 +172,7 @@ interface ThreadComposerProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
+  transcriptionProvider?: string | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -782,6 +783,7 @@ export function ThreadComposer({
   workspaceError = null,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
+  transcriptionProvider = null,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -1193,6 +1195,7 @@ export function ThreadComposer({
     onError: setVoiceError,
     onTranscript: appendTranscription,
     onTranscribeAudio,
+    wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
 
   useEffect(() => {
@@ -1566,10 +1569,10 @@ export function ThreadComposer({
     "w-full resize-none bg-transparent",
     isHero
       ? cn(
-          "min-h-[78px] px-4 text-[15px] leading-6 sm:px-5",
+          "min-h-[78px] px-4 text-[16px] leading-6 sm:px-5",
           relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
         )
-      : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[13.5px] leading-5 sm:px-4",
+      : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
   );
 
   return (
