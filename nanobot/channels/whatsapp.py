@@ -50,10 +50,15 @@ class _MediaInfo(NamedTuple):
 
 _NEONIZE_API: _NeonizeAPI | None = None
 _JID_RE = re.compile(r"^(?P<user>[^@]+)@(?P<server>[^@]+)$")
+_LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
 
 
 def _default_database_path() -> Path:
     return get_runtime_subdir("whatsapp-auth") / "neonize.db"
+
+
+def _legacy_bridge_config_fields(config: dict[str, Any]) -> list[str]:
+    return [field for field in _LEGACY_BRIDGE_CONFIG_FIELDS if field in config]
 
 
 def _load_neonize() -> _NeonizeAPI:
@@ -272,9 +277,16 @@ class WhatsAppChannel(BaseChannel):
         return WhatsAppConfig().model_dump(by_alias=True)
 
     def __init__(self, config: Any, bus: MessageBus):
+        legacy_bridge_fields = _legacy_bridge_config_fields(config) if isinstance(config, dict) else []
         if isinstance(config, dict):
             config = WhatsAppConfig.model_validate(config)
         super().__init__(config, bus)
+        if legacy_bridge_fields:
+            self.logger.warning(
+                "Ignoring deprecated WhatsApp bridge config fields: {}. "
+                "Run 'nanobot channels login whatsapp' to create a neonize session.",
+                ", ".join(legacy_bridge_fields),
+            )
         self._client: Any | None = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()

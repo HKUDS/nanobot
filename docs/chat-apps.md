@@ -343,6 +343,12 @@ Optional session database path:
 }
 ```
 
+**Migrating from the old bridge**
+
+- Remove `bridgeUrl` and `bridgeToken`; WhatsApp no longer runs a local Node.js bridge.
+- Re-run `nanobot channels login whatsapp`; old Baileys bridge auth data is not reused by neonize.
+- Update `allowFrom` entries to the WhatsApp sender ID without a leading `+`.
+
 **3. Run**
 
 ```bash
