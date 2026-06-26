@@ -229,7 +229,7 @@ If you suspect a security breach:
 ✅ **Secure Communication**
 - HTTPS for all external API calls
 - TLS for Telegram API
-- WhatsApp: no local bridge listener; session secrets stay in the local neonize database
+- WhatsApp session secrets stay in the local session database
 
 ## Known Limitations
 
