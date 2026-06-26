@@ -601,9 +601,12 @@ class ExecTool(Tool):
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
-        # from the hardcoded deny list via configuration.
-        explicitly_allowed = bool(self.allow_patterns) and any(
-            re.fullmatch(p, lower) for p in self.allow_patterns
+        # from the hardcoded deny list via configuration. A chained command is
+        # only explicitly allowed when every top-level shell segment matches.
+        segments = self._split_shell_segments(lower)
+        explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
+            any(re.search(pattern, segment) for pattern in self.allow_patterns)
+            for segment in segments
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
@@ -667,6 +670,79 @@ class ExecTool(Tool):
                     )
 
         return None
+
+    @staticmethod
+    def _split_shell_segments(command: str) -> list[str]:
+        """Split shell commands on top-level chaining operators."""
+        segments: list[str] = []
+        current: list[str] = []
+        quote: str | None = None
+        escaped = False
+        paren_depth = 0
+        i = 0
+
+        while i < len(command):
+            ch = command[i]
+
+            if escaped:
+                current.append(ch)
+                escaped = False
+                i += 1
+                continue
+
+            if ch == "\\" and quote != "'":
+                current.append(ch)
+                escaped = True
+                i += 1
+                continue
+
+            if quote is not None:
+                current.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                continue
+
+            if ch in {"'", '"', "`"}:
+                current.append(ch)
+                quote = ch
+                i += 1
+                continue
+
+            if ch == "(":
+                paren_depth += 1
+                current.append(ch)
+                i += 1
+                continue
+
+            if ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+                current.append(ch)
+                i += 1
+                continue
+
+            operator_len = 0
+            if paren_depth == 0:
+                if command.startswith(("&&", "||"), i):
+                    operator_len = 2
+                elif ch in {";", "|"}:
+                    operator_len = 1
+
+            if operator_len:
+                segment = "".join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                i += operator_len
+                continue
+
+            current.append(ch)
+            i += 1
+
+        segment = "".join(current).strip()
+        if segment:
+            segments.append(segment)
+        return segments
 
     @classmethod
     def _is_benign_device_path(cls, path: str) -> bool:
