@@ -718,6 +718,7 @@ def test_drop_malformed_tool_calls_trims_response():
     )
     AgentRunner._drop_malformed_tool_calls(response)
     assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.finish_reason == "tool_calls"
     assert response.should_execute_tools is True
 
 
@@ -732,6 +733,7 @@ def test_drop_malformed_tool_calls_all_bad_disables_execution():
     )
     AgentRunner._drop_malformed_tool_calls(response)
     assert response.tool_calls == []
+    assert response.finish_reason == "stop"
     assert response.should_execute_tools is False
 
 
@@ -797,4 +799,3 @@ def test_strip_malformed_tool_calls_noop_when_clean():
         {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
     ]
     assert AgentRunner._strip_malformed_tool_calls(messages) is messages
-

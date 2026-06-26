@@ -910,6 +910,8 @@ class AgentRunner:
             getattr(response, "finish_reason", None),
         )
         response.tool_calls = valid
+        if not valid:
+            response.finish_reason = "stop"
 
     async def _request_finalization_retry(
         self,
