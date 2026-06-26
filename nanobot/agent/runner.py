@@ -55,7 +55,6 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_tool_call_error,
     repeated_workspace_violation_error,
-    tool_call_signature,
 )
 
 GoalContinueMessage = str | Callable[[], str | None]
