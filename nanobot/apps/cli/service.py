@@ -946,6 +946,7 @@ class CliAppManager:
             capture_output=True,
             text=True,
             timeout=timeout,
+            shell=False,
         )
 
     def _installed_entry(self, app: dict[str, Any]) -> dict[str, Any]:
