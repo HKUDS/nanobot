@@ -400,6 +400,29 @@ class TestExecuteEndToEnd:
         assert "hello world" in result
         assert "Exit code: 0" in result
 
+    @pytest.mark.asyncio
+    async def test_execute_defaults_to_non_login_shell(self):
+        """The public execute path must not silently request a login shell."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"ok\n", b"")
+        mock_proc.returncode = 0
+        captured_login = []
+
+        async def capture_spawn(cmd, cwd, env, shell_program=None, login=None, *, stdin=None):
+            captured_login.append(login)
+            return mock_proc
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch.object(ExecTool, "_spawn", side_effect=capture_spawn),
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            tool = ExecTool()
+            await tool.execute(command="echo ok")
+            await tool.execute(command="echo ok", login=True)
+
+        assert captured_login == [False, True]
+
 
 # ---------------------------------------------------------------------------
 # _extract_absolute_paths - UNC path support
