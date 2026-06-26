@@ -86,6 +86,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        microcompact_tool_results: bool = True,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
@@ -96,6 +97,7 @@ class SubagentManager:
         self.model = model or provider.get_default_model()
         self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
+        self.microcompact_tool_results = microcompact_tool_results
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
         self.max_iterations = (
@@ -253,6 +255,7 @@ class SubagentManager:
                     temperature=temperature,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
+                    microcompact_tool_results=self.microcompact_tool_results,
                     hook=_SubagentHook(task_id, status),
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,

@@ -657,6 +657,7 @@ class Consolidator:
         max_completion_tokens: int = 4096,
         consolidation_ratio: float = 0.5,
         unified_session: bool = False,
+        microcompact_tool_results: bool = True,
     ):
         self.store = store
         self.provider = provider
@@ -666,6 +667,7 @@ class Consolidator:
         self.max_completion_tokens = max_completion_tokens
         self.consolidation_ratio = consolidation_ratio
         self.unified_session = unified_session
+        self.microcompact_tool_results = microcompact_tool_results
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
@@ -813,6 +815,10 @@ class Consolidator:
             session_key=session.key,
             unified_session=self.unified_session,
         )
+        if self.microcompact_tool_results:
+            from nanobot.agent.runner import AgentRunner
+
+            probe_messages = AgentRunner._microcompact(probe_messages)
         return estimate_prompt_tokens_chain(
             self.provider,
             self.model,

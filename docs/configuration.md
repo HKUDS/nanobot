@@ -2006,6 +2006,27 @@ Subagents also stop immediately when one of their tools returns an execution err
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
 
+## Tool Result Microcompact
+
+By default, nanobot replaces older large tool results with short placeholders before sending history back to the model. This keeps long sessions cheaper, but it can also change the prompt prefix as tool results age past the compacting boundary. Providers with prompt caching may see fewer cache hits in tool-heavy conversations.
+
+If prompt-cache stability matters more than the extra input tokens, disable tool-result microcompaction:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "microcompactToolResults": false
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.microcompactToolResults` | `true` | Replace older large compactable tool results with one-line placeholders before model calls and token estimates. Set to `false` to preserve those old tool-result bodies for cache-sensitive providers; context-budget snipping and consolidation can still remove history when needed. |
+
+
 ## Auto Compact
 
 When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.

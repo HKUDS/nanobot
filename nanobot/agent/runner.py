@@ -92,6 +92,7 @@ class AgentRunSpec:
     model: str
     max_iterations: int
     max_tool_result_chars: int
+    microcompact_tool_results: bool = True
     temperature: float | None = None
     max_tokens: int | None = None
     reasoning_effort: str | None = None
@@ -376,7 +377,8 @@ class AgentRunner:
                 # later when the caller saves only the new turn.
                 messages_for_model = self._drop_orphan_tool_results(messages)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-                messages_for_model = self._microcompact(messages_for_model)
+                if spec.microcompact_tool_results:
+                    messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
                 messages_for_model = self._snip_history(spec, messages_for_model)
                 # Snipping may have created new orphans; clean them up.

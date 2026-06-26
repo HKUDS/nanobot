@@ -61,6 +61,27 @@ def _tool_round(call_id: str) -> list[dict]:
     ]
 
 
+def _message_text_chars(messages: list[dict]) -> int:
+    total = 0
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    total += len(part.get("text", ""))
+    return total
+
+
+def _counting_provider():
+    provider = MagicMock()
+    provider.estimate_prompt_tokens.side_effect = (
+        lambda messages, _tools, _model: (_message_text_chars(messages), "chars")
+    )
+    return provider
+
+
 class TestConsolidatorSummarize:
     async def test_summarize_appends_to_history(self, consolidator, mock_provider, store):
         """Consolidator should call LLM to summarize, then append to HISTORY.md."""
@@ -871,3 +892,114 @@ class TestArchiveTruncation:
         sent_content = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         token_count = len(enc.encode(sent_content))
         assert token_count <= 9_900
+
+
+def test_estimate_session_prompt_tokens_mirrors_microcompact_when_enabled(tmp_path):
+    """#4222: status/consolidation estimates should match runner compaction."""
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.agent.runner import _MICROCOMPACT_KEEP_RECENT, _MICROCOMPACT_MIN_CHARS
+
+    ctx = ContextBuilder(workspace=tmp_path)
+    store = MemoryStore(tmp_path)
+    sessions = MagicMock()
+    session = Session(key="websocket:cache")
+    session.add_message("user", "inspect files")
+    long_content = "z" * (_MICROCOMPACT_MIN_CHARS + 80)
+    for i in range(_MICROCOMPACT_KEEP_RECENT + 3):
+        session.messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        session.messages.append(
+            {"role": "tool", "tool_call_id": f"c{i}", "name": "read_file", "content": long_content}
+        )
+
+    enabled = Consolidator(
+        store=store,
+        provider=_counting_provider(),
+        model="test-model",
+        sessions=sessions,
+        context_window_tokens=100_000,
+        build_messages=ctx.build_messages,
+        get_tool_definitions=MagicMock(return_value=[]),
+        microcompact_tool_results=True,
+    )
+    disabled = Consolidator(
+        store=store,
+        provider=_counting_provider(),
+        model="test-model",
+        sessions=sessions,
+        context_window_tokens=100_000,
+        build_messages=ctx.build_messages,
+        get_tool_definitions=MagicMock(return_value=[]),
+        microcompact_tool_results=False,
+    )
+
+    enabled_tokens, _ = enabled.estimate_session_prompt_tokens(session)
+    disabled_tokens, _ = disabled.estimate_session_prompt_tokens(session)
+
+    assert enabled_tokens < disabled_tokens
+
+
+def test_estimate_session_prompt_tokens_can_disable_microcompact(tmp_path):
+    """#4222: disabling microcompact leaves old tool results in the token probe."""
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.agent.runner import _MICROCOMPACT_KEEP_RECENT, _MICROCOMPACT_MIN_CHARS
+
+    captured: list[dict] = []
+    provider = MagicMock()
+
+    def estimate_prompt_tokens(messages, _tools, _model):
+        captured[:] = messages
+        return _message_text_chars(messages), "chars"
+
+    provider.estimate_prompt_tokens.side_effect = estimate_prompt_tokens
+    ctx = ContextBuilder(workspace=tmp_path)
+    store = MemoryStore(tmp_path)
+    session = Session(key="websocket:cache")
+    session.add_message("user", "inspect files")
+    long_content = "q" * (_MICROCOMPACT_MIN_CHARS + 80)
+    for i in range(_MICROCOMPACT_KEEP_RECENT + 3):
+        session.messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        session.messages.append(
+            {"role": "tool", "tool_call_id": f"c{i}", "name": "read_file", "content": long_content}
+        )
+
+    consolidator = Consolidator(
+        store=store,
+        provider=provider,
+        model="test-model",
+        sessions=MagicMock(),
+        context_window_tokens=100_000,
+        build_messages=ctx.build_messages,
+        get_tool_definitions=MagicMock(return_value=[]),
+        microcompact_tool_results=False,
+    )
+
+    consolidator.estimate_session_prompt_tokens(session)
+
+    tool_messages = [m for m in captured if m.get("role") == "tool"]
+    assert len(tool_messages) == _MICROCOMPACT_KEEP_RECENT + 3
+    assert all(m.get("content") == long_content for m in tool_messages)
+    assert "omitted from context" not in "\n".join(str(m.get("content")) for m in captured)
