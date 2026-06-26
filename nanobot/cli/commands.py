@@ -6,7 +6,6 @@ import select
 import signal
 import sys
 import tempfile
-import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path

@@ -154,7 +154,7 @@ async def test_agent_loop_run_closes_mcp_from_connection_owner_task(
             closed_tasks.append(asyncio.current_task())
             assert asyncio.current_task() is self.owner
 
-    async def _fake_connect(servers, _registry):
+    async def _fake_connect(servers, _registry, **_kwargs):
         stacks = {name: _OwnerCheckedStack() for name in servers}
         connected.set()
         return stacks

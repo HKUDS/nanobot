@@ -11,6 +11,7 @@ existing file, so ordinary words are never mistaken for attachments.
 
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def _extract(text: str, suffixes: set[str]) -> tuple[str, list[str]]:
     if not stripped:
         return text, []
     try:
-        tokens = shlex.split(stripped, posix=True)
+        tokens = shlex.split(stripped, posix=os.name != "nt")
     except ValueError:
         # Unbalanced quotes (e.g. an apostrophe) — treat as plain text.
         return text, []
@@ -42,6 +43,7 @@ def _extract(text: str, suffixes: set[str]) -> tuple[str, list[str]]:
     matched: list[str] = []
     kept: list[str] = []
     for token in tokens:
+        token = token.strip("\"'")
         if _is_file_with_suffix(token, suffixes):
             matched.append(str(Path(token).expanduser().resolve()))
         else:
