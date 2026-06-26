@@ -709,17 +709,12 @@ class Consolidator:
     @staticmethod
     def _full_unconsolidated_history(
         session: Session,
-        *,
-        include_timestamps: bool = False,
     ) -> list[dict[str, Any]]:
         """Return the whole unconsolidated tail for consolidation decisions."""
         unconsolidated_count = len(session.messages) - session.last_consolidated
         if unconsolidated_count <= 0:
             return []
-        return session.get_history(
-            max_messages=unconsolidated_count,
-            include_timestamps=include_timestamps,
-        )
+        return session.get_history(max_messages=unconsolidated_count)
 
     @staticmethod
     def _replay_overflow_boundary(
@@ -794,7 +789,7 @@ class Consolidator:
         session: Session,
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
-        history = self._full_unconsolidated_history(session, include_timestamps=True)
+        history = self._full_unconsolidated_history(session)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")

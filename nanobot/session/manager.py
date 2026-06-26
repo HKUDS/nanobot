@@ -118,25 +118,6 @@ class Session:
         ):
             self.last_consolidated = 0
 
-    @staticmethod
-    def _annotate_message_time(message: dict[str, Any], content: Any) -> Any:
-        """Expose persisted turn timestamps to the model for relative-date reasoning.
-
-        Annotating *every* assistant turn trains the model (via in-context
-        demonstrations) to start its own replies with the same
-        ``[Message Time: ...]`` prefix, which leaks metadata back to the user.
-        We therefore only annotate user turns. User-side stamps are enough to
-        pin adjacent assistant replies for relative-time reasoning, including
-        proactive messages the user replies to later.
-        """
-        timestamp = message.get("timestamp")
-        if not timestamp or not isinstance(content, str):
-            return content
-        role = message.get("role")
-        if role != "user":
-            return content
-        return f"[Message Time: {timestamp}]\n{content}"
-
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -153,7 +134,6 @@ class Session:
         max_messages: int = 120,
         *,
         max_tokens: int = 0,
-        include_timestamps: bool = False,
         extend_to_user: bool = False,
     ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input.
@@ -243,8 +223,6 @@ class Session:
                 if mcp_lines:
                     breadcrumbs = "\n".join(mcp_lines)
                     content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
-            if include_timestamps:
-                content = self._annotate_message_time(message, content)
             if role == "assistant" and isinstance(content, str) and not content.strip():
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
