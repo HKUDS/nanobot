@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import httpx
@@ -36,6 +38,12 @@ class _FakeBlobResourceContents:
         self.blob = blob
 
 
+class _FakeImageContent:
+    def __init__(self, data: str, mime_type: str = "image/png") -> None:
+        self.data = data
+        self.mimeType = mime_type
+
+
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
     return {"session": None}
@@ -50,6 +58,7 @@ def _fake_mcp_module(
         TextContent=_FakeTextContent,
         TextResourceContents=_FakeTextResourceContents,
         BlobResourceContents=_FakeBlobResourceContents,
+        ImageContent=_FakeImageContent,
     )
 
     class _FakeStdioServerParameters:
@@ -293,6 +302,60 @@ async def test_execute_returns_text_blocks() -> None:
     result = await wrapper.execute(value=1)
 
     assert result == "hello\n42"
+
+
+# Smallest valid 1x1 PNG, base64 without the data: prefix.
+_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+    "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent("here you go"),
+                _FakeImageContent(_PNG_B64, "image/png"),
+            ]
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute(prompt="a cat", model="sdxl")
+
+    payload = json.loads(result)
+    assert payload["text"] == "here you go"
+    assert len(payload["artifacts"]) == 1
+    artifact = payload["artifacts"][0]
+    assert artifact["mime"] == "image/png"
+    assert artifact["prompt"] == "a cat"
+    assert artifact["provider"] == "mcp:test"
+    assert Path(artifact["path"]).is_file()
+    # The base64 payload must NOT leak into the model-facing result.
+    assert _PNG_B64 not in result
+    assert "message tool" in payload["next_step"]
+
+
+@pytest.mark.asyncio
+async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=[_FakeImageContent("not-valid-base64!!", "image/png")])
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool returned an image that could not be stored)"
 
 
 @pytest.mark.asyncio
