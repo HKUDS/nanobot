@@ -197,6 +197,7 @@ class TestBundledToolContract:
         assert "Clarify before action" in content
         assert "Ask one focused question at a time" in content
         assert "Use `options` when the user should choose" in content
+        assert "Call `ask_clarification` by itself" in content
         assert "After `ask_clarification`, stop" in content
         assert "## File and Coding Workflows" in content
         assert "apply_patch" in content

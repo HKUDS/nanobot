@@ -16,6 +16,7 @@ Tool signatures are provided automatically via function calling. This section do
 - Clarify before action: if required details are missing, requirements are ambiguous, multiple valid approaches exist, or risky work needs confirmation, call `ask_clarification` before any other tool.
 - Ask one focused question at a time.
 - Use `options` when the user should choose among known choices.
+- Call `ask_clarification` by itself; do not include other tool calls in the same response.
 - After `ask_clarification`, stop; nanobot will wait for the next user message.
 
 ## Discovery and Reading

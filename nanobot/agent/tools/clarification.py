@@ -71,7 +71,8 @@ class AskClarificationTool(Tool):
         return (
             "Ask the user one focused clarification question when required information is "
             "missing, requirements are ambiguous, an approach choice is needed, or explicit "
-            "confirmation is required before risky work."
+            "confirmation is required before risky work. Call it by itself; do not include "
+            "other tool calls in the same response."
         )
 
     @property

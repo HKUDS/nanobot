@@ -426,6 +426,19 @@ class AgentRunner:
                     await hook.on_stream_end(context, resuming=True)
 
                 clarification = self._find_clarification_call(response.tool_calls)
+                if clarification is not None and len(response.tool_calls) > 1:
+                    cancelled_tool_names = [
+                        tool_call.name
+                        for tool_call in response.tool_calls
+                        if tool_call is not clarification
+                    ]
+                    logger.info(
+                        "ask_clarification cancelled {} same-turn tool call(s) for {}; "
+                        "replanning after user reply: {}",
+                        len(cancelled_tool_names),
+                        spec.session_key or "default",
+                        ", ".join(cancelled_tool_names),
+                    )
                 tool_calls_for_turn = (
                     [clarification] if clarification is not None else response.tool_calls
                 )

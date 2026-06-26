@@ -12,9 +12,16 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 @pytest.mark.asyncio
 async def test_ask_clarification_short_circuits_tool_batch():
+    from loguru import logger
+
     from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.agent.tools.clarification import AskClarificationTool
     from nanobot.agent.tools.registry import ToolRegistry
+
+    checkpoints = []
+
+    async def capture_checkpoint(payload):
+        checkpoints.append(payload)
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -35,13 +42,19 @@ async def test_ask_clarification_short_circuits_tool_batch():
     tools = ToolRegistry()
     tools.register(AskClarificationTool())
 
-    result = await AgentRunner(provider).run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "Deploy the app"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    logs = []
+    sink_id = logger.add(lambda message: logs.append(str(message)), format="{message}", level="INFO")
+    try:
+        result = await AgentRunner(provider).run(AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "Deploy the app"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            checkpoint_callback=capture_checkpoint,
+        ))
+    finally:
+        logger.remove(sink_id)
 
     assert result.final_content == (
         "Which environment should I deploy to?\n\n"
@@ -54,8 +67,19 @@ async def test_ask_clarification_short_circuits_tool_batch():
     assert result.tools_used == ["ask_clarification"]
     assert provider.chat_with_retry.await_count == 1
     assert [msg["role"] for msg in result.messages[-3:]] == ["assistant", "tool", "assistant"]
+    assistant_tool_calls = result.messages[-3]["tool_calls"]
+    assert [tc["function"]["name"] for tc in assistant_tool_calls] == ["ask_clarification"]
     assert result.messages[-2]["name"] == "ask_clarification"
     assert result.messages[-1]["content"] == result.final_content
+    awaiting_tools = next(payload for payload in checkpoints if payload["phase"] == "awaiting_tools")
+    pending_names = [
+        tc["function"]["name"] for tc in awaiting_tools["pending_tool_calls"]
+    ]
+    assert pending_names == ["ask_clarification"]
+    assert any(
+        "ask_clarification cancelled 1 same-turn tool call(s)" in entry and "exec" in entry
+        for entry in logs
+    )
 
 
 @pytest.mark.asyncio
@@ -148,6 +172,7 @@ async def test_ask_clarification_tool_formats_question_options():
     tool = AskClarificationTool()
 
     assert tool.name == "ask_clarification"
+    assert "Call it by itself" in tool.description
     assert tool.parameters["required"] == ["question"]
     assert tool.parameters["properties"]["clarification_type"]["enum"] == [
         "missing_info",
