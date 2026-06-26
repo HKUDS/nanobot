@@ -503,7 +503,23 @@ class MemoryStore:
         template = render_template(
             "agent/dream.md", strip=True, skill_creator_path=skill_creator_path,
         )
-        prompt = f"{template}\n\n## Conversation History\n{history_text}"
+
+        # Inject existing workspace skills so Dream can match before creating.
+        # Only workspace skills (not builtins) to keep the list focused on
+        # user-authored skills that Dream might duplicate.
+        from nanobot.agent.skills import SkillsLoader
+        loader = SkillsLoader(self.workspace)
+        workspace_skills = loader.list_skills(filter_unavailable=False)
+        workspace_skills = [s for s in workspace_skills if s.get("source") == "workspace"]
+        skills_section = ""
+        if workspace_skills:
+            lines = []
+            for entry in workspace_skills:
+                desc = loader._get_skill_description(entry["name"])
+                lines.append(f"- **{entry['name']}** — {desc}")
+            skills_section = "\n\n## Existing Workspace Skills\n" + "\n".join(lines)
+
+        prompt = f"{template}{skills_section}\n\n## Conversation History\n{history_text}"
         return (prompt, batch[-1]["cursor"])
 
     def build_dream_tools(self):

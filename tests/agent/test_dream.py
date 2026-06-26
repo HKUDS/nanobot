@@ -569,3 +569,50 @@ class TestDreamCommitMessage:
         ).strip()
         assert "dream: periodic memory consolidation" in log
         assert "Identified 2 new facts" in log
+
+
+class TestDreamSkillsSummary:
+    """Tests for workspace skills summary injection into Dream prompt."""
+
+    def test_prompt_includes_workspace_skills_summary(self, store, tmp_path):
+        """Existing workspace skills should appear in the Dream prompt."""
+        # Create a workspace skill
+        skill_dir = tmp_path / "skills" / "my-workflow"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my-workflow\ndescription: Deploy to production.\n---\n\nSteps:\n1. Build\n2. Deploy\n",
+            encoding="utf-8",
+        )
+
+        store.append_history("I always deploy with ./deploy.sh")
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+        assert "## Existing Workspace Skills" in prompt
+        assert "my-workflow" in prompt
+        assert "Deploy to production" in prompt
+
+    def test_prompt_omits_skills_section_when_no_skills(self, store):
+        """When no workspace skills exist, the section should not appear."""
+        store.append_history("hello world")
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+        assert "## Existing Workspace Skills" not in prompt
+
+    def test_prompt_includes_multiple_skills(self, store, tmp_path):
+        """Multiple workspace skills should all appear in the summary."""
+        for name, desc in [("deploy", "Deploy skill"), ("test", "Test skill")]:
+            skill_dir = tmp_path / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: {desc}\n---\n\nContent.\n",
+                encoding="utf-8",
+            )
+
+        store.append_history("reviewing my workflows")
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+        assert "deploy" in prompt
+        assert "test" in prompt
