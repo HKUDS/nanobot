@@ -89,7 +89,7 @@ class _PreparedCommand:
             maximum=600,
         ),
         shell=StringSchema(
-            "Optional shell binary to launch. On Unix, supports sh, bash, or zsh.",
+            "Optional shell binary to launch. Unix: sh, bash, zsh. Windows: powershell, pwsh, cmd.",
             nullable=True,
         ),
         login=BooleanSchema(
@@ -467,17 +467,23 @@ class ExecTool(Tool):
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
-            if "\n" in command:
-                return await asyncio.create_subprocess_exec(
-                    "powershell", "-NoProfile", "-Command", command,
+            # Default to PowerShell so single-line and multi-line commands
+            # share the same shell semantics.  cmd.exe is reachable via the
+            # explicit shell="cmd" parameter (see _resolve_shell).
+            default_program = shutil.which("powershell") or "powershell"
+            program = shell_program or default_program
+            program_name = Path(program).name.lower()
+            if program_name in ("cmd", "cmd.exe"):
+                return await asyncio.create_subprocess_shell(
+                    command,
                     stdin=stdin,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
                     env=env,
                 )
-            return await asyncio.create_subprocess_shell(
-                command,
+            return await asyncio.create_subprocess_exec(
+                program, "-NoProfile", "-Command", command,
                 stdin=stdin,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -503,10 +509,33 @@ class ExecTool(Tool):
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:
         if not shell:
             return None, None
-        if _IS_WINDOWS:
-            return None, "Error: shell parameter is not supported on Windows"
         if "\0" in shell or "\n" in shell or "\r" in shell:
             return None, "Error: shell contains invalid characters"
+        if _IS_WINDOWS:
+            win_allowed = {"powershell", "pwsh", "cmd", "cmd.exe"}
+            path = Path(shell).expanduser()
+            if path.is_absolute():
+                name = path.name.lower()
+                if name not in win_allowed:
+                    return None, (
+                        f"Error: unsupported shell {shell!r}. "
+                        "Allowed: powershell, pwsh, cmd"
+                    )
+                if not path.is_file():
+                    return None, f"Error: shell is not found: {shell}"
+                return str(path), None
+            if "/" in shell or "\\" in shell:
+                return None, "Error: shell must be a shell name or absolute path"
+            if shell.lower() not in win_allowed:
+                return None, (
+                    f"Error: unsupported shell {shell!r}. "
+                    "Allowed: powershell, pwsh, cmd"
+                )
+            if shell.lower() in ("cmd", "cmd.exe"):
+                resolved = os.environ.get("COMSPEC") or shutil.which("cmd") or "cmd"
+                return resolved, None
+            resolved = shutil.which(shell) or shell
+            return resolved, None
         allowed = {"sh", "bash", "zsh"}
         path = Path(shell).expanduser()
         if path.is_absolute():
