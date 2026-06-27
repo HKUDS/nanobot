@@ -17,6 +17,13 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.agent.verification_state import (
+    VerificationAnalysis,
+    analyze_verification_result,
+    append_verification_feedback,
+    record_verification_observation,
+)
+from nanobot.utils.helpers import build_structured_output_summary
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -37,6 +44,7 @@ class _SessionPoll:
     terminated: bool = False
     stdin_closed: bool = False
     truncated_chars: int = 0
+    analysis: VerificationAnalysis | None = None
 
 
 @dataclass(slots=True)
@@ -147,7 +155,19 @@ class _ExecSession:
             output = "".join(self._chunks)
             self._chunks.clear()
 
-        output, truncated = _truncate_output(output, max_output_chars)
+        analysis = analyze_verification_result(
+            command=self.command,
+            output=output,
+            exit_code=self.process.returncode,
+            timed_out=self._timed_out,
+        )
+        output, truncated = _truncate_output(
+            output,
+            max_output_chars,
+            analysis=analysis,
+            exit_code=self.process.returncode,
+            elapsed_s=max(0.0, time.monotonic() - self.started_at),
+        )
         return _SessionPoll(
             output=output,
             done=self.process.returncode is not None,
@@ -157,6 +177,7 @@ class _ExecSession:
             terminated=terminated,
             stdin_closed=stdin_closed,
             truncated_chars=truncated,
+            analysis=analysis,
         )
 
     async def kill(self) -> None:
@@ -320,15 +341,33 @@ def clamp_session_int(value: int | None, default: int, minimum: int, maximum: in
     return min(max(value, minimum), maximum)
 
 
-def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
+def _truncate_output(
+    output: str,
+    max_output_chars: int,
+    *,
+    analysis: VerificationAnalysis | None = None,
+    exit_code: int | None = None,
+    elapsed_s: float | None = None,
+) -> tuple[str, int]:
     if len(output) <= max_output_chars:
         return output, 0
-    half = max_output_chars // 2
     omitted = len(output) - max_output_chars
     return (
-        output[:half]
-        + f"\n\n... ({omitted:,} chars truncated) ...\n\n"
-        + output[-half:],
+        build_structured_output_summary(
+            "[tool output truncated]",
+            output,
+            max_chars=max_output_chars,
+            metadata=[
+                ("original_size_chars", len(output)),
+                ("exit_code", exit_code if exit_code is not None else "running"),
+                ("elapsed_s", f"{elapsed_s:.1f}" if elapsed_s is not None else "unknown"),
+            ],
+            analysis=analysis,
+            guidance=(
+                "Use the structured summary first. Poll again for new output "
+                "or rerun a narrower command instead of reading broad logs."
+            ),
+        ),
         omitted,
     )
 
@@ -349,6 +388,20 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
         parts.append(f"Process running. session_id: {session_id}")
     parts.append(f"Elapsed: {poll.elapsed_s:.1f}s")
     return "\n".join(parts) if parts else "(no output yet)"
+
+
+def _format_poll_with_verification(session_id: str, poll: _SessionPoll) -> str:
+    result = format_session_poll(session_id, poll)
+    if not poll.done:
+        return result
+    analysis = poll.analysis or analyze_verification_result(
+        command="",
+        output=result,
+        exit_code=poll.exit_code,
+        timed_out=poll.timed_out,
+    )
+    record_verification_observation(current_request_session_key(), analysis)
+    return append_verification_feedback(result, analysis)
 
 
 @tool_parameters(
@@ -492,7 +545,7 @@ class WriteStdinTool(Tool):
                 max_output_chars=output_limit,
                 owner_session_key=current_request_session_key(),
             )
-            return format_session_poll(session_id, poll)
+            return _format_poll_with_verification(session_id, poll)
         except KeyError:
             return f"Error: exec session not found: {session_id}"
         except Exception as exc:
@@ -532,10 +585,10 @@ class WriteStdinTool(Tool):
                 joined = "".join(aggregate)
                 if wait_for in joined:
                     poll.output = joined
-                    return format_session_poll(session_id, poll)
+                    return _format_poll_with_verification(session_id, poll)
             if poll.done or remaining_ms <= 0:
                 poll.output = "".join(aggregate)
-                result = format_session_poll(session_id, poll)
+                result = _format_poll_with_verification(session_id, poll)
                 if wait_for not in poll.output:
                     result += f"\nWait target not observed: {wait_for!r}"
                 return result

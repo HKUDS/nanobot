@@ -660,10 +660,12 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
     else:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
     result = await tool.execute(command=command)
+    assert "[tool output truncated]" in result
     assert "chars truncated" in result
-    # Head portion should start with As
-    assert result.startswith("A")
-    # Tail portion should end with the exit code which comes after Bs
+    assert "head:" in result
+    assert "tail:" in result
+    assert "A" * 80 in result
+    assert "B" * 80 in result
     assert "Exit code:" in result
 
 

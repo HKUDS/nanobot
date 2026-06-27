@@ -26,7 +26,7 @@ Those belong to the execution phase after the marker is set.
 
 - **`long_task`** — Register **one** sustained objective per thread. Call it promptly once the user has asked for a sustained task. The `goal` should follow the idempotent-goal rules below, but it should be produced quickly from the user's request—not after a long hidden planning pass.
 
-- **`complete_goal`** — Close bookkeeping for the **current** active goal. Call when work is **done**, **and also** when the user **cancels**, **changes direction**, or **replaces** the objective: use **`recap`** to state honestly what happened (e.g. cancelled, partially done, superseded). Then you may call **`long_task`** again for a **new** objective after the session shows no active goal (or after the user agrees to replace).
+- **`complete_goal`** — Close bookkeeping for the **current** active goal. Call when work is **done**, **and also** when the user **cancels**, **changes direction**, or **replaces** the objective: use **`recap`** to state honestly what happened (e.g. cancelled, partially done, superseded). For coding or file-producing tasks, include **`verification_summary`**, **`commands_run`**, and **`artifacts_created`** when possible; if stopping with known unresolved issues, fill **`remaining_failures`** honestly. Then you may call **`long_task`** again for a **new** objective after the session shows no active goal (or after the user agrees to replace).
 
 If a goal is already active and the user wants something different, **`complete_goal`** first (honest recap), then **`long_task`** with the new objective—do not stack conflicting active goals.
 
@@ -68,7 +68,7 @@ Use this when the goal is to **build or reshape a codebase** (app, service, tool
 
 1. **Modular layout** — Split into **meaningful modules** (directories + files with clear responsibilities: entrypoints, domain logic, config, infra, CLI/UI routes, etc.). **Do not** default to dumping an entire project into one giant source file unless the user explicitly wants a minimal single-file artifact.
 2. **Conventional structure** — Follow normal practice for that stack (separation of concerns, sensible naming, config vs code, reusable helpers). Aim for reviewable increments, not unreadable blobs.
-3. **Verify as you go** — Run/format/lint/tests the project affords after meaningful chunks so the tree stays truthful; bake **checks or manual steps into the goal** when they matter.
+3. **Verify as you go** — Run/format/lint/tests the project affords after meaningful chunks so the tree stays truthful; bake **checks or manual steps into the goal** when they matter. Before `complete_goal`, run the smallest reliable verification you can and summarize it in `verification_summary`.
 
 ## Look things up instead of guessing
 

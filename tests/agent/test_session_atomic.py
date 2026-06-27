@@ -1,6 +1,7 @@
 """Tests for atomic session save and corrupt-file repair."""
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +36,17 @@ class TestAtomicSave:
 
         tmp_files = list(mgr.sessions_dir.glob("*.tmp"))
         assert tmp_files == []
+
+    def test_save_recreates_deleted_sessions_dir(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        shutil.rmtree(mgr.sessions_dir)
+
+        session = Session(key="test:recreate")
+        session.add_message("user", "hello")
+        mgr.save(session)
+
+        path = mgr._get_session_path("test:recreate")
+        assert path.exists()
 
     def test_tmp_file_cleaned_up_on_write_failure(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)

@@ -104,6 +104,48 @@ def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
     assert "Exit code: 0" in result
 
 
+def test_exec_long_output_summary_includes_failure_signals(tmp_path):
+    async def run() -> str:
+        tool = ExecTool(working_dir=str(tmp_path), timeout=5)
+        command = _python_command(
+            "print('A' * 3000); "
+            "print('FAILED ../tests/test_outputs.py::test_artifact - AssertionError: missing output'); "
+            "print(\"FileNotFoundError: [Errno 2] No such file or directory: '/app/out.txt'\"); "
+            "print('B' * 3000); "
+            "raise SystemExit(1)"
+        )
+        return await tool.execute(command=command, max_output_tokens=2500)
+
+    result = asyncio.run(run())
+
+    assert "[tool output truncated]" in result
+    assert "chars truncated" in result
+    assert "failed_tests:" in result
+    assert "../tests/test_outputs.py::test_artifact" in result
+    assert "missing_artifacts:" in result
+    assert "/app/out.txt" in result
+    assert "head:" in result
+    assert "tail:" in result
+    assert "[Verification Feedback]" in result
+
+
+def test_exec_adds_verification_feedback_for_test_failures(tmp_path):
+    async def run() -> str:
+        tool = ExecTool(working_dir=str(tmp_path), timeout=5)
+        command = _python_command(
+            "print('FAILED test_outputs.py::test_answer - AssertionError: wrong'); "
+            "print('AssertionError: wrong'); raise SystemExit(1)"
+        )
+        return await tool.execute(command=command)
+
+    result = asyncio.run(run())
+
+    assert "Exit code: 1" in result
+    assert "[Verification Feedback]" in result
+    assert "Do not call complete_goal" in result
+    assert "test_outputs.py::test_answer" in result
+
+
 def test_exec_accepts_supported_shell_parameter(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir=str(tmp_path), timeout=5)
@@ -233,6 +275,35 @@ def test_write_stdin_accepts_max_output_tokens_alias(tmp_path):
     assert "Process running" in initial
     assert "chars truncated" in poll
     assert "Session terminated." in cleanup
+
+
+def test_write_stdin_long_output_summary_includes_failure_signals(tmp_path):
+    async def run() -> str:
+        manager = ExecSessionManager()
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        command = _python_command(
+            "print('A' * 3000); "
+            "print('FAILED test_outputs.py::test_file - AssertionError: bad'); "
+            "print(\"FileNotFoundError: [Errno 2] No such file or directory: '/app/missing.txt'\"); "
+            "print('B' * 3000); "
+            "raise SystemExit(1)"
+        )
+        return await exec_tool.execute(
+            command=command,
+            yield_time_ms=1000,
+            max_output_tokens=2500,
+        )
+
+    result = asyncio.run(run())
+
+    assert "[tool output truncated]" in result
+    assert "chars truncated" in result
+    assert "failed_tests:" in result
+    assert "test_outputs.py::test_file" in result
+    assert "missing_artifacts:" in result
+    assert "/app/missing.txt" in result
+    assert "Exit code: 1" in result
+    assert "[Verification Feedback]" in result
 
 
 def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
