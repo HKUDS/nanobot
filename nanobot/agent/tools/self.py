@@ -322,10 +322,10 @@ class MyTool(Tool, ContextAware):
     ) -> str:
         if action in ("inspect", "check"):
             return self._inspect(key)
-        if action == "escalate_reasoning":
-            return self._escalate_reasoning()
         if not self._modify_allowed:
             return "Error: set is disabled (tools.my.allow_set is false)"
+        if action == "escalate_reasoning":
+            return self._escalate_reasoning()
         if action in ("modify", "set"):
             return self._modify(key, value)
         return f"Unknown action: {action}"

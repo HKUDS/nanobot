@@ -144,7 +144,7 @@ class AgentRunner:
         Returns True if escalation was activated (i.e. an escalated level is configured).
         """
         self._escalated_reasoning = True
-        return True
+        return self._spec is not None and bool(self._spec.reasoning_effort_escalated)
 
     def _effective_reasoning_effort(self, spec: AgentRunSpec) -> str | None:
         if self._escalated_reasoning and spec.reasoning_effort_escalated:
@@ -316,6 +316,7 @@ class AgentRunner:
         return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        self._spec = spec
         self._escalated_reasoning = False
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)

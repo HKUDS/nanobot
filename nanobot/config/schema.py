@@ -419,6 +419,7 @@ class Config(BaseSettings):
             model=d.model, provider=d.provider, max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
             temperature=d.temperature, reasoning_effort=d.reasoning_effort,
+            reasoning_effort_escalated=d.reasoning_effort_escalated,
         )
 
     def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:
