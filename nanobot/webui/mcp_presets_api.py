@@ -1104,6 +1104,13 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
             tool_timeout = max(5, min(int(raw_timeout), 600))
         except ValueError as exc:
             raise McpPresetError("tool_timeout must be an integer") from exc
+    raw_idle = (_query_first(query, "idle_timeout") or "").strip()
+    idle_timeout = 0
+    if raw_idle:
+        try:
+            idle_timeout = max(0, min(int(raw_idle), 86400))
+        except ValueError as exc:
+            raise McpPresetError("idle_timeout must be an integer") from exc
     cfg = MCPServerConfig(
         type=transport,
         command=command if transport == "stdio" else "",
@@ -1113,6 +1120,7 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
         url=url if transport in {"sse", "streamableHttp"} else "",
         headers=_parse_string_map(_query_first(query, "headers")),
         tool_timeout=tool_timeout,
+        idle_timeout=idle_timeout,
         enabled_tools=_parse_enabled_tools(_query_first(query, "enabled_tools")),
     )
     return name, cfg
@@ -1140,6 +1148,11 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         timeout_int = max(5, min(int(tool_timeout), 600))
     except (TypeError, ValueError):
         timeout_int = _DEFAULT_CUSTOM_TIMEOUT
+    idle_timeout = raw.get("idleTimeout", raw.get("idle_timeout", 0))
+    try:
+        idle_timeout_int = max(0, min(int(idle_timeout), 86400))
+    except (TypeError, ValueError):
+        idle_timeout_int = 0
     if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
         raise McpPresetError(f"MCP server '{server_name}' args must be a string array")
     if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
@@ -1157,6 +1170,7 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         url=url if transport in {"sse", "streamableHttp"} else "",
         headers=dict(headers),
         tool_timeout=timeout_int,
+        idle_timeout=idle_timeout_int,
         enabled_tools=list(enabled_tools),
     )
 
