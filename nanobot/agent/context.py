@@ -1,6 +1,7 @@
 """Context builder for assembling agent prompts."""
 
 import base64
+import io
 import mimetypes
 import platform
 from pathlib import Path
@@ -20,6 +21,8 @@ from nanobot.utils.helpers import (
     truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
+
+_MAX_IMAGE_DIMENSION = 1024
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -268,6 +271,10 @@ class ContextBuilder:
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
+            resized = self._resize_image_if_needed(raw)
+            if resized is not raw:
+                raw = resized
+                mime = "image/jpeg"
             b64 = base64.b64encode(raw).decode()
             images.append({
                 "type": "image_url",
@@ -278,3 +285,25 @@ class ContextBuilder:
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
+
+    @staticmethod
+    def _resize_image_if_needed(raw: bytes) -> bytes:
+        try:
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(raw))
+            w, h = img.size
+            if w <= _MAX_IMAGE_DIMENSION and h <= _MAX_IMAGE_DIMENSION:
+                return raw
+            if w >= h:
+                new_w = _MAX_IMAGE_DIMENSION
+                new_h = int(h * _MAX_IMAGE_DIMENSION / w)
+            else:
+                new_h = _MAX_IMAGE_DIMENSION
+                new_w = int(w * _MAX_IMAGE_DIMENSION / h)
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
+        except ImportError:
+            return raw
