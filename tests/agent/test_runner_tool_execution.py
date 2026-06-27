@@ -126,6 +126,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
         ],
         {},
         {},
+        {},
     )
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
@@ -167,6 +168,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
             ToolCallRequest(id="ddg1", name="ddg_like", arguments={}),
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
         ],
+        {},
         {},
         {},
     )
@@ -358,3 +360,84 @@ async def test_runner_blocks_repeated_external_fetches():
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
     assert "repeated external lookup blocked" in blocked_tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_allows_repeated_successful_interleaved_calls():
+    provider = MagicMock()
+    call_count = {"n": 0}
+    captured_messages = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n == 1:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(id=f"c{n}", name="read_file", arguments={"path": "x"})], usage={})
+        elif n == 2:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(id=f"c{n}", name="edit", arguments={"path": "x", "content": "1"})], usage={})
+        elif n == 3:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(id=f"c{n}", name="read_file", arguments={"path": "x"})], usage={})
+        elif n == 4:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(id=f"c{n}", name="edit", arguments={"path": "x", "content": "2"})], usage={})
+        elif n == 5:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(id=f"c{n}", name="read_file", arguments={"path": "x"})], usage={})
+        else:
+            captured_messages[:] = messages
+            return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do edit"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=6,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert tools.execute.await_count == 5
+    for msg in result.messages:
+        if msg.get("role") == "tool":
+            assert "repeated identical tool call blocked" not in str(msg.get("content"))
+
+
+@pytest.mark.asyncio
+async def test_runner_blocks_repeated_failing_calls():
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n <= 3:
+            return LLMResponse(content="", tool_calls=[ToolCallRequest(id=f"c{n}", name="read_file", arguments={"path": "fail.txt"})], usage={})
+        else:
+            return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(side_effect=Exception("not found"))
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert tools.execute.await_count == 2
+    
+    blocked_tool_message = [
+        msg for msg in result.messages
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "c3"
+    ][0]
+    assert "repeated identical tool call blocked" in blocked_tool_message["content"]
