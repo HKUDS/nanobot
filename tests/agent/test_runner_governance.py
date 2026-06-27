@@ -695,3 +695,107 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
         assert non_system[0]["role"] in ("user", "tool"), (
             f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Malformed tool_call name guard (missing/non-string name wedges the session
+# upstream: messages.content.N.tool_use.name: Input should be a valid string)
+# ---------------------------------------------------------------------------
+
+
+def test_drop_malformed_tool_calls_trims_response():
+    """LLM response tool_calls with a missing/empty name are dropped in place."""
+    from nanobot.agent.runner import AgentRunner
+
+    response = LLMResponse(
+        content=None,
+        tool_calls=[
+            ToolCallRequest(id="1", name=None, arguments={}),
+            ToolCallRequest(id="2", name="", arguments={}),
+            ToolCallRequest(id="3", name="read_file", arguments={}),
+        ],
+        finish_reason="tool_calls",
+    )
+    AgentRunner._drop_malformed_tool_calls(response)
+    assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.finish_reason == "tool_calls"
+    assert response.should_execute_tools is True
+
+
+def test_drop_malformed_tool_calls_all_bad_disables_execution():
+    """If every tool call is malformed, execution is disabled (no empty exec)."""
+    from nanobot.agent.runner import AgentRunner
+
+    response = LLMResponse(
+        content="some text",
+        tool_calls=[ToolCallRequest(id="1", name=None, arguments={})],
+        finish_reason="tool_calls",
+    )
+    AgentRunner._drop_malformed_tool_calls(response)
+    assert response.tool_calls == []
+    assert response.finish_reason == "stop"
+    assert response.should_execute_tools is False
+
+
+def test_strip_malformed_tool_calls_keeps_valid_calls_in_history():
+    """A mixed assistant turn keeps only its valid tool_calls."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "bad", "type": "function", "function": {"name": None, "arguments": "{}"}},
+                {"id": "ok", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
+    ]
+    result = AgentRunner._strip_malformed_tool_calls(messages)
+    assert result is not messages  # copied, original untouched
+    assert len(messages[1]["tool_calls"]) == 2  # original preserved
+    kept = result[1]["tool_calls"]
+    assert [tc["function"]["name"] for tc in kept] == ["exec"]
+
+
+def test_strip_malformed_tool_calls_drops_empty_assistant_turn():
+    """An assistant turn that is only a malformed call is removed entirely;
+    the existing orphan-result cleanup then drops its dangling tool result,
+    so a polluted session self-heals."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "bad", "type": "function", "function": {"name": None, "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "bad", "name": "", "content": "r"},
+    ]
+    stripped = AgentRunner._strip_malformed_tool_calls(messages)
+    assert [m["role"] for m in stripped] == ["user", "tool"]
+    healed = AgentRunner._drop_orphan_tool_results(stripped)
+    assert [m["role"] for m in healed] == ["user"]
+
+
+def test_strip_malformed_tool_calls_noop_when_clean():
+    """Clean history is returned unchanged (same object)."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "ok", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
+    ]
+    assert AgentRunner._strip_malformed_tool_calls(messages) is messages
