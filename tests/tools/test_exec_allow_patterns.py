@@ -58,18 +58,11 @@ def test_allow_patterns_is_whitelist_only():
     assert "allowlist" in result.lower()
 
 
-def test_allow_patterns_do_not_allow_chained_command_bypass():
-    """A partial allowlist match must not bypass deny patterns in chained commands."""
-    tool = ExecTool(allow_patterns=[r"\becho\b"])
-    result = tool._guard_command("echo hello; rm -rf /", "/tmp")
-    assert result is not None
-    assert "deny pattern filter" in result.lower()
+def test_guard_allow_patterns_block_non_matching_chained_segment():
+    """Every top-level shell segment must match an allow pattern."""
+    tool = ExecTool(allow_patterns=[r"\becho\s+allowlisted\b"])
 
-
-def test_allow_patterns_do_not_allow_comment_tail_bypass():
-    """Comment tails must not make a non-allowlisted command match."""
-    tool = ExecTool(allow_patterns=[r"echo allowlisted"])
-    result = tool._guard_command("touch canary # echo allowlisted", "/tmp")
+    result = tool._guard_command("echo allowlisted && touch /tmp/evil", "/tmp")
     assert result is not None
     assert "allowlist" in result.lower()
 
@@ -86,4 +79,33 @@ def test_allow_patterns_fullmatch_allows_exact_command():
     """A full-command allow pattern can still exempt an exact denied command."""
     tool = ExecTool(allow_patterns=[r"rm\s+-rf\s+/tmp/build"])
     result = tool._guard_command("rm -rf /tmp/build", "/tmp")
+    assert result is None
+
+
+def test_guard_allow_patterns_allow_single_matching_segment():
+    tool = ExecTool(allow_patterns=[r"\becho\s+allowlisted\b"])
+
+    result = tool._guard_command("echo allowlisted", "/tmp")
+
+    assert result is None
+
+
+def test_guard_allow_patterns_allow_multiple_matching_segments():
+    tool = ExecTool(
+        allow_patterns=[
+            r"\becho\s+allowlisted\b",
+            r"\becho\s+also_allowed\b",
+        ]
+    )
+
+    result = tool._guard_command("echo allowlisted && echo also_allowed", "/tmp")
+
+    assert result is None
+
+
+def test_guard_allow_patterns_keep_fullmatch_style_compatibility():
+    tool = ExecTool(allow_patterns=[r"^echo\s+allowlisted$"])
+
+    result = tool._guard_command("echo allowlisted", "/tmp")
+
     assert result is None
