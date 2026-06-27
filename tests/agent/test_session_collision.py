@@ -93,6 +93,31 @@ def test_load_migrates_lossy_to_new_path(tmp_path: Path, monkeypatch) -> None:
     assert not lossy_path.exists()
 
 
+def test_load_does_not_migrate_lossy_path_for_different_stored_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    sm = _manager(tmp_path, monkeypatch)
+    first_key = "telegram:a_b"
+    second_key = "telegram:a:b"
+    lossy_path = sm._get_legacy_lossy_path(first_key)
+    assert lossy_path == sm._get_legacy_lossy_path(second_key)
+    _write_session_file(lossy_path, first_key, "belongs to first")
+
+    loaded_second = sm._load(second_key)
+
+    assert loaded_second is None
+    assert lossy_path.exists()
+    assert not sm._get_session_path(second_key).exists()
+
+    loaded_first = sm._load(first_key)
+
+    assert loaded_first is not None
+    assert loaded_first.messages[0]["content"] == "belongs to first"
+    assert sm._get_session_path(first_key).exists()
+    assert not lossy_path.exists()
+
+
 def test_safe_key_is_lossy() -> None:
     assert SessionManager.safe_key("telegram:a_b") == SessionManager.safe_key("telegram:a:b")
 

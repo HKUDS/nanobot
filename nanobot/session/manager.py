@@ -455,6 +455,24 @@ class SessionManager:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
+    @staticmethod
+    def _stored_key_for_path(path: Path) -> str | None:
+        """Read the stored session key from a JSONL metadata row, if present."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("_type") == "metadata":
+                        stored_key = data.get("key")
+                        return stored_key if isinstance(stored_key, str) else None
+                    return None
+        except Exception:
+            return None
+        return None
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
@@ -485,6 +503,15 @@ class SessionManager:
             ]
             for fallback_path, description in fallback_paths:
                 if not fallback_path.exists():
+                    continue
+                stored_key = self._stored_key_for_path(fallback_path)
+                if stored_key and stored_key != key:
+                    logger.info(
+                        "Skipping migration for {} from {} because it belongs to {}",
+                        key,
+                        description,
+                        stored_key,
+                    )
                     continue
                 try:
                     shutil.move(str(fallback_path), str(path))
