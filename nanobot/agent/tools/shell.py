@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import sys
 from contextlib import suppress
@@ -638,6 +639,10 @@ class ExecTool(Tool):
                 else None
             )
 
+            relative_escape = self._relative_path_escape_error(cmd, cwd_path)
+            if relative_escape:
+                return relative_escape
+
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
@@ -666,6 +671,71 @@ class ExecTool(Tool):
                         + _WORKSPACE_BOUNDARY_NOTE
                     )
 
+        return None
+
+    @classmethod
+    def _relative_path_escape_error(cls, command: str, cwd_path: Path) -> str | None:
+        """Block existing relative path operands that resolve outside the workspace."""
+        try:
+            lexer = shlex.shlex(command, posix=not _IS_WINDOWS, punctuation_chars=True)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return None
+
+        media_path = get_media_dir().resolve()
+        for idx, token in enumerate(tokens):
+            if (
+                token.isdigit()
+                and idx + 1 < len(tokens)
+                and tokens[idx + 1].startswith((">", "<"))
+            ):
+                continue
+            if idx > 0 and tokens[idx - 1] in {"<<", "<<<"}:
+                continue
+            relative_path = cls._relative_path_token(token, idx)
+            if relative_path is None:
+                continue
+            try:
+                candidate = (cwd_path / os.path.expandvars(relative_path)).expanduser()
+                if not candidate.exists() and not candidate.is_symlink():
+                    continue
+                resolved = candidate.resolve()
+            except Exception:
+                continue
+            if not (is_path_within(resolved, cwd_path) or is_path_within(resolved, media_path)):
+                return (
+                    "Error: Command blocked by safety guard (path outside working dir)"
+                    + _WORKSPACE_BOUNDARY_NOTE
+                )
+        return None
+
+    @staticmethod
+    def _relative_path_token(token: str, index: int) -> str | None:
+        if not token or "\0" in token:
+            return None
+        if token in {"&&", "||", ";", "|", "(", ")", "{", "}"}:
+            return None
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", token):
+            return None
+        if token.startswith("-"):
+            return None
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", token):
+            return None
+
+        redirect = re.match(r"^(?:\d*)?(?:>>?|<<?|<>|>\||&>)(.+)$", token)
+        if redirect:
+            token = redirect.group(1)
+            if not token or token.startswith("&"):
+                return None
+        elif token.startswith((">", "<")) or re.match(r"^\d+[<>]", token):
+            return None
+
+        path = Path(os.path.expandvars(token)).expanduser()
+        if path.is_absolute():
+            return None
+        if index > 0 or token.startswith((".", "~")) or "/" in token or "\\" in token:
+            return token
         return None
 
     @classmethod
