@@ -606,6 +606,15 @@ export function SettingsView({
     setActiveSection(initialSection);
   }, [initialSection]);
 
+  // Redirect to overview if the active section is hidden by config.
+  useEffect(() => {
+    const hidden = settings?.webui?.hidden_settings_sections;
+    if (hidden?.includes(activeSection) && activeSection !== "overview") {
+      setActiveSection("overview");
+      onSectionChange?.("overview");
+    }
+  }, [activeSection, settings?.webui?.hidden_settings_sections, onSectionChange]);
+
   const selectSection = useCallback(
     (section: SettingsSectionKey) => {
       setActiveSection(section);
@@ -1481,6 +1490,7 @@ export function SettingsView({
             requiresRestart={hasPendingRestart}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
+            hiddenSections={settings.webui?.hidden_settings_sections}
           />
         );
       case "appearance":
@@ -1717,6 +1727,7 @@ export function SettingsView({
           onBackToChat={onBackToChat}
           onLogout={onLogout}
           hostChromeInset={hostChromeInset}
+          hiddenSections={settings?.webui?.hidden_settings_sections}
         />
       ) : null}
 
@@ -1829,12 +1840,14 @@ function SettingsSidebar({
   onBackToChat,
   onLogout,
   hostChromeInset,
+  hiddenSections,
 }: {
   activeSection: SettingsSectionKey;
   onSelectSection: (section: SettingsSectionKey) => void;
   onBackToChat: () => void;
   onLogout?: () => void;
   hostChromeInset?: boolean;
+  hiddenSections?: string[];
 }) {
   const { t } = useTranslation();
   return (
@@ -1862,7 +1875,9 @@ function SettingsSidebar({
         aria-label={t("settings.sidebar.ariaLabel")}
         className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0"
       >
-        {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
+        {SETTINGS_NAV_ITEMS.filter(
+          ({ key }) => key === "overview" || !hiddenSections?.includes(key),
+        ).map(({ key, icon: Icon, fallback }) => {
           const active = key === activeSection;
           return (
             <button
@@ -1906,12 +1921,16 @@ function OverviewSettings({
   requiresRestart,
   onSelectSection,
   showBrandLogos,
+  hiddenSections,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
+  hiddenSections?: string[];
 }) {
+  const isSectionVisible = (key: SettingsSectionKey) =>
+    !hiddenSections?.includes(key);
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const activePreset = settings.agent.model_preset || "default";
@@ -1987,6 +2006,7 @@ function OverviewSettings({
         <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
+      {isSectionVisible("models") ? (
       <section>
         <SettingsSectionTitle>{tx("settings.sections.ai", "AI")}</SettingsSectionTitle>
         <SettingsGroup>
@@ -2001,10 +2021,13 @@ function OverviewSettings({
           />
         </SettingsGroup>
       </section>
+      ) : null}
 
+      {(isSectionVisible("browser") || isSectionVisible("image") || isSectionVisible("voice")) ? (
       <section>
         <SettingsSectionTitle>{tx("settings.sections.capabilities", "Capabilities")}</SettingsSectionTitle>
         <SettingsGroup>
+          {isSectionVisible("browser") ? (
           <OverviewListRow
             icon={Globe2}
             valueLogoProvider={settings.web_search.provider}
@@ -2014,6 +2037,8 @@ function OverviewSettings({
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("browser")}
           />
+          ) : null}
+          {isSectionVisible("image") ? (
           <OverviewListRow
             icon={ImageIcon}
             valueLogoProvider={settings.image_generation.provider}
@@ -2023,6 +2048,8 @@ function OverviewSettings({
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
           />
+          ) : null}
+          {isSectionVisible("voice") ? (
           <OverviewListRow
             icon={Mic}
             valueLogoProvider={transcription.provider}
@@ -2032,9 +2059,12 @@ function OverviewSettings({
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("voice")}
           />
+          ) : null}
         </SettingsGroup>
       </section>
+      ) : null}
 
+      {isSectionVisible("runtime") ? (
       <section>
         <SettingsSectionTitle>{tx("settings.sections.system", "System")}</SettingsSectionTitle>
         <SettingsGroup>
@@ -2054,6 +2084,7 @@ function OverviewSettings({
           />
         </SettingsGroup>
       </section>
+      ) : null}
 
       <section>
         <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>
