@@ -163,12 +163,14 @@ class SubagentManager:
         session_key: str | None = None,
         origin_message_id: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         workspace_scope: WorkspaceScope | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
+        run_model = model.strip() if isinstance(model, str) and model.strip() else None
 
         status = SubagentStatus(
             task_id=task_id,
@@ -187,6 +189,7 @@ class SubagentManager:
                 status,
                 origin_message_id,
                 temperature,
+                run_model,
                 workspace_scope,
             )
         )
@@ -216,6 +219,7 @@ class SubagentManager:
         status: SubagentStatus,
         origin_message_id: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         workspace_scope: WorkspaceScope | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
@@ -249,7 +253,7 @@ class SubagentManager:
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
-                    model=self.model,
+                    model=model or self.model,
                     temperature=temperature,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
