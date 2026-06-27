@@ -132,6 +132,11 @@ class AgentDefaults(Base):
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
+    subagent_result_mode: Literal["realtime", "aggregated"] = Field(
+        default="realtime",
+        validation_alias=AliasChoices("subagentResultMode", "subagent_result_mode"),
+        serialization_alias="subagentResultMode",
+    )
     fail_on_tool_error: bool = True
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"

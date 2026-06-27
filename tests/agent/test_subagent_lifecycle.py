@@ -13,6 +13,7 @@ from nanobot.agent.subagent import (
     SubagentManager,
     SubagentStatus,
     _SubagentHook,
+    _SubagentResult,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -54,6 +55,7 @@ async def _drain_subagent_tasks(sm: SubagentManager) -> None:
     tasks = list(sm._running_tasks.values())
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
     await asyncio.sleep(0)
 
 
@@ -367,6 +369,150 @@ class TestAnnounceResult:
         )
 
         assert published[0].metadata["origin_message_id"] == "msg-123"
+
+
+# ---------------------------------------------------------------------------
+# Aggregated result mode
+# ---------------------------------------------------------------------------
+
+
+class TestAggregatedResultMode:
+    @pytest.mark.asyncio
+    async def test_buffers_until_session_tasks_finish(self, tmp_path):
+        sm = _manager(tmp_path, max_concurrent_subagents=2, result_mode="aggregated")
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+
+        async def _run(spec):
+            task = spec.initial_messages[-1]["content"]
+            if task == "task 1":
+                await first_release.wait()
+                return AgentRunResult(
+                    final_content="result 1", messages=[], stop_reason="completed"
+                )
+            await second_release.wait()
+            return AgentRunResult(final_content="result 2", messages=[], stop_reason="completed")
+
+        sm.runner.run = _run
+
+        await sm.spawn("task 1", label="A", session_key="s1", origin_message_id="msg-1")
+        await sm.spawn("task 2", label="B", session_key="s1", origin_message_id="msg-1")
+
+        first_release.set()
+        for _ in range(10):
+            if sm._pending_aggregated_results.get("s1"):
+                break
+            await asyncio.sleep(0)
+
+        assert len(sm._pending_aggregated_results["s1"]) == 1
+        assert published == []
+
+        second_release.set()
+        await _drain_subagent_tasks(sm)
+
+        assert len(published) == 1
+        msg = published[0]
+        assert msg.session_key_override == "s1"
+        assert msg.metadata["injected_event"] == "subagent_result"
+        assert msg.metadata["subagent_result_mode"] == "aggregated"
+        assert msg.metadata["subagent_task_id"].startswith("aggregate:")
+        assert len(msg.metadata["subagent_task_ids"]) == 2
+        assert msg.metadata["origin_message_id"] == "msg-1"
+        assert msg.metadata["origin_message_ids"] == ["msg-1"]
+        assert "completed successfully" in msg.content
+        assert "task 1" in msg.content
+        assert "result 1" in msg.content
+        assert "task 2" in msg.content
+        assert "result 2" in msg.content
+
+    @pytest.mark.asyncio
+    async def test_aggregated_mode_announces_immediately_without_session(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+
+        with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
+            await sm._complete_subagent_result(
+                "t1",
+                "label",
+                "task",
+                "result",
+                {"channel": "cli", "chat_id": "direct"},
+                "ok",
+            )
+
+        mock_announce.assert_called_once()
+        assert sm._pending_aggregated_results == {}
+
+    def test_aggregated_report_limits_displayed_results(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+        results = [
+            _SubagentResult(
+                task_id=f"t{i}",
+                label=f"task {i}",
+                task=f"task {i}",
+                result=f"result {i}",
+                origin={"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+                status="ok",
+            )
+            for i in range(25)
+        ]
+
+        text = sm._format_aggregated_results(results)
+
+        assert "### 20. task 19" in text
+        assert "### 21." not in text
+        assert "5 additional subagent results omitted" in text
+
+    @pytest.mark.asyncio
+    async def test_aggregated_mode_caps_buffered_results(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+        origin = {"channel": "cli", "chat_id": "direct", "session_key": "s1"}
+        sm._session_tasks["s1"] = {f"t{i}" for i in range(25)}
+
+        for i in range(25):
+            await sm._complete_subagent_result(
+                f"t{i}",
+                f"task {i}",
+                f"task {i}",
+                f"result {i}",
+                origin,
+                "error" if i == 24 else "ok",
+            )
+
+        assert len(sm._pending_aggregated_results["s1"]) == 20
+        assert sm._pending_aggregated_omitted_counts["s1"] == 5
+        assert sm._pending_aggregated_omitted_statuses["s1"] == {"ok", "error"}
+
+        with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
+            await sm._flush_aggregated_results("s1")
+
+        assert sm._pending_aggregated_results == {}
+        assert sm._pending_aggregated_omitted_counts == {}
+        assert sm._pending_aggregated_omitted_statuses == {}
+        args, kwargs = mock_announce.call_args
+        assert args[1] == "25 background tasks"
+        assert "5 additional subagent results omitted" in args[3]
+        assert args[5] == "mixed"
+        assert kwargs["extra_metadata"]["subagent_result_count"] == 25
+        assert kwargs["extra_metadata"]["subagent_omitted_result_count"] == 5
+
+    def test_aggregated_report_truncates_large_result(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+        text = sm._format_aggregated_results([
+            _SubagentResult(
+                task_id="t1",
+                label="large",
+                task="large task",
+                result="x" * 5_000,
+                origin={"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+                status="ok",
+            )
+        ])
+
+        assert "... (truncated)" in text
+        assert len(text) < 4_200
 
 
 # ---------------------------------------------------------------------------
