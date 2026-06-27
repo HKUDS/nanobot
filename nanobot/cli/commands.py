@@ -1007,9 +1007,14 @@ def _run_gateway(
                 logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
                 return None
 
-            channel, chat_id = _pick_heartbeat_target()
-            if channel == "cli":
-                return None
+            # Use the configured fixed channel when set, otherwise pick the
+            # most recently active (legacy behaviour).
+            if hb_cfg.channel and hb_cfg.chat_id:
+                channel, chat_id = hb_cfg.channel, hb_cfg.chat_id
+            else:
+                channel, chat_id = _pick_heartbeat_target()
+                if channel == "cli":
+                    return None
 
             prompt = (
                 _HEARTBEAT_PREAMBLE
