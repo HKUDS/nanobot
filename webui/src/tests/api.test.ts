@@ -352,11 +352,14 @@ describe("webui API helpers", () => {
       baseUrl: "https://search.example.com",
       maxResults: 8,
       timeout: 45,
-      useJinaReader: false,
+      fetchProvider: "readability",
+      fetchApiKey: "tvly-test",
+      fetchBaseUrl: "https://extract.example.com",
+      fetchTimeout: 60,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&use_jina_reader=false",
+      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&fetch_provider=readability&fetch_api_key=tvly-test&fetch_base_url=https%3A%2F%2Fextract.example.com&fetch_timeout=60",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

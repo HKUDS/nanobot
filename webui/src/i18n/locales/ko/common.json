@@ -125,6 +125,10 @@
       "maxResults": "최대 결과 수",
       "timeout": "타임아웃",
       "jinaReader": "Jina 리더",
+      "fetchProvider": "가져오기 제공자",
+      "fetchApiKey": "Tavily Extract API 키",
+      "fetchBaseUrl": "Tavily Extract 기본 URL",
+      "fetchTimeout": "가져오기 타임아웃",
       "imageGeneration": "이미지 생성",
       "imageProvider": "이미지 제공자",
       "imageProviderStatus": "제공자 상태",
@@ -169,6 +173,10 @@
       "maxResults": "각 web_search 호출에서 반환되는 결과 수입니다.",
       "timeout": "검색 제공자 요청이 타임아웃되기 전의 초입니다.",
       "jinaReader": "가능할 때 web_fetch에 Jina Reader를 사용합니다.",
+      "fetchProvider": "web_fetch가 페이지 내용을 읽을 때 사용하는 제공자입니다.",
+      "fetchApiKey": "web_fetch가 Tavily Extract를 사용할 때 필요한 API 키입니다. 비워 두면 gateway 환경의 TAVILY_API_KEY를 사용합니다.",
+      "fetchBaseUrl": "Tavily 호환 Extract 엔드포인트를 선택적으로 재정의합니다.",
+      "fetchTimeout": "web_fetch 제공자 요청이 타임아웃되기 전의 초입니다.",
       "imageGeneration": "구성된 이미지 제공자가 있을 때 채팅에서 generate_image를 노출합니다.",
       "imageProvider": "generate_image에 사용할 등록 제공자를 선택합니다.",
       "imageProviderStatus": "이미지 생성은 제공자 자격 증명을 재사용합니다.",
@@ -198,6 +206,15 @@
       "transcriptionProviderStatus": "API 키는 transcription 설정이 아니라 providers 아래에 유지됩니다.",
       "transcriptionModel": "제공자가 사용자 지정 모델 ID를 요구하지 않으면 해석된 기본값을 사용하세요.",
       "transcriptionLanguage": "en, zh, ja, ko 같은 선택적 ISO-639 힌트입니다."
+    },
+    "placeholders": {
+      "fetchProvider": "가져오기 제공자 선택"
+    },
+    "fetchProviders": {
+      "auto": "자동",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "로컬 readability"
     },
     "values": {
       "light": "라이트",

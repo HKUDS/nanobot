@@ -1782,7 +1782,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert body["web_search"]["provider"] == "brave"
         assert body["web_search"]["api_key_hint"] == "brav••••cret"
         assert body["web_search"]["max_results"] == 5
-        assert body["web"]["fetch"]["use_jina_reader"] is True
+        assert body["web"]["fetch"]["enable"] is True
+        assert body["web"]["fetch"]["provider"] == "auto"
         search_providers = {provider["name"]: provider for provider in body["web_search"]["providers"]}
         assert search_providers["duckduckgo"]["credential"] == "none"
         assert search_providers["exa"]["credential"] == "api_key"
@@ -1921,7 +1922,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             "http://127.0.0.1:"
             f"{port}/api/settings/web-search/update?provider=searxng"
             "&base_url=https%3A%2F%2Fsearch.example.com"
-            "&max_results=8&timeout=45&use_jina_reader=false",
+            "&max_results=8&timeout=45&fetch_provider=readability",
             headers={"Authorization": "Bearer tok"},
         )
         assert search_updated.status_code == 200
@@ -1932,7 +1933,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_body["web_search"]["api_key_hint"] is None
         assert search_body["web_search"]["base_url"] == "https://search.example.com"
         assert search_body["web_search"]["max_results"] == 8
-        assert search_body["web"]["fetch"]["use_jina_reader"] is False
+        assert search_body["web"]["fetch"]["provider"] == "readability"
 
         network_safety_updated = await _http_get(
             "http://127.0.0.1:"
@@ -2013,7 +2014,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.tools.web.search.base_url == "https://search.example.com"
         assert saved.tools.web.search.max_results == 8
         assert saved.tools.web.search.timeout == 45
-        assert saved.tools.web.fetch.use_jina_reader is False
+        assert saved.tools.web.fetch.provider == "readability"
         assert saved.tools.webui_allow_local_service_access is False
         assert saved.tools.image_generation.enabled is True
         assert saved.tools.image_generation.provider == "openrouter"
