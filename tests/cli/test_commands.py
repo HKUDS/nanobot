@@ -5,6 +5,7 @@ import shutil
 import signal
 from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,6 +20,7 @@ from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot, make_provider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -1254,11 +1256,201 @@ def test_heartbeat_has_active_tasks(content, expected):
     assert _heartbeat_has_active_tasks(content) is expected
 
 
+def test_pick_heartbeat_target_uses_most_recent_enabled_channel() -> None:
+    target = cli_commands._pick_heartbeat_target_from_sessions(
+        sessions=[
+            {"key": "telegram:old", "updated_at": "2026-06-23T09:00:00"},
+            {"key": "cli:direct", "updated_at": "2026-06-24T12:00:00"},
+            {"key": "feishu:latest", "updated_at": "2026-06-24T10:00:00"},
+            {"key": "discord:disabled", "updated_at": "2026-06-24T11:00:00"},
+            {"key": "system:heartbeat", "updated_at": "2026-06-24T13:00:00"},
+        ],
+        enabled_channels={"telegram", "feishu"},
+        archived_keys=[],
+    )
+
+    assert target == ("feishu", "latest")
+
+
 def test_heartbeat_skips_bundled_template():
     from nanobot.cli.commands import _heartbeat_has_active_tasks
     from nanobot.utils.helpers import load_bundled_template
 
     assert _heartbeat_has_active_tasks(load_bundled_template("HEARTBEAT.md")) is False
+
+
+def test_heartbeat_trigger_dry_run_stops_after_phase_one(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "HEARTBEAT.md").write_text(
+        "## Active Tasks\n\n- Check the inbox and summarize urgent mail\n",
+        encoding="utf-8",
+    )
+
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+    seen: dict[str, object] = {}
+
+    class _FakeProvider:
+        generation = SimpleNamespace(max_tokens=4096)
+
+        async def chat_with_retry(self, **kwargs):
+            seen["decision_request"] = kwargs
+            return LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(
+                        id="decision-1",
+                        name="decide_heartbeat",
+                        arguments={
+                            "should_run": True,
+                            "tasks": "Check the inbox and summarize urgent mail.",
+                            "reason": "The Active Tasks section contains one task.",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+
+    provider = _FakeProvider()
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            seen["agent_config"] = config
+            return cls()
+
+        def __init__(self) -> None:
+            self.provider = provider
+            self.model = "test-model"
+            self.tools = {}
+
+        async def process_direct(self, *_args, **_kwargs):
+            raise AssertionError("dry-run must not execute Phase 2")
+
+        async def close_mcp(self) -> None:
+            seen["closed"] = True
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+        cron_service=lambda _store_path: object(),
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+
+    result = runner.invoke(
+        app,
+        ["heartbeat", "trigger", "--dry-run", "--json", "--config", str(config_file)],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout[result.stdout.index("{"):])
+    assert payload["status"] == "dry_run"
+    assert payload["decision"]["should_run"] is True
+    assert payload["decision"]["tasks"] == "Check the inbox and summarize urgent mail."
+    assert seen["closed"] is True
+    decision_request = seen["decision_request"]
+    assert decision_request["model"] == "test-model"
+    assert decision_request["tools"][0]["function"]["name"] == "decide_heartbeat"
+
+
+def test_run_heartbeat_trigger_executes_phase_two_and_delivers(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.cli.commands import _run_heartbeat_trigger
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "HEARTBEAT.md").write_text(
+        "## Active Tasks\n\n- Check the build status\n",
+        encoding="utf-8",
+    )
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+    config.gateway.heartbeat.keep_recent_messages = 3
+    seen: dict[str, object] = {}
+
+    class _FakeProvider:
+        generation = SimpleNamespace(max_tokens=4096)
+
+        async def chat_with_retry(self, **kwargs):
+            seen["decision_request"] = kwargs
+            return LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(
+                        id="decision-1",
+                        name="decide_heartbeat",
+                        arguments={
+                            "should_run": True,
+                            "tasks": "Check the build status.",
+                            "reason": "The task is active.",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+
+    class _FakeSession:
+        def retain_recent_legal_suffix(self, count: int) -> None:
+            seen["retain_count"] = count
+
+    class _FakeSessions:
+        def get_or_create(self, key: str) -> _FakeSession:
+            seen["session_key"] = key
+            return _FakeSession()
+
+        def save(self, session: _FakeSession) -> None:
+            seen["saved_session"] = session
+
+    class _FakeAgent:
+        def __init__(self) -> None:
+            self.provider = _FakeProvider()
+            self.model = "test-model"
+            self.sessions = _FakeSessions()
+
+        async def process_direct(self, prompt: str, **kwargs):
+            seen["phase_two_prompt"] = prompt
+            seen["phase_two_kwargs"] = kwargs
+            return OutboundMessage(
+                channel=kwargs["channel"],
+                chat_id=kwargs["chat_id"],
+                content="Build status looks healthy.",
+            )
+
+    async def _approve_delivery(*args, **kwargs) -> bool:
+        seen["evaluation"] = (args, kwargs)
+        return True
+
+    delivered: list[tuple[OutboundMessage, dict[str, object]]] = []
+
+    async def _deliver(msg: OutboundMessage, **kwargs) -> None:
+        delivered.append((msg, kwargs))
+
+    monkeypatch.setattr("nanobot.cli.heartbeat.evaluate_response", _approve_delivery)
+
+    result = asyncio.run(
+        _run_heartbeat_trigger(
+            config,
+            _FakeAgent(),
+            target=("telegram", "user-1"),
+            deliver_to_channel=_deliver,
+            acquire_lock=False,
+        )
+    )
+
+    assert result.status == "delivered"
+    assert result.delivered is True
+    assert "Phase 1 extracted tasks" in seen["phase_two_prompt"]
+    assert "Check the build status." in seen["phase_two_prompt"]
+    assert seen["phase_two_kwargs"]["session_key"] == "heartbeat"
+    assert seen["phase_two_kwargs"]["channel"] == "telegram"
+    assert seen["phase_two_kwargs"]["chat_id"] == "user-1"
+    assert seen["retain_count"] == 3
+    assert seen["session_key"] == "heartbeat"
+    assert delivered[0][0].content == "Build status looks healthy."
+    assert delivered[0][1]["record"] is True
 
 
 def test_heartbeat_target_skips_archived_webui_sessions():
@@ -1549,7 +1741,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
-        "nanobot.cli.commands.evaluate_response",
+        "nanobot.cli.heartbeat.evaluate_response",
         _capture_evaluate_response,
     )
 
@@ -1662,7 +1854,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
-    monkeypatch.setattr("nanobot.cli.commands.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr("nanobot.cli.heartbeat.evaluate_response", _unexpected_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
     assert isinstance(result.exception, _StopGatewayError)

@@ -13,6 +13,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running, or use `nanobot gateway --background` |
+| Debug heartbeat tasks | `nanobot heartbeat trigger --dry-run` | Runs the heartbeat Phase 1 decision without executing tasks |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
@@ -121,6 +122,19 @@ http://127.0.0.1:18790/health
 ```
 
 The bundled WebUI is served by the WebSocket channel, usually on port `8765`, not by the gateway health endpoint.
+
+## Heartbeat
+
+`nanobot heartbeat trigger` runs the same heartbeat trigger path used by the gateway timer. By default it performs a full run and prints the result in the terminal. Use `--dry-run` to stop after Phase 1, showing the static pre-check, LLM run/skip decision, and extracted task summary without executing tasks.
+
+| Command | Description |
+|---|---|
+| `nanobot heartbeat trigger --dry-run` | Inspect `HEARTBEAT.md` and print the Phase 1 decision |
+| `nanobot heartbeat trigger` | Run Phase 1 and execute the active tasks if the decision is `run` |
+| `nanobot heartbeat trigger --channel <name> --chat-id <id>` | Run with an explicit channel/chat context |
+| `nanobot heartbeat trigger --json` | Print machine-readable output for test harnesses |
+| `nanobot heartbeat trigger --workspace <path>` | Override workspace |
+| `nanobot heartbeat trigger --config <path>` | Use a specific config file |
 
 ## OpenAI-Compatible API
 
