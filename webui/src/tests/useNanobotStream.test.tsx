@@ -419,6 +419,161 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("renders ask_clarification tool result as an assistant answer", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-clarify-tool", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-clarify-tool", {
+        event: "message",
+        chat_id: "chat-clarify-tool",
+        text: 'ask_clarification({"question":"Need span?"})',
+        kind: "tool_hint",
+        turn_id: "turn-clarify",
+        turn_seq: 1,
+        tool_events: [{
+          phase: "start",
+          call_id: "call-clarify",
+          name: "ask_clarification",
+          arguments: { question: "Need span?" },
+        }],
+      });
+      fake.emit("chat-clarify-tool", {
+        event: "message",
+        chat_id: "chat-clarify-tool",
+        text: "",
+        kind: "progress",
+        turn_id: "turn-clarify",
+        turn_seq: 2,
+        tool_events: [{
+          phase: "end",
+          call_id: "call-clarify",
+          name: "ask_clarification",
+          arguments: { question: "Need span?" },
+          result: "Need span?\n\nOptions:\n1. 24m\n2. 30m",
+        }],
+      });
+      fake.emit("chat-clarify-tool", {
+        event: "message",
+        chat_id: "chat-clarify-tool",
+        text: "Need span?\n\nOptions:\n1. 24m\n2. 30m",
+        turn_id: "turn-clarify",
+        turn_seq: 3,
+      });
+    });
+
+    const trace = result.current.messages.find((message) => message.kind === "trace");
+    expect(trace?.toolEvents).toMatchObject([{
+      phase: "end",
+      call_id: "call-clarify",
+      name: "ask_clarification",
+    }]);
+    const clarificationMessages = result.current.messages.filter(
+      (message) =>
+        message.role === "assistant"
+        && message.content.includes("Need span?")
+        && message.content.includes("Options:"),
+    );
+    expect(clarificationMessages).toHaveLength(1);
+  });
+
+  it("keeps repeated complete assistant messages without turn metadata", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-repeat-answer", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-repeat-answer", {
+        event: "message",
+        chat_id: "chat-repeat-answer",
+        text: "same answer",
+      });
+      fake.emit("chat-repeat-answer", {
+        event: "message",
+        chat_id: "chat-repeat-answer",
+        text: "same answer",
+      });
+    });
+
+    expect(result.current.messages.filter((message) => (
+      message.role === "assistant" && message.content === "same answer"
+    ))).toHaveLength(2);
+  });
+
+  it("keeps repeated complete assistant messages with turn metadata", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-repeat-turn", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-repeat-turn", {
+        event: "message",
+        chat_id: "chat-repeat-turn",
+        text: "same answer",
+        turn_id: "turn-repeat",
+      });
+      fake.emit("chat-repeat-turn", {
+        event: "message",
+        chat_id: "chat-repeat-turn",
+        text: "same answer",
+        turn_id: "turn-repeat",
+      });
+    });
+
+    expect(result.current.messages.filter((message) => (
+      message.role === "assistant" && message.content === "same answer"
+    ))).toHaveLength(2);
+  });
+
+  it("dedupes ask_clarification fallback answer without turn metadata", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-clarify-no-turn", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const content = "Need span?\n\nOptions:\n1. 24m\n2. 30m";
+
+    act(() => {
+      fake.emit("chat-clarify-no-turn", {
+        event: "message",
+        chat_id: "chat-clarify-no-turn",
+        text: 'ask_clarification({"question":"Need span?"})',
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-clarify",
+          name: "ask_clarification",
+          arguments: { question: "Need span?" },
+        }],
+      });
+      fake.emit("chat-clarify-no-turn", {
+        event: "message",
+        chat_id: "chat-clarify-no-turn",
+        text: "",
+        kind: "progress",
+        tool_events: [{
+          phase: "end",
+          call_id: "call-clarify",
+          name: "ask_clarification",
+          arguments: { question: "Need span?" },
+          result: content,
+        }],
+      });
+      fake.emit("chat-clarify-no-turn", {
+        event: "message",
+        chat_id: "chat-clarify-no-turn",
+        text: content,
+      });
+    });
+
+    expect(result.current.messages.filter((message) => (
+      message.role === "assistant" && message.content === content
+    ))).toHaveLength(1);
+  });
+
   it("keeps phase updates when a tool event trace line is deduped", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-tool-phase", EMPTY_MESSAGES), {
