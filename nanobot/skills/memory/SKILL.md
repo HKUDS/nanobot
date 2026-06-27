@@ -11,7 +11,7 @@ always: true
 - `SOUL.md` — Bot personality and communication style. **Managed by Dream.** Do NOT edit.
 - `USER.md` — User profile and preferences. **Managed by Dream.** Do NOT edit.
 - `memory/MEMORY.md` — Long-term facts (project context, important events). **Managed by Dream.** Do NOT edit.
-- `memory/history.jsonl` — append-only JSONL, not loaded into context. Prefer the built-in `grep` tool to search it.
+- `memory/history.jsonl` — append-only JSONL, not loaded into context. Prefer the built-in `search_history` tool to recall it; fall back to `grep` for patterns it can't express.
 
 ## Search Past Events
 
