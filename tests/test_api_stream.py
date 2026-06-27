@@ -199,7 +199,7 @@ async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_passes_on_stream_callbacks(aiohttp_client) -> None:
-    """process_direct should be called with on_stream and on_stream_end when streaming."""
+    """process_direct should be called with streaming callbacks when streaming."""
     captured_kwargs: dict = {}
 
     async def fake_process_direct(**kwargs):
@@ -222,8 +222,110 @@ async def test_stream_passes_on_stream_callbacks(aiohttp_client) -> None:
         json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
     )
     assert resp.status == 200
+    assert captured_kwargs.get("on_progress") is not None
     assert captured_kwargs.get("on_stream") is not None
     assert captured_kwargs.get("on_stream_end") is not None
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_emits_tool_progress_sse_events(aiohttp_client) -> None:
+    """Structured tool_events should be exposed as named SSE events."""
+    agent = MagicMock()
+
+    async def fake_process_direct(
+        *, on_progress=None, on_stream=None, on_stream_end=None, **kwargs
+    ):
+        assert on_progress is not None
+        assert on_stream is not None
+        assert on_stream_end is not None
+        await on_progress(
+            'exec("ls")',
+            tool_hint=True,
+            tool_events=[
+                {
+                    "version": 1,
+                    "phase": "start",
+                    "call_id": "call-1",
+                    "name": "exec",
+                    "arguments": {"command": "ls"},
+                    "result": None,
+                    "error": None,
+                    "files": [],
+                    "embeds": [],
+                }
+            ],
+        )
+        await on_stream("done")
+        await on_progress(
+            "",
+            tool_events=[
+                {
+                    "version": 1,
+                    "phase": "end",
+                    "call_id": "call-1",
+                    "name": "exec",
+                    "arguments": {"command": "ls"},
+                    "result": "file.txt",
+                    "error": None,
+                    "files": [],
+                    "embeds": [],
+                }
+            ],
+        )
+        await on_stream_end(resuming=False)
+        return "done"
+
+    agent.process_direct = fake_process_direct
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "run ls"}], "stream": True},
+    )
+
+    assert resp.status == 200
+    body = await resp.text()
+    blocks = [block for block in body.split("\n\n") if block.strip()]
+    progress_blocks = [
+        block for block in blocks if block.startswith("event: nanobot.tool.progress\n")
+    ]
+    assert len(progress_blocks) == 2
+
+    payloads = [
+        json.loads(block.split("\ndata: ", 1)[1])
+        for block in progress_blocks
+    ]
+    assert payloads == [
+        {
+            "tool": "exec",
+            "toolCallId": "call-1",
+            "status": "running",
+            "arguments": {"command": "ls"},
+            "result": None,
+        },
+        {
+            "tool": "exec",
+            "toolCallId": "call-1",
+            "status": "completed",
+            "arguments": {"command": "ls"},
+            "result": "file.txt",
+        },
+    ]
+
+    data_lines = [line for line in body.split("\n") if line.startswith("data: ")]
+    chunks = [
+        json.loads(line[len("data: "):])
+        for line in data_lines
+        if line != "data: [DONE]"
+    ]
+    chunks = [chunk for chunk in chunks if chunk.get("object") == "chat.completion.chunk"]
+    assert any(chunk["choices"][0]["delta"].get("content") == "done" for chunk in chunks)
+    assert data_lines[-1] == "data: [DONE]"
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
