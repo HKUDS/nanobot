@@ -41,6 +41,7 @@ import {
   Target,
   Trash2,
   Undo2,
+  Wrench,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -74,6 +75,7 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   SlashCommand,
+  SkillSummary,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -159,6 +161,7 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  skills?: SkillSummary[];
   onStop?: () => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
@@ -187,6 +190,7 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
   square: Square,
   "square-pen": SquarePen,
   "undo-2": Undo2,
+  wrench: Wrench,
 };
 
 const SLASH_PALETTE_GAP_PX = 8;
@@ -270,10 +274,12 @@ interface SlashPaletteCommand extends SlashCommand {
   detail: string;
   badge?: string;
   recent: boolean;
+  kind?: "command" | "skill";
+  skill?: SkillSummary;
 }
 
 function slashCommandI18nKey(command: string): string {
-  return command.replace(/^\//, "").replace(/-/g, "_");
+  return command.replace(/^\//, "").replace(/[\s-]+/g, "_");
 }
 
 function readSlashRecents(): string[] {
@@ -772,6 +778,7 @@ export function ThreadComposer({
   slashCommands = [],
   cliApps = [],
   mcpPresets = [],
+  skills = [],
   onStop,
   onTranscribeAudio,
   runStartedAt = null,
@@ -926,7 +933,7 @@ export function ThreadComposer({
 
   const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
     if (slashQuery === null) return [];
-    const withDetails = visibleSlashCommands
+    const commandCandidates = visibleSlashCommands
       .filter((command) => {
         const commandKey = slashCommandI18nKey(command.command);
         const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
@@ -968,9 +975,42 @@ export function ThreadComposer({
           ...command,
           detail,
           badge,
+          kind: "command" as const,
           recent: recentSlashCommands.includes(command.command),
         };
+      });
+
+    const skillCandidates: SlashPaletteCommand[] = skills
+      .filter((skill) => skill.available)
+      .filter((skill) => {
+        const haystack = [
+          skill.name,
+          skill.description,
+          skill.source,
+          `/skill ${skill.name}`,
+        ].join(" ").toLowerCase();
+        return haystack.includes(slashQuery);
       })
+      .map((skill) => {
+        const command = `/skill ${skill.name}`;
+        const description = skill.description || t("thread.composer.slash.details.skill", {
+          defaultValue: "Activate this skill for the next message.",
+        });
+        return {
+          kind: "skill" as const,
+          skill,
+          command,
+          title: skill.name,
+          description,
+          detail: description,
+          icon: "brain",
+          argHint: "<message>",
+          badge: t("thread.composer.slash.badges.skill", { defaultValue: "Skill" }),
+          recent: recentSlashCommands.includes(command),
+        };
+      });
+
+    return [...commandCandidates, ...skillCandidates]
       .sort((a, b) => {
         if (isStreaming) {
           if (a.command === "/stop") return -1;
@@ -985,11 +1025,18 @@ export function ThreadComposer({
           return aRecent - bRecent;
         }
         return 0;
-      });
-
-    return withDetails
+      })
       .slice(0, 8);
-  }, [goalState?.active, isStreaming, modelLabel, recentSlashCommands, slashQuery, t, visibleSlashCommands]);
+  }, [
+    goalState?.active,
+    isStreaming,
+    modelLabel,
+    recentSlashCommands,
+    skills,
+    slashQuery,
+    t,
+    visibleSlashCommands,
+  ]);
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
@@ -1232,7 +1279,7 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const chooseSlashCommand = useCallback(
-    (command: SlashCommand) => {
+    (command: SlashPaletteCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
         onStop();
         setValue("");
@@ -2177,7 +2224,7 @@ function ComposerCliMentionOverlay({
             isHero={isHero}
           />
         );
-        return (
+        if (segment.kind === "mcp") return (
           <McpPresetMentionToken
             key={`mcp-${segment.preset.name}-${index}`}
             preset={segment.preset}
@@ -2186,6 +2233,7 @@ function ComposerCliMentionOverlay({
             isHero={isHero}
           />
         );
+        return null;
       })}
     </div>
   );
@@ -2326,7 +2374,9 @@ function MentionCandidateLogo({
   const color = (candidate.kind === "cli"
     ? candidate.app.brand_color
     : candidate.preset.brand_color) || "hsl(var(--primary))";
-  const rawLogoUrl = candidate.kind === "cli" ? candidate.app.logo_url : candidate.preset.logo_url;
+  const rawLogoUrl = candidate.kind === "cli"
+    ? candidate.app.logo_url
+    : candidate.preset.logo_url;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
   const logoUrl = logoUrls[logoIndex];
 

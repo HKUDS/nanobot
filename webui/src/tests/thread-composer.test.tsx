@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type { CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SkillSummary, SlashCommand } from "@/lib/types";
 
 vi.mock("@/lib/imageEncode", () => ({
   encodeImage: vi.fn(async (file: File) => ({
@@ -118,6 +118,22 @@ const MCP_PRESETS: McpPresetInfo[] = [
     brand_color: "#F24E1E",
     required_fields: [],
     connection_summary: "",
+  },
+];
+
+const SKILLS: SkillSummary[] = [
+  {
+    name: "github",
+    description: "Work with pull requests and issues",
+    source: "builtin",
+    available: true,
+  },
+  {
+    name: "github-enterprise",
+    description: "Work with enterprise GitHub instances",
+    source: "workspace",
+    available: false,
+    unavailable_reason: "ENV: GITHUB_TOKEN",
   },
 ];
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
@@ -1112,6 +1128,33 @@ describe("ThreadComposer", () => {
         brand_color: "#111827",
       }],
     });
+  });
+
+  it("shows available skills in the slash palette and inserts the selected skill command", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        skills={SKILLS}
+        slashCommands={[]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: "/git", selectionStart: 4 },
+    });
+
+    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    const option = within(palette).getByRole("option", { name: /github/i });
+    expect(option).toHaveAttribute("aria-selected", "true");
+    expect(option).toHaveTextContent("Skill");
+    expect(option).toHaveTextContent("/skill github <message>");
+    expect(within(palette).queryByText(/github-enterprise/i)).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("/skill github ");
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {

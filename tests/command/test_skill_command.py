@@ -41,9 +41,9 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     )
 
 
-def _ctx(loop: AgentLoop, raw: str = "/skill") -> CommandContext:
+def _ctx(loop: AgentLoop, raw: str = "/skill", *, args: str = "") -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
-    return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args="", loop=loop)
+    return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
 
 
 def _write_skill(base: Path, name: str, *, description: str = "", body: str = "# Skill\n") -> None:
@@ -127,6 +127,61 @@ async def test_skill_command_no_render_as_text(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_skill_command_activates_skill_for_agent_turn(tmp_path: Path) -> None:
+    ws_skills = tmp_path / "skills"
+    ws_skills.mkdir()
+    _write_skill(
+        ws_skills,
+        "weather",
+        description="Get current weather and forecasts",
+        body="# Weather\n\nUse weather APIs carefully.\n",
+    )
+
+    loop = _loop_with_skills(tmp_path)
+    ctx = _ctx(loop, "/skill weather forecast tomorrow", args="weather forecast tomorrow")
+
+    out = await cmd_skill(ctx)
+
+    assert out is None
+    assert '<skill-content name="weather">' in ctx.msg.content
+    assert "# Weather\n\nUse weather APIs carefully." in ctx.msg.content
+    assert "description: Get current weather and forecasts" not in ctx.msg.content
+    assert ctx.msg.content.endswith("\n\nforecast tomorrow")
+    assert ctx.msg.metadata["original_command"] == "/skill"
+    assert ctx.msg.metadata["original_content"] == "/skill weather forecast tomorrow"
+    assert ctx.msg.metadata["activated_skill"] == "weather"
+
+
+@pytest.mark.asyncio
+async def test_skill_command_rejects_unavailable_skill(tmp_path: Path) -> None:
+    ws_skills = tmp_path / "skills"
+    skill_dir = ws_skills / "weather"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: weather\n"
+        "description: Weather skill\n"
+        "metadata:\n"
+        "  nanobot:\n"
+        "    requires:\n"
+        "      bins:\n"
+        "        - nanobot-missing-test-binary\n"
+        "---\n\n"
+        "# Weather\n",
+        encoding="utf-8",
+    )
+
+    loop = _loop_with_skills(tmp_path)
+    ctx = _ctx(loop, "/skill weather forecast", args="weather forecast")
+
+    out = await cmd_skill(ctx)
+
+    assert out is not None
+    assert "Skill `weather` is unavailable" in out.content
+    assert "nanobot-missing-test-binary" in out.content
+
+
+@pytest.mark.asyncio
 async def test_skill_command_registered_on_router(tmp_path: Path) -> None:
     router = CommandRouter()
     register_builtin_commands(router)
@@ -136,3 +191,21 @@ async def test_skill_command_registered_on_router(tmp_path: Path) -> None:
 
     assert out is not None
     assert "No skills available." in out.content
+
+
+@pytest.mark.asyncio
+async def test_skill_command_prefix_registered_on_router(tmp_path: Path) -> None:
+    ws_skills = tmp_path / "skills"
+    ws_skills.mkdir()
+    _write_skill(ws_skills, "weather", body="# Weather\n")
+    router = CommandRouter()
+    register_builtin_commands(router)
+    loop = _loop_with_skills(tmp_path)
+    ctx = _ctx(loop, "/skill weather forecast")
+
+    out = await router.dispatch(ctx)
+
+    assert out is None
+    assert ctx.args == "weather forecast"
+    assert '<skill-content name="weather">' in ctx.msg.content
+    assert ctx.msg.content.endswith("\n\nforecast")

@@ -134,7 +134,9 @@ export function CliAppMentionText({
   mcpPresets?: McpPresetInfo[];
 }) {
   const segments = splitCapabilityMentionSegments(text, cliApps, mcpPresets);
-  if (!segments.some((segment) => segment.kind === "cli" || segment.kind === "mcp")) return <>{text}</>;
+  if (!segments.some((segment) => segment.kind === "cli" || segment.kind === "mcp")) {
+    return <>{text}</>;
+  }
   return (
     <>
       {segments.map((segment, index) => {

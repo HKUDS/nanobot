@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from html import escape
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
@@ -100,9 +101,10 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     ),
     BuiltinCommandSpec(
         "/skill",
-        "List skills",
-        "List all enabled skills available to the agent.",
+        "Activate skill",
+        "List or activate an enabled skill for the next message.",
         "wrench",
+        "[name] [message]",
     ),
     BuiltinCommandSpec(
         "/help",
@@ -677,24 +679,87 @@ async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
-    """List all enabled skills (name and description only)."""
-    loop = ctx.loop
+def _format_skill_list(loop) -> str:
+    """Format all enabled skills (name and description only)."""
     skills = loop.context.skills.list_skills(filter_unavailable=False)
     if not skills:
-        content = "No skills available."
-    else:
-        lines = [f"Available skills ({len(skills)}):", ""]
-        for entry in skills:
-            desc = loop.context.skills._get_skill_description(entry["name"])
-            lines.append(f"- **{entry['name']}** — {desc}")
-        content = "\n".join(lines)
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content=content,
-        metadata=dict(ctx.msg.metadata or {}),
+        return "No skills available."
+
+    lines = [f"Available skills ({len(skills)}):", ""]
+    for entry in skills:
+        desc = loop.context.skills._get_skill_description(entry["name"])
+        lines.append(f"- **{entry['name']}** — {desc}")
+    return "\n".join(lines)
+
+
+async def cmd_skill(ctx: CommandContext) -> OutboundMessage | None:
+    """List or activate an enabled skill for this agent turn."""
+    loop = ctx.loop
+    args = ctx.args.strip()
+    if not args:
+        content = _format_skill_list(loop)
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    skill_name, _, user_message = args.partition(" ")
+    skill_name = skill_name.strip()
+    if not skill_name:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Usage: `/skill [name] [message]`",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    loader = loop.context.skills
+    enabled_names = {entry["name"] for entry in loader.list_skills(filter_unavailable=False)}
+    available_names = {entry["name"] for entry in loader.list_skills(filter_unavailable=True)}
+    if skill_name not in available_names:
+        if skill_name in enabled_names:
+            _, reason = loader.get_skill_availability(skill_name)
+            reason_suffix = f" ({reason})" if reason else ""
+            content = (
+                f"Skill `{skill_name}` is unavailable{reason_suffix}.\n\n"
+                "Use `/skill` to list enabled skills."
+            )
+        else:
+            content = f"Unknown skill `{skill_name}`.\n\nUse `/skill` to list enabled skills."
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    markdown = loader.load_skill(skill_name)
+    if not markdown:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"Could not load skill `{skill_name}`.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    skill_content = loader._strip_frontmatter(markdown)
+    prompt = (
+        f'<skill-content name="{escape(skill_name, quote=True)}">\n'
+        f"{skill_content}\n"
+        "</skill-content>"
     )
+    user_message = user_message.strip()
+    ctx.msg.metadata = {
+        **dict(ctx.msg.metadata or {}),
+        "original_command": "/skill",
+        "original_content": ctx.raw,
+        "activated_skill": skill_name,
+    }
+    ctx.msg.content = f"{prompt}\n\n{user_message}" if user_message else prompt
+    return None
+
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
@@ -736,6 +801,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/skill", cmd_skill)
+    router.prefix("/skill ", cmd_skill)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
