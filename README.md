@@ -522,3 +522,47 @@ This project was started by [Xubin Ren](https://github.com/re-bin) as a personal
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
+
+## FAQ (Frequently Asked Questions)
+
+### What is nanobot?
+
+nanobot is an **open-source and ultra-lightweight AI agent** in the spirit of OpenClaw, Claude Code, and Codex. It keeps the core agent loop small and readable while supporting chat channels, memory, MCP and practical deployment paths.
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| 🐈 Ultra-lightweight | Stable long-running agent with small, readable core |
+| 🧠 Memory System | Token-based memory with Dream two-stage persistence |
+| 🔌 MCP Support | Model Context Protocol for tools and resources |
+| 🌐 Multi-channel | Discord, Telegram, Feishu, Slack, WeChat, QQ, Email, Matrix |
+| 🛡️ Sandbox | Production-ready sandboxing for safe code execution |
+| 📊 Observability | Langfuse, LangSmith integration |
+| 🖥️ WebUI | Built-in web interface for chat and settings |
+
+### Getting Started
+
+```bash
+pip install nanobot-ai
+nanobot setup  # Interactive setup wizard
+nanobot run
+```
+
+### Supported LLM Providers
+
+nanobot supports **42+ built-in providers**: OpenAI, Anthropic, Google Gemini, DeepSeek, Azure OpenAI, AWS Bedrock, GitHub Copilot, OpenRouter, Moonshot/Kimi, MiniMax, Local: Ollama, vLLM, LM Studio.
+
+### Supported Channels
+
+nanobot supports **25+ channels**: Discord, Telegram, Feishu, Slack, WeChat, QQ, Email, Matrix, DingTalk.
+
+### License
+
+MIT License.
+
+### Help Resources
+
+- 📚 [Documentation](https://nanobot.wiki/)
+- 🐛 [Issues](https://github.com/HKUDS/nanobot/issues)
+- 💬 [Discord](https://discord.gg/MnCvHqpUGB)
