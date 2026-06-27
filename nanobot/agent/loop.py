@@ -577,6 +577,9 @@ class AgentLoop:
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         return await self._cron_turns.submit(msg)
 
+    def delete_session(self, session_key: str) -> bool:
+        return self.sessions.delete_session(session_key)
+
     def pending_cron_job_ids_for_session(self, session_key: str) -> set[str]:
         return self._cron_turns.pending_job_ids_for_session(session_key)
 

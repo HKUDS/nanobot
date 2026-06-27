@@ -23,6 +23,9 @@ class BoundCronAgent(Protocol):
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         ...
 
+    def delete_session(self, session_key: str) -> bool:
+        ...
+
 
 class CronRunRecorder(Protocol):
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
@@ -136,6 +139,8 @@ async def run_bound_cron_job(
                 "error": error_text,
             },
         )
+        # Clean up the per-run session even on error to avoid session leaks.
+        agent.delete_session(session_key)
         raise
     finally:
         if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -150,4 +155,6 @@ async def run_bound_cron_job(
             "response": response,
         },
     )
+    # Clean up the per-run session so cron sessions don't accumulate unbounded.
+    agent.delete_session(session_key)
     return response
