@@ -22,6 +22,7 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     find_legal_message_start,
+    load_bundled_template,
     recent_message_start_index,
     strip_think,
     truncate_text,
@@ -635,6 +636,7 @@ class MemoryStore:
 # that catches any new caller that forgot to set its own cap.
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
+_ARCHIVE_MEMORY_CONTEXT_MAX_CHARS = 4_000  # current MEMORY.md excerpt for archive dedup
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 
@@ -827,6 +829,30 @@ class Consolidator:
             return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
         return truncate_text_to_tokens(text, budget)
 
+    def _current_memory_context(self) -> str:
+        """Return a bounded MEMORY.md excerpt for duplicate/correction checks."""
+        memory = self.store.read_memory().strip()
+        if not memory:
+            return ""
+        template = load_bundled_template("memory/MEMORY.md")
+        if template is not None and memory == template.strip():
+            return ""
+        return truncate_text(memory, _ARCHIVE_MEMORY_CONTEXT_MAX_CHARS)
+
+    def _format_archive_input(self, formatted_messages: str) -> str:
+        memory_context = self._current_memory_context()
+        if not memory_context:
+            return formatted_messages
+        return "\n\n".join(
+            [
+                "Current long-term memory excerpt "
+                "(for duplicate and correction checks; do not rewrite it verbatim):",
+                memory_context,
+                "Conversation chunk to archive:",
+                formatted_messages,
+            ]
+        )
+
     async def archive(
         self,
         messages: list[dict],
@@ -847,7 +873,9 @@ class Consolidator:
             return None
         messages_to_summarize = summary_messages if summary_messages is not None else messages
         try:
-            formatted = MemoryStore._format_messages(messages_to_summarize)
+            formatted = self._format_archive_input(
+                MemoryStore._format_messages(messages_to_summarize)
+            )
             formatted = self._truncate_to_token_budget(formatted)
             response = await self.provider.chat_with_retry(
                 model=self.model,
