@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import os
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -12,6 +14,7 @@ import pytest
 
 from nanobot.audio.transcription import (
     EffectiveTranscriptionConfig,
+    ensure_wav16k,
     resolve_transcription_config,
     transcribe_audio_file,
 )
@@ -942,3 +945,207 @@ def test_groq_provider_normalizes_chat_style_api_base() -> None:
     """Regression for #3637: apiBase set to the v1 base resolves to the audio endpoint."""
     provider = GroqTranscriptionProvider(api_key="gsk-test", api_base="https://api.groq.com/openai/v1")
     assert provider.api_url == "https://api.groq.com/openai/v1/audio/transcriptions"
+
+
+# ---------------------------------------------------------------------------
+# ensure_wav16k: normalize WhatsApp .ogg/.opus voice notes to 16 kHz mono WAV
+# before STT. Covers all five branches + caller-side tmp cleanup. ffmpeg is
+# mocked so these run deterministically on CI runners that lack the binary.
+# ---------------------------------------------------------------------------
+
+
+def _fake_completed(returncode: int = 0):
+    """Build a minimal object that quacks like subprocess.CompletedProcess."""
+    return SimpleNamespace(returncode=returncode, stdout=b"", stderr=b"")
+
+
+def test_ensure_wav16k_passthrough_for_non_convertible_extension(tmp_path: Path) -> None:
+    """A .wav (already a target format) is returned unchanged; ffmpeg is never invoked."""
+    src = tmp_path / "voice.wav"
+    src.write_bytes(b"RIFFfake")
+    with patch("nanobot.audio.transcription.shutil.which") as which, patch(
+        "nanobot.audio.transcription.subprocess.run"
+    ) as run:
+        use_path, tmp = ensure_wav16k(src)
+    assert use_path == src
+    assert tmp is None
+    which.assert_not_called()
+    run.assert_not_called()
+
+
+def test_ensure_wav16k_falls_back_when_ffmpeg_absent(tmp_path: Path) -> None:
+    """No ffmpeg on PATH: return the original .ogg untouched, no conversion attempted."""
+    src = tmp_path / "voice.ogg"
+    src.write_bytes(b"OggS\x00fake")
+    with patch("nanobot.audio.transcription.shutil.which", return_value=None), patch(
+        "nanobot.audio.transcription.subprocess.run"
+    ) as run:
+        use_path, tmp = ensure_wav16k(src)
+    assert use_path == src
+    assert tmp is None
+    run.assert_not_called()
+
+
+def test_ensure_wav16k_converts_successfully(tmp_path: Path) -> None:
+    """ffmpeg present and produces a non-empty file: return the converted tmp path."""
+    src = tmp_path / "voice.ogg"
+    src.write_bytes(b"OggS\x00fake")
+
+    def fake_run(cmd, **kwargs):
+        # cmd = [ffmpeg, -y, -i, src, -ar, 16000, -ac, 1, OUT]
+        Path(cmd[-1]).write_bytes(b"RIFF" + b"\x00" * 64)
+        return _fake_completed(0)
+
+    with patch("nanobot.audio.transcription.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "nanobot.audio.transcription.subprocess.run", side_effect=fake_run
+    ):
+        use_path, tmp = ensure_wav16k(src)
+    try:
+        assert tmp is not None
+        assert use_path == tmp
+        assert tmp.suffix == ".wav"
+        assert tmp.exists() and tmp.stat().st_size > 0
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def test_ensure_wav16k_falls_back_on_nonzero_returncode(tmp_path: Path) -> None:
+    """ffmpeg exits non-zero: fall back to original and remove the empty tmp file."""
+    src = tmp_path / "voice.opus"
+    src.write_bytes(b"OggS\x00fake")
+    created: list[Path] = []
+
+    def fake_run(cmd, **kwargs):
+        out = Path(cmd[-1])
+        created.append(out)  # mkstemp already created it (empty)
+        return _fake_completed(1)
+
+    with patch("nanobot.audio.transcription.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "nanobot.audio.transcription.subprocess.run", side_effect=fake_run
+    ):
+        use_path, tmp = ensure_wav16k(src)
+    assert use_path == src
+    assert tmp is None
+    # The temp file must have been cleaned up on the failure path.
+    assert created and not created[0].exists()
+
+
+def test_ensure_wav16k_falls_back_on_empty_output(tmp_path: Path) -> None:
+    """ffmpeg returns 0 but produces a 0-byte file: treat as failure, fall back."""
+    src = tmp_path / "voice.m4a"
+    src.write_bytes(b"\x00\x00\x00 ftypM4A ")
+    created: list[Path] = []
+
+    def fake_run(cmd, **kwargs):
+        out = Path(cmd[-1])  # left empty by mkstemp
+        created.append(out)
+        return _fake_completed(0)
+
+    with patch("nanobot.audio.transcription.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "nanobot.audio.transcription.subprocess.run", side_effect=fake_run
+    ):
+        use_path, tmp = ensure_wav16k(src)
+    assert use_path == src
+    assert tmp is None
+    assert created and not created[0].exists()
+
+
+def test_ensure_wav16k_falls_back_on_exception(tmp_path: Path) -> None:
+    """subprocess.run raising (e.g. TimeoutExpired): swallow and fall back to original."""
+    src = tmp_path / "voice.ogg"
+    src.write_bytes(b"OggS\x00fake")
+    with patch("nanobot.audio.transcription.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "nanobot.audio.transcription.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=60),
+    ):
+        use_path, tmp = ensure_wav16k(src)
+    assert use_path == src
+    assert tmp is None
+
+
+@pytest.mark.asyncio
+async def test_transcribe_audio_file_uses_converted_path_and_cleans_tmp(tmp_path: Path) -> None:
+    """End-to-end: provider receives the converted WAV, and the tmp file is removed after."""
+    src = tmp_path / "voice.ogg"
+    src.write_bytes(b"OggS\x00fake")
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"RIFF" + b"\x00" * 64)
+        return _fake_completed(0)
+
+    class StubProvider:
+        def __init__(self, **kwargs):
+            pass
+
+        async def transcribe(self, file_path: str | Path) -> str:
+            p = Path(file_path)
+            seen["path"] = p
+            seen["suffix"] = p.suffix
+            seen["existed_during_call"] = p.exists()
+            return "converted ok"
+
+    config = EffectiveTranscriptionConfig(
+        enabled=True,
+        provider="assemblyai",
+        model="universal-3-pro",
+        language="en",
+        api_key="aai-test",
+        api_base="https://assembly.example/v2",
+        max_duration_sec=120,
+        max_upload_mb=25,
+    )
+
+    with patch("nanobot.audio.transcription.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "nanobot.audio.transcription.subprocess.run", side_effect=fake_run
+    ), patch("nanobot.providers.transcription.AssemblyAITranscriptionProvider", StubProvider):
+        result = await transcribe_audio_file(src, config)
+
+    assert result == "converted ok"
+    # Provider got the 16k WAV, not the original .ogg.
+    assert seen["suffix"] == ".wav"
+    assert seen["existed_during_call"] is True
+    # The original is left intact; the tmp WAV is cleaned up afterwards.
+    assert src.exists()
+    assert not Path(seen["path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_transcribe_audio_file_cleans_tmp_on_provider_exception(tmp_path: Path) -> None:
+    """Even if the provider raises, the converted tmp file must not leak."""
+    src = tmp_path / "voice.ogg"
+    src.write_bytes(b"OggS\x00fake")
+    captured: dict[str, Path] = {}
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"RIFF" + b"\x00" * 64)
+        return _fake_completed(0)
+
+    class BoomProvider:
+        def __init__(self, **kwargs):
+            pass
+
+        async def transcribe(self, file_path: str | Path) -> str:
+            captured["path"] = Path(file_path)
+            raise RuntimeError("provider blew up")
+
+    config = EffectiveTranscriptionConfig(
+        enabled=True,
+        provider="assemblyai",
+        model="universal-3-pro",
+        language="en",
+        api_key="aai-test",
+        api_base="https://assembly.example/v2",
+        max_duration_sec=120,
+        max_upload_mb=25,
+    )
+
+    with patch("nanobot.audio.transcription.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "nanobot.audio.transcription.subprocess.run", side_effect=fake_run
+    ), patch("nanobot.providers.transcription.AssemblyAITranscriptionProvider", BoomProvider):
+        with pytest.raises(RuntimeError):
+            await transcribe_audio_file(src, config)
+
+    assert not captured["path"].exists()
+    assert src.exists()
