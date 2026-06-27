@@ -481,6 +481,13 @@ class AgentLoop:
         self._apply_provider_snapshot(snapshot, publish_update=publish_update, model_preset=name)
         self._active_preset = name
 
+    def escalate_reasoning(self) -> bool:
+        """Request escalated reasoning effort for subsequent LLM calls this turn.
+
+        Returns True if escalation was activated.
+        """
+        return self.runner.escalate_reasoning()
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools via plugin loader."""
         from nanobot.agent.tools.context import ToolContext
@@ -816,10 +823,24 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         try:
+            active_preset = self._active_preset
+            active_preset_cfg = self.model_presets.get(active_preset) if active_preset else None
+            reasoning_effort = (
+                active_preset_cfg.reasoning_effort
+                if active_preset_cfg and active_preset_cfg.reasoning_effort is not None
+                else None
+            )
+            reasoning_effort_escalated = (
+                active_preset_cfg.reasoning_effort_escalated
+                if active_preset_cfg and active_preset_cfg.reasoning_effort_escalated is not None
+                else None
+            )
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
                 tools=tools or self.tools,
                 model=self.model,
+                reasoning_effort=reasoning_effort,
+                reasoning_effort_escalated=reasoning_effort_escalated,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,

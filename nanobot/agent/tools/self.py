@@ -136,7 +136,9 @@ class MyTool(Tool, ContextAware):
     def description(self) -> str:
         base = (
             "Check and set your own runtime state.\n"
-            "Actions: check, set.\n"
+            "Actions: check, set, escalate_reasoning.\n"
+            "- escalate_reasoning: request deeper reasoning for the rest of this turn "
+            "(uses reasoningEffortEscalated from config).\n"
             "- check (no key): full config overview — start here.\n"
             "- check (key): drill into a value. Dot-paths allowed "
             "(e.g. '_last_usage.prompt_tokens', 'web_config.enable').\n"
@@ -322,9 +324,20 @@ class MyTool(Tool, ContextAware):
             return self._inspect(key)
         if not self._modify_allowed:
             return "Error: set is disabled (tools.my.allow_set is false)"
+        if action == "escalate_reasoning":
+            return self._escalate_reasoning()
         if action in ("modify", "set"):
             return self._modify(key, value)
         return f"Unknown action: {action}"
+
+    def _escalate_reasoning(self) -> str:
+        loop = self._runtime_state
+        if not hasattr(loop, "escalate_reasoning"):
+            return "Error: reasoning escalation is not available"
+        ok = loop.escalate_reasoning()
+        if ok:
+            return "Reasoning effort escalated for the remainder of this turn."
+        return "Error: could not escalate reasoning effort"
 
     # -- inspect --
 
