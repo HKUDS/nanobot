@@ -25,3 +25,11 @@ if (!root) throw new Error("root element missing");
 
 /* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
 ReactDOM.createRoot(root).render(<App />);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", {
+      updateViaCache: "none",
+    });
+  });
+}
