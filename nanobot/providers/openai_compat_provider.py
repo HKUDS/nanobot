@@ -34,6 +34,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
+from nanobot.providers.text_tool_calls import maybe_inject_text_tool_calls
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -1146,13 +1147,13 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=fn_prov,
                 ))
 
-            return LLMResponse(
+            return maybe_inject_text_tool_calls(LLMResponse(
                 content=content,
                 tool_calls=parsed_tool_calls,
                 finish_reason=finish_reason,
                 usage=self._extract_usage(response_map),
                 reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
-            )
+            ))
 
         if not response.choices:
             return LLMResponse(
@@ -1195,13 +1196,13 @@ class OpenAICompatProvider(LLMProvider):
         if reasoning_content is None and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
 
-        return LLMResponse(
+        return maybe_inject_text_tool_calls(LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
             reasoning_content=reasoning_content,
-        )
+        ))
 
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
@@ -1327,7 +1328,7 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
-        return LLMResponse(
+        return maybe_inject_text_tool_calls(LLMResponse(
             content="".join(content_parts) or None,
             tool_calls=[
                 ToolCallRequest(
@@ -1343,7 +1344,7 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
-        )
+        ))
 
     @classmethod
     def _extract_error_metadata(cls, e: Exception) -> dict[str, Any]:
@@ -1520,13 +1521,13 @@ class OpenAICompatProvider(LLMProvider):
                         on_tool_call_delta=on_tool_call_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
-                    return LLMResponse(
+                    return maybe_inject_text_tool_calls(LLMResponse(
                         content=content or None,
                         tool_calls=tool_calls,
                         finish_reason=finish_reason,
                         usage=usage,
                         reasoning_content=reasoning_content,
-                    )
+                    ))
                 except Exception as responses_error:
                     if self._spec and self._spec.name == "github_copilot":
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
