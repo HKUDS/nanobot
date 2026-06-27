@@ -5,7 +5,7 @@ import os
 import select
 import signal
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,7 @@ _log_handler_id = logger.add(
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )
 
+import httpx  # noqa: E402
 from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
 from prompt_toolkit.application import run_in_terminal  # noqa: E402
 from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
@@ -50,6 +51,8 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.bus.events import OutboundMessage  # noqa: E402
+from nanobot.bus.queue import MessageBus  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
@@ -216,6 +219,64 @@ def _heartbeat_has_active_tasks(content: str) -> bool:
             continue
         return True
     return False
+
+
+def _default_gateway_send_url(config: Config) -> str:
+    """Default ``/api/send`` endpoint URL derived from gateway config."""
+    host = config.gateway.host or "127.0.0.1"
+    return f"http://{host}:{config.gateway.port}/api/send"
+
+
+def _make_cli_send_callback(
+    bus: "MessageBus",
+    *,
+    gateway_url: str | None,
+    gateway_token: str | None,
+    local_publish: "Callable[[OutboundMessage], Awaitable[None]]",
+) -> "Callable[[OutboundMessage], Awaitable[None]]":
+    """Build a MessageTool send callback for the CLI ``agent`` command.
+
+    Targets routed to the ``cli`` channel are delivered locally (printed in
+    the terminal exactly as before). Any other channel is relayed to the
+    running gateway's ``/api/send`` endpoint via an async HTTP POST, since
+    those channels only live inside the gateway process. Relay failures
+    raise so ``MessageTool.execute`` surfaces them to the model.
+    """
+    url = (gateway_url or "").strip() or None
+    token = (gateway_token or "").strip() or None
+
+    async def _send(msg: OutboundMessage) -> None:
+        # CLI-local destination: keep the previous in-process behavior.
+        if msg.channel == "cli":
+            await local_publish(msg)
+            return
+        if not url:
+            raise RuntimeError(
+                "cross-channel send requested but no gateway URL is configured "
+                "(set --gateway-url or config.gateway.port); the gateway must "
+                "be running for the target channel to receive the message."
+            )
+        payload = {
+            "channel": msg.channel,
+            "chat_id": msg.chat_id,
+            "content": msg.content,
+            "media": list(msg.media or []),
+            "buttons": list(msg.buttons or []),
+            "metadata": dict(msg.metadata or {}),
+        }
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"gateway unreachable at {url}: {exc}") from exc
+        if resp.status_code != 200:
+            detail = resp.text.strip() or resp.reason_phrase
+            raise RuntimeError(f"gateway send failed ({resp.status_code}): {detail}")
+
+    return _send
 
 
 def _pick_heartbeat_target_from_sessions(
@@ -824,6 +885,187 @@ def serve(
 # ============================================================================
 
 
+async def _gateway_http_server(
+    host: str,
+    gate_port: int,
+    *,
+    deliver: Callable[[OutboundMessage], Awaitable[None]] | None = None,
+    send_token: str = "",
+):
+    """Lightweight HTTP server on the gateway port.
+
+    Serves ``GET /health`` for liveness probes and ``POST /api/send`` so
+    out-of-process clients (e.g. ``nanobot agent``) can relay proactive
+    messages onto the gateway's bus, where the running channel managers
+    deliver them to live channels. When ``send_token`` is empty the send
+    endpoint is restricted to localhost connections.
+    """
+    import json as _json
+
+    _max_send_body = 1_048_576  # 1 MiB ceiling for /api/send payloads
+
+    def _peer_is_local(writer) -> bool:
+        get_extra = getattr(writer, "get_extra_info", None)
+        if not callable(get_extra):
+            return True  # test/unknown transport — treat as local
+        peer = get_extra("peername")
+        if not peer:
+            return True
+        peer_host = peer[0] if isinstance(peer, tuple) else str(peer)
+        return peer_host in ("127.0.0.1", "::1", "localhost")
+
+    def _authed(request_headers: dict[str, str]) -> bool:
+        if not send_token:
+            return True
+        bearer = request_headers.get("authorization", "")
+        if bearer.startswith("Bearer ") and bearer[len("Bearer "):].strip() == send_token:
+            return True
+        return request_headers.get("x-nanobot-auth", "").strip() == send_token
+
+    async def _read_request(reader) -> tuple[str, str, dict[str, str], bytes]:
+        """Read a single HTTP/1.x request. Returns (method, path, headers, body)."""
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = await asyncio.wait_for(reader.read(8192), timeout=5)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > 65536 and b"\r\n\r\n" not in buf:
+                break
+        head, _, body_start = buf.partition(b"\r\n\r\n")
+        lines = head.decode("utf-8", errors="replace").split("\r\n")
+        request_line = lines[0] if lines else ""
+        parts = request_line.split(" ")
+        method = parts[0] if len(parts) >= 1 else ""
+        path = parts[1] if len(parts) >= 2 else ""
+        headers: dict[str, str] = {}
+        for line in lines[1:]:
+            if ":" in line:
+                k, _, v = line.partition(":")
+                headers[k.strip().lower()] = v.strip()
+        content_length = 0
+        try:
+            content_length = int(headers.get("content-length", "0") or "0")
+        except ValueError:
+            content_length = 0
+        body = body_start
+        while len(body) < content_length and len(body) < _max_send_body:
+            chunk = await asyncio.wait_for(
+                reader.read(min(8192, content_length - len(body))), timeout=5
+            )
+            if not chunk:
+                break
+            body += chunk
+        if content_length and len(body) > content_length:
+            body = body[:content_length]
+        return method, path, headers, body
+
+    def _respond(writer, status: int, reason: str, body_bytes: bytes, ctype: str):
+        out = (
+            f"HTTP/1.0 {status} {reason}\r\n"
+            f"Content-Type: {ctype}\r\n"
+            f"Content-Length: {len(body_bytes)}\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        ).encode() + body_bytes
+        writer.write(out)
+        # Drain is awaited by caller where possible; tests use a no-op drain.
+
+    async def handle(reader, writer):
+        try:
+            method, path, headers, body = await _read_request(reader)
+        except (asyncio.TimeoutError, ConnectionError):
+            writer.close()
+            return
+
+        if method == "GET" and path == "/health":
+            _respond(writer, 200, "OK", _json.dumps({"status": "ok"}).encode(), "application/json")
+            await writer.drain()
+            writer.close()
+            return
+
+        if method == "POST" and path == "/api/send":
+            if deliver is None:
+                _respond(writer, 503, "Service Unavailable", b"send not configured", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            if not _authed(headers):
+                _respond(writer, 401, "Unauthorized", b"Unauthorized", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            if not send_token and not _peer_is_local(writer):
+                _respond(writer, 403, "Forbidden", b"remote send requires a token", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            if len(body) > _max_send_body:
+                _respond(writer, 413, "Payload Too Large", b"too large", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            try:
+                payload = _json.loads(body.decode("utf-8")) if body else {}
+            except (ValueError, UnicodeDecodeError):
+                _respond(writer, 400, "Bad Request", b"invalid json", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            if not isinstance(payload, dict):
+                _respond(writer, 400, "Bad Request", b"payload must be an object", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            channel = str(payload.get("channel") or "").strip()
+            chat_id = str(payload.get("chat_id") or payload.get("chatId") or "").strip()
+            content = payload.get("content")
+            if not channel or not chat_id:
+                _respond(writer, 400, "Bad Request", b"missing channel or chat_id", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            if content is None:
+                _respond(writer, 400, "Bad Request", b"missing content", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            media = payload.get("media") or []
+            buttons = payload.get("buttons") or []
+            metadata = dict(payload.get("metadata") or {})
+            metadata["_record_channel_delivery"] = True
+            msg = OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=str(content),
+                media=list(media) if isinstance(media, list) else [],
+                buttons=list(buttons) if isinstance(buttons, list) else [],
+                metadata=metadata,
+            )
+            try:
+                await deliver(msg)
+            except Exception:
+                logger.exception("gateway /api/send delivery failed")
+                _respond(writer, 502, "Bad Gateway", b"delivery failed", "text/plain")
+                await writer.drain()
+                writer.close()
+                return
+            _respond(writer, 200, "OK", b'{"ok":true}', "application/json")
+            await writer.drain()
+            writer.close()
+            return
+
+        _respond(writer, 404, "Not Found", b"Not Found", "text/plain")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, host, gate_port)
+    console.print(f"[green]✓[/green] Health endpoint: http://{host}:{gate_port}/health")
+    console.print(f"[green]✓[/green] Send endpoint: http://{host}:{gate_port}/api/send")
+    async with server:
+        await server.serve_forever()
+
+
 def _run_gateway(
     config: Config,
     *,
@@ -1116,48 +1358,6 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
-    async def _health_server(host: str, health_port: int):
-        """Lightweight HTTP health endpoint on the gateway port."""
-        import json as _json
-
-        async def handle(reader, writer):
-            try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except (asyncio.TimeoutError, ConnectionError):
-                writer.close()
-                return
-
-            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
-            method, path = "", ""
-            parts = request_line.split(" ")
-            if len(parts) >= 2:
-                method, path = parts[0], parts[1]
-
-            if method == "GET" and path == "/health":
-                body = _json.dumps({"status": "ok"})
-                resp = (
-                    f"HTTP/1.0 200 OK\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-            else:
-                body = "Not Found"
-                resp = (
-                    f"HTTP/1.0 404 Not Found\r\n"
-                    f"Content-Type: text/plain\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-
-            writer.write(resp.encode())
-            await writer.drain()
-            writer.close()
-
-        server = await asyncio.start_server(handle, host, health_port)
-        console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
-        async with server:
-            await server.serve_forever()
     # Register Dream system job (idempotent on restart)
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream
@@ -1230,7 +1430,12 @@ def _run_gateway(
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
-                    _health_server(config.gateway.host, port),
+                    _gateway_http_server(
+                        config.gateway.host,
+                        port,
+                        deliver=_deliver_to_channel,
+                        send_token=(config.gateway.send_token or "").strip(),
+                    ),
                     name="nanobot-health-server",
                 ))
             if open_browser_url:
@@ -1312,6 +1517,16 @@ def agent(
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    gateway_url: str | None = typer.Option(
+        None,
+        "--gateway-url",
+        help="Gateway /api/send endpoint URL for cross-channel proactive sends (defaults to config.gateway).",
+    ),
+    gateway_token: str | None = typer.Option(
+        None,
+        "--gateway-token",
+        help="Shared secret for the gateway /api/send endpoint (defaults to config.gateway.sendToken).",
+    ),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -1347,6 +1562,25 @@ def agent(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
+
+    # Relay cross-channel sends (any channel != "cli") to the running gateway,
+    # since those channels only live inside the gateway process. CLI-local
+    # sends keep the existing in-process bus behavior.
+    from nanobot.agent.tools.message import MessageTool
+
+    resolved_gateway_url = gateway_url or _default_gateway_send_url(config)
+    resolved_gateway_token = gateway_token if gateway_token is not None else (config.gateway.send_token or "")
+    tools = getattr(agent_loop, "tools", None)
+    message_tool = tools.get("message") if tools is not None else None
+    if isinstance(message_tool, MessageTool):
+        message_tool.set_send_callback(
+            _make_cli_send_callback(
+                bus,
+                gateway_url=resolved_gateway_url,
+                gateway_token=resolved_gateway_token,
+                local_publish=bus.publish_outbound,
+            )
+        )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
