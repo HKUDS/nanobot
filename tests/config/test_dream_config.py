@@ -6,6 +6,10 @@ def test_dream_config_defaults_to_interval_hours() -> None:
 
     assert cfg.interval_h == 2
     assert cfg.cron is None
+    assert cfg.eager_consolidation is False
+    assert cfg.eager_min_messages == 3
+    assert cfg.eager_min_interval_s == 120
+    assert cfg.eager_max_batch == 20
 
 
 def test_dream_config_builds_every_schedule_from_interval() -> None:
@@ -52,3 +56,25 @@ def test_dream_config_uses_model_override_name_and_accepts_legacy_model() -> Non
     assert cfg.model_override == "openrouter/sonnet"
     assert dumped["modelOverride"] == "openrouter/sonnet"
     assert "model" not in dumped
+
+
+def test_dream_config_accepts_eager_consolidation_camel_case() -> None:
+    cfg = DreamConfig.model_validate(
+        {
+            "eagerConsolidation": True,
+            "eagerMinMessages": 4,
+            "eagerMinIntervalS": 30,
+            "eagerMaxBatch": 12,
+        }
+    )
+
+    dumped = cfg.model_dump(by_alias=True)
+
+    assert cfg.eager_consolidation is True
+    assert cfg.eager_min_messages == 4
+    assert cfg.eager_min_interval_s == 30
+    assert cfg.eager_max_batch == 12
+    assert dumped["eagerConsolidation"] is True
+    assert dumped["eagerMinMessages"] == 4
+    assert dumped["eagerMinIntervalS"] == 30
+    assert dumped["eagerMaxBatch"] == 12

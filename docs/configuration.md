@@ -2041,6 +2041,34 @@ How it works:
 >
 > This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
 
+## Eager Memory Consolidation
+
+By default, `memory/history.jsonl` receives archive entries when a session is compacted or when the prompt is already large enough to need token-driven consolidation. If you want Dream to see ordinary short conversations too, enable eager consolidation:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "dream": {
+        "eagerConsolidation": true,
+        "eagerMinMessages": 3,
+        "eagerMinIntervalS": 120,
+        "eagerMaxBatch": 20
+      }
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.dream.eagerConsolidation` | `false` | Append recent completed turns to `memory/history.jsonl` in the background after responses. |
+| `agents.defaults.dream.eagerMinMessages` | `3` | Minimum number of new messages since the last eager archive pass. |
+| `agents.defaults.dream.eagerMinIntervalS` | `120` | Per-session throttle, in seconds, between eager archive passes. |
+| `agents.defaults.dream.eagerMaxBatch` | `20` | Maximum messages summarized by one eager archive pass. |
+
+Eager consolidation is append-only: it advances a separate `last_eager_consolidated` cursor, does not remove live session messages, and does not inject its summary back into the next prompt. It may add extra LLM summarization calls, so it is opt-in.
+
 ## Timezone
 
 Time is context. Context should be precise.

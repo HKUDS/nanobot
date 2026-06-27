@@ -202,6 +202,10 @@ class AgentLoop:
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
         max_messages: int = 120,
+        eager_consolidation: bool = False,
+        eager_min_messages: int = 3,
+        eager_min_interval_s: int = 120,
+        eager_max_batch: int = 20,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -326,6 +330,10 @@ class AgentLoop:
             max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
+            eager_consolidation=eager_consolidation,
+            eager_min_messages=eager_min_messages,
+            eager_min_interval_s=eager_min_interval_s,
+            eager_max_batch=eager_max_batch,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -391,6 +399,10 @@ class AgentLoop:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
+            eager_consolidation=defaults.dream.eager_consolidation,
+            eager_min_messages=defaults.dream.eager_min_messages,
+            eager_min_interval_s=defaults.dream.eager_min_interval_s,
+            eager_max_batch=defaults.dream.eager_max_batch,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
@@ -1137,6 +1149,31 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    async def _post_turn_consolidation(
+        self,
+        session: Session,
+        *,
+        replay_max_messages: int | None,
+    ) -> None:
+        await self.consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=replay_max_messages,
+        )
+        await self.consolidator.maybe_eager_consolidate(session)
+
+    def _schedule_post_turn_consolidation(
+        self,
+        session: Session,
+        *,
+        replay_max_messages: int | None,
+    ) -> None:
+        self._schedule_background(
+            self._post_turn_consolidation(
+                session,
+                replay_max_messages=replay_max_messages,
+            )
+        )
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -1221,11 +1258,9 @@ class AgentLoop:
         )
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
-        self._schedule_background(
-            self.consolidator.maybe_consolidate_by_tokens(
-                session,
-                replay_max_messages=self._max_messages,
-            )
+        self._schedule_post_turn_consolidation(
+            session,
+            replay_max_messages=self._max_messages,
         )
         content = final_content or "Background task completed."
         outbound_metadata: dict[str, Any] = {}
@@ -1551,11 +1586,9 @@ class AgentLoop:
             ctx.session.enforce_file_cap(
                 on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
             )
-            self._schedule_background(
-                self.consolidator.maybe_consolidate_by_tokens(
-                    ctx.session,
-                    replay_max_messages=self._max_messages,
-                )
+            self._schedule_post_turn_consolidation(
+                ctx.session,
+                replay_max_messages=self._max_messages,
             )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)

@@ -34,6 +34,7 @@ _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
+    "_last_eager_consolidated_at",
     "pending_user_turn",
     "runtime_checkpoint",
     "thread_goal",
@@ -108,6 +109,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    last_eager_consolidated: int = 0  # Number of messages proactively archived to history
 
     def __post_init__(self) -> None:
         # An out-of-range offset (corrupt metadata) would hide all history; reset it.
@@ -117,6 +119,14 @@ class Session:
             or not 0 <= self.last_consolidated <= len(self.messages)
         ):
             self.last_consolidated = 0
+        if (
+            isinstance(self.last_eager_consolidated, bool)
+            or not isinstance(self.last_eager_consolidated, int)
+            or not 0 <= self.last_eager_consolidated <= len(self.messages)
+        ):
+            self.last_eager_consolidated = self.last_consolidated
+        if self.last_eager_consolidated < self.last_consolidated:
+            self.last_eager_consolidated = self.last_consolidated
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -269,8 +279,10 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.last_eager_consolidated = 0
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop("_last_eager_consolidated_at", None)
 
     def retain_recent_legal_suffix(
         self,
@@ -296,6 +308,7 @@ class Session:
 
         original = list(self.messages)
         before_lc = self.last_consolidated
+        before_eager = self.last_eager_consolidated
 
         start_idx = max(0, len(self.messages) - max_messages)
         if extend_to_user:
@@ -354,9 +367,14 @@ class Session:
             1 for i, m in enumerate(original)
             if i < before_lc and id(m) in retained_ids
         )
+        new_eager = sum(
+            1 for i, m in enumerate(original)
+            if i < before_eager and id(m) in retained_ids
+        )
 
         self.messages = retained
         self.last_consolidated = new_lc
+        self.last_eager_consolidated = max(new_lc, new_eager)
         self.updated_at = datetime.now()
         return dropped, already_consolidated
 
@@ -452,6 +470,7 @@ class SessionManager:
             created_at = None
             updated_at = None
             last_consolidated = 0
+            last_eager_consolidated = 0
 
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -466,6 +485,10 @@ class SessionManager:
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
+                        last_eager_consolidated = data.get(
+                            "last_eager_consolidated",
+                            last_consolidated,
+                        )
                     else:
                         messages.append(data)
 
@@ -475,7 +498,8 @@ class SessionManager:
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                last_eager_consolidated=last_eager_consolidated,
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -496,6 +520,7 @@ class SessionManager:
             created_at: datetime | None = None
             updated_at: datetime | None = None
             last_consolidated = 0
+            last_eager_consolidated = 0
             skipped = 0
 
             with open(path, encoding="utf-8") as f:
@@ -518,6 +543,10 @@ class SessionManager:
                             with suppress(ValueError, TypeError):
                                 updated_at = datetime.fromisoformat(data["updated_at"])
                         last_consolidated = data.get("last_consolidated", 0)
+                        last_eager_consolidated = data.get(
+                            "last_eager_consolidated",
+                            last_consolidated,
+                        )
                     else:
                         messages.append(data)
 
@@ -533,7 +562,8 @@ class SessionManager:
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                last_eager_consolidated=last_eager_consolidated,
             )
         except Exception as e:
             logger.warning("Repair failed for session {}: {}", key, e)
@@ -570,7 +600,8 @@ class SessionManager:
                     "created_at": session.created_at.isoformat(),
                     "updated_at": session.updated_at.isoformat(),
                     "metadata": session.metadata,
-                    "last_consolidated": session.last_consolidated
+                    "last_consolidated": session.last_consolidated,
+                    "last_eager_consolidated": session.last_eager_consolidated,
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
                 for msg in session.messages:
@@ -679,6 +710,9 @@ class SessionManager:
         if source.last_consolidated > len(copied):
             metadata.pop("_last_summary", None)
             last_consolidated = 0
+        last_eager_consolidated = min(source.last_eager_consolidated, len(copied))
+        if last_eager_consolidated < last_consolidated:
+            last_eager_consolidated = last_consolidated
 
         now = datetime.now()
         target = Session(
@@ -688,6 +722,7 @@ class SessionManager:
             updated_at=now,
             metadata=metadata,
             last_consolidated=last_consolidated,
+            last_eager_consolidated=last_eager_consolidated,
         )
         self.save(target, fsync=True)
         return target
