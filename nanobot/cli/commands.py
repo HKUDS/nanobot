@@ -1041,9 +1041,12 @@ def _run_gateway(
             response = resp.content if resp else ""
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create(hb_session_key)
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
+            # Only prune when using a dedicated heartbeat session — skip when
+            # sharing the user's conversation session to avoid truncating their history.
+            if hb_cfg.isolated_session:
+                session = agent.sessions.get_or_create(hb_session_key)
+                session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+                agent.sessions.save(session)
 
             if not response:
                 return None
