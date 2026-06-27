@@ -70,12 +70,34 @@ class RuntimeModelChanged:
     model_preset: str | None
 
 
+@dataclass(frozen=True)
+class StartupActivity:
+    """Structured startup activity for runtime surfaces."""
+
+    component: str
+    phase: str
+    message: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class McpServerStatusChanged:
+    """MCP server connection status changed."""
+
+    server: str
+    status: str
+    message: str = ""
+    capabilities: dict[str, Any] = field(default_factory=dict)
+
+
 RuntimeEvent = (
     SessionTurnStarted
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
     | RuntimeModelChanged
+    | StartupActivity
+    | McpServerStatusChanged
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
@@ -83,6 +105,8 @@ RuntimeEventType = (
     | type[TurnCompleted]
     | type[GoalStateChanged]
     | type[RuntimeModelChanged]
+    | type[StartupActivity]
+    | type[McpServerStatusChanged]
 )
 RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
 _HandlerEntry = tuple[RuntimeEventType | None, RuntimeEventHandler]

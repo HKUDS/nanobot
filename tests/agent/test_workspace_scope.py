@@ -16,6 +16,7 @@ from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
+    WorkspaceScopeResolver,
     bind_workspace_scope,
     default_workspace_scope,
     reset_workspace_scope,
@@ -92,6 +93,39 @@ def test_workspace_scope_metadata_falls_back_for_stale_session(tmp_path: Path) -
 
     assert scope.project_path == tmp_path.resolve()
     assert scope.access_mode == "full"
+
+
+def test_workspace_scope_resolver_supports_cli_channel(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=True,
+        scoped_channels={"websocket", "cli"},
+    )
+    metadata = {
+        WORKSPACE_SCOPE_METADATA_KEY: {
+            "project_path": str(project),
+            "access_mode": "full",
+        }
+    }
+
+    cli_scope = resolver.for_turn(
+        channel="cli",
+        message_metadata=None,
+        session_metadata=metadata,
+    )
+    telegram_scope = resolver.for_turn(
+        channel="telegram",
+        message_metadata=metadata,
+        session_metadata=metadata,
+    )
+
+    assert cli_scope.project_path == project.resolve()
+    assert cli_scope.access_mode == "full"
+    assert cli_scope.source_channel == "cli"
+    assert telegram_scope.project_path == tmp_path.resolve()
+    assert telegram_scope.access_mode == "restricted"
 
 
 @pytest.mark.asyncio

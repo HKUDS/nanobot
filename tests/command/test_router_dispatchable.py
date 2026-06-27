@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.command.builtin import register_builtin_commands
+from nanobot.command.builtin import BUILTIN_COMMAND_SPECS, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
 
 
@@ -28,6 +28,10 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("/dream-restore")
         assert router.is_dispatchable_command("/goal")
         assert router.is_dispatchable_command("/pairing")
+
+    def test_all_builtin_specs_are_routable(self, router: CommandRouter) -> None:
+        for spec in BUILTIN_COMMAND_SPECS:
+            assert router.is_priority(spec.command) or router.is_dispatchable_command(spec.command)
 
     def test_prefix_commands_match(self, router: CommandRouter) -> None:
         assert router.is_dispatchable_command("/dream-log abc123")
