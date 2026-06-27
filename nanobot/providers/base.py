@@ -176,6 +176,7 @@ class GenerationSettings:
 
 
 _SYNTHETIC_USER_CONTENT = "(conversation continued)"
+_IMAGE_OMITTED_PLACEHOLDER = "[image not delivered to model; omitted and cannot be viewed]"
 
 
 class LLMProvider(ABC):
@@ -562,11 +563,9 @@ class LLMProvider(ABC):
                 new_content = []
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        placeholder = (
-                            "[Image not delivered to model — "
-                            "do not describe or reference it]"
+                        new_content.append(
+                            {"type": "text", "text": _IMAGE_OMITTED_PLACEHOLDER}
                         )
-                        new_content.append({"type": "text", "text": placeholder})
                         found = True
                     else:
                         new_content.append(b)
@@ -589,11 +588,7 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 for i, b in enumerate(content):
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        placeholder = (
-                            "[Image not delivered to model — "
-                            "do not describe or reference it]"
-                        )
-                        content[i] = {"type": "text", "text": placeholder}
+                        content[i] = {"type": "text", "text": _IMAGE_OMITTED_PLACEHOLDER}
                         found = True
         return found
 
