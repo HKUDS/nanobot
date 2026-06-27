@@ -97,13 +97,16 @@ class GitStore:
             # Ensure tracked files exist (touch them if missing) so the initial
             # commit has something to track.
             for rel in self._tracked_files:
-                p = self._workspace / rel
+                p = self._workspace / self._add_path(rel)
+                if rel.endswith("/**"):
+                    p.mkdir(parents=True, exist_ok=True)
+                    continue
                 p.parent.mkdir(parents=True, exist_ok=True)
                 if not p.exists():
                     p.write_text("", encoding="utf-8")
 
             # Initial commit
-            porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
+            porcelain.add(str(self._workspace), paths=[".gitignore", *self._tracked_add_paths()])
             porcelain.commit(
                 str(self._workspace),
                 message=b"init: nanobot memory store",
@@ -136,7 +139,7 @@ class GitStore:
                 return None
 
             msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
+            porcelain.add(str(self._workspace), paths=self._tracked_add_paths())
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,
@@ -196,16 +199,31 @@ class GitStore:
         """Generate .gitignore content from tracked files."""
         dirs: set[str] = set()
         for f in self._tracked_files:
-            parent = str(Path(f).parent)
+            add_path = self._add_path(f)
+            if f.endswith("/**"):
+                dirs.add(add_path)
+            parent = str(Path(add_path).parent)
             if parent != ".":
-                dirs.add(parent)
+                parts = Path(parent).parts
+                for idx in range(1, len(parts) + 1):
+                    dirs.add(str(Path(*parts[:idx])))
         lines = ["/*"]
         for d in sorted(dirs):
             lines.append(f"!{d}/")
         for f in self._tracked_files:
-            lines.append(f"!{f}")
+            if f.endswith("/**"):
+                lines.append(f"!{self._add_path(f)}/**")
+            else:
+                lines.append(f"!{f}")
         lines.append("!.gitignore")
         return "\n".join(lines) + "\n"
+
+    def _tracked_add_paths(self) -> list[str]:
+        return [self._add_path(path) for path in self._tracked_files]
+
+    @staticmethod
+    def _add_path(path: str) -> str:
+        return path[:-3].rstrip("/\\") if path.endswith("/**") else path
 
     # -- query -----------------------------------------------------------------
 

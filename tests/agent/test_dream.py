@@ -128,6 +128,7 @@ class TestDreamTools:
             "apply_patch",
             "edit_file",
             "read_file",
+            "write_memory_concepts",
             "write_file",
         }
 
