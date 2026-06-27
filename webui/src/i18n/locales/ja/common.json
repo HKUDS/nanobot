@@ -459,17 +459,31 @@
     },
     "apps": {
       "description": "nanobot がチャットで使用できる App CLI と MCP サービスを追加します。",
+      "descriptionWithNanobot": "nanobot の機能、ローカルアプリアダプター、接続済みツールサーバーを有効にします。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "チャンネル",
+      "featureLabel": "機能",
       "filterAll": "すべて",
+      "filterNanobot": "Nanobot",
       "filterCli": "CLI アプリ",
       "filterMcp": "MCP サービス",
       "enabledSummary": "{{count}} 件有効",
       "caption": "CLI {{cli}} 件 · MCP {{mcp}} 件",
+      "captionWithNanobot": "Nanobot {{nanobot}} 件 · CLI {{cli}} 件 · MCP {{mcp}} 件",
       "searchPlaceholder": "アプリを検索",
       "featured": "注目",
       "loading": "アプリを読み込み中...",
-      "empty": "一致するアプリはありません。"
+      "empty": "一致するアプリはありません。",
+      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。"
+    },
+    "nanobotFeatures": {
+      "enabled": "有効",
+      "enable": "有効化",
+      "ready": "準備完了",
+      "missingDependency": "必要なサポートをインストール",
+      "channelDisabled": "チャンネルは無効",
+      "notEnabled": "未有効"
     },
     "automations": {
       "filters": {

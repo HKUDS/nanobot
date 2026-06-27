@@ -154,7 +154,7 @@ The key (`webhook`) becomes the config section name. The value points to your `B
 
 ```bash
 python -m pip install -e .
-nanobot plugins list      # verify "Webhook" shows as "plugin"
+nanobot plugins list      # verify "webhook" shows as a channel
 nanobot onboard           # auto-adds default config for detected plugins
 ```
 
@@ -534,7 +534,7 @@ If not overridden, the base class returns `{"enabled": false}`.
 git clone https://github.com/you/nanobot-channel-webhook
 cd nanobot-channel-webhook
 python -m pip install -e .
-nanobot plugins list    # should show "Webhook" as "plugin"
+nanobot plugins list    # should show "webhook" as a channel
 nanobot gateway         # test end-to-end
 ```
 
@@ -543,8 +543,8 @@ nanobot gateway         # test end-to-end
 ```bash
 $ nanobot plugins list
 
-  Name       Source    Enabled
-  telegram   builtin  yes
-  discord    builtin  no
-  webhook    plugin   yes
+  Name       Type      Enabled
+  discord    channel   no
+  telegram   channel   yes
+  webhook    channel   yes
 ```

@@ -459,17 +459,31 @@
     },
     "apps": {
       "description": "Tambahkan CLI aplikasi dan layanan MCP yang dapat digunakan nanobot dari chat.",
+      "descriptionWithNanobot": "Aktifkan kemampuan nanobot, adaptor aplikasi lokal, dan server alat terhubung.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Kanal",
+      "featureLabel": "Fitur",
       "filterAll": "Semua",
+      "filterNanobot": "Nanobot",
       "filterCli": "Aplikasi CLI",
       "filterMcp": "Layanan MCP",
       "enabledSummary": "{{count}} aktif",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "captionWithNanobot": "{{nanobot}} Nanobot · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Cari aplikasi",
       "featured": "Unggulan",
       "loading": "Memuat aplikasi...",
-      "empty": "Tidak ada aplikasi yang cocok."
+      "empty": "Tidak ada aplikasi yang cocok.",
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
+    },
+    "nanobotFeatures": {
+      "enabled": "Aktif",
+      "enable": "Aktifkan",
+      "ready": "Siap",
+      "missingDependency": "Instal dukungan yang diperlukan",
+      "channelDisabled": "Kanal dinonaktifkan",
+      "notEnabled": "Belum aktif"
     },
     "automations": {
       "filters": {

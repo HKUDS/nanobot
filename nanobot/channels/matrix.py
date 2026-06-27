@@ -3,6 +3,7 @@
 import asyncio
 import json
 import mimetypes
+import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -45,7 +46,7 @@ try:
     from nio.exceptions import EncryptionError
 except ImportError as e:
     raise ImportError(
-        "Matrix dependencies not installed. Run: pip install nanobot-ai[matrix]"
+        "Matrix dependencies not installed. Run: nanobot plugins enable matrix"
     ) from e
 
 from nanobot.bus.events import OutboundMessage
@@ -199,7 +200,7 @@ class MatrixConfig(Base):
     password: str = ""
     access_token: str = ""
     device_id: str = ""
-    e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
+    e2ee_enabled: bool = Field(default=sys.platform != "win32", alias="e2eeEnabled")
     sas_verification: bool = Field(default=False, alias="sasVerification")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024

@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,10 @@ from nanobot.channels.matrix import (
 )
 
 _ROOM_SEND_UNSET = object()
+
+
+def test_default_e2ee_matches_platform_support() -> None:
+    assert MatrixConfig().e2ee_enabled is (sys.platform != "win32")
 
 
 class _DummyTask:
@@ -292,7 +297,7 @@ async def test_start_skips_load_store_when_device_id_missing(
         "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
     )
 
-    channel = MatrixChannel(_make_config(device_id=""), MessageBus())
+    channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=True), MessageBus())
     await channel.start()
 
     assert len(clients) == 1
@@ -319,7 +324,7 @@ async def test_register_event_callbacks_uses_media_base_filter() -> None:
 
 
 def test_register_to_device_callbacks_when_sas_verification_enabled() -> None:
-    channel = MatrixChannel(_make_config(sas_verification=True), MessageBus())
+    channel = MatrixChannel(_make_config(e2ee_enabled=True, sas_verification=True), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
@@ -347,7 +352,11 @@ def test_register_to_device_callbacks_skips_when_e2ee_disabled() -> None:
 async def test_sas_verification_start_accepts_allowed_sender(monkeypatch) -> None:
     _patch_key_verification_events(monkeypatch)
     channel = MatrixChannel(
-        _make_config(allow_from=["@alice:matrix.org"], sas_verification=True),
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
         MessageBus(),
     )
     client = _FakeAsyncClient("", "", "", None)
@@ -366,7 +375,11 @@ async def test_sas_verification_start_accepts_allowed_sender(monkeypatch) -> Non
 async def test_sas_verification_ignores_denied_sender(monkeypatch) -> None:
     _patch_key_verification_events(monkeypatch)
     channel = MatrixChannel(
-        _make_config(allow_from=["@alice:matrix.org"], sas_verification=True),
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
         MessageBus(),
     )
     client = _FakeAsyncClient("", "", "", None)
@@ -402,7 +415,11 @@ async def test_sas_verification_ignores_when_disabled(monkeypatch) -> None:
 async def test_sas_verification_key_confirms_allowed_sender(monkeypatch) -> None:
     _patch_key_verification_events(monkeypatch)
     channel = MatrixChannel(
-        _make_config(allow_from=["@alice:matrix.org"], sas_verification=True),
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
         MessageBus(),
     )
     client = _FakeAsyncClient("", "", "", None)
@@ -1202,7 +1219,7 @@ async def test_on_media_message_handles_decrypt_error(monkeypatch, tmp_path) -> 
 
 @pytest.mark.asyncio
 async def test_send_clears_typing_after_send() -> None:
-    channel = MatrixChannel(_make_config(), MessageBus())
+    channel = MatrixChannel(_make_config(e2ee_enabled=True), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
