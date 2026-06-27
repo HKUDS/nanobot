@@ -798,14 +798,24 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
     if host in {"0.0.0.0", "::"}:
+        if not api_key:
+            console.print(
+                "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+                "Set api.api_key in config to prevent unauthenticated access.[/red]"
+            )
+            raise typer.Exit(1)
         console.print(
-            "[yellow]Warning:[/yellow] API is bound to all interfaces. "
-            "Only do this behind a trusted network boundary, firewall, or reverse proxy."
+            "[yellow]API is bound to all interfaces "
+            "(authentication required).[/yellow]"
         )
     console.print()
 
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+    api_app = create_app(
+        agent_loop, model_name=model_name, request_timeout=timeout,
+        api_key=api_key,
+    )
 
     async def on_startup(_app):
         await agent_loop._connect_mcp()

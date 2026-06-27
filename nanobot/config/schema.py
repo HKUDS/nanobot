@@ -310,6 +310,18 @@ class ApiConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
+    api_key: str = Field(default="", repr=False)
+
+    @model_validator(mode="after")
+    def wildcard_host_requires_auth(self) -> "ApiConfig":
+        if self.host not in ("0.0.0.0", "::"):
+            return self
+        if self.api_key.strip():
+            return self
+        raise ValueError(
+            "host is 0.0.0.0 (all interfaces) but api_key is not set "
+            "- set api.api_key to prevent unauthenticated access"
+        )
 
 
 class GatewayConfig(Base):
