@@ -13,6 +13,10 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from nanobot.agent.context_governance import (
+    ContextGovernanceConfig,
+    ContextGovernor,
+)
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.clarification import ASK_CLARIFICATION_TOOL_NAME
 from nanobot.agent.tools.registry import ToolRegistry
@@ -33,11 +37,8 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     extract_reasoning,
-    find_legal_message_start,
-    maybe_persist_tool_result,
     strip_reasoning_tags,
     strip_think,
-    truncate_text,
 )
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
@@ -50,7 +51,6 @@ from nanobot.utils.runtime import (
     build_finalization_retry_message,
     build_goal_continue_message,
     build_length_recovery_message,
-    ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
@@ -68,17 +68,6 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
-_SNIP_SAFETY_BUFFER = 1024
-_MICROCOMPACT_KEEP_RECENT = 10
-_MICROCOMPACT_MIN_CHARS = 500
-_COMPACTABLE_TOOLS = frozenset({
-    "read_file", "exec", "grep", "find_files",
-    "web_search", "web_fetch", "list_dir", "list_exec_sessions",
-})
-# read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
-_TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
-_BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
-
 # Backward-compatible module attribute for tests/extensions that monkeypatch
 # the former single-file tracker hook. Runtime uses prepare_file_edit_trackers.
 prepare_file_edit_tracker = _prepare_file_edit_tracker
@@ -137,6 +126,7 @@ class AgentRunner:
 
     def __init__(self, provider: LLMProvider):
         self.provider = provider
+        self.context_governor = ContextGovernor()
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -370,6 +360,19 @@ class AgentRunner:
         had_injections = False
         final_content_streamed = False
         injection_cycles = 0
+        compacted_tool_call_ids: set[str] = set()
+        governance_config = ContextGovernanceConfig(
+            provider=self.provider,
+            model=spec.model,
+            tools=spec.tools,
+            workspace=spec.workspace,
+            session_key=spec.session_key,
+            max_tool_result_chars=spec.max_tool_result_chars,
+            context_window_tokens=spec.context_window_tokens,
+            context_block_limit=spec.context_block_limit,
+            max_tokens=spec.max_tokens,
+            inflight_start_index=len(spec.initial_messages),
+        )
 
         for iteration in range(spec.max_iterations):
             try:
@@ -377,14 +380,11 @@ class AgentRunner:
                 # may repair or compact historical messages for the model, but
                 # those synthetic edits must not shift the append boundary used
                 # later when the caller saves only the new turn.
-                messages_for_model = self._drop_orphan_tool_results(messages)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-                messages_for_model = self._microcompact(messages_for_model)
-                messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
-                messages_for_model = self._snip_history(spec, messages_for_model)
-                # Snipping may have created new orphans; clean them up.
-                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                messages_for_model = self.context_governor.prepare_for_model(
+                    governance_config,
+                    messages,
+                    compacted_tool_call_ids,
+                )
             except Exception:
                 logger.exception(
                     "Context governance failed on turn {} for {}; applying minimal repair",
@@ -392,8 +392,10 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = self._drop_orphan_tool_results(messages)
-                    messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                    messages_for_model = ContextGovernor.drop_orphan_tool_results(messages)
+                    messages_for_model = ContextGovernor.backfill_missing_tool_results(
+                        messages_for_model
+                    )
                 except Exception:
                     messages_for_model = messages
             context = AgentHookContext(
@@ -471,8 +473,8 @@ class AgentRunner:
                         external_lookup_counts,
                         workspace_violation_counts,
                     )
-                    content = self._normalize_tool_result(
-                        spec,
+                    content = self.context_governor.normalize_tool_result(
+                        governance_config,
                         clarification.id,
                         clarification.name,
                         result,
@@ -551,8 +553,8 @@ class AgentRunner:
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": self._normalize_tool_result(
-                            spec,
+                        "content": self.context_governor.normalize_tool_result(
+                            governance_config,
                             tool_call.id,
                             tool_call.name,
                             result,
@@ -1152,67 +1154,6 @@ class AgentRunner:
         return results, events, fatal_error
 
     @staticmethod
-    def _tool_call_name(tool_call: dict[str, Any]) -> str:
-        function = tool_call.get("function")
-        if isinstance(function, dict):
-            name = function.get("name")
-            return name if isinstance(name, str) else ""
-        name = tool_call.get("name")
-        return name if isinstance(name, str) else ""
-
-    @classmethod
-    def _is_ask_clarification_message(cls, message: dict[str, Any]) -> bool:
-        if message.get("name") == ASK_CLARIFICATION_TOOL_NAME:
-            return True
-        return any(
-            isinstance(tc, dict) and cls._tool_call_name(tc) == ASK_CLARIFICATION_TOOL_NAME
-            for tc in (message.get("tool_calls") or [])
-        )
-
-    @classmethod
-    def _with_latest_clarification_pair(
-        cls,
-        original: list[dict[str, Any]],
-        kept: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        if not kept or kept[-1].get("role") != "user":
-            return kept
-
-        reply = kept[-1]
-        try:
-            reply_idx = next(
-                idx for idx in range(len(original) - 1, -1, -1)
-                if original[idx] is reply or original[idx] == reply
-            )
-        except StopIteration:
-            return kept
-
-        if reply_idx < 3:
-            return kept
-        if not (
-            original[reply_idx - 3].get("role") == "assistant"
-            and cls._is_ask_clarification_message(original[reply_idx - 3])
-            and original[reply_idx - 2].get("role") == "tool"
-            and cls._is_ask_clarification_message(original[reply_idx - 2])
-            and original[reply_idx - 1].get("role") == "assistant"
-        ):
-            return kept
-
-        start = reply_idx - 3
-        if start and original[start - 1].get("role") == "user":
-            start -= 1
-        protected = [dict(message) for message in original[start: reply_idx + 1]]
-        if len(kept) >= len(protected) and kept[-len(protected):] == protected:
-            return kept
-
-        overlap = 0
-        for size in range(min(len(kept), len(protected)), 0, -1):
-            if kept[-size:] == protected[-size:]:
-                overlap = size
-                break
-        return kept[:-overlap] + protected if overlap else kept + protected
-
-    @staticmethod
     def _find_clarification_call(
         tool_calls: list[ToolCallRequest],
     ) -> ToolCallRequest | None:
@@ -1493,226 +1434,6 @@ class AgentRunner:
         if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
-
-    def _normalize_tool_result(
-        self,
-        spec: AgentRunSpec,
-        tool_call_id: str,
-        tool_name: str,
-        result: Any,
-    ) -> Any:
-        result = ensure_nonempty_tool_result(tool_name, result)
-        if tool_name in _TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
-            # Exempt tools bound their own output; skip generic offload and truncation.
-            return result
-        try:
-            content = maybe_persist_tool_result(
-                spec.workspace,
-                spec.session_key,
-                tool_call_id,
-                result,
-                max_chars=spec.max_tool_result_chars,
-            )
-        except Exception:
-            logger.exception(
-                "Tool result persist failed for {} in {}; using raw result",
-                tool_call_id,
-                spec.session_key or "default",
-            )
-            content = result
-        if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
-            return truncate_text(content, spec.max_tool_result_chars)
-        return content
-
-    @staticmethod
-    def _drop_orphan_tool_results(
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Drop tool results that have no matching assistant tool_call earlier in the history."""
-        declared: set[str] = set()
-        updated: list[dict[str, Any]] | None = None
-        for idx, msg in enumerate(messages):
-            role = msg.get("role")
-            if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
-                        declared.add(str(tc["id"]))
-            if role == "tool":
-                tid = msg.get("tool_call_id")
-                if tid and str(tid) not in declared:
-                    if updated is None:
-                        updated = [dict(m) for m in messages[:idx]]
-                    continue
-            if updated is not None:
-                updated.append(dict(msg))
-
-        if updated is None:
-            return messages
-        return updated
-
-    @staticmethod
-    def _backfill_missing_tool_results(
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Insert synthetic error results for orphaned tool_use blocks."""
-        declared: list[tuple[int, str, str]] = []  # (assistant_idx, call_id, name)
-        fulfilled: set[str] = set()
-        for idx, msg in enumerate(messages):
-            role = msg.get("role")
-            if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
-                        name = ""
-                        func = tc.get("function")
-                        if isinstance(func, dict):
-                            name = func.get("name", "")
-                        declared.append((idx, str(tc["id"]), name))
-            elif role == "tool":
-                tid = msg.get("tool_call_id")
-                if tid:
-                    fulfilled.add(str(tid))
-
-        missing = [(ai, cid, name) for ai, cid, name in declared if cid not in fulfilled]
-        if not missing:
-            return messages
-
-        updated = list(messages)
-        offset = 0
-        for assistant_idx, call_id, name in missing:
-            insert_at = assistant_idx + 1 + offset
-            while insert_at < len(updated) and updated[insert_at].get("role") == "tool":
-                insert_at += 1
-            updated.insert(insert_at, {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "name": name,
-                "content": _BACKFILL_CONTENT,
-            })
-            offset += 1
-        return updated
-
-    @staticmethod
-    def _microcompact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Replace old compactable tool results with one-line summaries."""
-        compactable_indices: list[int] = []
-        for idx, msg in enumerate(messages):
-            if msg.get("role") == "tool" and msg.get("name") in _COMPACTABLE_TOOLS:
-                compactable_indices.append(idx)
-
-        if len(compactable_indices) <= _MICROCOMPACT_KEEP_RECENT:
-            return messages
-
-        stale = compactable_indices[: len(compactable_indices) - _MICROCOMPACT_KEEP_RECENT]
-        updated: list[dict[str, Any]] | None = None
-        for idx in stale:
-            msg = messages[idx]
-            content = msg.get("content")
-            if not isinstance(content, str) or len(content) < _MICROCOMPACT_MIN_CHARS:
-                continue
-            name = msg.get("name", "tool")
-            summary = f"[{name} result omitted from context]"
-            if updated is None:
-                updated = [dict(m) for m in messages]
-            updated[idx]["content"] = summary
-
-        return updated if updated is not None else messages
-
-    def _apply_tool_result_budget(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        updated = messages
-        for idx, message in enumerate(messages):
-            if message.get("role") != "tool":
-                continue
-            normalized = self._normalize_tool_result(
-                spec,
-                str(message.get("tool_call_id") or f"tool_{idx}"),
-                str(message.get("name") or "tool"),
-                message.get("content"),
-            )
-            if normalized != message.get("content"):
-                if updated is messages:
-                    updated = [dict(m) for m in messages]
-                updated[idx]["content"] = normalized
-        return updated
-
-    def _snip_history(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        if not messages or not spec.context_window_tokens:
-            return messages
-
-        provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
-        max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
-            provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
-        )
-        budget = spec.context_block_limit or (
-            spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
-        )
-        if budget <= 0:
-            return messages
-
-        estimate, _ = estimate_prompt_tokens_chain(
-            self.provider,
-            spec.model,
-            messages,
-            spec.tools.get_definitions(),
-        )
-        if estimate <= budget:
-            return messages
-
-        system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]
-        non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]
-        if not non_system:
-            return messages
-
-        system_tokens = sum(estimate_message_tokens(msg) for msg in system_messages)
-        fixed_tokens, _ = estimate_prompt_tokens_chain(
-            self.provider,
-            spec.model,
-            system_messages,
-            spec.tools.get_definitions(),
-        )
-        remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
-        kept: list[dict[str, Any]] = []
-        kept_tokens = 0
-        for message in reversed(non_system):
-            msg_tokens = estimate_message_tokens(message)
-            if kept and kept_tokens + msg_tokens > remaining_budget:
-                break
-            kept.append(message)
-            kept_tokens += msg_tokens
-        kept.reverse()
-
-        if kept:
-            for i, message in enumerate(kept):
-                if message.get("role") == "user":
-                    kept = kept[i:]
-                    break
-            else:
-                # Recover nearest user message from outside the kept window;
-                # GLM rejects system→assistant (error 1214).  Budget is
-                # intentionally exceeded — oversized beats invalid.
-                for idx in range(len(non_system) - 1, -1, -1):
-                    if non_system[idx].get("role") == "user":
-                        kept = non_system[idx:]
-                        break
-                # If no user exists at all, _enforce_role_alternation
-                # will insert a synthetic one as a safety net.
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
-        if not kept:
-            kept = non_system[-min(len(non_system), 4) :]
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
-        kept = self._with_latest_clarification_pair(non_system, kept)
-        return system_messages + kept
 
     def _partition_tool_batches(
         self,

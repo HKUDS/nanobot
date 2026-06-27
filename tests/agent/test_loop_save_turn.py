@@ -1222,11 +1222,9 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
-    # User turns carry the timestamp prefix so the model can reason about
-    # relative time. Assistant turns do NOT, otherwise the model treats those
-    # past replies as in-context examples and starts its own outputs with
-    # ``[Message Time: ...]`` (which then leaks back to the user).
-    assert "[Message Time:" in non_system[0]["content"]
+    # Persisted timestamps stay in session records, but replay content is not
+    # rewritten with volatile ``[Message Time: ...]`` prefixes.
+    assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["content"].count("subagent result") == 1
     assert "Current Time:" in non_system[2]["content"]

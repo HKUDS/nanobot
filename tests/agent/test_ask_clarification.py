@@ -122,12 +122,11 @@ async def test_ask_clarification_error_continues_for_model_repair():
 
 
 def test_snip_history_keeps_latest_clarification_pair():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.context_governance import ContextGovernanceConfig, ContextGovernor
 
     provider = MagicMock(spec=LLMProvider)
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    runner = AgentRunner(provider)
     messages = [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "old " + ("x" * 2000)},
@@ -152,11 +151,12 @@ def test_snip_history_keeps_latest_clarification_pair():
         {"role": "user", "content": "yes"},
     ]
 
-    kept = runner._snip_history(AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
+    kept = ContextGovernor().snip_history(ContextGovernanceConfig(
+        provider=provider,
         model="test-model",
-        max_iterations=1,
+        tools=tools,
+        workspace=None,
+        session_key=None,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         context_window_tokens=1200,
         context_block_limit=80,

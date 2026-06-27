@@ -118,7 +118,12 @@ to perform that task.
 
 Automations are scheduled agent turns. They should be created from the chat,
 channel, or session where they are supposed to run so nanobot keeps the correct
-target context.
+target context. When an automation runs, it normally delivers the result back to
+that linked chat.
+
+For recurring background checks that should stay quiet unless there is something
+useful to report, use the protected heartbeat job by editing `HEARTBEAT.md`
+instead of creating a chat automation.
 
 Use the Automations view to:
 

@@ -54,7 +54,7 @@ def _make_provider_core(
     if provider_name and not spec and p:
         if not p.api_base:
             raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-        spec = create_dynamic_spec(provider_name)
+        spec = create_dynamic_spec(provider_name, thinking_style=(p.thinking_style or "") if p else "")
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
