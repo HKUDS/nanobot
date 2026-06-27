@@ -1,6 +1,7 @@
 """Configuration schema using Pydantic."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -320,6 +321,79 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
+class WebhookRouteConfig(Base):
+    """One inbound webhook route served by ``nanobot gateway``.
+
+    ``to`` uses the same compact address users see elsewhere: ``channel:chat``.
+    The webhook response is delivered to that channel/chat, and the default
+    session is the same key unless ``thread`` is set.
+    """
+
+    enabled: bool = True
+    path: str = ""  # Defaults to /webhooks/<route-name>.
+    provider: str = "generic"
+    auth: Literal["secret", "none"] = "secret"
+    secret: str = Field(default="", repr=False)
+    to: str = ""  # Required when enabled, e.g. "websocket:github" or "telegram:12345".
+    thread: str = ""  # Optional explicit session key; defaults to ``to``.
+    prompt: str = ""  # Optional Jinja template; a generic event summary is used when empty.
+    events: list[str] = Field(default_factory=list)  # Optional provider event-name allowlist.
+    actions: list[str] = Field(default_factory=list)  # Optional JSON payload action allowlist.
+    sender: str = "webhook"
+    max_body_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
+    dedupe_ttl_s: int = Field(default=3_600, ge=0, le=86_400)
+
+    @model_validator(mode="after")
+    def _validate_route(self) -> "WebhookRouteConfig":
+        if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", self.provider) is None:
+            raise ValueError(
+                "webhook provider names may contain only letters, numbers, '_', '.', and '-'"
+            )
+        if self.path:
+            if not self.path.startswith("/"):
+                raise ValueError("webhook route path must start with '/'")
+            if "?" in self.path or "#" in self.path or any(ch.isspace() for ch in self.path):
+                raise ValueError("webhook route path must be a clean absolute path")
+        self.events = _clean_webhook_filter("events", self.events)
+        self.actions = _clean_webhook_filter("actions", self.actions)
+        return self
+
+
+class WebhooksConfig(Base):
+    """Inbound webhook triggers served on the gateway HTTP port."""
+
+    enabled: bool = True
+    routes: dict[str, WebhookRouteConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_routes(self) -> "WebhooksConfig":
+        seen_paths: dict[str, str] = {}
+        for name, route in self.routes.items():
+            if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name) is None:
+                raise ValueError(
+                    "webhook route names may contain only letters, numbers, '_', '.', and '-'"
+                )
+            if not self.enabled or not route.enabled:
+                continue
+            path = route.path or f"/webhooks/{name}"
+            normalized = path.rstrip("/") if len(path) > 1 else path
+            if normalized == "/health":
+                raise ValueError("webhook route path must not be /health")
+            if previous := seen_paths.get(normalized):
+                raise ValueError(
+                    f"webhook routes {previous!r} and {name!r} share path {normalized!r}"
+                )
+            seen_paths[normalized] = name
+            if ":" not in route.to:
+                raise ValueError("webhook route 'to' must use 'channel:chat' format")
+            channel, chat_id = route.to.split(":", 1)
+            if not channel.strip() or not chat_id.strip():
+                raise ValueError("webhook route 'to' must include both channel and chat")
+            if route.auth == "secret" and not route.secret.strip():
+                raise ValueError("webhook route secret is required unless auth is 'none'")
+        return self
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -339,6 +413,13 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     import importlib
     module = importlib.import_module(module_path)
     return getattr(module, class_name)()
+
+
+def _clean_webhook_filter(name: str, values: list[str]) -> list[str]:
+    cleaned = [value.strip() for value in values]
+    if any(not value for value in cleaned):
+        raise ValueError(f"webhook route {name} must not contain empty values")
+    return cleaned
 
 
 class ToolsConfig(Base):
@@ -380,6 +461,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    webhooks: WebhooksConfig = Field(default_factory=WebhooksConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,

@@ -47,6 +47,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
+| Accept incoming webhooks | `webhooks.routes.<name>` with `secret`, `to`, and optional `prompt` | `nanobot gateway`, then POST to `gateway.port` | [Webhooks](#webhooks) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
 | Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Start each process with explicit paths and run `nanobot status` for the default instance only | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
@@ -1945,6 +1946,99 @@ From the terminal:
 nanobot agent -m "/pairing list"
 nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
+
+
+## Webhooks
+
+Webhooks let external systems start a nanobot turn by sending an authenticated HTTP `POST` to the gateway health port. They are event sources, not chat channels: the HTTP caller gets an immediate JSON acceptance response, and the agent's actual reply is delivered to the configured chat target.
+
+`nanobot gateway` serves webhook routes on `gateway.host:gateway.port`, the same small HTTP listener that serves `/health`. If the gateway is behind a tunnel or reverse proxy, terminate TLS and public host policy there, then forward only the route paths you need.
+
+### Generic route
+
+```json
+{
+  "webhooks": {
+    "enabled": true,
+    "routes": {
+      "deploy": {
+        "secret": "${NANOBOT_DEPLOY_WEBHOOK_SECRET}",
+        "to": "telegram:123456789",
+        "prompt": "Deployment event for {{ event.service }}: {{ event.status }}"
+      }
+    }
+  }
+}
+```
+
+The default route path is `/webhooks/<route-name>`, so the example above listens on `/webhooks/deploy`. Set `path` only when the external platform requires a different URL.
+
+For generic webhooks with `auth: "secret"` (the default), send one of these:
+
+```text
+Authorization: Bearer <secret>
+X-Nanobot-Auth: <secret>
+X-Nanobot-Signature-256: sha256=<hmac_sha256(raw_body, secret)>
+```
+
+Use the HMAC header when the sender supports request signing. Bearer-style headers are simpler for systems that only support static secret headers. `auth: "none"` is available for trusted local-only integrations, but do not expose unauthenticated routes to the public internet.
+
+### GitHub route
+
+```json
+{
+  "webhooks": {
+    "routes": {
+      "github": {
+        "provider": "github",
+        "secret": "${GITHUB_WEBHOOK_SECRET}",
+        "to": "discord:repo-events",
+        "events": ["pull_request"],
+        "actions": ["opened", "synchronize", "reopened", "ready_for_review"],
+        "thread": "github:{{ github.repository_full_name }}:{{ github.pull_request.number or github.issue.number or github.ref }}",
+        "prompt": "Review {{ github.repository_full_name }} PR #{{ github.pull_request.number }} after {{ github.action }}.\n\n{{ body }}"
+      }
+    }
+  }
+}
+```
+
+For `provider: "github"`, nanobot validates GitHub's `X-Hub-Signature-256` HMAC header and deduplicates deliveries by `X-GitHub-Delivery` for `dedupeTtlS` seconds.
+Use `events` and `actions` to keep setup pings, issue events, or unrelated PR actions from starting an agent turn.
+
+### Template data
+
+`prompt` and `thread` are Jinja templates. If `prompt` is empty, nanobot builds a generic event summary and includes a warning that webhook payloads are untrusted external data.
+
+Common template variables:
+
+| Variable | Description |
+|----------|-------------|
+| `event` / `payload` / `json` | Parsed JSON body for JSON requests. |
+| `body` | Raw UTF-8 request body. |
+| `headers` | Request headers with secrets redacted. |
+| `event_name` | Generic event header or GitHub event name. |
+| `delivery_id` | Delivery ID used for deduplication when present. |
+| `github.*` | GitHub-specific fields such as `event`, `action`, `repository_full_name`, `sender_login`, `issue_title`, and `pull_request_title`. |
+
+`to` is required for enabled routes and uses `channel:chat` format, for example `telegram:123456789`, `discord:repo-events`, or `websocket:webhooks`. It decides where the agent answer is sent. `thread` is optional; when omitted, the session key defaults to the same `channel:chat` value.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `webhooks.enabled` | `true` | Enables the webhook subsystem. |
+| `webhooks.routes.<name>.enabled` | `true` | Enables one route. Route names may contain letters, numbers, `_`, `.`, and `-`. |
+| `webhooks.routes.<name>.path` | `/webhooks/<name>` | HTTP path served by the gateway. `/health` is reserved. |
+| `webhooks.routes.<name>.provider` | `generic` | Registered webhook provider. Built-ins are `generic` and `github`; provider controls signature and context handling. |
+| `webhooks.routes.<name>.auth` | `secret` | `secret` or `none`. |
+| `webhooks.routes.<name>.secret` | empty | Shared secret or signing secret. Use `${ENV_VAR}` placeholders for real deployments. |
+| `webhooks.routes.<name>.to` | empty | Required target address in `channel:chat` format. |
+| `webhooks.routes.<name>.events` | `[]` | Optional provider event-name allowlist. For GitHub this matches `X-GitHub-Event`, such as `pull_request`. |
+| `webhooks.routes.<name>.actions` | `[]` | Optional JSON payload `action` allowlist, such as `opened` or `synchronize`. |
+| `webhooks.routes.<name>.thread` | empty | Optional Jinja template for the session key. Defaults to `to`; rendered values are capped at 512 characters. |
+| `webhooks.routes.<name>.prompt` | empty | Optional Jinja template for the inbound agent message. |
+| `webhooks.routes.<name>.sender` | `webhook` | Sender ID placed on the inbound message. |
+| `webhooks.routes.<name>.maxBodyBytes` | `1048576` | Maximum request body size, from 1 KiB to 10 MiB. |
+| `webhooks.routes.<name>.dedupeTtlS` | `3600` | In-memory duplicate delivery TTL. Set `0` to disable dedupe. |
 
 
 ## Gateway Heartbeat

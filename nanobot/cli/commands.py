@@ -843,10 +843,12 @@ def _run_gateway(
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
+    from nanobot.gateway.http import run_gateway_http_ingress
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.webhooks import WebhookRouter
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -1116,48 +1118,18 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
-    async def _health_server(host: str, health_port: int):
-        """Lightweight HTTP health endpoint on the gateway port."""
-        import json as _json
+    webhook_router = WebhookRouter(config.webhooks, bus, log=logger)
+    if health_server_enabled:
+        console.print(
+            f"[green]✓[/green] Health endpoint: http://{config.gateway.host}:{port}/health"
+        )
+        if webhook_router.enabled_routes:
+            routes = ", ".join(
+                f"{name} ({path})"
+                for path, name in sorted(webhook_router.enabled_routes.items())
+            )
+            console.print(f"[green]✓[/green] Webhooks: {routes}")
 
-        async def handle(reader, writer):
-            try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except (asyncio.TimeoutError, ConnectionError):
-                writer.close()
-                return
-
-            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
-            method, path = "", ""
-            parts = request_line.split(" ")
-            if len(parts) >= 2:
-                method, path = parts[0], parts[1]
-
-            if method == "GET" and path == "/health":
-                body = _json.dumps({"status": "ok"})
-                resp = (
-                    f"HTTP/1.0 200 OK\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-            else:
-                body = "Not Found"
-                resp = (
-                    f"HTTP/1.0 404 Not Found\r\n"
-                    f"Content-Type: text/plain\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-
-            writer.write(resp.encode())
-            await writer.drain()
-            writer.close()
-
-        server = await asyncio.start_server(handle, host, health_port)
-        console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
-        async with server:
-            await server.serve_forever()
     # Register Dream system job (idempotent on restart)
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream
@@ -1230,8 +1202,13 @@ def _run_gateway(
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
-                    _health_server(config.gateway.host, port),
-                    name="nanobot-health-server",
+                    run_gateway_http_ingress(
+                        host=config.gateway.host,
+                        port=port,
+                        webhook_router=webhook_router,
+                        log=logger,
+                    ),
+                    name="nanobot-gateway-http",
                 ))
             if open_browser_url:
                 tasks.append(asyncio.create_task(
