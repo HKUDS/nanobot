@@ -279,8 +279,8 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_drain_pending_blocks_while_subagents_running(tmp_path):
-    """_drain_pending should block when no messages are available but sub-agents are still running."""
+async def test_drain_pending_does_not_block_while_subagents_running(tmp_path):
+    """_drain_pending should ignore running workers unless user messages are queued."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -336,31 +336,24 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
 
     assert injection_callback is not None
 
-    # Now test the callback directly
-    # With sub-agents running and an empty queue, it should block
-    drain_task = asyncio.create_task(injection_callback())
+    # Running subagents alone must not keep the current turn alive.
+    results = await asyncio.wait_for(injection_callback(), timeout=1.0)
+    assert results == []
 
-    # Let the task enter the blocking queue wait.
-    await asyncio.sleep(0)
-
-    # Should still be running (blocked on pending_queue.get())
-    assert not drain_task.done(), "drain should block while sub-agents are running"
-
-    # Now put a message in the queue (simulating sub-agent completion)
+    # Real follow-up messages still use the ordinary pending queue path.
     await pending_queue.put(InboundMessage(
-        sender_id="subagent",
+        sender_id="user",
         channel="test",
         chat_id="c1",
-        content="Sub-agent result",
+        content="User follow-up",
         media=None,
         metadata={},
     ))
 
-    # Should unblock and return results
-    results = await asyncio.wait_for(drain_task, timeout=2.0)
+    results = await asyncio.wait_for(injection_callback(), timeout=1.0)
     assert len(results) >= 1
     assert results[0]["role"] == "user"
-    assert "Sub-agent result" in str(results[0]["content"])
+    assert "User follow-up" in str(results[0]["content"])
 
     # Cleanup
     hang_task.cancel()
@@ -417,8 +410,8 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_drain_pending_timeout(tmp_path):
-    """_drain_pending should return empty after timeout when sub-agents hang."""
+async def test_drain_pending_does_not_wait_for_hung_subagents(tmp_path):
+    """_drain_pending should not call asyncio.wait_for for hung subagents."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
@@ -467,14 +460,10 @@ async def test_drain_pending_timeout(tmp_path):
 
     assert injection_callback is not None
 
-    # Patch the timeout path without leaking the queue.get() coroutine.
-    async def _timeout(awaitable, timeout):
-        awaitable.close()
-        raise asyncio.TimeoutError
-
-    with patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_timeout):
+    with patch("nanobot.agent.loop.asyncio.wait_for") as wait_for:
         results = await injection_callback()
         assert results == []
+        wait_for.assert_not_called()
 
     # Cleanup
     hang_task.cancel()

@@ -4,19 +4,20 @@ import asyncio
 import json
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.mailbox import MailboxRead, MailboxStore, TaskRequest, TaskResult, TaskSnapshot
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
@@ -88,6 +89,8 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        mailbox: MailboxStore | None = None,
+        on_result_ready: Callable[[TaskResult], Awaitable[None]] | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -115,6 +118,8 @@ class SubagentManager:
         )
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
+        self.mailbox = mailbox or MailboxStore(workspace)
+        self._on_result_ready = on_result_ready
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -168,6 +173,7 @@ class SubagentManager:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        mailbox_session_key = session_key or f"{origin_channel}:{origin_chat_id}"
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
 
         status = SubagentStatus(
@@ -177,6 +183,18 @@ class SubagentManager:
             started_at=time.monotonic(),
         )
         self._task_statuses[task_id] = status
+        await self.mailbox.dispatch(TaskRequest(
+            task_id=task_id,
+            session_key=mailbox_session_key,
+            label=display_label,
+            task=task,
+            origin={
+                "channel": origin_channel,
+                "chat_id": origin_chat_id,
+                "session_key": session_key,
+                "origin_message_id": origin_message_id,
+            },
+        ))
 
         bg_task = asyncio.create_task(
             self._run_subagent(
@@ -205,14 +223,17 @@ class SubagentManager:
         bg_task.add_done_callback(_cleanup)
 
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        return (
+            f"Subagent [{display_label}] started (id: {task_id}). "
+            f"Use poll_subagents or wait_subagents with id {task_id} to get the result."
+        )
 
     async def _run_subagent(
         self,
         task_id: str,
         task: str,
         label: str,
-        origin: dict[str, str],
+        origin: dict[str, Any],
         status: SubagentStatus,
         origin_message_id: str | None = None,
         temperature: float | None = None,
@@ -287,6 +308,12 @@ class SubagentManager:
                 logger.info("Subagent [{}] completed successfully", task_id)
                 await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
 
+        except asyncio.CancelledError:
+            status.phase = "cancelled"
+            status.stop_reason = "cancelled"
+            await self.mailbox.mark_cancelled(task_id, reason="Cancelled.")
+            logger.info("Subagent [{}] cancelled", task_id)
+            raise
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
@@ -299,44 +326,45 @@ class SubagentManager:
         label: str,
         task: str,
         result: str,
-        origin: dict[str, str],
+        origin: dict[str, Any],
         status: str,
         origin_message_id: str | None = None,
     ) -> None:
-        """Announce the subagent result to the main agent via the message bus."""
-        status_text = "completed successfully" if status == "ok" else "failed"
-
-        announce_content = render_template(
-            "agent/subagent_announce.md",
-            label=label,
-            status_text=status_text,
-            task=task,
-            result=result,
-        )
-
-        # Inject as system message to trigger main agent.
-        # Use session_key_override to align with the main agent's effective
-        # session key (which accounts for unified sessions) so the result is
-        # routed to the correct pending queue (mid-turn injection) instead of
-        # being dispatched as a competing independent task.
+        """Record the subagent result in the mailbox for explicit manager polling."""
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
         metadata: dict[str, Any] = {
-            "injected_event": "subagent_result",
             "subagent_task_id": task_id,
+            "origin_channel": origin.get("channel"),
+            "origin_chat_id": origin.get("chat_id"),
         }
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
-        msg = InboundMessage(
-            channel="system",
-            sender_id="subagent",
-            chat_id=f"{origin['channel']}:{origin['chat_id']}",
-            content=announce_content,
-            session_key_override=override,
+
+        task_result = TaskResult(
+            task_id=task_id,
+            session_key=override,
+            label=label,
+            task=task,
+            status=status,
+            content=result,
+            dedupe_key=task_id,
             metadata=metadata,
         )
+        written = await self.mailbox.record_result(task_result)
 
-        await self.bus.publish_inbound(msg)
-        logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
+        if written:
+            logger.debug(
+                "Subagent [{}] wrote result to mailbox for session {}",
+                task_id,
+                override,
+            )
+            if self._on_result_ready is not None:
+                try:
+                    await self._on_result_ready(task_result)
+                except Exception:
+                    logger.exception("Subagent result-ready callback failed")
+        else:
+            logger.debug("Subagent [{}] result already recorded", task_id)
 
     @staticmethod
     def _format_partial_progress(result) -> str:
@@ -381,11 +409,94 @@ class SubagentManager:
         """Cancel all subagents for the given session. Returns count cancelled."""
         tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
                  if tid in self._running_tasks and not self._running_tasks[tid].done()]
+        for tid in list(self._session_tasks.get(session_key, [])):
+            if tid in self._running_tasks and not self._running_tasks[tid].done():
+                await self.mailbox.mark_cancelled(
+                    tid,
+                    session_key=session_key,
+                    reason="Cancelled by /stop.",
+                )
         for t in tasks:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)
+
+    async def cancel_task(self, task_id: str, session_key: str | None = None) -> str:
+        """Cancel one running subagent task and record a cancelled mailbox state."""
+        snapshots = await self.mailbox.poll(session_key, task_id=task_id) if session_key else []
+        if session_key and not snapshots:
+            return "not_found"
+        task = self._running_tasks.get(task_id)
+        if task is None or task.done():
+            if snapshots:
+                return snapshots[0].state
+            return "not_found"
+        await self.mailbox.mark_cancelled(
+            task_id,
+            session_key=session_key,
+            reason="Cancelled by manager.",
+        )
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+        return "cancelled"
+
+    async def poll(
+        self,
+        session_key: str,
+        task_id: str | None = None,
+    ) -> list[TaskSnapshot]:
+        """Return mailbox task status snapshots for a session."""
+        return await self.mailbox.poll(session_key, task_id=task_id)
+
+    async def wait_for_result(
+        self,
+        session_key: str,
+        task_id: str | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> MailboxRead:
+        """Wait for and consume a mailbox result for a session."""
+        return await self.mailbox.wait_for_result(
+            session_key,
+            task_id=task_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def runtime_status_lines(self, session_key: str, *, limit: int = 8) -> list[str]:
+        """Return compact model-visible task status lines for runtime context."""
+        snapshots = self.mailbox.snapshot_sync(session_key)
+        if not snapshots:
+            return []
+
+        now = time.time()
+        ordered = sorted(
+            snapshots,
+            key=lambda item: (
+                item.consumed_at is not None,
+                item.completed_at is None,
+                item.created_at,
+                item.task_id,
+            ),
+        )
+        lines = ["Subagent tasks:"]
+        for snapshot in ordered[: max(0, limit)]:
+            state = snapshot.state
+            if snapshot.result_status and snapshot.consumed_at is None:
+                state = f"{state}, result ready"
+            elif snapshot.consumed_at is not None:
+                state = f"{state}, result consumed"
+            elapsed = max(0, int((snapshot.completed_at or now) - snapshot.created_at))
+            label = " ".join(snapshot.label.split())
+            if len(label) > 48:
+                label = label[:45] + "..."
+            lines.append(
+                f"- {snapshot.task_id}: {state}, label=\"{label}\", elapsed={elapsed}s"
+            )
+        remaining = len(ordered) - limit
+        if remaining > 0:
+            lines.append(f"- ... {remaining} more subagent task(s)")
+        return lines
 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""

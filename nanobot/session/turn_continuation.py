@@ -25,6 +25,8 @@ INTERNAL_CONTINUATION_RUN_STARTED_AT_META = "_internal_continuation_run_started_
 SKIP_USER_PERSIST_META = "_skip_user_persist"
 
 _GOAL_CONTINUATION_KIND = "sustained_goal"
+SUBAGENT_RESULT_CONTINUATION_KIND = "subagent_result"
+SUBAGENT_RESULT_TASK_ID_META = "_subagent_result_task_id"
 _GOAL_CONTINUATION_SENDER = "system:continuation"
 _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
@@ -56,6 +58,38 @@ def internal_continuation_run_started_at(metadata: Mapping[str, Any] | None) -> 
         return None
     started_at = float(value)
     return started_at if started_at > 0 else None
+
+
+def subagent_result_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
+    """True for an internal continuation caused by a ready subagent result."""
+    return bool(
+        internal_continuation_inbound(metadata)
+        and metadata.get(INTERNAL_CONTINUATION_KIND_META) == SUBAGENT_RESULT_CONTINUATION_KIND
+    )
+
+
+def subagent_result_continuation_task_id(metadata: Mapping[str, Any] | None) -> str | None:
+    """Return the ready subagent task id carried by a continuation message."""
+    if not subagent_result_continuation_inbound(metadata):
+        return None
+    value = metadata.get(SUBAGENT_RESULT_TASK_ID_META) if metadata else None
+    return value if isinstance(value, str) and value else None
+
+
+def subagent_result_continuation_metadata(
+    message_metadata: Mapping[str, Any] | None,
+    *,
+    task_id: str,
+    run_started_at: float | None = None,
+) -> dict[str, Any]:
+    """Build sanitized metadata for a subagent-result continuation turn."""
+    metadata = _internal_continuation_metadata(
+        message_metadata,
+        kind=SUBAGENT_RESULT_CONTINUATION_KIND,
+        run_started_at=run_started_at,
+    )
+    metadata[SUBAGENT_RESULT_TASK_ID_META] = task_id
+    return metadata
 
 
 def should_persist_user_message(metadata: Mapping[str, Any] | None) -> bool:
@@ -223,11 +257,12 @@ def _increment_goal_continuation_round(session_metadata: MutableMapping[str, Any
 def _internal_continuation_metadata(
     message_metadata: Mapping[str, Any] | None,
     *,
+    kind: str = _GOAL_CONTINUATION_KIND,
     run_started_at: float | None = None,
 ) -> dict[str, Any]:
     metadata = dict(message_metadata or {})
     metadata[INTERNAL_CONTINUATION_META] = True
-    metadata[INTERNAL_CONTINUATION_KIND_META] = _GOAL_CONTINUATION_KIND
+    metadata[INTERNAL_CONTINUATION_KIND_META] = kind
     if run_started_at is not None:
         metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] = float(run_started_at)
     for key in _STRIPPED_INBOUND_META_KEYS:
