@@ -7,12 +7,14 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import secrets
 import string
 import time
 import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -34,7 +36,6 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
-
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
 
@@ -1073,6 +1074,61 @@ class OpenAICompatProvider(LLMProvider):
                 current = getattr(current, segment, None)
         return int(current or 0) if current is not None else 0
 
+    @staticmethod
+    def _unique_parsed_tool_id(value: Any, used_ids: set[str]) -> str:
+        base = str(value) if isinstance(value, str) and value else _short_tool_id()
+        if base not in used_ids:
+            used_ids.add(base)
+            return base
+        salt = 1
+        while True:
+            candidate = f"{base}_{salt}"
+            if candidate not in used_ids:
+                used_ids.add(candidate)
+                return candidate
+            salt += 1
+
+    @classmethod
+    def _parse_text_tool_calls(cls, content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
+        """Parse common text-format tool call blocks from OpenAI-compatible gateways."""
+        if not isinstance(content, str) or "<tool_call" not in content:
+            return content, []
+
+        calls: list[ToolCallRequest] = []
+        used_ids: set[str] = set()
+
+        def _parse_payload(raw: str) -> ToolCallRequest | None:
+            try:
+                payload = json_repair.loads(raw)
+            except Exception:
+                return None
+            if not isinstance(payload, dict):
+                return None
+            fn = payload.get("function") if isinstance(payload.get("function"), dict) else payload
+            name = fn.get("name") if isinstance(fn, dict) else None
+            if not isinstance(name, str) or not name:
+                return None
+            args = fn.get("arguments", {}) if isinstance(fn, dict) else {}
+            if isinstance(args, str):
+                with suppress(Exception):
+                    args = json_repair.loads(args)
+            return ToolCallRequest(
+                id=cls._unique_parsed_tool_id(payload.get("id"), used_ids),
+                name=name,
+                arguments=args if isinstance(args, dict) else {},
+            )
+
+        def _replace(match: re.Match[str]) -> str:
+            parsed = _parse_payload(match.group(1))
+            if parsed is None:
+                return match.group(0)
+            calls.append(parsed)
+            return ""
+
+        stripped = re.sub(r"<tool_call>\s*(.*?)\s*</tool_call>", _replace, content, flags=re.DOTALL)
+        stripped = stripped.strip() or None
+        return stripped, calls
+
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
             return LLMResponse(content=response, finish_reason="stop")
@@ -1132,19 +1188,25 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning_content = m.get("reasoning_content")
 
             parsed_tool_calls = []
+            used_tool_ids: set[str] = set()
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = parse_tool_arguments(fn.get("arguments", {}))
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
-                    id=str(tc_map.get("id") or _short_tool_id()),
+                    id=self._unique_parsed_tool_id(tc_map.get("id"), used_tool_ids),
                     name=str(fn.get("name") or ""),
                     arguments=args,
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
                 ))
+
+            if not parsed_tool_calls:
+                content, parsed_tool_calls = self._parse_text_tool_calls(content)
+                if parsed_tool_calls:
+                    finish_reason = "tool_calls"
 
             return LLMResponse(
                 content=content,
@@ -1179,11 +1241,12 @@ class OpenAICompatProvider(LLMProvider):
                 content = m.reasoning
 
         tool_calls = []
+        used_tool_ids: set[str] = set()
         for tc in raw_tool_calls:
             args = parse_tool_arguments(tc.function.arguments)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
-                id=str(getattr(tc, "id", None) or _short_tool_id()),
+                id=self._unique_parsed_tool_id(getattr(tc, "id", None), used_tool_ids),
                 name=tc.function.name,
                 arguments=args,
                 extra_content=ec,
@@ -1194,6 +1257,11 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
+
+        if not tool_calls:
+            content, tool_calls = self._parse_text_tool_calls(content)
+            if tool_calls:
+                finish_reason = "tool_calls"
 
         return LLMResponse(
             content=content,
@@ -1327,9 +1395,7 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
-        return LLMResponse(
-            content="".join(content_parts) or None,
-            tool_calls=[
+        parsed_tool_calls = [
                 ToolCallRequest(
                     id=b["id"] or _short_tool_id(),
                     name=b["name"],
@@ -1339,7 +1405,16 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=b.get("fn_prov"),
                 )
                 for b in tc_bufs.values()
-            ],
+            ]
+        content = "".join(content_parts) or None
+        if not parsed_tool_calls:
+            content, parsed_tool_calls = cls._parse_text_tool_calls(content)
+            if parsed_tool_calls:
+                finish_reason = "tool_calls"
+
+        return LLMResponse(
+            content=content,
+            tool_calls=parsed_tool_calls,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
