@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import time
 from contextlib import suppress
@@ -138,7 +139,7 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
-    """Restart the process in-place via os.execv."""
+    """Restart the process."""
     msg = ctx.msg
     set_restart_notice_to_env(
         channel=msg.channel,
@@ -148,7 +149,18 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
     async def _do_restart():
         await asyncio.sleep(1)
-        os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
+        if sys.platform == "win32":
+            # os.execv on Windows confuses service managers (nssm/winsw)
+            # because it spawns a new process instead of replacing the
+            # image.  Spawn a detached child and exit cleanly so service
+            # managers see a normal exit and can restart per their config.
+            subprocess.Popen(
+                [sys.executable, "-m", "nanobot"] + sys.argv[1:],
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            sys.exit(0)
+        else:
+            os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
 
     asyncio.create_task(_do_restart())
     return OutboundMessage(
