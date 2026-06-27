@@ -39,6 +39,44 @@ If `channel` points to a channel that is not enabled in your config, nanobot wil
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 
+## Authentication
+
+Optionally protect the API with a Bearer token:
+
+```bash
+# Set via environment variable
+export NANOBOT_API_KEY="your-secret-token"
+nanobot serve
+
+# Or pass directly
+nanobot serve --api-key "your-secret-token"
+
+# Or set in config.json
+# { "api": { "apiKey": "${NANOBOT_API_KEY}" } }
+```
+
+When configured, all endpoints except `/health` require an `Authorization` header:
+
+```bash
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Authorization: Bearer $NANOBOT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "hi"}]}'
+```
+
+Python (`openai`):
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8900/v1",
+    api_key="your-secret-token",  # matches NANOBOT_API_KEY
+)
+```
+
+When no API key is configured, the server allows unauthenticated access (backward compatible).
+
 ## curl
 
 ```bash

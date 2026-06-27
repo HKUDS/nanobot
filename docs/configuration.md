@@ -1527,6 +1527,30 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 >
 > If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
 
+## API Server
+
+Configure the OpenAI-compatible API server (`nanobot serve`):
+
+```json
+{
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8900,
+    "timeout": 120,
+    "apiKey": "${NANOBOT_API_KEY}"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | string | `"127.0.0.1"` | Bind address |
+| `port` | int | `8900` | Listen port |
+| `timeout` | float | `120.0` | Per-request timeout in seconds |
+| `apiKey` | string \| null | `null` | Bearer token for API authentication; `null` = open access |
+
+The `apiKey` field supports `${VAR}` environment variable interpolation. You can also set `NANOBOT_API_KEY` directly in the environment or pass `--api-key` on the command line (CLI flag takes highest precedence).
+
 ## Web Tools
 
 nanobot incorporates basic tools for accessing the web. These include searching via APIs, and fetching arbitrary web pages in Markdown format. They are enabled by default, and can be configured in `~/.nanobot/config.json` under `tools.web`.

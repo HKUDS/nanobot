@@ -483,3 +483,83 @@ async def test_process_direct_accepts_media() -> None:
     assert captured_msg is not None
     assert captured_msg.media == ["/tmp/image.png", "/tmp/report.pdf"]
     assert captured_msg.content == "analyze this"
+
+
+# ---------------------------------------------------------------------------
+# Authentication middleware tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_auth_disabled_requests_succeed(aiohttp_client) -> None:
+    """No API key configured: requests succeed without auth header."""
+    agent = _make_mock_agent()
+    app = create_app(agent, model_name="test-model", request_timeout=10.0, api_key=None)
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert resp.status == 200
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_auth_missing_header_returns_401(aiohttp_client) -> None:
+    """API key configured + no Authorization header -> 401."""
+    agent = _make_mock_agent()
+    app = create_app(agent, model_name="test-model", request_timeout=10.0, api_key="secret-key")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert resp.status == 401
+    body = await resp.json()
+    assert body["error"]["type"] == "authentication_error"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_auth_wrong_token_returns_401(aiohttp_client) -> None:
+    """API key configured + wrong Bearer token -> 401."""
+    agent = _make_mock_agent()
+    app = create_app(agent, model_name="test-model", request_timeout=10.0, api_key="secret-key")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+        headers={"Authorization": "Bearer wrong-key"},
+    )
+    assert resp.status == 401
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_auth_correct_token_returns_200(aiohttp_client) -> None:
+    """API key configured + correct Bearer token -> 200."""
+    agent = _make_mock_agent()
+    app = create_app(agent, model_name="test-model", request_timeout=10.0, api_key="secret-key")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+        headers={"Authorization": "Bearer secret-key"},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["choices"][0]["message"]["content"] == "mock response"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_health_unauthenticated_regardless_of_api_key(aiohttp_client) -> None:
+    """Health endpoint remains open even when API key is configured."""
+    agent = _make_mock_agent()
+    app = create_app(agent, model_name="test-model", request_timeout=10.0, api_key="secret-key")
+    client = await aiohttp_client(app)
+    resp = await client.get("/health")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["status"] == "ok"
