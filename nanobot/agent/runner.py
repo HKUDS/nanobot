@@ -196,6 +196,21 @@ class AgentRunner:
             return False, injection_cycles
         if real_injection:
             injection_cycles += 1
+            # Prepend a user-attention hint as the first injection.
+            # _append_injected_messages will merge consecutive user
+            # messages via _merge_message_content, producing a single
+            # user message with the hint as prefix — avoiding provider
+            # compatibility issues with consecutive user roles.
+            hint_msg = {
+                "role": "user",
+                "content": (
+                    "⚠️ The user has sent new messages while you were working. "
+                    "Read them carefully — the user may want to correct or "
+                    "redirect your task. You MUST acknowledge the user's "
+                    "message and respond BEFORE resuming any tool calls."
+                ),
+            }
+            injections.insert(0, hint_msg)
         if assistant_message is not None:
             messages.append(assistant_message)
             if iteration is not None:
