@@ -9,7 +9,11 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -306,6 +310,79 @@ def test_exec_still_blocks_real_outside_path_via_redirect(tmp_path):
     workspace.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
     blocked = tool._guard_command("echo pwn > /etc/issue", str(workspace))
+    assert blocked is not None
+    assert "path outside working dir" in blocked
+
+
+def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool_bin = tmp_path / "home" / ".local" / "bin"
+    tool_bin.mkdir(parents=True)
+    uv = tool_bin / "uv"
+    uv.write_text("#!/bin/sh\n")
+    monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="bwrap",
+        sandbox_ro_binds=[str(tool_bin)],
+    )
+
+    blocked = tool._guard_command(
+        f"{uv} --version",
+        str(workspace),
+        restrict_to_workspace=True,
+        workspace_root=str(workspace),
+    )
+
+    assert blocked is None
+
+
+def test_exec_allows_absolute_path_inside_bwrap_rw_bind(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="bwrap",
+        sandbox_rw_binds=[str(cache_dir)],
+    )
+
+    blocked = tool._guard_command(
+        f"touch {cache_dir / 'stamp'}",
+        str(workspace),
+        restrict_to_workspace=True,
+        workspace_root=str(workspace),
+    )
+
+    assert blocked is None
+
+
+def test_exec_bind_roots_do_not_widen_guard_without_bwrap(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool_bin = tmp_path / "home" / ".local" / "bin"
+    tool_bin.mkdir(parents=True)
+    uv = tool_bin / "uv"
+    uv.write_text("#!/bin/sh\n")
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        sandbox="",
+        sandbox_ro_binds=[str(tool_bin)],
+    )
+
+    blocked = tool._guard_command(
+        f"{uv} --version",
+        str(workspace),
+        restrict_to_workspace=True,
+        workspace_root=str(workspace),
+    )
+
     assert blocked is not None
     assert "path outside working dir" in blocked
 

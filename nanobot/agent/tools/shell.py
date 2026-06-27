@@ -58,6 +58,8 @@ class ExecToolConfig(Base):
     path_prepend: str = ""
     path_append: str = ""
     sandbox: str = ""
+    sandbox_ro_binds: list[str] = Field(default_factory=list)
+    sandbox_rw_binds: list[str] = Field(default_factory=list)
     allowed_env_keys: list[str] = Field(default_factory=list)
     allow_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
@@ -153,6 +155,8 @@ class ExecTool(Tool):
             sandbox=cfg.sandbox,
             path_prepend=cfg.path_prepend,
             path_append=cfg.path_append,
+            sandbox_ro_binds=cfg.sandbox_ro_binds,
+            sandbox_rw_binds=cfg.sandbox_rw_binds,
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
@@ -170,6 +174,8 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_prepend: str = "",
         path_append: str = "",
+        sandbox_ro_binds: list[str] | None = None,
+        sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
         session_manager: Any | None = None,
     ):
@@ -202,6 +208,8 @@ class ExecTool(Tool):
         self.webui_allow_local_service_access = webui_allow_local_service_access
         self.path_prepend = path_prepend
         self.path_append = path_append
+        self.sandbox_ro_binds = self._normalize_bind_roots(sandbox_ro_binds)
+        self.sandbox_rw_binds = self._normalize_bind_roots(sandbox_rw_binds)
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
 
@@ -410,7 +418,14 @@ class ExecTool(Tool):
                 )
             else:
                 workspace = workspace_root or cwd
-                command = wrap_command(self.sandbox, command, workspace, cwd)
+                command = wrap_command(
+                    self.sandbox,
+                    command,
+                    workspace,
+                    cwd,
+                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                )
                 cwd = str(Path(workspace).resolve())
 
         effective_timeout = self._resolve_timeout(timeout)
@@ -637,6 +652,7 @@ class ExecTool(Tool):
                 if workspace_root
                 else None
             )
+            sandbox_bind_roots = self._active_sandbox_bind_roots()
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -660,6 +676,8 @@ class ExecTool(Tool):
                 )
                 if not allowed and resolved_workspace is not None:
                     allowed = is_path_within(p, resolved_workspace)
+                if not allowed and sandbox_bind_roots:
+                    allowed = any(is_path_within(p, root) for root in sandbox_bind_roots)
                 if p.is_absolute() and not allowed:
                     return (
                         "Error: Command blocked by safety guard (path outside working dir)"
@@ -686,3 +704,28 @@ class ExecTool(Tool):
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths
+
+    @staticmethod
+    def _normalize_bind_roots(paths: list[str] | None) -> list[Path]:
+        roots: list[Path] = []
+        seen: set[str] = set()
+        for raw in paths or []:
+            value = str(raw).strip()
+            if not value:
+                continue
+            path = Path(os.path.expandvars(value)).expanduser()
+            if not path.is_absolute():
+                continue
+            with suppress(OSError, RuntimeError, ValueError):
+                resolved = path.resolve(strict=False)
+                key = os.path.normcase(os.fspath(resolved))
+                if key in seen:
+                    continue
+                seen.add(key)
+                roots.append(resolved)
+        return roots
+
+    def _active_sandbox_bind_roots(self) -> list[Path]:
+        if self.sandbox != "bwrap" or _IS_WINDOWS:
+            return []
+        return [*self.sandbox_ro_binds, *self.sandbox_rw_binds]
