@@ -306,3 +306,22 @@ class TestToolHintMaxLength:
         short = _hint([_tc("list_dir", {"path": long_path})], max_length=40)
         long = _hint([_tc("list_dir", {"path": long_path})], max_length=120)
         assert len(long) > len(short)
+
+
+class TestToolHintMalformedCalls:
+    """Malformed tool calls must not crash hint formatting (see HKUDS/nanobot)."""
+
+    def test_none_name_is_skipped(self):
+        """A tool call with name=None should be skipped, not raise AttributeError."""
+        result = _hint([_tc(None, None)])
+        assert result == ""
+
+    def test_empty_name_is_skipped(self):
+        """A tool call with an empty name should be skipped."""
+        result = _hint([_tc("", {"path": "foo.txt"})])
+        assert result == ""
+
+    def test_none_name_mixed_with_valid_call(self):
+        """A degenerate call must not suppress hints for the valid calls beside it."""
+        result = _hint([_tc(None, None), _tc("read_file", {"path": "foo.txt"})])
+        assert result == "read foo.txt"
