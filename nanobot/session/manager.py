@@ -101,10 +101,8 @@ def _metadata_title(metadata: Any) -> str:
 
 @dataclass
 class RetentionResult:
-    retained: list[dict]
     dropped: list[dict]
     already_consolidated_count: int
-    new_last_consolidated: int
 
 
 @dataclass
@@ -289,25 +287,22 @@ class Session:
     ) -> RetentionResult:
         """Keep a legal recent suffix, optionally extending it back to a user turn.
 
-        Returns a RetentionResult describing retained messages, removed messages,
-        and how the last_consolidated cursor changed.
+        Returns a RetentionResult with dropped messages and how many of those
+        were in the already-consolidated prefix. This method mutates
+        self.messages and self.last_consolidated in place.
         """
         if max_messages <= 0:
             dropped = list(self.messages)
             lc = self.last_consolidated
             self.clear()
             return RetentionResult(
-                retained=self.messages,
                 dropped=dropped,
                 already_consolidated_count=min(lc, len(dropped)),
-                new_last_consolidated=self.last_consolidated,
             )
         if len(self.messages) <= max_messages:
             return RetentionResult(
-                retained=self.messages,
                 dropped=[],
                 already_consolidated_count=0,
-                new_last_consolidated=self.last_consolidated,
             )
 
         original = list(self.messages)
@@ -375,10 +370,8 @@ class Session:
         self.last_consolidated = new_lc
         self.updated_at = datetime.now()
         return RetentionResult(
-            retained=retained,
             dropped=dropped,
             already_consolidated_count=already_consolidated,
-            new_last_consolidated=new_lc,
         )
 
     def enforce_file_cap(
