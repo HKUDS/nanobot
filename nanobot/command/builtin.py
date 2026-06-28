@@ -130,6 +130,15 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     msg = ctx.msg
     total = await loop._cancel_active_tasks(ctx.key)
+    # Also drain pending queue to prevent mid-turn injection deadlock
+    pending = loop._pending_queues.pop(ctx.key, None)
+    if pending is not None:
+        while not pending.empty():
+            try:
+                pending.get_nowait()
+                total += 1
+            except Exception:
+                break
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
