@@ -202,6 +202,7 @@ class AgentLoop:
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
         max_messages: int = 120,
+        max_messages_eviction_stride: int = 16,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -293,6 +294,7 @@ class AgentLoop:
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
+        self._max_messages_eviction_stride = max(1, max_messages_eviction_stride)
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -391,6 +393,7 @@ class AgentLoop:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
+            max_messages_eviction_stride=defaults.max_messages_eviction_stride,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
@@ -1184,6 +1187,7 @@ class AgentLoop:
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "extend_to_user": is_subagent,
+            "eviction_stride": self._max_messages_eviction_stride,
         }
         history = session.get_history(**_hist_kwargs)
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -1462,6 +1466,7 @@ class AgentLoop:
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "extend_to_user": False,
+            "eviction_stride": self._max_messages_eviction_stride,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(

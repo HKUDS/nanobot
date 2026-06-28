@@ -223,7 +223,12 @@ class TestAgentLoopTTLParam:
         kwargs = session.get_history.call_args.kwargs
         assert isinstance(kwargs.get("max_tokens"), int)
         assert kwargs["max_tokens"] > 0
-        assert set(kwargs) == {"max_messages", "max_tokens", "extend_to_user"}
+        assert set(kwargs) == {
+            "max_messages",
+            "max_tokens",
+            "extend_to_user",
+            "eviction_stride",
+        }
 
     @pytest.mark.asyncio
     async def test_session_file_cap_archives_and_trims_old_messages(self, tmp_path):

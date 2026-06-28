@@ -136,11 +136,16 @@ class Session:
         *,
         max_tokens: int = 0,
         extend_to_user: bool = False,
+        eviction_stride: int = 0,
     ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input.
 
         History is sliced by message count first (``max_messages``), then by
         token budget from the tail (``max_tokens``) when provided.
+
+        ``eviction_stride`` quantizes the count-based slice boundary so it only
+        advances in whole blocks, keeping the replayed prefix byte-stable for
+        prompt caching (see issue #4222 and ``recent_message_start_index``).
         """
         unconsolidated = self.messages[self.last_consolidated:]
         max_messages = max_messages if max_messages > 0 else 120
@@ -148,6 +153,7 @@ class Session:
             unconsolidated,
             max_messages,
             extend_to_user=extend_to_user,
+            eviction_stride=eviction_stride,
         )
         sliced = unconsolidated[start_idx:]
 

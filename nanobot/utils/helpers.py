@@ -351,11 +351,33 @@ def recent_message_start_index(
     max_messages: int,
     *,
     extend_to_user: bool = False,
+    eviction_stride: int = 0,
 ) -> int:
-    """Return the start index for a recent replay window."""
+    """Return the start index for a recent replay window.
+
+    With the default ``eviction_stride`` of 0 (or 1) the window slides one
+    message at a time: every new turn past ``max_messages`` advances the start
+    index by one, so the replayed prefix shifts on every turn and a byte-prefix
+    prompt cache misses continuously (see issue #4222).
+
+    When ``eviction_stride > 1`` the start index is quantized down to a multiple
+    of the stride, so it only advances in whole ``eviction_stride``-sized blocks.
+    Between block boundaries the window start is fixed, so the replayed prefix is
+    byte-identical across turns and stays cache-resident. This only ever keeps
+    *more* messages than the plain slice (the start index can only move earlier),
+    so no history is lost; it just bounds the extra context to ``eviction_stride``.
+    """
     if max_messages <= 0:
         return len(messages)
     start_idx = max(0, len(messages) - max_messages)
+    # Clamp the stride to the window size so block alignment never keeps more
+    # than ~2x ``max_messages`` messages, even if a large stride is configured
+    # for a small window.
+    stride = min(eviction_stride, max_messages)
+    if stride > 1 and start_idx > 0:
+        # Floor to a block boundary so the window start only moves every
+        # ``stride`` messages instead of on every turn.
+        start_idx -= start_idx % stride
     if not extend_to_user or len(messages) <= max_messages:
         return start_idx
     if any(messages[i].get("role") == "user" for i in range(start_idx, len(messages))):

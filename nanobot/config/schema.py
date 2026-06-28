@@ -158,6 +158,12 @@ class AgentDefaults(Base):
         default=120,
         ge=0,
     )  # Max messages to replay from session history (0 = use default 120, respects token budget)
+    max_messages_eviction_stride: int = Field(
+        default=16,
+        ge=1,
+        validation_alias=AliasChoices("maxMessagesEvictionStride"),
+        serialization_alias="maxMessagesEvictionStride",
+    )  # Evict the replay window in blocks of this size so the prefix stays byte-stable for prompt caching (1 = legacy slide-one-at-a-time; see #4222)
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
