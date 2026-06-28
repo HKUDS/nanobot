@@ -366,6 +366,14 @@ def recent_message_start_index(
     byte-identical across turns and stays cache-resident. This only ever keeps
     *more* messages than the plain slice (the start index can only move earlier),
     so no history is lost; it just bounds the extra context to ``eviction_stride``.
+
+    The stride is clamped to ``max_messages`` (below), so the window re-anchors at
+    least once per ``max_messages`` turns and the live window stays within
+    ``[max_messages, 2 * max_messages)``. A consequence worth noting: pairing a
+    *small* ``max_messages`` with a *large* ``eviction_stride`` makes the effective
+    stride equal to ``max_messages``, so the window can hold up to ~2x
+    ``max_messages`` messages before re-anchoring — eviction still happens every
+    ``max_messages`` turns, it just retains a larger byte-stable block in between.
     """
     if max_messages <= 0:
         return len(messages)
