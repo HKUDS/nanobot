@@ -129,6 +129,13 @@ class WeixinConfig(Base):
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    # Default on: WeChat iLink has no native incremental delivery (send_delta is
+    # buffered and the final answer is still sent in one shot), so streaming has
+    # zero user-facing effect here — it only switches the LLM call to the
+    # streaming API. That avoids upstream Anthropic relays that drop tool_use
+    # id/name/input on the non-streaming Messages path (a common third-party
+    # relay bug). Set to false only if a relay's streaming/SSE path is broken.
+    streaming: bool = True
 
 
 class WeixinChannel(BaseChannel):
@@ -167,6 +174,10 @@ class WeixinChannel(BaseChannel):
         self._typing_tickets: dict[str, dict[str, Any]] = {}
         self._context_token_at: dict[str, float] = {}
         self._pending_tool_hints: dict[str, list[str]] = {}
+        # Buffers streamed content deltas per chat. WeChat iLink has no native
+        # incremental delivery, so when streaming is enabled we accumulate the
+        # deltas and flush the full reply in one shot at _stream_end.
+        self._stream_buffers: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------------
     # State persistence
@@ -1223,14 +1234,28 @@ class WeixinChannel(BaseChannel):
     async def send_delta(
         self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        """Weixin iLink does not support native streaming deltas.
+        """Deliver a streamed reply to WeChat.
 
-        We only hook ``_stream_end`` so buffered tool hints are flushed even
-        when the final answer carries the ``_streamed`` flag and bypasses
-        :meth:`send`.
+        WeChat iLink has no native incremental delivery, and the manager
+        bypasses :meth:`send` for the ``_streamed`` final answer. So we
+        accumulate the content deltas here and flush the full reply as a
+        single message at ``_stream_end`` — otherwise a streamed reply would
+        never reach the user. Reasoning deltas are invisible in WeChat and are
+        dropped.
         """
-        if metadata and metadata.get("_stream_end"):
-            await self._flush_tool_hints(chat_id)
+        meta = metadata or {}
+        if meta.get("_reasoning_delta") or meta.get("_reasoning"):
+            return
+        if delta:
+            self._stream_buffers.setdefault(chat_id, []).append(delta)
+        if not meta.get("_stream_end"):
+            return
+        full = "".join(self._stream_buffers.pop(chat_id, [])).strip()
+        await self._flush_tool_hints(chat_id)
+        if full:
+            await self.send(
+                OutboundMessage(channel=self.name, chat_id=chat_id, content=full)
+            )
 
     async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
         """Start typing indicator immediately when a message is received."""
