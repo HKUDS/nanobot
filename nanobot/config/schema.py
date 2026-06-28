@@ -193,6 +193,24 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     peers: list[PeerAgentConfig] = Field(default_factory=list)  # A2A peer roster (#4179)
 
+    @model_validator(mode="after")
+    def _check_unique_peer_names(self) -> AgentsConfig:
+        """Reject duplicate peer names so the roster can't silently drop a peer.
+
+        Peers are keyed by name downstream (``{p.name: p for p in peers}``), so a
+        duplicate would otherwise be deduplicated last-wins and the agent could
+        delegate to a peer that was overwritten.
+        """
+        seen: set[str] = set()
+        dupes: set[str] = set()
+        for peer in self.peers:
+            (dupes if peer.name in seen else seen).add(peer.name)
+        if dupes:
+            raise ValueError(
+                f"duplicate peer name(s) in agents.peers: {', '.join(sorted(dupes))}"
+            )
+        return self
+
 
 class ProviderConfig(Base):
     """LLM provider configuration."""

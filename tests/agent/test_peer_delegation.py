@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import (
@@ -20,7 +21,7 @@ from nanobot.agent.subagent import (
 from nanobot.agent.tools.context import RequestContext, ToolContext
 from nanobot.agent.tools.delegate import DelegateTool
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import PeerAgentConfig
+from nanobot.config.schema import AgentsConfig, PeerAgentConfig
 from nanobot.providers.base import LLMProvider
 
 
@@ -225,3 +226,16 @@ async def test_delegate_allowed_below_max_depth():
 
     assert result == "started"
     sm.spawn.assert_awaited_once()
+
+
+# --- config validation -------------------------------------------------------
+
+
+def test_duplicate_peer_names_rejected():
+    with pytest.raises(ValidationError, match="duplicate peer name"):
+        AgentsConfig(peers=[PeerAgentConfig(name="researcher"), PeerAgentConfig(name="researcher")])
+
+
+def test_unique_peer_names_accepted():
+    cfg = AgentsConfig(peers=[PeerAgentConfig(name="researcher"), PeerAgentConfig(name="writer")])
+    assert [p.name for p in cfg.peers] == ["researcher", "writer"]
