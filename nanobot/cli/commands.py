@@ -1744,6 +1744,11 @@ _PROVIDER_DISPLAY: dict[str, str] = {
     "github_copilot": "GitHub Copilot",
 }
 
+_OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "openai_codex": "openai-codex/gpt-5.1-codex",
+    "github_copilot": "github-copilot/gpt-4.1",
+}
+
 
 def _register_login(name: str):
     """Register an OAuth login handler."""
@@ -1775,9 +1780,51 @@ def _resolve_oauth_provider(provider: str):
     return spec
 
 
+def _set_oauth_provider_as_main(
+    provider_name: str,
+    *,
+    model: str | None = None,
+    config_path: str | None = None,
+) -> None:
+    """Persist an OAuth provider as the active agent provider."""
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
+
+    config = load_config(resolved_config_path)
+    selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
+    config.agents.defaults.model_preset = None
+    config.agents.defaults.provider = provider_name
+    config.agents.defaults.model = selected_model
+    save_config(config, resolved_config_path)
+
+    saved_path = resolved_config_path or get_config_path()
+    console.print(
+        f"[green]✓ Set {provider_name.replace('_', '-')} as the main provider[/green]  "
+        f"[dim]{selected_model}[/dim]"
+    )
+    console.print(f"[dim]Saved: {saved_path}[/dim]")
+
+
 @provider_app.command("login")
 def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    set_main: bool = typer.Option(
+        False,
+        "--set-main",
+        "--main",
+        help="Set this OAuth provider as the active agent provider after login",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model to use when setting this provider as the active provider",
+    ),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -1789,6 +1836,8 @@ def provider_login(
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
+    if set_main or model:
+        _set_oauth_provider_as_main(spec.name, model=model, config_path=config)
 
 
 @provider_app.command("logout")
