@@ -256,7 +256,7 @@ class SubagentManager:
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
-                    model=model or self.model,
+                    model=self.model if model is None else model,
                     temperature=temperature,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
