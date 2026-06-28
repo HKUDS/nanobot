@@ -539,9 +539,10 @@ class SessionManager:
                 logger.info("Recovered session {} from corrupt file ({} messages)", key, len(repaired.messages))
             return repaired
 
-    def _repair(self, key: str) -> Session | None:
+    def _repair(self, key: str, *, path: Path | None = None) -> Session | None:
         """Attempt to recover a session from a corrupt JSONL file."""
-        path = self._get_session_path(key)
+        if path is None:
+            path = self._get_session_path(key)
         if not path.exists():
             return None
 
@@ -893,7 +894,7 @@ class SessionManager:
                                 }
                             )
             except Exception:
-                repaired = self._repair(fallback_key)
+                repaired = self._repair(fallback_key, path=path)
                 if repaired is not None:
                     sessions.append(
                         {
