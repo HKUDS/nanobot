@@ -266,13 +266,8 @@ def test_get_history_preserves_reasoning_content():
     ]
 
 
-def test_get_history_annotates_user_turns_but_not_assistant_turns():
-    """Only user turns carry the timestamp prefix.
-
-    Annotating assistant turns trains the model (via in-context examples) to
-    start its own replies with ``[Message Time: ...]``. User-side stamps are
-    enough to pin adjacent assistant replies for relative-time reasoning.
-    """
+def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
+    """Persisted timestamps are session metadata, not prompt content."""
     session = Session(key="test:timestamps")
     session.messages.append({
         "role": "user",
@@ -285,12 +280,14 @@ def test_get_history_annotates_user_turns_but_not_assistant_turns():
         "timestamp": "2026-04-26T22:00:05",
     })
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
+    assert session.messages[0]["timestamp"] == "2026-04-26T22:00:00"
+    assert session.messages[1]["timestamp"] == "2026-04-26T22:00:05"
     assert history == [
         {
             "role": "user",
-            "content": "[Message Time: 2026-04-26T22:00:00]\n10 点提醒是昨天发生的",
+            "content": "10 点提醒是昨天发生的",
         },
         {
             "role": "assistant",
@@ -299,8 +296,8 @@ def test_get_history_annotates_user_turns_but_not_assistant_turns():
     ]
 
 
-def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_timestamps():
-    """Assistant-side timestamp examples can leak back into future replies."""
+def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content():
+    """Timestamp metadata remains persisted without becoming prompt text."""
     session = Session(key="test:proactive-timestamps")
     session.messages.append({
         "role": "assistant",
@@ -314,8 +311,10 @@ def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_times
         "timestamp": "2026-04-26T18:00:00",
     })
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
+    assert session.messages[0]["timestamp"] == "2026-04-26T15:00:00"
+    assert session.messages[1]["timestamp"] == "2026-04-26T18:00:00"
     assert history == [
         {
             "role": "assistant",
@@ -323,18 +322,18 @@ def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_times
         },
         {
             "role": "user",
-            "content": "[Message Time: 2026-04-26T18:00:00]\n好",
+            "content": "好",
         },
     ]
 
 
-def test_get_history_does_not_annotate_tool_results_with_timestamps():
+def test_get_history_does_not_inject_tool_result_timestamps():
     session = Session(key="test:tool-timestamps")
     session.messages.append({"role": "user", "content": "run tool"})
     session.messages.extend(_tool_turn("ts", 0))
     session.messages[-1]["timestamp"] = "2026-04-26T22:00:10"
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
     tool_result = history[-1]
     assert tool_result["role"] == "tool"
@@ -555,7 +554,7 @@ def test_get_history_sanitizes_existing_assistant_replay_artifacts():
         }
     )
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 

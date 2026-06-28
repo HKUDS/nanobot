@@ -57,18 +57,20 @@ Preset names come from the top-level `modelPresets` config. Switching is runtime
 
 ## Periodic Tasks
 
-Periodic tasks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). When `nanobot gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers results to your most recently active chat channel. If there are no active tasks, the heartbeat is skipped silently.
+Periodic background checks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). When `nanobot gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers only results that pass the notification gate to your most recently active chat channel. If there are no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
+
+Use heartbeat for recurring checks that should usually stay quiet. User-created cron jobs are different: they run as scheduled turns in the chat/session where they were created and normally deliver the result back to that channel.
 
 **Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
 
 ```markdown
 ## Active Tasks
 
-- Check weather forecast and send a summary
-- Scan inbox for urgent emails
+- Check weather forecast and notify me only if storms are expected
+- Scan inbox for urgent emails and notify me if any are found
 ```
 
-The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
+The agent can also manage this file itself - ask it to "add a periodic background check" or "check this periodically but only notify me if something changes" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
 
 You can change the interval or disable the built-in heartbeat in `~/.nanobot/config.json`:
 

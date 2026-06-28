@@ -351,6 +351,8 @@ class TelegramConfig(Base):
     streaming: bool = True
     # Enable inline keyboard buttons in Telegram messages.
     inline_keyboards: bool = False
+    # Opt in to Bot API 10.1 sendRichMessage for richer markdown rendering.
+    rich_messages: bool = False
     stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
     webhook_url: str = ""
     webhook_listen_host: str = "127.0.0.1"
@@ -803,6 +805,7 @@ class TelegramChannel(BaseChannel):
             # latches off permanently if the server doesn't support it.
             if (
                 not render_as_blockquote
+                and self.config.rich_messages
                 and not getattr(self, "_rich_send_disabled", False)
             ):
                 rich_ok = await self._try_send_rich(
@@ -911,7 +914,7 @@ class TelegramChannel(BaseChannel):
             # Skip when a streaming preview already exists to avoid the
             # delete-and-resend pattern that causes flickering and drops
             # line breaks (issue #4470).
-            if not buf.message_id and not getattr(self, "_rich_send_disabled", False):
+            if not buf.message_id and self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
                 reply_params = None
                 if reply_to_message_id := meta.get("message_id"):
                     reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}

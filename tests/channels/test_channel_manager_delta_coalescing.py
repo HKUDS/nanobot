@@ -143,6 +143,31 @@ class TestDeltaCoalescing:
         assert pending[0].content == "World"
 
     @pytest.mark.asyncio
+    async def test_deltas_different_stream_ids_not_coalesced(self, manager, bus):
+        """Deltas for the same chat but different streams should not be merged."""
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="A1",
+            metadata={"_stream_delta": True, "_stream_id": "stream-a"},
+        ))
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="B1",
+            metadata={"_stream_delta": True, "_stream_id": "stream-b"},
+        ))
+
+        first_msg = await bus.consume_outbound()
+        merged, pending = manager._coalesce_stream_deltas(first_msg)
+
+        assert merged.content == "A1"
+        assert merged.metadata.get("_stream_id") == "stream-a"
+        assert len(pending) == 1
+        assert pending[0].content == "B1"
+        assert pending[0].metadata.get("_stream_id") == "stream-b"
+
+    @pytest.mark.asyncio
     async def test_stream_end_terminates_coalescing(self, manager, bus):
         """_stream_end should stop coalescing and be included in final message."""
         # Put deltas with stream_end at the end

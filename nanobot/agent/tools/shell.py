@@ -93,8 +93,8 @@ class _PreparedCommand:
             nullable=True,
         ),
         login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default true).",
-            default=True,
+            description="Whether to run bash/zsh with login shell semantics (default false).",
+            default=False,
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
@@ -432,7 +432,7 @@ class ExecTool(Tool):
             env=env,
             timeout=effective_timeout,
             shell_program=shell_program,
-            login=True if login is None else login,
+            login=False if login is None else login,
         )
 
     def _compose_path(self, current_path: str) -> str:
@@ -461,7 +461,7 @@ class ExecTool(Tool):
     async def _spawn(
         command: str, cwd: str, env: dict[str, str],
         shell_program: str | None = None,
-        login: bool = True,
+        login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
     ) -> asyncio.subprocess.Process:
@@ -541,8 +541,9 @@ class ExecTool(Tool):
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
 
-        On Unix, only HOME/LANG/TERM are passed; ``bash -l`` sources the
-        user's profile which sets PATH and other essentials.
+        On Unix, only HOME/LANG/TERM are passed by default. If callers request
+        ``login=True``, bash/zsh may source the user's profile and add PATH or
+        other variables.
 
         On Windows, ``cmd.exe`` has no login-profile mechanism, so a curated
         set of system variables (including PATH) is forwarded.  API keys and
@@ -602,7 +603,7 @@ class ExecTool(Tool):
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
         # from the hardcoded deny list via configuration.
         explicitly_allowed = bool(self.allow_patterns) and any(
-            re.search(p, lower) for p in self.allow_patterns
+            re.fullmatch(p, lower) for p in self.allow_patterns
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:

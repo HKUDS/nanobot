@@ -326,11 +326,10 @@ python -m pip install -e .
 nanobot --version
 ```
 
-If you use WhatsApp, rebuild the local bridge after upgrading:
+If you use WhatsApp from a source checkout, keep the optional dependencies installed:
 
 ```bash
-rm -rf ~/.nanobot/bridge
-nanobot channels login whatsapp
+python -m pip install -e ".[whatsapp]"
 ```
 
 ## First-Run Troubleshooting

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import secrets
 import string
@@ -275,7 +276,19 @@ class AnthropicProvider(LLMProvider):
             blocks.append({"type": "text", "text": content})
         elif isinstance(content, list):
             for item in content:
-                blocks.append(item if isinstance(item, dict) else {"type": "text", "text": str(item)})
+                if isinstance(item, dict):
+                    if not item.get("type"):
+                        # Anthropic requires every content block to declare a "type".
+                        # A tool that returned a bare dict lands here; coerce it to
+                        # a text block instead of emitting one that the API rejects.
+                        blocks.append({
+                            "type": "text",
+                            "text": AnthropicProvider._stringify_typeless_block(item),
+                        })
+                    else:
+                        blocks.append(item)
+                else:
+                    blocks.append({"type": "text", "text": str(item)})
 
         for tc in msg.get("tool_calls") or []:
             if not isinstance(tc, dict):
@@ -315,10 +328,17 @@ class AnthropicProvider(LLMProvider):
                 # A tool that returned a bare dict (or a list of dicts) lands
                 # here; coerce it to a text block instead of emitting a block
                 # the API rejects with "content.0.type: Field required".
-                result.append({"type": "text", "text": str(item)})
+                result.append({
+                    "type": "text",
+                    "text": AnthropicProvider._stringify_typeless_block(item),
+                })
                 continue
             result.append(item)
         return result or "(empty)"
+
+    @staticmethod
+    def _stringify_typeless_block(block: dict[str, Any]) -> str:
+        return json.dumps(block, ensure_ascii=False, sort_keys=True, default=str)
 
     @staticmethod
     def _convert_image_block(block: dict[str, Any]) -> dict[str, Any] | None:

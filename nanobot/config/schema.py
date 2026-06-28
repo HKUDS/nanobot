@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import AliasChoices, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from nanobot.config_base import Base
@@ -132,6 +132,7 @@ class AgentDefaults(Base):
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
+    fail_on_tool_error: bool = True
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
@@ -182,6 +183,29 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
+    thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+
+    # Valid values mirror the keys of _THINKING_STYLE_MAP in
+    # nanobot/providers/openai_compat_provider.py. Kept duplicated here to
+    # avoid an import cycle (schema.py must not import from providers/).
+    _VALID_THINKING_STYLES: ClassVar[tuple[str, ...]] = (
+        "thinking_type",
+        "enable_thinking",
+        "reasoning_split",
+    )
+
+    @field_validator("thinking_style")
+    @classmethod
+    def _validate_thinking_style(cls, v: str | None) -> str | None:
+        if not v:  # None or "" -> no injection, valid (backwards compatible)
+            return v
+        if v not in cls._VALID_THINKING_STYLES:
+            raise ValueError(
+                f"Invalid thinking_style {v!r}. "
+                f"Must be one of: {', '.join(repr(s) for s in cls._VALID_THINKING_STYLES)} "
+                f"(or empty/omitted)."
+            )
+        return v
 
 
 class BedrockProviderConfig(ProviderConfig):
@@ -307,7 +331,7 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all capabilities (tools, resources, prompts); any restriction = only listed tools, no resources/prompts
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
