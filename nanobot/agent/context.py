@@ -22,7 +22,7 @@ from nanobot.utils.helpers import (
 )
 from nanobot.utils.prompt_templates import render_template
 
-_MAX_IMAGE_DIMENSION = 1024
+_MAX_IMAGE_DIMENSION = 1568
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
