@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -18,7 +19,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.config.schema import AgentDefaults, PeerAgentConfig, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
@@ -27,6 +28,20 @@ from nanobot.security.workspace_access import (
     workspace_sandbox_status,
 )
 from nanobot.utils.prompt_templates import render_template
+
+# Tracks how deep the current peer-delegation chain is (A→B→C…). Subagents run
+# in their own asyncio tasks, which copy the contextvar at creation time, so a
+# peer bound to depth N sees depth N for any ``delegate`` it issues and passes
+# N+1 to its delegate — letting ``SubagentManager`` cap runaway cross-delegation.
+_CURRENT_DELEGATION_DEPTH: ContextVar[int] = ContextVar(
+    "nanobot_delegation_depth",
+    default=0,
+)
+
+
+def current_delegation_depth() -> int:
+    """Return the delegation depth of the currently executing (sub)agent."""
+    return _CURRENT_DELEGATION_DEPTH.get()
 
 
 @dataclass(slots=True)
@@ -88,6 +103,8 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        peers: dict[str, PeerAgentConfig] | None = None,
+        max_delegation_depth: int | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -112,6 +129,12 @@ class SubagentManager:
             fail_on_tool_error
             if fail_on_tool_error is not None
             else defaults.fail_on_tool_error
+        )
+        self.peers: dict[str, PeerAgentConfig] = dict(peers or {})
+        self.max_delegation_depth = (
+            max_delegation_depth
+            if max_delegation_depth is not None
+            else defaults.max_delegation_depth
         )
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
@@ -145,6 +168,9 @@ class SubagentManager:
                 restrict_to_workspace=cfg.restrict_to_workspace,
                 workspace=root,
             ),
+            # Exposed so a peer subagent can re-delegate down the chain; only the
+            # peer-gated, depth-bounded ``delegate`` tool is subagent-scoped.
+            subagent_manager=self,
         )
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
@@ -164,10 +190,20 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        peer: str | None = None,
+        delegation_depth: int = 0,
     ) -> str:
-        """Spawn a subagent to execute a task in the background."""
+        """Spawn a subagent to execute a task in the background.
+
+        When ``peer`` names a registered peer agent (see #4179), the subagent
+        assumes that peer's role (system prompt + model) instead of the generic
+        subagent persona. ``delegation_depth`` carries the position in the
+        delegation chain so nested ``delegate`` calls can be bounded.
+        """
+        peer_cfg = self.peers.get(peer) if peer else None
         task_id = str(uuid.uuid4())[:8]
-        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        default_label = (peer if peer_cfg else None) or task[:30] + ("..." if len(task) > 30 else "")
+        display_label = label or default_label
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
 
         status = SubagentStatus(
@@ -188,6 +224,8 @@ class SubagentManager:
                 origin_message_id,
                 temperature,
                 workspace_scope,
+                peer_cfg,
+                delegation_depth,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -217,6 +255,8 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        peer_cfg: PeerAgentConfig | None = None,
+        delegation_depth: int = 0,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -232,7 +272,11 @@ class SubagentManager:
                 cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             tools = self._build_tools(workspace=root, tools_config=cfg)
-            system_prompt = self._build_subagent_prompt(workspace=root)
+            if peer_cfg is not None and peer_cfg.system_prompt:
+                system_prompt = peer_cfg.system_prompt
+            else:
+                system_prompt = self._build_subagent_prompt(workspace=root)
+            run_model = (peer_cfg.model if peer_cfg is not None else None) or self.model
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -245,11 +289,12 @@ class SubagentManager:
                 else None
             )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
+            depth_token: Token[int] = _CURRENT_DELEGATION_DEPTH.set(delegation_depth)
             try:
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
-                    model=self.model,
+                    model=run_model,
                     temperature=temperature,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
@@ -264,6 +309,7 @@ class SubagentManager:
                     llm_timeout_s=llm_timeout,
                 ))
             finally:
+                _CURRENT_DELEGATION_DEPTH.reset(depth_token)
                 if token is not None:
                     reset_workspace_scope(token)
             status.phase = "done"

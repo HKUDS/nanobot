@@ -205,6 +205,8 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        peers: dict[str, Any] | None = None,
+        max_delegation_depth: int | None = None,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -290,6 +292,8 @@ class AgentLoop:
             max_concurrent_subagents=max_concurrent_subagents,
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            peers=peers,
+            max_delegation_depth=max_delegation_depth,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -388,6 +392,8 @@ class AgentLoop:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
+            peers={peer.name: peer for peer in config.agents.peers},
+            max_delegation_depth=defaults.max_delegation_depth,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
