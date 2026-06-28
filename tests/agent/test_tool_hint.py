@@ -1,7 +1,7 @@
 """Tests for tool hint formatting (nanobot.utils.tool_hints)."""
 
-from nanobot.utils.tool_hints import format_tool_hints
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.tool_hints import format_tool_hints
 
 
 def _tc(name: str, args) -> ToolCallRequest:

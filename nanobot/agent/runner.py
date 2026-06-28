@@ -952,7 +952,7 @@ class AgentRunner:
         retry_messages = list(messages)
         note = (
             "The previous model response attempted to call tools, but every tool call "
-            "was malformed: the tool_use blocks had missing/non-string name, id, or input. "
+            "was malformed: the tool_use blocks had missing or non-string tool names. "
             "Do not answer with a promise to use tools. Either call the required tools again "
             "using valid tool names from the provided tool list and JSON object inputs, or give "
             "a final answer only if no tool is required."
