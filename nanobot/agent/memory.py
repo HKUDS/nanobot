@@ -1018,9 +1018,9 @@ class Consolidator:
                 metadata={},
                 last_consolidated=0,
             )
-            dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
+            result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
             messages_to_keep = probe.messages
-            messages_to_remove = dropped[already_consolidated:]
+            messages_to_remove = result.dropped[result.already_consolidated_count:]
 
             if not messages_to_remove and not messages_to_keep:
                 session.updated_at = datetime.now()

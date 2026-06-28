@@ -100,6 +100,14 @@ def _metadata_title(metadata: Any) -> str:
 
 
 @dataclass
+class RetentionResult:
+    retained: list[dict]
+    dropped: list[dict]
+    already_consolidated_count: int
+    new_last_consolidated: int
+
+
+@dataclass
 class Session:
     """A conversation session."""
 
@@ -278,22 +286,29 @@ class Session:
         max_messages: int,
         *,
         extend_to_user: bool = False,
-    ) -> tuple[list[dict], int]:
+    ) -> RetentionResult:
         """Keep a legal recent suffix, optionally extending it back to a user turn.
 
-        Returns ``(dropped, already_consolidated_count)`` where *dropped* is
-        the list of removed messages (in original order) and
-        *already_consolidated_count* is how many of those were inside the
-        pre-existing ``last_consolidated`` prefix and therefore do not need
-        raw archiving.
+        Returns a RetentionResult describing retained messages, removed messages,
+        and how the last_consolidated cursor changed.
         """
         if max_messages <= 0:
             dropped = list(self.messages)
             lc = self.last_consolidated
             self.clear()
-            return dropped, min(lc, len(dropped))
+            return RetentionResult(
+                retained=self.messages,
+                dropped=dropped,
+                already_consolidated_count=min(lc, len(dropped)),
+                new_last_consolidated=self.last_consolidated,
+            )
         if len(self.messages) <= max_messages:
-            return [], 0
+            return RetentionResult(
+                retained=self.messages,
+                dropped=[],
+                already_consolidated_count=0,
+                new_last_consolidated=self.last_consolidated,
+            )
 
         original = list(self.messages)
         before_lc = self.last_consolidated
@@ -359,7 +374,12 @@ class Session:
         self.messages = retained
         self.last_consolidated = new_lc
         self.updated_at = datetime.now()
-        return dropped, already_consolidated
+        return RetentionResult(
+            retained=retained,
+            dropped=dropped,
+            already_consolidated_count=already_consolidated,
+            new_last_consolidated=new_lc,
+        )
 
     def enforce_file_cap(
         self,
@@ -370,17 +390,17 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
-        dropped, already_consolidated = self.retain_recent_legal_suffix(limit)
-        if not dropped:
+        result = self.retain_recent_legal_suffix(limit)
+        if not result.dropped:
             return
 
-        archive_chunk = dropped[already_consolidated:]
+        archive_chunk = result.dropped[result.already_consolidated_count:]
         if archive_chunk and on_archive:
             on_archive(archive_chunk)
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,
-            len(dropped),
+            len(result.dropped),
             len(archive_chunk),
             len(self.messages),
         )

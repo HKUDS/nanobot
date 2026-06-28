@@ -685,12 +685,12 @@ def test_retain_recent_legal_suffix_returns_dropped_messages():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    dropped, already_cons = session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
-    assert len(dropped) == 6
-    assert [m["content"] for m in dropped] == [f"msg{i}" for i in range(6)]
+    assert len(result.dropped) == 6
+    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
     assert len(session.messages) == 4
-    assert already_cons == 0
+    assert result.already_consolidated_count == 0
 
 
 def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
@@ -699,10 +699,10 @@ def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     for i in range(3):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    dropped, already_cons = session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
-    assert dropped == []
-    assert already_cons == 0
+    assert result.dropped == []
+    assert result.already_consolidated_count == 0
     assert len(session.messages) == 3
 
 
@@ -713,10 +713,10 @@ def test_retain_recent_legal_suffix_returns_all_on_zero():
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 3
 
-    dropped, already_cons = session.retain_recent_legal_suffix(0)
+    result = session.retain_recent_legal_suffix(0)
 
-    assert len(dropped) == 5
-    assert already_cons == 3
+    assert len(result.dropped) == 5
+    assert result.already_consolidated_count == 3
     assert session.messages == []
 
 
@@ -820,11 +820,11 @@ def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
         session.messages.append({"role": "assistant", "content": f"a{i}"})
     session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
 
-    dropped, already_cons = session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
     # Retained messages start from latest user (u9) + max_messages forward
     # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
     # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
     assert session.last_consolidated == 3
     # already_cons should count dropped messages with original index < 12
-    assert already_cons == 9
+    assert result.already_consolidated_count == 9
