@@ -346,11 +346,7 @@ class WebSocketChannel(BaseChannel):
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
         """Replay goal/run strip state after subscribe (same-process refresh)."""
         await self._maybe_push_active_goal_state(chat_id)
-        t0 = websocket_turn_wall_started_at(chat_id)
-        if t0 is not None:
-            await self.send_goal_status(chat_id, "running", started_at=t0)
-        else:
-            await self.send_goal_status(chat_id, "idle")
+        await self._maybe_push_turn_run_wall_clock(chat_id)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
