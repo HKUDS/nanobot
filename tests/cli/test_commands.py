@@ -466,9 +466,38 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
     assert saved.agents.defaults.provider == "openai_codex"
-    assert saved.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved.agents.defaults.model == "openai-codex/gpt-5.4-mini"
     assert saved.agents.defaults.model_preset is None
     assert make_provider(saved).__class__.__name__ == "OpenAICodexProvider"
+
+
+def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
+    config_path = tmp_path / "config.json"
+    original = cli_commands._LOGIN_HANDLERS["github_copilot"]
+    cli_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "provider",
+                "login",
+                "github-copilot",
+                "--set-main",
+                "--config",
+                str(config_path),
+            ],
+        )
+    finally:
+        cli_commands._LOGIN_HANDLERS["github_copilot"] = original
+
+    assert result.exit_code == 0
+    assert "Set github-copilot as the main provider" in result.stdout
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.agents.defaults.provider == "github_copilot"
+    assert saved.agents.defaults.model == "github-copilot/gpt-5.4-mini"
+    assert saved.agents.defaults.model_preset is None
+    assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
 
 
 def test_provider_login_model_implies_set_main_provider(tmp_path):
