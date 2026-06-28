@@ -605,7 +605,7 @@ class ExecTool(Tool):
         # only explicitly allowed when every top-level shell segment matches.
         segments = self._split_shell_segments(lower)
         explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
-            any(re.search(pattern, segment) for pattern in self.allow_patterns)
+            any(re.fullmatch(pattern, segment) for pattern in self.allow_patterns)
             for segment in segments
         )
         if not explicitly_allowed:
