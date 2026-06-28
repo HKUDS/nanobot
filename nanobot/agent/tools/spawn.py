@@ -27,6 +27,12 @@ if TYPE_CHECKING:
             minimum=0.0,
             maximum=2.0,
         ),
+        model=StringSchema(
+            "Optional model id for this subagent only (e.g. delegate a heavy "
+            "task to a stronger reasoning model, or a simple one to a cheaper, "
+            "faster model). Must be a model the configured provider serves. "
+            "Defaults to the parent agent's model."
+        ),
         required=["task"],
     )
 )
@@ -73,6 +79,7 @@ class SpawnTool(Tool, ContextAware):
         task: str,
         label: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -93,4 +100,5 @@ class SpawnTool(Tool, ContextAware):
             origin_message_id=self._origin_message_id.get(),
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
+            model=model,
         )
