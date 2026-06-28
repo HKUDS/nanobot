@@ -7,6 +7,7 @@ mutate an existing session history list in place.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,10 @@ if TYPE_CHECKING:
 SNIP_SAFETY_BUFFER = 1024
 MICROCOMPACT_KEEP_RECENT = 10
 MICROCOMPACT_MIN_CHARS = 500
+STALE_ERROR_USER_TURNS = 4
+ADAPTIVE_TOOL_RESULT_MIN_CHARS = 4_000
+ADAPTIVE_TOOL_RESULT_BUDGET_RATIO = 0.08
+SUBAGENT_RESULT_MAX_CHARS = 6_000
 INFLIGHT_COMPACT_TARGET_RATIO = 0.85
 COMPACTABLE_TOOLS = frozenset({
     "read_file", "exec", "grep", "find_files",
@@ -63,7 +68,10 @@ class ContextGovernor:
     ) -> list[dict[str, Any]]:
         updated = self.drop_orphan_tool_results(messages)
         updated = self.backfill_missing_tool_results(updated)
+        updated = self.compact_subagent_announcements(updated)
         updated = self.apply_tool_result_budget(config, updated)
+        updated = self.compact_duplicate_tool_results(updated)
+        updated = self.compact_stale_error_tool_results(updated)
         updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
         updated = self.snip_history(config, updated)
         updated = self.drop_orphan_tool_results(updated)
@@ -93,17 +101,20 @@ class ContextGovernor:
         tool_call_id: str,
         tool_name: str,
         result: Any,
+        *,
+        max_chars: int | None = None,
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result
+        max_chars = max_chars if max_chars is not None else config.max_tool_result_chars
         try:
             content = maybe_persist_tool_result(
                 config.workspace,
                 config.session_key,
                 tool_call_id,
                 result,
-                max_chars=config.max_tool_result_chars,
+                max_chars=max_chars,
             )
         except Exception:
             logger.exception(
@@ -112,8 +123,8 @@ class ContextGovernor:
                 config.session_key or "default",
             )
             content = result
-        if isinstance(content, str) and len(content) > config.max_tool_result_chars:
-            return truncate_text(content, config.max_tool_result_chars)
+        if isinstance(content, str) and len(content) > max_chars:
+            return truncate_text(content, max_chars)
         return content
 
     @staticmethod
@@ -189,6 +200,7 @@ class ContextGovernor:
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         updated = messages
+        max_chars = self._effective_tool_result_chars(config)
         for idx, message in enumerate(messages):
             if message.get("role") != "tool":
                 continue
@@ -197,6 +209,7 @@ class ContextGovernor:
                 str(message.get("tool_call_id") or f"tool_{idx}"),
                 str(message.get("name") or "tool"),
                 message.get("content"),
+                max_chars=max_chars,
             )
             if normalized != message.get("content"):
                 if updated is messages:
@@ -312,10 +325,179 @@ class ContextGovernor:
 
         return system_messages + self._legal_history_tail(kept, non_system)
 
+    def compact_subagent_announcements(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Trim oversized persisted subagent announcements before model replay."""
+        updated = messages
+        for idx, message in enumerate(messages):
+            content = message.get("content")
+            if message.get("role") != "user" or not isinstance(content, str):
+                continue
+            compacted = self._compact_subagent_announcement(content)
+            if compacted == content:
+                continue
+            if updated is messages:
+                updated = [dict(m) for m in messages]
+            updated[idx]["content"] = compacted
+        return updated
+
+    def compact_duplicate_tool_results(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Compact older duplicate compactable tool results in the model copy.
+
+        The raw session history remains intact. Only exact repeats of the same
+        tool name and normalized arguments are compacted, and the newest result
+        stays visible as the recovery path for the model.
+        """
+        tool_signatures = self._tool_call_signatures(messages)
+        seen: dict[tuple[str, str], list[int]] = {}
+        for idx, msg in enumerate(messages):
+            if not self._is_compactable_tool_result(msg):
+                continue
+            call_id = str(msg.get("tool_call_id") or "")
+            signature = tool_signatures.get(call_id)
+            if signature is None:
+                continue
+            seen.setdefault(signature, []).append(idx)
+
+        compact_indexes = {idx for indexes in seen.values() for idx in indexes[:-1]}
+        if not compact_indexes:
+            return messages
+
+        updated = [dict(m) for m in messages]
+        for idx in sorted(compact_indexes):
+            self._compact_tool_result_at(updated, idx)
+        return updated
+
+    def compact_stale_error_tool_results(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Compact old failed tool payloads after several newer user turns."""
+        turns_after = 0
+        compact_indexes: list[int] = []
+        for idx in range(len(messages) - 1, -1, -1):
+            msg = messages[idx]
+            if msg.get("role") == "user":
+                turns_after += 1
+                continue
+            if turns_after < STALE_ERROR_USER_TURNS:
+                continue
+            if not self._is_compactable_tool_result(msg, min_chars=0):
+                continue
+            content = msg.get("content")
+            if isinstance(content, str) and content.lstrip().startswith("Error:"):
+                compact_indexes.append(idx)
+
+        if not compact_indexes:
+            return messages
+
+        updated = [dict(m) for m in messages]
+        for idx in compact_indexes:
+            self._compact_tool_result_at(updated, idx)
+        return updated
+
     @staticmethod
     def _summary_for(message: dict[str, Any]) -> str:
         name = message.get("name", "tool")
         return f"[{name} result omitted from context]"
+
+    @classmethod
+    def _is_compacted_summary(cls, message: dict[str, Any]) -> bool:
+        content = message.get("content")
+        return isinstance(content, str) and content == cls._summary_for(message)
+
+    @classmethod
+    def _is_compactable_tool_result(
+        cls,
+        message: dict[str, Any],
+        *,
+        min_chars: int = MICROCOMPACT_MIN_CHARS,
+    ) -> bool:
+        if message.get("role") != "tool" or message.get("name") not in COMPACTABLE_TOOLS:
+            return False
+        if cls._is_compacted_summary(message):
+            return False
+        content = message.get("content")
+        return isinstance(content, str) and len(content) >= min_chars
+
+    @classmethod
+    def _tool_call_signatures(
+        cls,
+        messages: list[dict[str, Any]],
+    ) -> dict[str, tuple[str, str]]:
+        signatures: dict[str, tuple[str, str]] = {}
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            for tool_call in msg.get("tool_calls") or []:
+                if not isinstance(tool_call, dict) or not tool_call.get("id"):
+                    continue
+                func = tool_call.get("function")
+                if not isinstance(func, dict):
+                    continue
+                name = str(func.get("name") or "")
+                if name not in COMPACTABLE_TOOLS:
+                    continue
+                signatures[str(tool_call["id"])] = (
+                    name,
+                    cls._normalize_tool_arguments(func.get("arguments")),
+                )
+        return signatures
+
+    @staticmethod
+    def _normalize_tool_arguments(arguments: Any) -> str:
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except Exception:
+                return arguments.strip()
+        try:
+            return json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        except TypeError:
+            return str(arguments)
+
+    @staticmethod
+    def _effective_tool_result_chars(config: ContextGovernanceConfig) -> int:
+        limit = config.max_tool_result_chars
+        budget = ContextGovernor.input_budget(config)
+        if budget <= 0:
+            return limit
+        adaptive = max(
+            ADAPTIVE_TOOL_RESULT_MIN_CHARS,
+            int(budget * ADAPTIVE_TOOL_RESULT_BUDGET_RATIO),
+        )
+        return min(limit, adaptive)
+
+    @staticmethod
+    def _compact_subagent_announcement(content: str) -> str:
+        normalized = content.replace("\r\n", "\n")
+        stripped = normalized.lstrip()
+        if not stripped.startswith("[Subagent"):
+            return content
+        lower = normalized.lower()
+        result_marker = "\nresult:\n"
+        result_idx = lower.find(result_marker)
+        if result_idx == -1:
+            result_marker = "\nresult:"
+            result_idx = lower.find(result_marker)
+        if result_idx == -1:
+            return content
+
+        result_start = result_idx + len(result_marker)
+        after_result = normalized[result_start:].lstrip()
+        instruction_marker = "summarize this naturally"
+        instruction_idx = after_result.lower().find(instruction_marker)
+        if instruction_idx == -1:
+            result_text = after_result.rstrip()
+            instruction = ""
+        else:
+            result_text = after_result[:instruction_idx].rstrip()
+            instruction = after_result[instruction_idx:].lstrip()
+
+        if len(result_text) <= SUBAGENT_RESULT_MAX_CHARS:
+            return content
+
+        prefix = normalized[:result_start]
+        compacted_result = truncate_text(result_text, SUBAGENT_RESULT_MAX_CHARS)
+        compacted_result += "\n\n[Subagent result truncated for context replay.]"
+        suffix = f"\n\n{instruction}" if instruction else ""
+        return f"{prefix}{compacted_result}{suffix}"
 
     def _legal_history_tail(
         self,

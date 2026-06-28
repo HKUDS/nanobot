@@ -10,6 +10,7 @@ import pytest
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
     MICROCOMPACT_KEEP_RECENT,
+    SUBAGENT_RESULT_MAX_CHARS,
     ContextGovernanceConfig,
     ContextGovernor,
 )
@@ -716,6 +717,144 @@ def test_microcompact_skips_non_compactable_tools(monkeypatch):
         set(),
     )
     assert result is messages  # no compactable tools found
+
+
+def test_compact_duplicate_tool_results_preserves_newest_result():
+    content = "duplicate output\n" * 80
+    messages = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "old",
+                "type": "function",
+                "function": {"name": "grep", "arguments": '{"pattern":"x","path":"."}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "old", "name": "grep", "content": content},
+        {"role": "user", "content": "try again"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "new",
+                "type": "function",
+                "function": {"name": "grep", "arguments": '{"path":".","pattern":"x"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "new", "name": "grep", "content": content},
+    ]
+
+    result = ContextGovernor().compact_duplicate_tool_results(messages)
+
+    assert result is not messages
+    assert messages[2]["content"] == content
+    assert result[2]["content"] == "[grep result omitted from context]"
+    assert result[5]["content"] == content
+
+
+def test_compact_duplicate_tool_results_skips_different_arguments():
+    content = "search output\n" * 80
+    messages = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "first",
+                "type": "function",
+                "function": {"name": "web_search", "arguments": '{"query":"one"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "first", "name": "web_search", "content": content},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "second",
+                "type": "function",
+                "function": {"name": "web_search", "arguments": '{"query":"two"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "second", "name": "web_search", "content": content},
+    ]
+
+    result = ContextGovernor().compact_duplicate_tool_results(messages)
+
+    assert result is messages
+
+
+def test_compact_stale_error_tool_results_after_newer_user_turns():
+    error = "Error: RuntimeError: boom"
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "bad"}]},
+        {"role": "tool", "tool_call_id": "bad", "name": "exec", "content": error},
+        {"role": "user", "content": "turn 1"},
+        {"role": "assistant", "content": "reply 1"},
+        {"role": "user", "content": "turn 2"},
+        {"role": "assistant", "content": "reply 2"},
+        {"role": "user", "content": "turn 3"},
+        {"role": "assistant", "content": "reply 3"},
+        {"role": "user", "content": "turn 4"},
+    ]
+
+    result = ContextGovernor().compact_stale_error_tool_results(messages)
+
+    assert result is not messages
+    assert messages[2]["content"] == error
+    assert result[2]["content"] == "[exec result omitted from context]"
+
+
+def test_compact_subagent_announcements_trims_large_result_only():
+    long_result = "x" * (SUBAGENT_RESULT_MAX_CHARS + 500)
+    content = (
+        "[Subagent 'research' completed successfully]\n\n"
+        "Task: inspect the project\n\n"
+        f"Result:\n{long_result}\n\n"
+        "Summarize this naturally for the user. Keep it brief."
+    )
+    messages = [{"role": "user", "content": content}]
+
+    result = ContextGovernor().compact_subagent_announcements(messages)
+
+    assert result is not messages
+    assert messages[0]["content"] == content
+    compacted = result[0]["content"]
+    assert "Task: inspect the project" in compacted
+    assert "[Subagent result truncated for context replay.]" in compacted
+    assert "Summarize this naturally for the user" in compacted
+    assert len(compacted) < len(content)
+
+
+def test_apply_tool_result_budget_uses_adaptive_limit_for_tight_context():
+    provider = MagicMock()
+    provider.generation = SimpleNamespace(max_tokens=0)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    content = "x" * 5_000
+    messages = [{"role": "tool", "tool_call_id": "exec_1", "name": "exec", "content": content}]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=16_000,
+        context_window_tokens=100_000,
+        context_block_limit=50_000,
+        max_tokens=0,
+    )
+
+    result = ContextGovernor().apply_tool_result_budget(
+        _governance_config(provider, tools, spec),
+        messages,
+    )
+
+    assert result is not messages
+    assert messages[0]["content"] == content
+    assert result[0]["content"].startswith("x" * 4_000)
+    assert len(result[0]["content"]) < len(content)
 
 
 def test_governance_repairs_orphans_after_snip():
