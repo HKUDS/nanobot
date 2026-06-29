@@ -104,6 +104,22 @@ def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
     assert "Exit code: 0" in result
 
 
+def test_exec_one_shot_compacts_large_command_output(tmp_path):
+    async def run() -> str:
+        tool = ExecTool(working_dir=str(tmp_path), timeout=5)
+        command = _python_command(
+            "import json; print(json.dumps([{'id': i, 'name': 'item'} for i in range(400)]))"
+        )
+        return await tool.execute(command=command, max_output_tokens=4000)
+
+    result = asyncio.run(run())
+
+    assert "command output compacted" in result
+    assert '"type": "array"' in result
+    assert '"items": 400' in result
+    assert "Exit code: 0" in result
+
+
 def test_exec_accepts_supported_shell_parameter(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir=str(tmp_path), timeout=5)
