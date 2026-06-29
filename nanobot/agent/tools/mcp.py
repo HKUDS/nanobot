@@ -174,7 +174,8 @@ def _redact_url(url: str) -> str:
     """
     try:
         parts = urllib.parse.urlsplit(url)
-        netloc = parts.hostname or ""
+        hostname = parts.hostname or ""
+        netloc = f"[{hostname}]" if ":" in hostname else hostname
         if parts.port:
             netloc = f"{netloc}:{parts.port}"
         return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, "", ""))
