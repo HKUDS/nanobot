@@ -57,7 +57,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import DEFAULT_REPLAY_MAX_MESSAGES, Session, SessionManager
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
@@ -201,7 +201,7 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
-        max_messages: int = 500,
+        max_messages: int = DEFAULT_REPLAY_MAX_MESSAGES,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -292,7 +292,9 @@ class AgentLoop:
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
-        self._max_messages = max_messages if max_messages > 0 else 500
+        self._max_messages = (
+            max_messages if max_messages > 0 else DEFAULT_REPLAY_MAX_MESSAGES
+        )
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -390,7 +392,6 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
-            max_messages=defaults.max_messages,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,

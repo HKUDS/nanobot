@@ -1,4 +1,4 @@
-"""Tests for max_messages config wiring into session history replay."""
+"""Tests for the internal max_messages replay cap."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
-from nanobot.session.manager import Session
+from nanobot.session.manager import DEFAULT_REPLAY_MAX_MESSAGES, Session
 
-DEFAULT_MAX_MESSAGES = 500
+DEFAULT_MAX_MESSAGES = DEFAULT_REPLAY_MAX_MESSAGES
 
 
 def _make_loop(tmp_path: Path, max_messages: int = DEFAULT_MAX_MESSAGES) -> AgentLoop:
@@ -103,10 +103,10 @@ class TestGetHistoryWithMaxMessages:
 
 
 class TestMaxMessagesIntegration:
-    """Verify the config flows from AgentLoop into get_history calls."""
+    """Verify AgentLoop passes the replay cap into get_history calls."""
 
     @pytest.mark.asyncio
-    async def test_process_message_passes_config_to_history_call(self, tmp_path: Path) -> None:
+    async def test_process_message_passes_limit_to_history_call(self, tmp_path: Path) -> None:
         """The real message path should pass max_messages into session history replay."""
         loop = _make_loop(tmp_path, max_messages=25)
         loop.provider.chat_with_retry = AsyncMock(
@@ -127,7 +127,7 @@ class TestMaxMessagesIntegration:
         assert mock_hist.call_args.kwargs["extend_to_user"] is False
 
     @pytest.mark.asyncio
-    async def test_zero_config_passes_builtin_limit_to_history_call(self, tmp_path: Path) -> None:
+    async def test_zero_limit_passes_builtin_limit_to_history_call(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path, max_messages=0)
         loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[], usage={})
@@ -182,31 +182,3 @@ class TestMaxMessagesIntegration:
         sent_text = "\n".join(str(message.get("content")) for message in sent_messages)
         assert "new question" in sent_text
         assert "long older turn" not in sent_text
-
-
-class TestSchemaConfig:
-    """Verify the config schema accepts max_messages."""
-
-    def test_schema_default(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        defaults = AgentDefaults()
-        assert defaults.max_messages == DEFAULT_MAX_MESSAGES
-
-    def test_schema_accepts_zero_as_builtin_limit(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        defaults = AgentDefaults(max_messages=0)
-        assert defaults.max_messages == 0
-
-    def test_schema_accepts_positive(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        defaults = AgentDefaults(max_messages=25)
-        assert defaults.max_messages == 25
-
-    def test_schema_rejects_negative(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        with pytest.raises(Exception):  # Pydantic validation error
-            AgentDefaults(max_messages=-1)

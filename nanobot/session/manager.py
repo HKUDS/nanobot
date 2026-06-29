@@ -27,6 +27,7 @@ from nanobot.utils.helpers import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 FILE_MAX_MESSAGES = 2000
+DEFAULT_REPLAY_MAX_MESSAGES = 500
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -132,7 +133,7 @@ class Session:
 
     def get_history(
         self,
-        max_messages: int = 500,
+        max_messages: int = DEFAULT_REPLAY_MAX_MESSAGES,
         *,
         max_tokens: int = 0,
         extend_to_user: bool = False,
@@ -143,7 +144,7 @@ class Session:
         token budget from the tail (``max_tokens``) when provided.
         """
         unconsolidated = self.messages[self.last_consolidated:]
-        max_messages = max_messages if max_messages > 0 else 500
+        max_messages = max_messages if max_messages > 0 else DEFAULT_REPLAY_MAX_MESSAGES
         start_idx = recent_message_start_index(
             unconsolidated,
             max_messages,
