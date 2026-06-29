@@ -465,6 +465,8 @@ async def test_process_direct_accepts_media() -> None:
     loop._connect_mcp = AsyncMock()
     loop._session_locks = {}
     loop._pending_queues = {}
+    loop._cron_turns = MagicMock()
+    loop._cron_turns.publish_next_deferred = AsyncMock()
     loop.bus = AsyncMock()
 
     captured_msg = None

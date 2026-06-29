@@ -975,6 +975,7 @@ class AgentLoop:
         self,
         session_key: str,
     ) -> AsyncIterator[asyncio.Queue]:
+        """Publish a session's active injection queue while the caller owns its lock."""
         pending: asyncio.Queue = asyncio.Queue(maxsize=20)
         self._pending_queues[session_key] = pending
         try:
@@ -1881,3 +1882,4 @@ class AgentLoop:
         finally:
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
             self._runtime_events().clear_turn(session_key)
+            await self._cron_turns.publish_next_deferred(session_key)

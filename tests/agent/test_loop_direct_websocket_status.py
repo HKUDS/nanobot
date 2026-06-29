@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 
@@ -183,3 +184,36 @@ async def test_process_direct_republishes_leftover_queue_messages(tmp_path) -> N
         msgs.append(await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5))
     contents = [m.content for m in msgs]
     assert "subagent result" in contents
+
+
+@pytest.mark.asyncio
+async def test_process_direct_publishes_deferred_cron_turn_after_pending_queue(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()
+    session_key = "cron:test-deferred"
+
+    async def _process_message(msg, **_kwargs):
+        deferred = InboundMessage(
+            channel="websocket",
+            sender_id="cron",
+            chat_id="chat-1",
+            content="deferred cron turn",
+            metadata={
+                CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-1"},
+                CRON_DEFER_UNTIL_IDLE_META: True,
+            },
+        )
+        assert loop._cron_turns.defer_if_active(
+            deferred,
+            session_key=session_key,
+            active_session_keys=loop._pending_queues.keys(),
+        )
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=msg.content)
+
+    loop._process_message = _process_message
+
+    await loop.process_direct("hello", session_key=session_key)
+
+    msg = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+    assert msg.content == "deferred cron turn"
+    assert session_key not in loop._cron_turns.deferred_queues
