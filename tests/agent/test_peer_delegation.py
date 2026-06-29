@@ -239,3 +239,37 @@ def test_duplicate_peer_names_rejected():
 def test_unique_peer_names_accepted():
     cfg = AgentsConfig(peers=[PeerAgentConfig(name="researcher"), PeerAgentConfig(name="writer")])
     assert [p.name for p in cfg.peers] == ["researcher", "writer"]
+
+
+# --- nested delegation: origin context propagates to peer subagent tools -----
+
+
+@pytest.mark.asyncio
+async def test_nested_delegate_inherits_origin_not_defaults():
+    """A peer that re-delegates must route from the origin session, not cli/direct.
+
+    _build_tools makes a fresh registry whose ContextAware tools are never
+    set_context()'d, so without _bind_tool_context the nested delegate would use
+    the cli/direct defaults. Verify the bind fixes it.
+    """
+    sm = _manager(peers=[PeerAgentConfig(name="researcher")])
+    tools = sm._build_tools()  # subagent-scope registry; includes delegate (peers set)
+    assert tools.has("delegate")
+
+    origin = {"channel": "telegram", "chat_id": "grp1", "session_key": "telegram:grp1"}
+    sm._bind_tool_context(tools, origin, "msg-42")
+
+    delegate = tools.get("delegate")
+    sm.spawn = AsyncMock(return_value="started")
+    token = _CURRENT_DELEGATION_DEPTH.set(1)
+    try:
+        await delegate.execute(peer="researcher", task="dig deeper")
+    finally:
+        _CURRENT_DELEGATION_DEPTH.reset(token)
+
+    kwargs = sm.spawn.call_args.kwargs
+    assert kwargs["origin_channel"] == "telegram"
+    assert kwargs["origin_chat_id"] == "grp1"
+    assert kwargs["session_key"] == "telegram:grp1"
+    assert kwargs["origin_message_id"] == "msg-42"
+    assert kwargs["delegation_depth"] == 2

@@ -13,7 +13,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.context import ContextAware, RequestContext, ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
@@ -175,6 +175,28 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
+    @staticmethod
+    def _bind_tool_context(
+        tools: ToolRegistry,
+        origin: dict[str, str],
+        origin_message_id: str | None,
+    ) -> None:
+        """Set the origin request context on a subagent's ContextAware tools.
+
+        Without this, a `delegate` issued from inside a peer subagent would read the
+        ContextAware defaults (cli/direct) and route its result to the wrong session.
+        """
+        request_ctx = RequestContext(
+            channel=origin["channel"],
+            chat_id=origin["chat_id"],
+            message_id=origin_message_id,
+            session_key=origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}",
+        )
+        for name in tools.tool_names:
+            tool = tools.get(name)
+            if isinstance(tool, ContextAware):
+                tool.set_context(request_ctx)
+
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         self.provider = provider
         self.model = model
@@ -272,6 +294,12 @@ class SubagentManager:
                 cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             tools = self._build_tools(workspace=root, tools_config=cfg)
+            # Bind the subagent's tools to the *origin* request context so a peer
+            # that re-delegates (A→B→C) routes its delegate from the right session
+            # instead of the ContextAware defaults (cli/direct). _build_tools makes a
+            # fresh registry, so without this the nested delegate would announce to
+            # the wrong place. Mirrors AgentLoop._update_tool_context.
+            self._bind_tool_context(tools, origin, origin_message_id)
             if peer_cfg is not None and peer_cfg.system_prompt:
                 system_prompt = peer_cfg.system_prompt
             else:
