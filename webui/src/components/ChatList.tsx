@@ -7,6 +7,7 @@ import {
 import {
   Archive,
   ArchiveRestore,
+  Download,
   Folder,
   MoreHorizontal,
   Pencil,
@@ -40,8 +41,8 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
-const ACTION_MENU_CONTENT_CLASS = "w-[8.5rem] min-w-[8.5rem]";
-const ACTION_MENU_ITEM_CLASS = "grid w-[7.75rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-2";
+const ACTION_MENU_CONTENT_CLASS = "w-[10.25rem] min-w-[10.25rem]";
+const ACTION_MENU_ITEM_CLASS = "grid w-[9.5rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-2";
 
 interface ChatListProps {
   sessions: ChatSummary[];
@@ -51,6 +52,7 @@ interface ChatListProps {
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  onExportMarkdown?: (key: string, label: string) => void;
   onToggleGroup?: (groupId: string) => void;
   onRequestRenameProject?: (projectKey: string, label: string) => void;
   onNewChatInProject?: (projectPath: string, projectName: string) => void;
@@ -80,6 +82,7 @@ export const ChatList = memo(function ChatList({
   onTogglePin,
   onRequestRename,
   onToggleArchive,
+  onExportMarkdown,
   onToggleGroup,
   onRequestRenameProject,
   onNewChatInProject,
@@ -333,6 +336,15 @@ export const ChatList = memo(function ChatList({
                                 <Pencil className="h-4 w-4 shrink-0" />
                                 {t("chat.rename")}
                               </DropdownMenuItem>
+                              {onExportMarkdown ? (
+                                <DropdownMenuItem
+                                  onSelect={() => onExportMarkdown(s.key, title)}
+                                  className={ACTION_MENU_ITEM_CLASS}
+                                >
+                                  <Download className="h-4 w-4 shrink-0" />
+                                  {t("chat.exportMarkdown")}
+                                </DropdownMenuItem>
+                              ) : null}
                               <DropdownMenuItem
                                 onSelect={() => onToggleArchive(s.key)}
                                 className={ACTION_MENU_ITEM_CLASS}
