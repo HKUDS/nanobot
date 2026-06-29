@@ -43,12 +43,17 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { fetchSettings, fetchWebuiThread, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
   getHostApi,
   toRuntimeSurface,
 } from "@/lib/runtime";
+import {
+  buildSessionMarkdown,
+  downloadMarkdownFile,
+  sessionMarkdownFilename,
+} from "@/lib/session-export";
 import { projectNameFromPath } from "@/lib/workspace";
 
 type BootState =
@@ -1348,6 +1353,27 @@ function Shell({
     setPendingDelete({ key, label, automations });
   }, [getSessionAutomations]);
 
+  const onExportMarkdown = useCallback(async (key: string, label: string) => {
+    const session = sessions.find((s) => s.key === key);
+    if (!session) return;
+    const title = label.trim()
+      || sidebarState.title_overrides[key]
+      || session.title
+      || deriveTitle(session.preview, t("chat.newChat"));
+    try {
+      const thread = await fetchWebuiThread(token, key);
+      const markdown = buildSessionMarkdown({
+        session,
+        title,
+        messages: thread?.messages ?? [],
+        locale: i18n.resolvedLanguage,
+      });
+      downloadMarkdownFile(sessionMarkdownFilename(title, key), markdown);
+    } catch (e) {
+      console.error("Failed to export session markdown", e);
+    }
+  }, [i18n.resolvedLanguage, sessions, sidebarState.title_overrides, t, token]);
+
   const headerTitle = activeSession
     ? sidebarState.title_overrides[activeSession.key] ||
       activeSession.title ||
@@ -1394,6 +1420,7 @@ function Shell({
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onExportMarkdown,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
