@@ -78,7 +78,8 @@ nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 Replace `"Review PR #4502"` with the message you want nanobot to receive. The
 trigger is bound to the session where it was created, so the message goes back
 to that same chat. Keep `nanobot gateway` running so trigger messages can be
-delivered.
+delivered. The trigger message starts an automation turn; it is not shown in
+the chat as a normal user message.
 
 For longer or generated content, omit the message argument and pipe stdin:
 

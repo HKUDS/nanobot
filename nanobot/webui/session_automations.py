@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any, Protocol
 
-from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.cron.types import CronJob
+from nanobot.session.automation_turns import is_automation_history_message
 from nanobot.session.manager import _message_preview_text
 from nanobot.triggers.types import ExternalTrigger
 
@@ -326,7 +326,7 @@ def _session_preview(messages: Any) -> str:
     for message in messages:
         if not isinstance(message, dict):
             continue
-        if message.get(CRON_HISTORY_META) is True:
+        if is_automation_history_message(message):
             continue
         text = _message_preview_text(message)
         if not text:
