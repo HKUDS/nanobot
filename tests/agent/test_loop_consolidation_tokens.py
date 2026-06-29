@@ -209,6 +209,7 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
     loop.consolidator.maybe_consolidate_by_tokens.assert_any_await(
         session,
         replay_max_messages=loop._max_messages,
+        replay_eviction_stride=loop._max_messages_eviction_stride,
     )
 
 

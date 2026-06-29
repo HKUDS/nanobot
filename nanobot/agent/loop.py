@@ -1173,6 +1173,7 @@ class AgentLoop:
         await self.consolidator.maybe_consolidate_by_tokens(
             session,
             replay_max_messages=self._max_messages,
+            replay_eviction_stride=self._max_messages_eviction_stride,
         )
         is_subagent = msg.sender_id == "subagent"
         if is_subagent and self._persist_subagent_followup(session, msg):
@@ -1229,6 +1230,7 @@ class AgentLoop:
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 replay_max_messages=self._max_messages,
+                replay_eviction_stride=self._max_messages_eviction_stride,
             )
         )
         content = final_content or "Background task completed."
@@ -1450,6 +1452,7 @@ class AgentLoop:
             await self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
                 replay_max_messages=self._max_messages,
+                replay_eviction_stride=self._max_messages_eviction_stride,
             )
         self._set_tool_context(
             ctx.msg.channel,
@@ -1560,6 +1563,7 @@ class AgentLoop:
                 self.consolidator.maybe_consolidate_by_tokens(
                     ctx.session,
                     replay_max_messages=self._max_messages,
+                    replay_eviction_stride=self._max_messages_eviction_stride,
                 )
             )
         self._clear_pending_user_turn(ctx.session)

@@ -232,6 +232,35 @@ class TestConsolidatorTokenBudget:
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
         consolidator.sessions.save.assert_called()
 
+    async def test_replay_window_overflow_uses_eviction_stride(
+        self,
+        consolidator,
+    ):
+        """Preflight replay consolidation must match the model replay window."""
+        consolidator._SAFETY_BUFFER = 0
+        session = Session(key="test:replay-stride")
+        for i in range(20):
+            session.add_message("user", f"u{i}")
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="old conversation summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=10,
+            replay_eviction_stride=4,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert archived_chunk[0]["content"] == "u0"
+        assert archived_chunk[-1]["content"] == "u7"
+        assert session.last_consolidated == 8
+
+        history = session.get_history(max_messages=10, eviction_stride=4)
+        assert history[0]["content"] == "u8"
+        assert len(history) == 12
+
     async def test_replay_window_overflow_extends_to_long_recent_user_turn(
         self,
         consolidator,

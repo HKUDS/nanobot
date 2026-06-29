@@ -723,6 +723,7 @@ class Consolidator:
     def _replay_overflow_boundary(
         session: Session,
         replay_max_messages: int | None,
+        replay_eviction_stride: int = 0,
     ) -> int | None:
         if not replay_max_messages or replay_max_messages <= 0:
             return None
@@ -735,6 +736,7 @@ class Consolidator:
             tail_messages,
             replay_max_messages,
             extend_to_user=True,
+            eviction_stride=replay_eviction_stride,
         )
         sliced = tail[start_idx:]
         for i, (_idx, message) in enumerate(sliced):
@@ -760,9 +762,14 @@ class Consolidator:
         self,
         session: Session,
         replay_max_messages: int | None,
+        replay_eviction_stride: int = 0,
     ) -> str | None:
         """Archive messages that would be hidden by the replay message window."""
-        end_idx = self._replay_overflow_boundary(session, replay_max_messages)
+        end_idx = self._replay_overflow_boundary(
+            session,
+            replay_max_messages,
+            replay_eviction_stride,
+        )
         if end_idx is None:
             return None
         chunk = session.messages[session.last_consolidated:end_idx]
@@ -883,6 +890,7 @@ class Consolidator:
         session: Session,
         *,
         replay_max_messages: int | None = None,
+        replay_eviction_stride: int = 0,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
@@ -906,6 +914,7 @@ class Consolidator:
             last_summary = await self._consolidate_replay_overflow(
                 session,
                 replay_max_messages,
+                replay_eviction_stride,
             )
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
