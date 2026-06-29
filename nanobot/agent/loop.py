@@ -40,9 +40,6 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.cron.session_turns import (
-    cron_history_overrides,
-)
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.security.workspace_access import (
@@ -51,6 +48,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
 )
 from nanobot.session import turn_continuation
+from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
@@ -607,10 +605,10 @@ class AgentLoop:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
-            text_override, cron_extra = cron_history_overrides(msg.metadata)
+            text_override, automation_extra = automation_history_overrides(msg.metadata)
             if text_override is not None:
                 text = text_override
-            extra.update(cron_extra)
+            extra.update(automation_extra)
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)

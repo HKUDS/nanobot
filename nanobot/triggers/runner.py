@@ -10,11 +10,10 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.triggers.session_turns import EXTERNAL_TRIGGER_META
 from nanobot.triggers.store import ExternalTriggerStore
 from nanobot.triggers.types import ExternalTrigger, TriggerDelivery
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
-
-EXTERNAL_TRIGGER_META = "_external_trigger"
 
 
 async def run_external_trigger_queue(
