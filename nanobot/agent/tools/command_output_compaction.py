@@ -80,9 +80,9 @@ def compact_command_output(
     family = _command_family(command)
     compacted = _route_compactor(family, output)
     if compacted is None:
-        compacted = _generic_compact(output.stdout, output.max_chars)
-        if output.stderr.strip():
-            compacted = _join_sections([compacted, _error_focused(output.stderr, output.max_chars // 3)])
+        # Unknown plain stdout keeps the legacy raw-output path so ExecTool's
+        # final head/tail truncation continues to preserve exact command text.
+        return combined or "(no output)"
 
     compacted = _fit(compacted, output.max_chars)
     if compacted == combined:

@@ -247,6 +247,72 @@ def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
     ]
 
 
+def test_apply_tool_replay_window_keeps_10_summarizes_50_removes_rest():
+    messages = [{"role": "user", "content": "run many commands"}]
+    for idx in range(65):
+        messages.extend([
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"call_{idx}",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": f'{{"command":"cmd {idx}"}}',
+                        },
+                    },
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": f"call_{idx}",
+                "name": "exec",
+                "content": f"output {idx} " + ("x" * 300),
+            },
+        ])
+
+    compacted = ContextGovernor().apply_tool_replay_window(messages)
+
+    tool_messages = [msg for msg in compacted if msg.get("role") == "tool"]
+    tool_ids = [msg["tool_call_id"] for msg in tool_messages]
+    assert tool_ids == [f"call_{idx}" for idx in range(5, 65)]
+    assert all(
+        "result summarized for context" in str(msg.get("content"))
+        for msg in tool_messages[:50]
+    )
+    assert all(
+        str(msg.get("content")).startswith(f"output {idx}")
+        for idx, msg in zip(range(55, 65), tool_messages[50:])
+    )
+    assistant_call_ids = [
+        call["id"]
+        for msg in compacted
+        for call in msg.get("tool_calls") or []
+    ]
+    assert assistant_call_ids == [f"call_{idx}" for idx in range(5, 65)]
+    assert compacted[0] is messages[0]
+    assert messages[2]["tool_call_id"] == "call_0"  # original history is untouched
+
+
+def test_apply_tool_replay_window_leaves_latest_10_unchanged():
+    messages = [{"role": "user", "content": "run commands"}]
+    for idx in range(10):
+        messages.extend([
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": f"call_{idx}", "type": "function", "function": {"name": "exec"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": f"call_{idx}", "name": "exec", "content": "ok"},
+        ])
+
+    assert ContextGovernor().apply_tool_replay_window(messages) is messages
+
+
 @pytest.mark.asyncio
 async def test_backfill_noop_when_complete():
     """Complete message chains should not be modified."""
