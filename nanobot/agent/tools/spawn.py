@@ -74,8 +74,12 @@ class SpawnTool(Tool, ContextAware):
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
-        if self._manager.spawn_presets:
-            names = ", ".join(sorted(self._manager.spawn_presets))
+        try:
+            spawn_presets = self._manager.available_spawn_presets()
+        except Exception:
+            spawn_presets = {}
+        if spawn_presets:
+            names = ", ".join(sorted(spawn_presets))
             base += f" Available model presets: [{names}]."
         return base
 

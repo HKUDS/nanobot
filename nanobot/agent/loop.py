@@ -214,6 +214,7 @@ class AgentLoop:
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         spawn_presets: dict[str, ModelPresetConfig] | None = None,
+        spawn_presets_loader: Callable[[], dict[str, ModelPresetConfig]] | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
     ):
@@ -292,6 +293,7 @@ class AgentLoop:
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
             spawn_presets=spawn_presets,
+            spawn_presets_loader=spawn_presets_loader,
             preset_snapshot_loader=preset_snapshot_loader,
         )
         self._unified_session = unified_session
@@ -368,12 +370,19 @@ class AgentLoop:
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
         provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
+        spawn_presets_loader = extra.pop("spawn_presets_loader", None)
         preset_snapshot_loader = extra.pop("preset_snapshot_loader", None) or preset_helpers.make_preset_snapshot_loader(
             config,
             provider_snapshot_loader,
         )
         all_presets = preset_helpers.configured_model_presets(config)
-        spawn_presets = {n: all_presets[n] for n in defaults.spawn_presets if n in all_presets}
+        spawn_presets = preset_helpers.configured_spawn_presets(config)
+        if spawn_presets_loader is None and provider_snapshot_loader is not None:
+            def spawn_presets_loader() -> dict[str, ModelPresetConfig]:
+                from nanobot.config.loader import load_config, resolve_config_env_vars
+                return preset_helpers.configured_spawn_presets(
+                    resolve_config_env_vars(load_config())
+                )
         return cls(
             bus=bus,
             provider=provider,
@@ -402,6 +411,7 @@ class AgentLoop:
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             spawn_presets=spawn_presets,
+            spawn_presets_loader=spawn_presets_loader,
             **extra,
         )
 

@@ -90,6 +90,7 @@ class SubagentManager:
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
         spawn_presets: dict[str, ModelPresetConfig] | None = None,
+        spawn_presets_loader: Callable[[], dict[str, ModelPresetConfig]] | None = None,
         preset_snapshot_loader: PresetSnapshotLoader | None = None,
     ):
         defaults = AgentDefaults()
@@ -112,6 +113,7 @@ class SubagentManager:
             else defaults.max_concurrent_subagents
         )
         self.spawn_presets: dict[str, ModelPresetConfig] = spawn_presets or {}
+        self._spawn_presets_loader = spawn_presets_loader
         self._preset_snapshot_loader = preset_snapshot_loader
         self._preset_cache: dict[str, tuple[tuple[object, ...], AgentRunner]] = {}
         self.fail_on_tool_error = (
@@ -160,6 +162,11 @@ class SubagentManager:
         self.model = model
         self.runner.provider = provider
 
+    def available_spawn_presets(self) -> dict[str, ModelPresetConfig]:
+        if self._spawn_presets_loader is None:
+            return self.spawn_presets
+        return self._spawn_presets_loader()
+
     async def spawn(
         self,
         task: str,
@@ -173,8 +180,16 @@ class SubagentManager:
         model_preset: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
-        if model_preset is not None and model_preset not in self.spawn_presets:
-            available = ", ".join(sorted(self.spawn_presets)) or "(none)"
+        if model_preset is not None:
+            try:
+                available_presets = self.available_spawn_presets()
+            except Exception as e:
+                logger.exception("Failed to load current spawn_presets")
+                return f"Cannot spawn subagent with model_preset {model_preset!r}: {e}"
+        else:
+            available_presets = self.spawn_presets
+        if model_preset is not None and model_preset not in available_presets:
+            available = ", ".join(sorted(available_presets)) or "(none)"
             return (
                 f"Cannot spawn subagent with model_preset {model_preset!r}: "
                 f"not in allowed spawn_presets. Available: {available}"
