@@ -5,7 +5,7 @@ import os
 import select
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
@@ -61,6 +61,7 @@ from nanobot.utils.restart import (  # noqa: E402
     format_restart_completed_message,
     should_show_cli_restart_notice,
 )
+from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -72,6 +73,91 @@ def _sanitize_surrogates(text: str) -> str:
     with U+FFFD.
     """
     return text.encode("utf-16-le", errors="surrogatepass").decode("utf-16-le", errors="replace")
+
+
+def _signal_name(signum: int) -> str:
+    with suppress(ValueError):
+        return signal.Signals(signum).name
+    return f"signal {signum}"
+
+
+def _ensure_gateway_tty_signal_mode() -> None:
+    """Keep foreground gateway Ctrl+C usable even after a raw-mode TTY leak."""
+    try:
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            return
+    except Exception:
+        return
+
+    with suppress(Exception):
+        import termios
+
+        attrs = termios.tcgetattr(fd)
+        lflag = attrs[3]
+        required = termios.ISIG | termios.ICANON | termios.ECHO
+        if (lflag & required) == required:
+            return
+        attrs[3] = lflag | required
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        logger.debug("Restored foreground gateway TTY signal mode")
+
+
+def _install_gateway_shutdown_handlers(
+    loop: asyncio.AbstractEventLoop,
+    shutdown_event: asyncio.Event,
+    tasks: list[asyncio.Task],
+    print_status: Callable[[str], None],
+) -> Callable[[], None]:
+    """Install foreground gateway signal handlers and return a restore callback."""
+    loop_signals: list[int] = []
+    previous_handlers: list[tuple[int, Any]] = []
+    shutdown_requested = False
+
+    def request_shutdown(signum: int) -> None:
+        nonlocal shutdown_requested
+        sig_name = _signal_name(signum)
+        if shutdown_requested:
+            logger.warning("Forcing gateway shutdown after repeated {}", sig_name)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            return
+        shutdown_requested = True
+        logger.info("Gateway shutdown requested by {}", sig_name)
+        print_status("\nShutting down... Press Ctrl+C again to force.")
+        shutdown_event.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(signum, request_shutdown, signum)
+        except (NotImplementedError, RuntimeError, ValueError):
+            try:
+                previous = signal.getsignal(signum)
+                signal.signal(signum, lambda sig, _frame: request_shutdown(sig))
+            except (RuntimeError, ValueError):
+                logger.debug("Could not install gateway handler for {}", _signal_name(signum))
+                continue
+            previous_handlers.append((signum, previous))
+        else:
+            loop_signals.append(signum)
+
+    def restore() -> None:
+        for signum in loop_signals:
+            with suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.remove_signal_handler(signum)
+        for signum, handler in previous_handlers:
+            with suppress(RuntimeError, ValueError):
+                signal.signal(signum, handler)
+
+    return restore
+
+
+def _advance_dream_cursor_if_behind(memory: Any) -> None:
+    latest = memory.get_latest_cursor()
+    if memory.get_last_dream_cursor() < latest:
+        memory.set_last_dream_cursor(latest)
 
 
 class SafeFileHistory(FileHistory):
@@ -130,6 +216,29 @@ def _heartbeat_has_active_tasks(content: str) -> bool:
             continue
         return True
     return False
+
+
+def _pick_heartbeat_target_from_sessions(
+    *,
+    enabled_channels: Iterable[str],
+    sessions: Iterable[dict[str, Any]],
+    archived_keys: Iterable[str],
+) -> tuple[str, str]:
+    enabled = set(enabled_channels)
+    archived = set(archived_keys)
+    for item in sessions:
+        key = item.get("key") or ""
+        if key in archived:
+            continue
+        if ":" not in key:
+            continue
+        channel, chat_id = key.split(":", 1)
+        if channel in {"cli", "system"}:
+            continue
+        if channel in enabled and chat_id:
+            return channel, chat_id
+    return "cli", "direct"
+
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -985,17 +1094,12 @@ def _run_gateway(
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        return "cli", "direct"
+        sidebar_state = read_webui_sidebar_state()
+        return _pick_heartbeat_target_from_sessions(
+            enabled_channels=channels.enabled_channels,
+            sessions=session_manager.list_sessions(),
+            archived_keys=sidebar_state.get("archived_keys", []),
+        )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -1067,6 +1171,7 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
         console.print("[yellow]○[/yellow] Dream: disabled")
+        _advance_dream_cursor_if_behind(agent.context.memory)
 
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:
@@ -1105,17 +1210,48 @@ def _run_gateway(
             console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
     async def run():
+        tasks: list[asyncio.Task] = []
+        shutdown_task: asyncio.Task | None = None
+        runtime_tasks: asyncio.Future | None = None
+        runtime_tasks_drained = False
+        shutdown_event = asyncio.Event()
+        _ensure_gateway_tty_signal_mode()
+        restore_shutdown_handlers = _install_gateway_shutdown_handlers(
+            asyncio.get_running_loop(),
+            shutdown_event,
+            tasks,
+            console.print,
+        )
         try:
             await cron.start()
             tasks = [
-                agent.run(),
-                channels.start_all(),
+                asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
+                asyncio.create_task(channels.start_all(), name="nanobot-channels"),
             ]
             if health_server_enabled:
-                tasks.append(_health_server(config.gateway.host, port))
+                tasks.append(asyncio.create_task(
+                    _health_server(config.gateway.host, port),
+                    name="nanobot-health-server",
+                ))
             if open_browser_url:
-                tasks.append(_open_browser_when_ready())
-            await asyncio.gather(*tasks)
+                tasks.append(asyncio.create_task(
+                    _open_browser_when_ready(),
+                    name="nanobot-open-browser",
+                ))
+            runtime_tasks = asyncio.gather(*tasks)
+            shutdown_task = asyncio.create_task(
+                shutdown_event.wait(),
+                name="nanobot-gateway-shutdown",
+            )
+            done, _pending = await asyncio.wait(
+                {runtime_tasks, shutdown_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if runtime_tasks in done:
+                runtime_tasks_drained = True
+                await runtime_tasks
+            elif runtime_tasks is not None:
+                runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -1124,16 +1260,30 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
-            await agent.close_mcp()
-            cron.stop()
-            agent.stop()
-            await channels.stop_all()
-            # Flush all cached sessions to durable storage before exit.
-            # This prevents data loss on filesystems with write-back
-            # caching (rclone VFS, NFS, FUSE mounts, etc.).
-            flushed = agent.sessions.flush_all()
-            if flushed:
-                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
+            try:
+                if shutdown_task and not shutdown_task.done():
+                    shutdown_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await shutdown_task
+                cron.stop()
+                agent.stop()
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                if runtime_tasks is not None and not runtime_tasks_drained:
+                    with suppress(asyncio.CancelledError, Exception):
+                        await runtime_tasks
+                await channels.stop_all()
+                # Flush all cached sessions to durable storage before exit.
+                # This prevents data loss on filesystems with write-back
+                # caching (rclone VFS, NFS, FUSE mounts, etc.).
+                flushed = agent.sessions.flush_all()
+                if flushed:
+                    logger.info("Shutdown: flushed {} session(s) to disk", flushed)
+            finally:
+                restore_shutdown_handlers()
 
     asyncio.run(run())
 

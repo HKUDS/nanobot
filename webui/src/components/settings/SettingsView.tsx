@@ -195,7 +195,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -335,7 +335,7 @@ function defaultPreset(payload: SettingsPayload): SettingsPayload["model_presets
 }
 
 function normalizeContextWindowTokens(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 65_536;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 200_000;
 }
 
 function editableDefaultProvider(payload: SettingsPayload): string {
@@ -372,7 +372,7 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   provider: "",
   modelPreset: "default",
   presetLabel: "Default",
-  contextWindowTokens: 65_536,
+  contextWindowTokens: 200_000,
   timezone: "UTC",
   botName: "nanobot",
   botIcon: "",
@@ -2552,7 +2552,8 @@ function ModelsSettings({
               value={String(form.contextWindowTokens)}
               options={CONTEXT_WINDOW_TOKEN_OPTIONS.map((tokens) => ({
                 value: String(tokens),
-                label: tokens === 262_144 ? "256K" : "64K",
+                label:
+                  tokens === 262_144 ? "256K" : tokens === 200_000 ? "200K" : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({

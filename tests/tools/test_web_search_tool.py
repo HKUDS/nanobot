@@ -366,6 +366,31 @@ async def test_duckduckgo_search(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_duckduckgo_search_passes_proxy(monkeypatch):
+    """DDGS client must receive the configured proxy so search works behind a proxy."""
+    captured: dict = {}
+    proxy_url = "http://proxy.example:8080"
+
+    class ProxyCaptorDDGS:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def text(self, query, max_results=5):
+            return [{"title": "Result", "href": "https://example.com", "body": "OK"}]
+
+    monkeypatch.setattr("ddgs.DDGS", ProxyCaptorDDGS)
+
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="duckduckgo"),
+        proxy=proxy_url,
+    )
+    result = await tool.execute(query="test")
+    assert captured["proxy"] == proxy_url
+    assert captured["timeout"] == 10
+    assert "Result" in result
+
+
+@pytest.mark.asyncio
 async def test_brave_fallback_to_duckduckgo_when_no_key(monkeypatch):
     class MockDDGS:
         def __init__(self, **kw):

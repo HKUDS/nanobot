@@ -178,7 +178,8 @@ class GatewayRuntime:
             self._clear_state()
             return RuntimeResult(False, "gateway_state_stale", self.status(reason="stale_state"))
 
-        self._terminate(status.pid, timeout_s=timeout_s)
+        if not self._terminate(status.pid, timeout_s=timeout_s):
+            return RuntimeResult(False, "gateway_stop_timeout", self.status(reason="stop_timeout"))
         self._clear_state()
         return RuntimeResult(True, "gateway_stopped", self.status(reason="stopped"))
 
@@ -263,13 +264,12 @@ class GatewayRuntime:
             return {"creationflags": flags}
         return {"start_new_session": True}
 
-    def _terminate(self, pid: int, *, timeout_s: int) -> None:
+    def _terminate(self, pid: int, *, timeout_s: int) -> bool:
         if self.platform_name == "Windows":
-            self._terminate_windows(pid, timeout_s=timeout_s)
-        else:
-            self._terminate_posix(pid, timeout_s=timeout_s)
+            return self._terminate_windows(pid, timeout_s=timeout_s)
+        return self._terminate_posix(pid, timeout_s=timeout_s)
 
-    def _terminate_posix(self, pid: int, *, timeout_s: int) -> None:
+    def _terminate_posix(self, pid: int, *, timeout_s: int) -> bool:
         try:
             pgid = os.getpgid(pid)
         except OSError:
@@ -280,28 +280,28 @@ class GatewayRuntime:
             else:
                 os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
-            return
+            return True
         if self._wait_for_exit(pid, timeout_s):
-            return
+            return True
         with suppress(ProcessLookupError):
             if pgid is not None:
                 os.killpg(pgid, signal.SIGKILL)
             else:
                 os.kill(pid, signal.SIGKILL)
-        self._wait_for_exit(pid, 2)
+        return self._wait_for_exit(pid, 2)
 
-    def _terminate_windows(self, pid: int, *, timeout_s: int) -> None:
+    def _terminate_windows(self, pid: int, *, timeout_s: int) -> bool:
         ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
         if ctrl_break is not None:
             with suppress(ProcessLookupError):
                 os.kill(pid, ctrl_break)
             if self._wait_for_exit(pid, timeout_s):
-                return
+                return True
         self._subprocess_run(["taskkill", "/PID", str(pid), "/T"], check=False)
         if self._wait_for_exit(pid, 2):
-            return
+            return True
         self._subprocess_run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False)
-        self._wait_for_exit(pid, 2)
+        return self._wait_for_exit(pid, 2)
 
     def _wait_for_exit(self, pid: int, timeout_s: int | float) -> bool:
         deadline = time.monotonic() + max(float(timeout_s), 0.0)

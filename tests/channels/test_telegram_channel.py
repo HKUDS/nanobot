@@ -471,7 +471,7 @@ async def test_send_rich_capability_error_latches_and_falls_back() -> None:
     from telegram.error import BadRequest
 
     channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
@@ -490,7 +490,7 @@ async def test_send_rich_bad_request_does_not_latch_capability() -> None:
     from telegram.error import BadRequest
 
     channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
@@ -503,6 +503,23 @@ async def test_send_rich_bad_request_does_not_latch_capability() -> None:
     assert channel._rich_send_disabled is False
     channel._app.bot.do_api_request.assert_awaited_once()
     assert len(channel._app.bot.sent_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_rich_messages_default_skips_send_rich_message() -> None:
+    """By default, sendRichMessage should not be called."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="**hello**"))
+
+    channel._app.bot.do_api_request.assert_not_called()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.sent_messages[0]["text"]
 
 
 @pytest.mark.asyncio

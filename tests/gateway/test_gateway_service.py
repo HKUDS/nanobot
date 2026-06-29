@@ -103,6 +103,7 @@ def test_launchd_install_dry_run_renders_plist(tmp_path):
         "/Users/test/.nanobot/config.json",
     ]
     assert payload["KeepAlive"] == {"SuccessfulExit": False}
+    assert payload["RunAtLoad"] is True
     assert ("launchctl", "bootstrap", _expected_launchd_domain(), str(result.path)) in result.commands
 
 
@@ -118,9 +119,32 @@ def test_launchd_no_enable_start_still_bootstraps(tmp_path):
         dry_run=True,
     )
 
+    assert result.content is not None
+    payload = plistlib.loads(result.content.encode("utf-8"))
+    assert payload["RunAtLoad"] is False
     assert result.commands[0][:2] == ("launchctl", "bootstrap")
     assert not any(command[1] == "enable" for command in result.commands)
     assert any(command[1] == "kickstart" for command in result.commands)
+
+
+def test_launchd_enable_without_start_sets_run_at_load_without_bootstrap(tmp_path):
+    installer = GatewayServiceInstaller(platform_name="Darwin", home=tmp_path)
+
+    result = installer.install(
+        GatewayServiceOptions(
+            start=GatewayStartOptions(port=18790),
+            enable=True,
+            start_now=False,
+        ),
+        dry_run=True,
+    )
+
+    assert result.content is not None
+    payload = plistlib.loads(result.content.encode("utf-8"))
+    assert payload["RunAtLoad"] is True
+    assert not any(command[1] == "bootstrap" for command in result.commands)
+    assert any(command[1] == "enable" for command in result.commands)
+    assert not any(command[1] == "kickstart" for command in result.commands)
 
 
 def test_launchd_no_enable_start_reinstall_boots_out_existing_label(tmp_path):

@@ -36,6 +36,24 @@ _VOLCENGINE_TIME_RANGES = {"OneDay", "OneWeek", "OneMonth", "OneYear"}
 _VOLCENGINE_DATE_RANGE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$")
 
 
+# Single source of truth for selectable search providers (CLI wizard + WebUI).
+# "credential" describes what each provider needs: none / api_key / base_url /
+# optional_api_key.
+SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
+    {"name": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
+    {"name": "brave", "label": "Brave Search", "credential": "api_key"},
+    {"name": "tavily", "label": "Tavily", "credential": "api_key"},
+    {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
+    {"name": "jina", "label": "Jina", "credential": "api_key"},
+    {"name": "kagi", "label": "Kagi", "credential": "api_key"},
+    {"name": "exa", "label": "Exa", "credential": "api_key"},
+    {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "bocha", "label": "Bocha", "credential": "api_key"},
+    {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
+    {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
+)
+
+
 class WebSearchConfig(Base):
     """Web search configuration."""
     provider: str = "duckduckgo"
@@ -759,7 +777,7 @@ class WebSearchTool(Tool):
             # We run it in a thread to avoid blocking the loop
             from ddgs import DDGS
 
-            ddgs = DDGS(timeout=10)
+            ddgs = DDGS(timeout=10, proxy=self.proxy)
             raw = await asyncio.wait_for(
                 asyncio.to_thread(ddgs.text, query, max_results=n),
                 timeout=self.config.timeout,
