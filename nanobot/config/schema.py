@@ -179,6 +179,7 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
+    proxy: str | None = None  # OpenAI-compatible/Codex HTTP proxy URL
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -12,6 +13,7 @@ from nanobot.webui.settings_api import (
     WebUISettingsError,
     _oauth_provider_status,
     create_model_configuration,
+    login_oauth_provider,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -842,6 +844,39 @@ def test_openai_codex_oauth_status_rejects_unavailable_token(
 
     assert status["configured"] is False
     assert status["account"] is None
+
+
+def test_openai_codex_oauth_login_passes_configured_proxy(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = "http://127.0.0.1:23458"
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_TEST}"}}}),
+        config_path,
+    )
+    monkeypatch.setenv("CODEX_PROXY_TEST", proxy)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    import oauth_cli_kit
+
+    captured: dict[str, str | None] = {}
+
+    def fake_get_token(*, proxy=None):
+        captured["get_proxy"] = proxy
+        raise RuntimeError("no-token")
+
+    def fake_login(*, print_fn, prompt_fn, proxy=None):
+        captured["login_proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+    monkeypatch.setattr(oauth_cli_kit, "login_oauth_interactive", fake_login)
+
+    login_oauth_provider({"provider": ["openai-codex"]})
+
+    assert captured == {"get_proxy": proxy, "login_proxy": proxy}
 
 
 def test_provider_models_payload_fetches_openai_compatible_models(

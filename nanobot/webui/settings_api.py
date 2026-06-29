@@ -22,7 +22,7 @@ from nanobot.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
-from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
 from nanobot.config.schema import ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
@@ -1166,14 +1166,19 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         except ImportError:
             raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
 
+        try:
+            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+        except ValueError as e:
+            raise WebUISettingsError(str(e), status=400) from e
         token = None
         with suppress(Exception):
-            token = get_token()
+            token = get_token(proxy=proxy)
         if not (token and token.access):
             messages: list[str] = []
             token = login_oauth_interactive(
                 print_fn=lambda message: messages.append(str(message)),
                 prompt_fn=lambda _prompt: "",
+                proxy=proxy,
             )
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)

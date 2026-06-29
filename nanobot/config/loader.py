@@ -80,6 +80,10 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
+    if config.providers.openai_codex.proxy is not None:
+        data.setdefault("providers", {})["openaiCodex"] = {
+            "proxy": config.providers.openai_codex.proxy,
+        }
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

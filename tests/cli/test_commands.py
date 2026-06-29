@@ -5,6 +5,7 @@ import shutil
 import signal
 from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,7 +20,7 @@ from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
-from nanobot.providers.factory import ProviderSnapshot, make_provider
+from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.metadata import (
@@ -434,6 +435,60 @@ def test_provider_login_rejects_unknown_provider():
     assert "Unknown OAuth provider" in result.stdout
 
 
+def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
+    proxy = "http://127.0.0.1:23458"
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
+    )
+
+    import oauth_cli_kit
+
+    def fake_get_token(**_kwargs):
+        raise RuntimeError("no-token")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+
+    captured: dict[str, str | None] = {}
+
+    def fake_login(*, print_fn, prompt_fn, proxy=None):
+        captured["proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "login_oauth_interactive", fake_login)
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert captured["proxy"] == proxy
+
+
+def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
+    proxy = "http://127.0.0.1:23458"
+    monkeypatch.setenv("CODEX_PROXY_FOR_TEST", proxy)
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config.model_validate(
+            {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
+        ),
+    )
+
+    import oauth_cli_kit
+
+    captured: dict[str, str | None] = {}
+
+    def fake_get_token(*, proxy=None):
+        captured["proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert captured["proxy"] == proxy
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
@@ -685,6 +740,54 @@ def test_make_provider_uses_github_copilot_backend():
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
+def test_openai_codex_proxy_config_affects_provider_and_signature():
+    def config_with_proxy(proxy: str) -> Config:
+        return Config.model_validate(
+            {
+                "agents": {
+                    "defaults": {
+                        "provider": "openai-codex",
+                        "model": "openai-codex/gpt-5.5",
+                    }
+                },
+                "providers": {"openaiCodex": {"proxy": proxy}},
+            }
+        )
+
+    proxy = "http://127.0.0.1:23458"
+    config = config_with_proxy(proxy)
+
+    provider = make_provider(config)
+
+    assert provider.__class__.__name__ == "OpenAICodexProvider"
+    assert provider.proxy == proxy
+    assert provider_signature(config) != provider_signature(
+        config_with_proxy("http://127.0.0.1:23459")
+    )
+
+
+def test_provider_proxy_rejects_unsupported_backend():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "anthropic/claude-opus-4-5",
+                }
+            },
+            "providers": {
+                "anthropic": {
+                    "apiKey": "sk-test",
+                    "proxy": "http://127.0.0.1:23458",
+                }
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"providers\.anthropic\.proxy"):
+        make_provider(config)
+
+
 def test_github_copilot_provider_strips_prefixed_model_name():
     from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
@@ -752,7 +855,7 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
                         "x-session-affinity": "sticky-session",
                     },
                 }
-            },
+            }
         }
     )
 

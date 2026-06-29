@@ -240,6 +240,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
 > - **Custom OpenAI-compatible providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own OpenAI-compatible endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. This named-custom path uses the OpenAI-compatible request format only. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` with `provider: "anthropic"`.
+> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers and `openai_codex`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -632,20 +633,37 @@ nanobot agent -m "Reply with one short sentence."
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
-Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openai_codex` block is optional and is only needed for provider-specific settings such as a proxy.
 
 **1. Login:**
 ```bash
 nanobot provider login openai-codex
 ```
 
-**2. Set model** (merge into `~/.nanobot/config.json`):
+If the machine running nanobot cannot open a graphical browser, copy the printed URL into a real browser. For remote SSH login, open the URL locally, then paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted.
+
+**2. Optional proxy** (merge into `~/.nanobot/config.json` if Codex OAuth or Codex API traffic must use a proxy):
+
+```json
+{
+  "providers": {
+    "openai_codex": {
+      "proxy": "http://127.0.0.1:7890"
+    }
+  }
+}
+```
+
+The proxy applies to Codex OAuth token refresh, interactive token exchange, and Codex Responses API requests. It does not affect other providers; configure `proxy` separately on each supported provider that needs it.
+
+**3. Set model** (merge into `~/.nanobot/config.json`):
 ```json
 {
   "modelPresets": {
     "codex": {
       "provider": "openai_codex",
-      "model": "openai-codex/gpt-5.1-codex"
+      "model": "gpt-5.1-codex",
+      "reasoningEffort": "high"
     }
   },
   "agents": {
@@ -656,7 +674,9 @@ nanobot provider login openai-codex
 }
 ```
 
-**3. Chat:**
+Use `reasoningEffort` in the preset to send a Codex reasoning effort such as `"low"`, `"medium"`, `"high"`, or another value supported by the selected model. When `provider` is explicitly `openai_codex`, the model name does not need the `openai-codex/` prefix.
+
+**4. Chat:**
 ```bash
 nanobot agent -m "Hello!"
 
@@ -675,7 +695,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
-GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
 ```bash
