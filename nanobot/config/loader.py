@@ -189,14 +189,18 @@ def _migrate_config(data: dict) -> dict:
         # in a sub-config keeps `web` / `exec` / `my` symmetric and gives room
         # to grow.
         if "myEnabled" in tools or "mySet" in tools:
-            my_cfg = tools.setdefault("my", {})
-            if "myEnabled" in tools and "enable" not in my_cfg:
-                my_cfg["enable"] = tools.pop("myEnabled")
-            else:
-                tools.pop("myEnabled", None)
-            if "mySet" in tools and "allowSet" not in my_cfg:
-                my_cfg["allowSet"] = tools.pop("mySet")
-            else:
-                tools.pop("mySet", None)
+            my_cfg = tools.get("my")
+            if "my" not in tools:
+                my_cfg = {}
+                tools["my"] = my_cfg
+            if isinstance(my_cfg, dict):
+                if "myEnabled" in tools and "enable" not in my_cfg:
+                    my_cfg["enable"] = tools.pop("myEnabled")
+                else:
+                    tools.pop("myEnabled", None)
+                if "mySet" in tools and "allowSet" not in my_cfg:
+                    my_cfg["allowSet"] = tools.pop("mySet")
+                else:
+                    tools.pop("mySet", None)
 
     return data

@@ -285,7 +285,14 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
     assert config.tools.webui_allow_local_service_access is False
 
 
-@pytest.mark.parametrize("payload", [{"tools": None}, {"tools": {"exec": None}}])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tools": None},
+        {"tools": {"exec": None}},
+        {"tools": {"my": None, "myEnabled": True}},
+    ],
+)
 def test_load_config_handles_null_tool_sections(tmp_path, payload) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(payload), encoding="utf-8")
