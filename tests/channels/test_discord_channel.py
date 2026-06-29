@@ -866,7 +866,7 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history", "model", "trigger"])
+@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history", "model"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -918,7 +918,7 @@ async def test_slash_model_forwards_optional_preset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slash_trigger_forwards_optional_name() -> None:
+async def test_slash_trigger_forwards_required_name() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
 

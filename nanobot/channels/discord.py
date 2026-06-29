@@ -217,13 +217,13 @@ if DISCORD_AVAILABLE:
                 command_text = f"/model {preset}" if preset else "/model"
                 await self._forward_slash_command(interaction, command_text)
 
-            @self.tree.command(name="trigger", description="Create a local trigger for this chat")
-            @app_commands.describe(name="Optional trigger name")
+            @self.tree.command(name="trigger", description="Create a named local trigger for this chat")
+            @app_commands.describe(name="Trigger name")
             async def trigger_command(
                 interaction: discord.Interaction,
-                name: str | None = None,
+                name: str,
             ) -> None:
-                name = (name or "").strip()
+                name = name.strip()
                 command_text = f"/trigger {name}" if name else "/trigger"
                 await self._forward_slash_command(interaction, command_text)
 

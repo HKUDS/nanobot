@@ -1574,6 +1574,7 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/history")
     assert pat.fullmatch("/history 5")
     assert pat.fullmatch("/goal ship the feature")
+    assert pat.fullmatch("/trigger")
     assert pat.fullmatch("/trigger PR review")
     assert pat.fullmatch("/pairing list")
     assert pat.fullmatch("/model fast")
