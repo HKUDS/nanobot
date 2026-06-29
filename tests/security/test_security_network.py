@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 from unittest.mock import patch
 
@@ -105,6 +106,38 @@ def test_blocks_ipv6_mapped_rfc1918():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:10.0.0.1"])):
         ok, err = validate_url_target("http://evil.com/")
         assert not ok
+
+
+def test_blocks_sampled_addresses_from_internal_networks():
+    """Property-style guard: sampled blocked CIDRs must all fail closed."""
+    configure_ssrf_whitelist([])
+    blocked_networks = [
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    ]
+    samples: list[str] = []
+    for cidr in blocked_networks:
+        network = ipaddress.ip_network(cidr)
+        samples.append(str(network.network_address))
+        if network.num_addresses > 2:
+            samples.append(str(network.network_address + 1))
+            samples.append(str(network[-2]))
+
+    for idx, ip in enumerate(samples):
+        host = f"internal-{idx}.example"
+        resolver = _fake_resolve_v6 if ":" in ip else _fake_resolve
+        with patch("nanobot.security.network.socket.getaddrinfo", resolver(host, [ip])):
+            ok, err = validate_url_target(f"http://{host}/")
+        assert not ok, f"expected {ip} to be blocked"
+        assert "blocked" in err.lower() or "private" in err.lower()
 
 
 def test_allows_public_ipv6():

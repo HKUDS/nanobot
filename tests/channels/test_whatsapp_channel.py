@@ -1,451 +1,455 @@
-"""Tests for WhatsApp channel outbound media support."""
+from __future__ import annotations
 
-import json
-import os
-import sys
-import types
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.channels.whatsapp import (
-    WhatsAppChannel,
-    _load_or_create_bridge_token,
-)
+from nanobot.channels import whatsapp as whatsapp_module
+from nanobot.channels.whatsapp import WhatsAppChannel, _legacy_bridge_config_fields, _NeonizeAPI
 
 
-def _make_channel() -> WhatsAppChannel:
-    bus = MagicMock()
-    ch = WhatsAppChannel({"enabled": True}, bus)
-    ch._ws = AsyncMock()
-    ch._connected = True
+class _Proto:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def HasField(self, name: str) -> bool:  # noqa: N802 - protobuf compatibility
+        return _is_set(getattr(self, name, None))
+
+    def ListFields(self):  # noqa: N802 - protobuf compatibility
+        return [
+            (SimpleNamespace(name=name), value)
+            for name, value in self.__dict__.items()
+            if _is_set(value)
+        ]
+
+
+def _is_set(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (str, bytes, list, tuple, dict, set)):
+        return bool(value)
+    return True
+
+
+def _jid(user: str, server: str) -> _Proto:
+    return _Proto(User=user, Server=server, IsEmpty=False)
+
+
+def _event(
+    *,
+    message: _Proto,
+    message_id: str = "m1",
+    chat: _Proto | None = None,
+    sender: _Proto | None = None,
+    sender_alt: _Proto | None = None,
+    is_group: bool = False,
+    timestamp: int = 1,
+    is_from_me: bool = False,
+) -> _Proto:
+    source = _Proto(
+        Chat=chat or _jid("15551234567", "s.whatsapp.net"),
+        Sender=sender,
+        SenderAlt=sender_alt,
+        IsGroup=is_group,
+        IsFromMe=is_from_me,
+    )
+    return _Proto(
+        Info=_Proto(ID=message_id, Timestamp=timestamp, MessageSource=source),
+        Message=message,
+    )
+
+
+def _make_channel(config: dict | None = None) -> WhatsAppChannel:
+    merged = {"enabled": True, "allowFrom": ["*"]}
+    if config:
+        merged.update(config)
+    ch = WhatsAppChannel(merged, MagicMock())
+    ch._started_at = 0
     return ch
 
 
-@pytest.mark.asyncio
-async def test_send_text_only():
-    ch = _make_channel()
-    msg = OutboundMessage(channel="whatsapp", chat_id="123@s.whatsapp.net", content="hello")
-
-    await ch.send(msg)
-
-    ch._ws.send.assert_called_once()
-    payload = json.loads(ch._ws.send.call_args[0][0])
-    assert payload["type"] == "send"
-    assert payload["text"] == "hello"
-
-
-@pytest.mark.asyncio
-async def test_send_media_dispatches_send_media_command():
-    ch = _make_channel()
-    msg = OutboundMessage(
-        channel="whatsapp",
-        chat_id="123@s.whatsapp.net",
-        content="check this out",
-        media=["/tmp/photo.jpg"],
+def _patch_neonize_api(monkeypatch) -> None:
+    monkeypatch.setattr(
+        whatsapp_module,
+        "_NEONIZE_API",
+        _NeonizeAPI(
+            NewAClient=object,
+            ConnectedEv=object(),
+            DisconnectedEv=object(),
+            MessageEv=object(),
+            PairStatusEv=object(),
+            build_jid=lambda user, server="s.whatsapp.net": (user, server),
+        ),
     )
 
-    await ch.send(msg)
 
-    assert ch._ws.send.call_count == 2
-    text_payload = json.loads(ch._ws.send.call_args_list[0][0][0])
-    media_payload = json.loads(ch._ws.send.call_args_list[1][0][0])
+class _FakeLoginClient:
+    def __init__(self) -> None:
+        self.handlers = {}
+        self.me = _Proto(JID=_jid("bot", "s.whatsapp.net"), LID=_jid("BOTLID", "lid"))
+        self.stop = AsyncMock()
 
-    assert text_payload["type"] == "send"
-    assert text_payload["text"] == "check this out"
+    def event(self, event_type):
+        def register(func):
+            self.handlers[event_type] = func
+            return func
 
-    assert media_payload["type"] == "send_media"
-    assert media_payload["filePath"] == "/tmp/photo.jpg"
-    assert media_payload["mimetype"] == "image/jpeg"
-    assert media_payload["fileName"] == "photo.jpg"
+        return register
+
+    def qr(self, func):
+        self.qr_handler = func
+        return func
+
+    async def connect(self) -> None:
+        await self.handlers[whatsapp_module._NEONIZE_API.ConnectedEv](self, _Proto())
+
+
+class _FailingConnectLoginClient(_FakeLoginClient):
+    async def connect(self) -> asyncio.Task[None]:
+        async def fail() -> None:
+            raise RuntimeError("dial failed")
+
+        return asyncio.create_task(fail())
+
+
+def test_default_config_has_no_bridge_fields() -> None:
+    config = WhatsAppChannel.default_config()
+
+    assert "bridgeUrl" not in config
+    assert "bridgeToken" not in config
+    assert config["databasePath"] == ""
+
+
+def test_legacy_bridge_config_fields_are_detected() -> None:
+    assert _legacy_bridge_config_fields({"bridgeUrl": "ws://localhost:3001"}) == ["bridgeUrl"]
+    assert _legacy_bridge_config_fields({"bridgeToken": "secret"}) == ["bridgeToken"]
 
 
 @pytest.mark.asyncio
-async def test_send_media_only_no_text():
+async def test_login_succeeds_when_connected(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = _FakeLoginClient()
     ch = _make_channel()
-    msg = OutboundMessage(
-        channel="whatsapp",
-        chat_id="123@s.whatsapp.net",
-        content="",
-        media=["/tmp/doc.pdf"],
+    ch._new_client = MagicMock(return_value=client)
+
+    assert await ch.login() is True
+    assert ch._self_jids == {"bot@s.whatsapp.net", "bot", "BOTLID@lid", "BOTLID"}
+    client.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_login_fails_when_connect_task_fails(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = _FailingConnectLoginClient()
+    ch = _make_channel()
+    ch._new_client = MagicMock(return_value=client)
+
+    assert await ch.login() is False
+    client.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(OutboundMessage(channel="whatsapp", chat_id="12345@s.whatsapp.net", content="hi"))
+
+    client.send_message.assert_awaited_once_with(("12345", "s.whatsapp.net"), "hi")
+
+
+@pytest.mark.asyncio
+async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=["photo.jpg", "clip.mp4", "voice.ogg", "report.pdf"],
+        )
     )
 
-    await ch.send(msg)
-
-    ch._ws.send.assert_called_once()
-    payload = json.loads(ch._ws.send.call_args[0][0])
-    assert payload["type"] == "send_media"
-    assert payload["mimetype"] == "application/pdf"
-
-
-@pytest.mark.asyncio
-async def test_send_multiple_media():
-    ch = _make_channel()
-    msg = OutboundMessage(
-        channel="whatsapp",
-        chat_id="123@s.whatsapp.net",
-        content="",
-        media=["/tmp/a.png", "/tmp/b.mp4"],
+    jid = ("12345", "s.whatsapp.net")
+    client.send_image.assert_awaited_once_with(jid, "photo.jpg")
+    client.send_video.assert_awaited_once_with(jid, "clip.mp4")
+    client.send_audio.assert_awaited_once_with(jid, "voice.ogg")
+    client.send_document.assert_awaited_once_with(
+        jid,
+        "report.pdf",
+        filename="report.pdf",
+        mimetype="application/pdf",
     )
 
-    await ch.send(msg)
-
-    assert ch._ws.send.call_count == 2
-    p1 = json.loads(ch._ws.send.call_args_list[0][0][0])
-    p2 = json.loads(ch._ws.send.call_args_list[1][0][0])
-    assert p1["mimetype"] == "image/png"
-    assert p2["mimetype"] == "video/mp4"
-
 
 @pytest.mark.asyncio
-async def test_send_when_disconnected_is_noop():
+async def test_send_when_disconnected_raises() -> None:
     ch = _make_channel()
-    ch._connected = False
 
-    msg = OutboundMessage(
-        channel="whatsapp",
-        chat_id="123@s.whatsapp.net",
-        content="hello",
-        media=["/tmp/x.jpg"],
-    )
-    await ch.send(msg)
-
-    ch._ws.send.assert_not_called()
+    with pytest.raises(RuntimeError, match="not connected"):
+        await ch.send(OutboundMessage(channel="whatsapp", chat_id="123", content="hi"))
 
 
 @pytest.mark.asyncio
-async def test_group_policy_mention_skips_unmentioned_group_message():
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "groupPolicy": "mention"}, MagicMock())
+async def test_group_policy_mention_skips_unmentioned_group_message() -> None:
+    ch = _make_channel({"groupPolicy": "mention"})
+    ch._self_jids = {"bot@s.whatsapp.net", "bot"}
     ch._handle_message = AsyncMock()
 
-    await ch._handle_bridge_message(
-        json.dumps(
-            {
-                "type": "message",
-                "id": "m1",
-                "sender": "12345@g.us",
-                "pn": "user@s.whatsapp.net",
-                "content": "hello group",
-                "timestamp": 1,
-                "isGroup": True,
-                "wasMentioned": False,
-            }
-        )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="hello group"),
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("SENDERLID", "lid"),
+            is_group=True,
+        ),
     )
 
     ch._handle_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_group_policy_mention_accepts_mentioned_group_message():
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "groupPolicy": "mention"}, MagicMock())
+async def test_group_policy_mention_accepts_mention_and_prefers_phone_sender() -> None:
+    ch = _make_channel({"groupPolicy": "mention"})
+    ch._self_jids = {"bot@s.whatsapp.net", "bot"}
     ch._handle_message = AsyncMock()
+    context = _Proto(mentionedJID=["bot@s.whatsapp.net"])
+    message = _Proto(extendedTextMessage=_Proto(text="hello @bot", contextInfo=context))
 
-    await ch._handle_bridge_message(
-        json.dumps(
-            {
-                "type": "message",
-                "id": "m1",
-                "sender": "12345@g.us",
-                "pn": "user@s.whatsapp.net",
-                "content": "hello @bot",
-                "timestamp": 1,
-                "isGroup": True,
-                "wasMentioned": True,
-            }
-        )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=message,
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("LID99", "lid"),
+            sender_alt=_jid("15559998888", "s.whatsapp.net"),
+            is_group=True,
+        ),
     )
 
-    ch._handle_message.assert_awaited_once()
     kwargs = ch._handle_message.await_args.kwargs
-    assert kwargs["chat_id"] == "12345@g.us"
-    assert kwargs["sender_id"] == "user"
+    assert kwargs["sender_id"] == "15559998888"
+    assert kwargs["chat_id"] == "120363000@g.us"
+    assert kwargs["metadata"]["lid"] == "LID99"
+    assert kwargs["metadata"]["phone"] == "15559998888"
 
 
 @pytest.mark.asyncio
-async def test_group_policy_mention_accepts_reply_to_bot_message():
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "groupPolicy": "mention"}, MagicMock())
+async def test_group_policy_mention_accepts_reply_to_bot() -> None:
+    ch = _make_channel({"groupPolicy": "mention"})
+    ch._self_jids = {"bot@s.whatsapp.net", "bot"}
     ch._handle_message = AsyncMock()
+    context = _Proto(participant="bot@s.whatsapp.net")
+    message = _Proto(extendedTextMessage=_Proto(text="reply", contextInfo=context))
 
-    await ch._handle_bridge_message(
-        json.dumps(
-            {
-                "type": "message",
-                "id": "m-reply",
-                "sender": "12345@g.us",
-                "pn": "user@s.whatsapp.net",
-                "content": "replying to bot",
-                "timestamp": 1,
-                "isGroup": True,
-                "wasMentioned": False,
-                "isReplyToBot": True,
-            }
-        )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=message,
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("SENDERLID", "lid"),
+            is_group=True,
+        ),
     )
 
-    ch._handle_message.assert_awaited_once()
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["metadata"]["is_reply_to_bot"] is True
 
 
 @pytest.mark.asyncio
-async def test_sender_id_prefers_phone_jid_over_lid():
-    """sender_id should resolve to phone number when @s.whatsapp.net JID is present."""
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
-    ch._handle_message = AsyncMock()
-
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "lid1",
-            "sender": "ABC123@lid.whatsapp.net",
-            "pn": "5551234@s.whatsapp.net",
-            "content": "hi",
-            "timestamp": 1,
-        })
-    )
-
-    kwargs = ch._handle_message.await_args.kwargs
-    assert kwargs["sender_id"] == "5551234"
-
-
-@pytest.mark.asyncio
-async def test_group_sender_id_uses_participant_when_phone_jid_missing():
-    """Group messages should identify the participant, not the group chat JID."""
+async def test_group_sender_id_uses_participant_not_group_jid() -> None:
     ch = WhatsAppChannel({"enabled": True, "allowFrom": ["SENDERLID"]}, MagicMock())
+    ch._started_at = 0
     ch._handle_message = AsyncMock()
 
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "group-lid",
-            "sender": "12345@g.us",
-            "pn": "",
-            "participant": "SENDERLID@lid.whatsapp.net",
-            "content": "hi",
-            "timestamp": 1,
-            "isGroup": True,
-        })
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="hi"),
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("SENDERLID", "lid"),
+            is_group=True,
+        ),
     )
 
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["sender_id"] == "SENDERLID"
-    assert kwargs["metadata"]["participant"] == "SENDERLID@lid.whatsapp.net"
+    assert kwargs["metadata"]["participant"] == "SENDERLID@lid"
 
 
 @pytest.mark.asyncio
-async def test_lid_to_phone_cache_resolves_lid_only_messages():
-    """When only LID is present, a cached LID→phone mapping should be used."""
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+async def test_lid_to_phone_cache_resolves_lid_only_messages() -> None:
+    ch = _make_channel()
     ch._handle_message = AsyncMock()
 
-    # First message: both phone and LID → builds cache
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "c1",
-            "sender": "LID99@lid.whatsapp.net",
-            "pn": "5559999@s.whatsapp.net",
-            "content": "first",
-            "timestamp": 1,
-        })
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="first"),
+            message_id="c1",
+            chat=_jid("LID99", "lid"),
+            sender=_jid("LID99", "lid"),
+            sender_alt=_jid("5559999", "s.whatsapp.net"),
+        ),
     )
-    # Second message: only LID, no phone
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "c2",
-            "sender": "LID99@lid.whatsapp.net",
-            "pn": "",
-            "content": "second",
-            "timestamp": 2,
-        })
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="second"),
+            message_id="c2",
+            chat=_jid("LID99", "lid"),
+            sender=_jid("LID99", "lid"),
+        ),
     )
 
-    second_kwargs = ch._handle_message.await_args_list[1].kwargs
-    assert second_kwargs["sender_id"] == "5559999"
+    assert ch._handle_message.await_args_list[1].kwargs["sender_id"] == "5559999"
+
+
+def test_lid_mappings_from_config() -> None:
+    ch = WhatsAppChannel(
+        {"enabled": True, "lidMappings": {"123456789012345": "15551234567"}},
+        MagicMock(),
+    )
+
+    assert ch._lid_to_phone == {"123456789012345": "15551234567"}
 
 
 @pytest.mark.asyncio
-async def test_voice_message_transcription_uses_media_path():
-    """Voice messages are transcribed when media path is available."""
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+async def test_image_media_is_downloaded_and_forwarded(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(whatsapp_module, "get_media_dir", lambda channel: tmp_path / channel)
+    ch = _make_channel()
     ch._handle_message = AsyncMock()
-    ch.transcribe_audio = AsyncMock(return_value="Hello world")
-
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "v1",
-            "sender": "12345@s.whatsapp.net",
-            "pn": "",
-            "content": "[Voice Message]",
-            "timestamp": 1,
-            "media": ["/tmp/voice.ogg"],
-        })
+    client = SimpleNamespace(download_any=AsyncMock())
+    message = _Proto(
+        imageMessage=_Proto(
+            caption="look",
+            mimetype="image/jpeg",
+        )
     )
 
-    ch.transcribe_audio.assert_awaited_once_with("/tmp/voice.ogg")
+    await ch._handle_neonize_message(
+        client,
+        _event(message=message, sender_alt=_jid("15551234567", "s.whatsapp.net")),
+    )
+
+    client.download_any.assert_awaited_once()
     kwargs = ch._handle_message.await_args.kwargs
-    assert kwargs["content"].startswith("Hello world")
+    assert kwargs["content"].startswith("look\n[image: ")
+    assert len(kwargs["media"]) == 1
+    assert kwargs["media"][0].endswith(".jpg")
 
 
 @pytest.mark.asyncio
-async def test_forwarded_voice_message_preserves_metadata_after_transcription():
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+async def test_voice_message_transcribes_and_drops_media_when_successful(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(whatsapp_module, "get_media_dir", lambda channel: tmp_path / channel)
+    ch = _make_channel()
     ch._handle_message = AsyncMock()
-    ch.transcribe_audio = AsyncMock(return_value="Forwarded audio text")
+    ch.transcribe_audio = AsyncMock(return_value="Hello from audio")
+    client = SimpleNamespace(download_any=AsyncMock())
+    message = _Proto(audioMessage=_Proto(mimetype="audio/ogg", PTT=True))
 
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "v-forwarded",
-            "sender": "12345@s.whatsapp.net",
-            "pn": "",
-            "content": "[Voice Message]",
-            "timestamp": 1,
-            "media": ["/tmp/voice.ogg"],
-            "isForwarded": True,
-        })
+    await ch._handle_neonize_message(
+        client,
+        _event(message=message, sender_alt=_jid("15551234567", "s.whatsapp.net")),
     )
 
+    ch.transcribe_audio.assert_awaited_once()
     kwargs = ch._handle_message.await_args.kwargs
-    assert kwargs["content"] == "Forwarded audio text"
-    assert kwargs["metadata"]["is_forwarded"] is True
+    assert kwargs["content"] == "Hello from audio"
+    assert kwargs["media"] == []
 
 
 @pytest.mark.asyncio
-async def test_unauthorized_voice_message_does_not_transcribe() -> None:
+async def test_unauthorized_voice_message_does_not_download_or_transcribe(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(whatsapp_module, "get_media_dir", lambda channel: tmp_path / channel)
     ch = WhatsAppChannel({"enabled": True, "allowFrom": ["allowed"]}, MagicMock())
+    ch._started_at = 0
     ch._handle_message = AsyncMock()
-    ch.transcribe_audio = AsyncMock(return_value="Hello world")
+    ch.transcribe_audio = AsyncMock(return_value="blocked audio")
+    client = SimpleNamespace(download_any=AsyncMock())
 
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "v-blocked",
-            "sender": "blocked@s.whatsapp.net",
-            "pn": "",
-            "content": "[Voice Message]",
-            "timestamp": 1,
-            "media": ["/tmp/voice.ogg"],
-        })
+    await ch._handle_neonize_message(
+        client,
+        _event(
+            message=_Proto(audioMessage=_Proto(mimetype="audio/ogg", PTT=True)),
+            chat=_jid("blocked", "s.whatsapp.net"),
+            sender=_jid("blocked", "s.whatsapp.net"),
+        ),
     )
 
+    client.download_any.assert_not_awaited()
     ch.transcribe_audio.assert_not_awaited()
-    ch._handle_message.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_voice_message_no_media_shows_not_available():
-    """Voice messages without media produce a fallback placeholder."""
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
-    ch._handle_message = AsyncMock()
-
-    await ch._handle_bridge_message(
-        json.dumps({
-            "type": "message",
-            "id": "v2",
-            "sender": "12345@s.whatsapp.net",
-            "pn": "",
-            "content": "[Voice Message]",
-            "timestamp": 1,
-        })
-    )
-
+    ch._handle_message.assert_awaited_once()
     kwargs = ch._handle_message.await_args.kwargs
-    assert kwargs["content"] == "[Voice Message: Audio not available]"
-
-
-def test_load_or_create_bridge_token_persists_generated_secret(tmp_path):
-    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
-
-    first = _load_or_create_bridge_token(token_path)
-    second = _load_or_create_bridge_token(token_path)
-
-    assert first == second
-    assert token_path.read_text(encoding="utf-8") == first
-    assert len(first) >= 32
-    if os.name != "nt":
-        assert token_path.stat().st_mode & 0o777 == 0o600
-
-
-def test_configured_bridge_token_skips_local_token_file(monkeypatch, tmp_path):
-    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
-    monkeypatch.setattr("nanobot.channels.whatsapp._bridge_token_path", lambda: token_path)
-    ch = WhatsAppChannel({"enabled": True, "bridgeToken": "manual-secret"}, MagicMock())
-
-    assert ch._effective_bridge_token() == "manual-secret"
-    assert not token_path.exists()
+    assert kwargs["sender_id"] == "blocked"
+    assert kwargs["content"] == ""
+    assert kwargs["media"] == []
+    assert kwargs["is_dm"] is True
 
 
 @pytest.mark.asyncio
-async def test_login_exports_effective_bridge_token(monkeypatch, tmp_path):
-    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
-    bridge_dir = tmp_path / "bridge"
-    bridge_dir.mkdir()
-    calls = []
+async def test_unauthorized_dm_uses_base_pairing_flow(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    monkeypatch.setattr("nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH")
+    monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: False)
+    client = SimpleNamespace(send_message=AsyncMock(), download_any=AsyncMock())
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": []}, MagicMock())
+    ch._client = client
+    ch._connected = True
+    ch._started_at = 0
 
-    monkeypatch.setattr("nanobot.channels.whatsapp._bridge_token_path", lambda: token_path)
-    monkeypatch.setattr("nanobot.channels.whatsapp._ensure_bridge_setup", lambda: bridge_dir)
-    monkeypatch.setattr("nanobot.channels.whatsapp.shutil.which", lambda _: "/usr/bin/npm")
-
-    def fake_run(*args, **kwargs):
-        calls.append((args, kwargs))
-        return MagicMock()
-
-    monkeypatch.setattr("nanobot.channels.whatsapp.subprocess.run", fake_run)
-    ch = WhatsAppChannel({"enabled": True}, MagicMock())
-
-    assert await ch.login() is True
-    assert len(calls) == 1
-
-    _, kwargs = calls[0]
-    assert kwargs["cwd"] == bridge_dir
-    assert kwargs["env"]["AUTH_DIR"] == str(token_path.parent)
-    assert kwargs["env"]["BRIDGE_TOKEN"] == token_path.read_text(encoding="utf-8")
-
-
-@pytest.mark.asyncio
-async def test_start_sends_auth_message_with_generated_token(monkeypatch, tmp_path):
-    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
-    sent_messages: list[str] = []
-
-    class FakeWS:
-        def __init__(self) -> None:
-            self.close = AsyncMock()
-
-        async def send(self, message: str) -> None:
-            sent_messages.append(message)
-            ch._running = False
-
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            raise StopAsyncIteration
-
-    class FakeConnect:
-        def __init__(self, ws):
-            self.ws = ws
-
-        async def __aenter__(self):
-            return self.ws
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    monkeypatch.setattr("nanobot.channels.whatsapp._bridge_token_path", lambda: token_path)
-    monkeypatch.setitem(
-        sys.modules,
-        "websockets",
-        types.SimpleNamespace(connect=lambda url: FakeConnect(FakeWS())),
+    await ch._handle_neonize_message(
+        client,
+        _event(
+            message=_Proto(conversation="hello"),
+            chat=_jid("blocked", "s.whatsapp.net"),
+            sender=_jid("blocked", "s.whatsapp.net"),
+        ),
     )
 
-    ch = WhatsAppChannel({"enabled": True, "bridgeUrl": "ws://localhost:3001"}, MagicMock())
-    await ch.start()
+    client.download_any.assert_not_awaited()
+    client.send_message.assert_awaited_once()
+    assert client.send_message.await_args.args[0] == ("blocked", "s.whatsapp.net")
+    assert "ABCD-EFGH" in client.send_message.await_args.args[1]
 
-    assert sent_messages == [
-        json.dumps({"type": "auth", "token": token_path.read_text(encoding="utf-8")})
-    ]
+
+def test_reset_database_removes_sqlite_sidecars(tmp_path) -> None:
+    db = tmp_path / "neonize.db"
+    wal = tmp_path / "neonize.db-wal"
+    shm = tmp_path / "neonize.db-shm"
+    for path in (db, wal, shm):
+        path.write_text("x", encoding="utf-8")
+
+    WhatsAppChannel._reset_database(db)
+
+    assert not db.exists()
+    assert not wal.exists()
+    assert not shm.exists()

@@ -4,6 +4,11 @@ import pytest
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.providers.base import LLMResponse
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    default_workspace_scope,
+    reset_workspace_scope,
+)
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -125,6 +130,153 @@ class TestDreamTools:
             "read_file",
             "write_file",
         }
+
+    @pytest.mark.asyncio
+    async def test_dream_can_edit_canonical_memory_files(self, store):
+        tools = store.build_dream_tools()
+
+        memory_result = await tools.execute(
+            "apply_patch",
+            {
+                "edits": [
+                    {
+                        "path": "memory/MEMORY.md",
+                        "action": "replace",
+                        "old_text": "Project X active",
+                        "new_text": "Project Y active",
+                    }
+                ]
+            },
+        )
+        soul_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "SOUL.md",
+                "old_text": "Helpful",
+                "new_text": "Precise",
+            },
+        )
+
+        assert "Patch applied" in memory_result
+        assert "Successfully edited" in soul_result
+        assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
+        assert "Precise" in store.soul_file.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_can_write_workspace_skills(self, store):
+        tools = store.build_dream_tools()
+        target = store.workspace / "skills" / "demo" / "SKILL.md"
+
+        result = await tools.execute(
+            "write_file",
+            {
+                "path": "skills/demo/SKILL.md",
+                "content": "---\nname: demo\ndescription: Demo skill.\n---\n\nUse when needed.\n",
+            },
+        )
+
+        assert "Successfully wrote" in result
+        assert target.read_text(encoding="utf-8").startswith("---\nname: demo")
+
+    @pytest.mark.asyncio
+    async def test_dream_tools_keep_internal_write_scope_under_full_access(self, store):
+        tools = store.build_dream_tools()
+        scope = default_workspace_scope(store.workspace, restrict_to_workspace=False)
+        outside = store.workspace.parent / f"{store.workspace.name}-outside"
+        outside.mkdir()
+        outside_target = outside / "escape.txt"
+        skill_target = store.workspace / "skills" / "scoped" / "SKILL.md"
+
+        token = bind_workspace_scope(scope)
+        try:
+            outside_result = await tools.execute(
+                "write_file",
+                {"path": str(outside_target), "content": "owned"},
+            )
+            skill_result = await tools.execute(
+                "apply_patch",
+                {
+                    "edits": [
+                        {
+                            "path": "skills/scoped/SKILL.md",
+                            "action": "add",
+                            "new_text": "---\nname: scoped\n---\n",
+                        }
+                    ]
+                },
+            )
+        finally:
+            reset_workspace_scope(token)
+
+        assert "outside allowed directory" in outside_result
+        assert not outside_target.exists()
+        assert "Patch applied" in skill_result
+        assert skill_target.read_text(encoding="utf-8").startswith("---\nname: scoped")
+
+    @pytest.mark.asyncio
+    async def test_dream_cannot_modify_memory_internal_files(self, store):
+        tools = store.build_dream_tools()
+        store.history_file.write_text("before\n", encoding="utf-8")
+        store._dream_cursor_file.write_text("1", encoding="utf-8")
+
+        history_result = await tools.execute(
+            "apply_patch",
+            {
+                "edits": [
+                    {
+                        "path": "memory/history.jsonl",
+                        "action": "replace",
+                        "old_text": "before",
+                        "new_text": "after",
+                    }
+                ]
+            },
+        )
+        cursor_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "memory/.dream_cursor",
+                "old_text": "1",
+                "new_text": "2",
+            },
+        )
+
+        assert "outside allowed directory" in history_result
+        assert "outside allowed directory" in cursor_result
+        assert store.history_file.read_text(encoding="utf-8") == "before\n"
+        assert store._dream_cursor_file.read_text(encoding="utf-8") == "1"
+
+    @pytest.mark.asyncio
+    async def test_dream_cannot_create_children_under_canonical_files(self, store):
+        tools = store.build_dream_tools()
+
+        memory_child = store.memory_file / "evil.txt"
+        user_child = store.user_file / "evil.txt"
+        memory_result = await tools.execute(
+            "apply_patch",
+            {
+                "edits": [
+                    {
+                        "path": "memory/MEMORY.md/evil.txt",
+                        "action": "add",
+                        "new_text": "owned",
+                    }
+                ]
+            },
+        )
+        user_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "USER.md/evil.txt",
+                "old_text": "",
+                "new_text": "owned",
+            },
+        )
+
+        assert "outside allowed directory" in memory_result
+        assert "outside allowed directory" in user_result
+        assert not memory_child.exists()
+        assert not user_child.exists()
 
 
 class TestEphemeralDirect:

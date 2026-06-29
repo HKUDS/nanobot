@@ -15,8 +15,6 @@ from typing import Any
 import json_repair
 from loguru import logger
 
-from nanobot.utils.helpers import image_placeholder_text
-
 STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
@@ -55,6 +53,18 @@ class ToolCallRequest:
     extra_content: dict[str, Any] | None = None
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
+
+    def has_valid_name(self) -> bool:
+        """Whether this call carries a usable (non-empty string) tool name.
+
+        ToolCallRequest.name is typed ``str`` but not enforced at runtime: a
+        model/gateway can emit a degenerate call with ``name=None`` or ``""``.
+        Such a call cannot be executed and, if persisted and replayed, makes
+        upstream APIs reject the whole request (e.g. Anthropic-style
+        ``messages.content.N.tool_use.name: Input should be a valid string``),
+        which permanently wedges the session.
+        """
+        return isinstance(self.name, str) and bool(self.name)
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
@@ -564,8 +574,10 @@ class LLMProvider(ABC):
                 new_content = []
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        placeholder = (
+                            "[Image not delivered to model — "
+                            "do not describe or reference it]"
+                        )
                         new_content.append({"type": "text", "text": placeholder})
                         found = True
                     else:
@@ -589,8 +601,10 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 for i, b in enumerate(content):
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        placeholder = (
+                            "[Image not delivered to model — "
+                            "do not describe or reference it]"
+                        )
                         content[i] = {"type": "text", "text": placeholder}
                         found = True
         return found

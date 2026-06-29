@@ -309,10 +309,7 @@ class WebUISettingsRouter:
             "yes",
         }
         try:
-            if installed_only:
-                payload = await asyncio.to_thread(cli_apps_payload, installed_only=True)
-            else:
-                payload = await asyncio.to_thread(cli_apps_payload)
+            payload = await cli_apps_payload(installed_only=installed_only)
         except Exception:
             self.logger.exception("failed to load CLI Apps payload")
             return self._error_response(500, "failed to load CLI Apps")

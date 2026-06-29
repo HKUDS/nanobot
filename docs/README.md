@@ -41,6 +41,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | Use nanobot in a browser | [`webui.md`](./webui.md) | Enable WebSocket, run `nanobot gateway`, open `http://127.0.0.1:8765` |
 | Talk through a chat app | [`chat-apps.md`](./chat-apps.md) | Merge one channel snippet, run `nanobot channels status`, keep `nanobot gateway` running |
 | Change provider or add fallbacks | [`provider-cookbook.md`](./provider-cookbook.md) | Keep `modelPresets` named and set `agents.defaults.modelPreset` |
+| Call nanobot from Python | [`python-sdk.md`](./python-sdk.md) | Reuse the same config/workspace from code, then run or stream one agent turn |
 | Understand before operating long-term | [`concepts.md`](./concepts.md) | Know what config, workspace, gateway, sessions, memory, and tools mean |
 | Diagnose a new failure | [`troubleshooting.md`](./troubleshooting.md) | Start with `nanobot status`, then `nanobot agent -m "Hello!"` |
 
@@ -68,7 +69,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | Observability | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) | Langfuse tracing setup and required environment variables |
 | WebSocket protocol | [`websocket.md`](./websocket.md) | Custom clients, token issuance, multiplexed chats, media, and protocol events |
 | OpenAI-compatible API | [`openai-api.md`](./openai-api.md) | `/v1/chat/completions`, `/v1/models`, file uploads, and SDK-compatible usage |
-| Python SDK | [`python-sdk.md`](./python-sdk.md) | Running nanobot from Python and attaching hooks |
+| Python SDK | [`python-sdk.md`](./python-sdk.md) | SDK 101, sessions, streaming, model overrides, runtime helpers, and hooks |
 | Runtime self-inspection | [`my-tool.md`](./my-tool.md) | Inspecting and tuning the current agent run |
 
 ## Fast Lookup
@@ -80,6 +81,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | Langfuse environment variables | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) |
 | WebSocket/WebUI protocol details | [`websocket.md`](./websocket.md) |
 | OpenAI-compatible API usage | [`openai-api.md`](./openai-api.md) |
+| Python SDK usage | [`python-sdk.md`](./python-sdk.md) |
 | Multiple configs, workspaces, and ports | [`multiple-instances.md`](./multiple-instances.md) |
 | Security, sandboxing, and SSRF controls | [`configuration.md#security`](./configuration.md#security) |
 | Channel plugin development | [`channel-plugin-guide.md`](./channel-plugin-guide.md) |

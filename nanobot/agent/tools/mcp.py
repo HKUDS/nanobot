@@ -1,6 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -44,6 +45,76 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+
+
+def _is_malformed_mcp_progress_notification(message: Any) -> bool:
+    payload = _mcp_jsonrpc_payload(message)
+    if _payload_value(payload, "method") != "notifications/progress":
+        return False
+
+    params = _payload_value(payload, "params")
+    return not _progress_params_have_token(params)
+
+
+def _mcp_jsonrpc_payload(message: Any) -> Any:
+    """Return the JSON-RPC payload across current and future MCP SDK shapes."""
+    envelope = getattr(message, "message", message)
+    return getattr(envelope, "root", None) or envelope
+
+
+def _payload_value(payload: Any, key: str) -> Any:
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return getattr(payload, key, None)
+
+
+def _progress_params_have_token(params: Any) -> bool:
+    if isinstance(params, Mapping):
+        return "progressToken" in params
+    return hasattr(params, "progressToken") or hasattr(params, "progress_token")
+
+
+class _MalformedProgressNotificationFilter:
+    def __init__(self, read_stream: Any, server_name: str) -> None:
+        self._read_stream = read_stream
+        self._server_name = server_name
+        self._iterator: Any | None = None
+
+    async def __aenter__(self) -> "_MalformedProgressNotificationFilter":
+        await self._read_stream.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
+        return await self._read_stream.__aexit__(exc_type, exc, tb)
+
+    def __aiter__(self) -> "_MalformedProgressNotificationFilter":
+        self._iterator = self._read_stream.__aiter__()
+        return self
+
+    async def __anext__(self) -> Any:
+        if self._iterator is None:
+            self._iterator = self._read_stream.__aiter__()
+
+        while True:
+            message = await self._iterator.__anext__()
+            if _is_malformed_mcp_progress_notification(message):
+                logger.debug(
+                    "MCP server '{}': dropped progress notification without progressToken",
+                    self._server_name,
+                )
+                continue
+            return message
+
+    async def aclose(self) -> None:
+        close = getattr(self._read_stream, "aclose", None)
+        if close is not None:
+            await close()
+
+
+def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: str) -> Any:
+    if not all(hasattr(read_stream, name) for name in ("__aenter__", "__aexit__", "__aiter__")):
+        return read_stream
+    return _MalformedProgressNotificationFilter(read_stream, server_name)
 
 
 def _sanitize_name(name: str) -> str:
@@ -243,6 +314,52 @@ class _MCPWrapperBase(Tool):
         return True
 
 
+def _image_block_data_url(block: Any, types: Any) -> str | None:
+    """Return a base64 ``data:`` URL for an MCP image-bearing content block.
+
+    Handles ``ImageContent`` directly and ``EmbeddedResource`` wrapping a binary
+    blob with an ``image/*`` MIME type. Returns ``None`` for anything else.
+    ``getattr`` guards keep this safe when the installed/faked ``mcp`` SDK does
+    not expose a given type.
+    """
+    image_cls = getattr(types, "ImageContent", None)
+    if image_cls is not None and isinstance(block, image_cls):
+        mime = getattr(block, "mimeType", None) or "image/png"
+        return f"data:{mime};base64,{block.data}"
+
+    embedded_cls = getattr(types, "EmbeddedResource", None)
+    blob_cls = getattr(types, "BlobResourceContents", None)
+    if embedded_cls is not None and isinstance(block, embedded_cls):
+        resource = getattr(block, "resource", None)
+        if blob_cls is not None and isinstance(resource, blob_cls):
+            mime = getattr(resource, "mimeType", None) or ""
+            if isinstance(mime, str) and mime.startswith("image/"):
+                return f"data:{mime};base64,{resource.blob}"
+    return None
+
+
+def _mcp_image_tool_result(text_parts: list[str], artifacts: list[dict[str, Any]]) -> str:
+    """Build the compact tool result for an MCP call that returned image(s).
+
+    The base64 stays out of the model context entirely — only artifact paths and
+    metadata are returned, so the result is small and the channel can deliver the
+    saved file via the message tool.
+    """
+    payload: dict[str, Any] = {
+        "artifacts": artifacts,
+        "next_step": (
+            "These images were returned by an MCP tool and saved as local artifacts. "
+            "Call the message tool with the artifact 'path' values in the media "
+            "parameter to deliver the images to the user. Do not paste base64 or raw "
+            "paths into your reply unless the user asks for debug details."
+        ),
+    }
+    text = "\n".join(part for part in text_parts if part)
+    if text:
+        payload["text"] = text
+    return json.dumps(payload, ensure_ascii=False)
+
+
 class MCPToolWrapper(_MCPWrapperBase):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
@@ -270,8 +387,6 @@ class MCPToolWrapper(_MCPWrapperBase):
         return self._parameters
 
     async def execute(self, **kwargs: Any) -> str:
-        from mcp import types
-
         retried_transient = False
         refreshed_session = False
         while True:
@@ -326,16 +441,62 @@ class MCPToolWrapper(_MCPWrapperBase):
                 )
                 return f"(MCP tool call failed: {type(exc).__name__})"
             else:
-                # Success — extract result
-                parts = []
-                for block in result.content:
-                    if isinstance(block, types.TextContent):
-                        parts.append(block.text)
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
+                # Success — extract text and persist any image content as artifacts.
+                return self._render_call_result(result.content, kwargs)
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
+
+    def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
+        """Turn MCP content blocks into a tool result string.
+
+        Text is concatenated as before. Image blocks are decoded and saved as
+        local artifacts (mirroring the built-in image generation tool) so the
+        model can deliver them via the message tool instead of trying to forward
+        base64 — which would be truncated and bloat the context window.
+        """
+        from mcp import types
+
+        text_parts: list[str] = []
+        artifacts: list[dict[str, Any]] = []
+        for block in content:
+            if isinstance(block, types.TextContent):
+                text_parts.append(block.text)
+                continue
+            data_url = _image_block_data_url(block, types)
+            if data_url is not None:
+                stored = self._store_image_block(data_url, arguments)
+                if stored is not None:
+                    artifacts.append(stored)
+                else:
+                    text_parts.append("(MCP tool returned an image that could not be stored)")
+                continue
+            text_parts.append(str(block))
+
+        if artifacts:
+            return _mcp_image_tool_result(text_parts, artifacts)
+        return "\n".join(text_parts) or "(no output)"
+
+    def _store_image_block(
+        self, data_url: str, arguments: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """Persist one image data URL as an artifact; return its metadata or None."""
+        from nanobot.utils.artifacts import ArtifactError, store_generated_image_artifact
+
+        try:
+            return store_generated_image_artifact(
+                data_url,
+                prompt=str(arguments.get("prompt") or ""),
+                model=str(arguments.get("model") or ""),
+                save_dir="generated",
+                provider=f"mcp:{self._server_name}",
+            )
+        except (ArtifactError, OSError) as exc:
+            logger.warning(
+                "MCP tool '{}' returned an image that could not be stored: {}",
+                self._name,
+                exc,
+            )
+            return None
 
 
 class MCPResourceWrapper(_MCPWrapperBase):
@@ -670,7 +831,7 @@ async def connect_mcp_servers(
                         headers=cfg.headers or None,
                         event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=httpx.Timeout(30.0, connect=10.0),
                     )
                 )
                 read, write, _ = await server_stack.enter_async_context(
@@ -681,6 +842,7 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
+            read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 
@@ -726,31 +888,57 @@ async def connect_mcp_servers(
                         ", ".join(available_wrapped_names) or "(none)",
                     )
 
-            try:
-                resources_result = await session.list_resources()
-                for resource in resources_result.resources:
-                    wrapper = MCPResourceWrapper(
-                        session, name, resource, resource_timeout=cfg.tool_timeout
-                    )
-                    registry.register(wrapper)
-                    registered_count += 1
+            # Only register resources and prompts when no tool restriction is
+            # active.  enabledTools is a per-*tool* allowlist; resources and
+            # prompts have no equivalent name filter, so they must be skipped
+            # whenever the operator specified a tool subset.  An empty list
+            # (deny-all) or a list of specific tool names both indicate that
+            # the operator intended to restrict capabilities — registering
+            # unrestricted resource/prompt wrappers would violate that intent.
+            # The default ["*"] (allow-all) means no restriction was intended.
+            register_extras = allow_all_tools
+            if register_extras:
+                try:
+                    resources_result = await session.list_resources()
+                    for resource in resources_result.resources:
+                        wrapper = MCPResourceWrapper(
+                            session, name, resource, resource_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered resource '{}' from server '{}'",
+                            wrapper.name,
+                            name,
+                        )
+                except Exception as e:
                     logger.debug(
-                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+                        "MCP server '{}': resources not supported or failed: {}", name, e
                     )
-            except Exception as e:
-                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
 
-            try:
-                prompts_result = await session.list_prompts()
-                for prompt in prompts_result.prompts:
-                    wrapper = MCPPromptWrapper(
-                        session, name, prompt, prompt_timeout=cfg.tool_timeout
+                try:
+                    prompts_result = await session.list_prompts()
+                    for prompt in prompts_result.prompts:
+                        wrapper = MCPPromptWrapper(
+                            session, name, prompt, prompt_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered prompt '{}' from server '{}'",
+                            wrapper.name,
+                            name,
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "MCP server '{}': prompts not supported or failed: {}", name, e
                     )
-                    registry.register(wrapper)
-                    registered_count += 1
-                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
-            except Exception as e:
-                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+            else:
+                logger.info(
+                    "MCP server '{}': skipping resource/prompt registration "
+                    "(enabledTools does not include '*' — only tools allowed)",
+                    name,
+                )
 
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count

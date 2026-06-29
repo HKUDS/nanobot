@@ -35,8 +35,9 @@ always: true
 
 | Situation | Command |
 |-----------|---------|
-| Large codebase analysis | `my(action="set", key="context_window_tokens", value=131072)` |
-| Repetitive simple tasks | `my(action="set", key="model", value="<fast-model>")` |
+| Large codebase analysis | `my(action="set", key="context_window_tokens", value=262144)` |
+| Switch to a named model preset | `my(action="set", key="model_preset", value="<preset-name>")` |
+| Repetitive simple tasks without a preset | `my(action="set", key="model", value="<fast-model>")` |
 | Long multi-step task | `my(action="set", key="max_iterations", value=80)` |
 
 **Tradeoff:** Bias toward stability. Only set when defaults are genuinely insufficient.
@@ -58,6 +59,7 @@ always: true
 ## Constraints
 
 - All modifications in-memory only — restart resets everything
+- Prefer `model_preset` for configured model choices. Direct `model` changes clear the active preset and should only be used when no preset exists.
 - Protected params have type/range validation: `max_iterations` (1–100), `context_window_tokens` (4096–1M), `model` (non-empty str)
 - If `tools.my.allow_set` is false, check only
 

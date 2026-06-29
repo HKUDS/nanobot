@@ -26,7 +26,8 @@ Add to `config.json` under `channels.websocket`:
       "host": "127.0.0.1",
       "port": 8765,
       "path": "/",
-      "websocketRequiresToken": false,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true,
       "allowFrom": ["*"],
       "streaming": true
     }

@@ -266,13 +266,8 @@ def test_get_history_preserves_reasoning_content():
     ]
 
 
-def test_get_history_annotates_user_turns_but_not_assistant_turns():
-    """Only user turns carry the timestamp prefix.
-
-    Annotating assistant turns trains the model (via in-context examples) to
-    start its own replies with ``[Message Time: ...]``. User-side stamps are
-    enough to pin adjacent assistant replies for relative-time reasoning.
-    """
+def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
+    """Persisted timestamps are session metadata, not prompt content."""
     session = Session(key="test:timestamps")
     session.messages.append({
         "role": "user",
@@ -285,12 +280,14 @@ def test_get_history_annotates_user_turns_but_not_assistant_turns():
         "timestamp": "2026-04-26T22:00:05",
     })
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
+    assert session.messages[0]["timestamp"] == "2026-04-26T22:00:00"
+    assert session.messages[1]["timestamp"] == "2026-04-26T22:00:05"
     assert history == [
         {
             "role": "user",
-            "content": "[Message Time: 2026-04-26T22:00:00]\n10 点提醒是昨天发生的",
+            "content": "10 点提醒是昨天发生的",
         },
         {
             "role": "assistant",
@@ -299,8 +296,8 @@ def test_get_history_annotates_user_turns_but_not_assistant_turns():
     ]
 
 
-def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_timestamps():
-    """Assistant-side timestamp examples can leak back into future replies."""
+def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content():
+    """Timestamp metadata remains persisted without becoming prompt text."""
     session = Session(key="test:proactive-timestamps")
     session.messages.append({
         "role": "assistant",
@@ -314,8 +311,10 @@ def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_times
         "timestamp": "2026-04-26T18:00:00",
     })
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
+    assert session.messages[0]["timestamp"] == "2026-04-26T15:00:00"
+    assert session.messages[1]["timestamp"] == "2026-04-26T18:00:00"
     assert history == [
         {
             "role": "assistant",
@@ -323,18 +322,18 @@ def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_times
         },
         {
             "role": "user",
-            "content": "[Message Time: 2026-04-26T18:00:00]\n好",
+            "content": "好",
         },
     ]
 
 
-def test_get_history_does_not_annotate_tool_results_with_timestamps():
+def test_get_history_does_not_inject_tool_result_timestamps():
     session = Session(key="test:tool-timestamps")
     session.messages.append({"role": "user", "content": "run tool"})
     session.messages.extend(_tool_turn("ts", 0))
     session.messages[-1]["timestamp"] = "2026-04-26T22:00:10"
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
     tool_result = history[-1]
     assert tool_result["role"] == "tool"
@@ -555,7 +554,7 @@ def test_get_history_sanitizes_existing_assistant_replay_artifacts():
         }
     )
 
-    history = session.get_history(max_messages=500, include_timestamps=True)
+    history = session.get_history(max_messages=500)
 
     assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
@@ -641,6 +640,42 @@ def test_retain_recent_legal_suffix_can_extend_to_user_for_long_recent_turn():
     _assert_no_orphans(history)
 
 
+def test_get_history_can_extend_to_user_for_long_recent_turn():
+    session = Session(key="test:history-extend-to-user")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.append({"role": "assistant", "content": "old answer"})
+    session.messages.append({"role": "user", "content": "record this"})
+    for i in range(4):
+        session.messages.extend(_tool_turn("recent", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+
+    hard_capped = session.get_history(max_messages=8)
+    extended = session.get_history(max_messages=8, extend_to_user=True)
+
+    assert len(hard_capped) <= 8
+    assert len(extended) > 8
+    assert extended[0]["content"] == "record this"
+    assert extended[-1]["content"] == "done"
+    _assert_no_orphans(extended)
+
+
+def test_get_history_extend_to_user_keeps_newer_user_inside_window():
+    session = Session(key="test:history-extend-newer-user")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.append({"role": "assistant", "content": "old answer"})
+    session.messages.append({"role": "user", "content": "long older turn"})
+    for i in range(8):
+        session.messages.extend(_tool_turn("older", i))
+    session.messages.append({"role": "assistant", "content": "older final"})
+    session.messages.append({"role": "user", "content": "new question"})
+    session.messages.append({"role": "assistant", "content": "new answer"})
+
+    history = session.get_history(max_messages=6, extend_to_user=True)
+
+    assert [m["content"] for m in history] == ["new question", "new answer"]
+    _assert_no_orphans(history)
+
+
 # --- enforce_file_cap archive correctness (issue #4128) ---
 
 
@@ -650,12 +685,12 @@ def test_retain_recent_legal_suffix_returns_dropped_messages():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    dropped, already_cons = session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
-    assert len(dropped) == 6
-    assert [m["content"] for m in dropped] == [f"msg{i}" for i in range(6)]
+    assert len(result.dropped) == 6
+    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
     assert len(session.messages) == 4
-    assert already_cons == 0
+    assert result.already_consolidated_count == 0
 
 
 def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
@@ -664,10 +699,10 @@ def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     for i in range(3):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    dropped, already_cons = session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
-    assert dropped == []
-    assert already_cons == 0
+    assert result.dropped == []
+    assert result.already_consolidated_count == 0
     assert len(session.messages) == 3
 
 
@@ -678,10 +713,10 @@ def test_retain_recent_legal_suffix_returns_all_on_zero():
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 3
 
-    dropped, already_cons = session.retain_recent_legal_suffix(0)
+    result = session.retain_recent_legal_suffix(0)
 
-    assert len(dropped) == 5
-    assert already_cons == 3
+    assert len(result.dropped) == 5
+    assert result.already_consolidated_count == 3
     assert session.messages == []
 
 
@@ -785,11 +820,11 @@ def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
         session.messages.append({"role": "assistant", "content": f"a{i}"})
     session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
 
-    dropped, already_cons = session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
     # Retained messages start from latest user (u9) + max_messages forward
     # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
     # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
     assert session.last_consolidated == 3
     # already_cons should count dropped messages with original index < 12
-    assert already_cons == 9
+    assert result.already_consolidated_count == 9

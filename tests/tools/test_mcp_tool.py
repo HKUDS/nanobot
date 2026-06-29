@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import httpx
@@ -36,6 +38,12 @@ class _FakeBlobResourceContents:
         self.blob = blob
 
 
+class _FakeImageContent:
+    def __init__(self, data: str, mime_type: str = "image/png") -> None:
+        self.data = data
+        self.mimeType = mime_type
+
+
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
     return {"session": None}
@@ -50,6 +58,7 @@ def _fake_mcp_module(
         TextContent=_FakeTextContent,
         TextResourceContents=_FakeTextResourceContents,
         BlobResourceContents=_FakeBlobResourceContents,
+        ImageContent=_FakeImageContent,
     )
 
     class _FakeStdioServerParameters:
@@ -295,6 +304,60 @@ async def test_execute_returns_text_blocks() -> None:
     assert result == "hello\n42"
 
 
+# Smallest valid 1x1 PNG, base64 without the data: prefix.
+_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+    "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent("here you go"),
+                _FakeImageContent(_PNG_B64, "image/png"),
+            ]
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute(prompt="a cat", model="sdxl")
+
+    payload = json.loads(result)
+    assert payload["text"] == "here you go"
+    assert len(payload["artifacts"]) == 1
+    artifact = payload["artifacts"][0]
+    assert artifact["mime"] == "image/png"
+    assert artifact["prompt"] == "a cat"
+    assert artifact["provider"] == "mcp:test"
+    assert Path(artifact["path"]).is_file()
+    # The base64 payload must NOT leak into the model-facing result.
+    assert _PNG_B64 not in result
+    assert "message tool" in payload["next_step"]
+
+
+@pytest.mark.asyncio
+async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=[_FakeImageContent("not-valid-base64!!", "image/png")])
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool returned an image that could not be stored)"
+
+
 @pytest.mark.asyncio
 async def test_execute_returns_timeout_message() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
@@ -431,6 +494,79 @@ async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
         await stack.aclose()
 
     assert registry.tool_names == []
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_empty_list_blocks_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """enabledTools: [] (deny-all) must also block resource and prompt registration."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo"],
+        resource_names=["secret_data"],
+        prompt_names=["admin_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=[])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == []
+    # Resources and prompts must also be blocked
+    assert not any("secret_data" in name for name in registry.tool_names)
+    assert not any("admin_prompt" in name for name in registry.tool_names)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_specific_list_blocks_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """enabledTools with specific tool names must not leak resources or prompts."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo", "other"],
+        resource_names=["secret_data"],
+        prompt_names=["admin_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["demo"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    # Only the allowed tool should be registered
+    assert "mcp_test_demo" in registry.tool_names
+    assert "mcp_test_other" not in registry.tool_names
+    # Resources and prompts must not leak
+    assert not any("secret_data" in name for name in registry.tool_names)
+    assert not any("admin_prompt" in name for name in registry.tool_names)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """enabledTools: ['*'] should allow all tools, resources, and prompts."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo"],
+        resource_names=["public_data"],
+        prompt_names=["help_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert "mcp_test_demo" in registry.tool_names
+    assert any("public_data" in name for name in registry.tool_names)
+    assert any("help_prompt" in name for name in registry.tool_names)
 
 
 @pytest.mark.asyncio
@@ -643,6 +779,48 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
     assert registry.tool_names == ["mcp_good_demo"]
     assert set(stacks) == {"good"}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    captured: dict[str, object] = {}
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    @asynccontextmanager
+    async def _capturing_streamable_http_client(_url: str, http_client=None):
+        captured["timeout"] = http_client.timeout
+        yield object(), object(), object()
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _capturing_streamable_http_client,
+    )
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(url="https://mcp.example.com/mcp")},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    timeout = captured["timeout"]
+    assert timeout.connect == 10.0
+    assert timeout.read == 30.0
+    assert timeout.write == 30.0
+    assert timeout.pool == 30.0
 
 
 @pytest.mark.asyncio

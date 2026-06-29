@@ -3,8 +3,12 @@ name: Test Suite
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - docs/**
   pull_request:
     branches: [main]
+    paths-ignore:
+      - docs/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,10 +44,38 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --dev
 
       - name: Lint with ruff
         run: uv run ruff check nanobot --select F
 
       - name: Run tests
-        run: uv run pytest tests/
+        run: uv run python -m pytest tests/ --cov=nanobot --cov-report=term-missing:skip-covered
+
+  webui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install WebUI dependencies
+        working-directory: webui
+        run: bun install
+
+      - name: Lint WebUI
+        working-directory: webui
+        run: bun run lint
+
+      - name: Test WebUI
+        working-directory: webui
+        run: bun run test
+
+      - name: Build WebUI
+        working-directory: webui
+        run: bun run build

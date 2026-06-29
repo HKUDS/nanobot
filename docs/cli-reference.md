@@ -12,7 +12,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Check config without calling a model | `nanobot status` | Reads the default config and summarizes the active model/provider |
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
-| Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running while those surfaces are in use |
+| Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running, or use `nanobot gateway --background` |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
@@ -46,7 +46,9 @@ nanobot gateway --verbose
 nanobot serve --verbose
 ```
 
-Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal to stop `nanobot gateway` or `nanobot serve`.
+Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal
+to stop foreground `nanobot gateway` or `nanobot serve`. If you started the gateway
+with `--background`, use `nanobot gateway stop`.
 
 ## Setup
 
@@ -79,15 +81,38 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ## Gateway
 
-`nanobot gateway` starts enabled chat channels, WebUI/WebSocket when configured, cron-backed system jobs, Dream, heartbeat, and the health endpoint.
+`nanobot gateway` starts enabled chat channels, WebUI/WebSocket when configured, cron-backed system jobs, Dream, heartbeat, and the health endpoint. By default it runs in the foreground, which keeps existing scripts and terminal workflows unchanged. Use `--background` when you want a local macOS, Linux, or Windows process that you can manage from the CLI.
 
 | Command | Description |
 |---|---|
-| `nanobot gateway` | Start the gateway with config defaults |
+| `nanobot gateway` | Start the gateway in the foreground with config defaults |
 | `nanobot gateway --verbose` | Show verbose runtime output |
 | `nanobot gateway --port <port>` | Override `gateway.port` for the health endpoint |
 | `nanobot gateway --workspace <path>` | Override workspace |
 | `nanobot gateway --config <path>` | Use a specific config file |
+| `nanobot gateway --background` | Start the gateway as a background process |
+| `nanobot gateway status` | Show the recorded background gateway PID, state file, and log file |
+| `nanobot gateway logs --no-follow` | Print recent background gateway logs and exit |
+| `nanobot gateway logs` | Follow background gateway logs |
+| `nanobot gateway restart` | Restart the recorded background gateway with the current config |
+| `nanobot gateway stop` | Stop the recorded background gateway |
+| `nanobot gateway install-service` | Install a systemd user service or macOS LaunchAgent |
+| `nanobot gateway install-service --dry-run` | Preview the generated service file and system commands |
+| `nanobot gateway uninstall-service` | Remove the installed system service |
+
+For custom instances, pass the same selector flags to management commands:
+
+```bash
+nanobot gateway --background --config ./bot-a/config.json --workspace ./bot-a/workspace
+nanobot gateway status --config ./bot-a/config.json --workspace ./bot-a/workspace
+nanobot gateway stop --config ./bot-a/config.json --workspace ./bot-a/workspace
+nanobot gateway install-service --config ./bot-a/config.json --workspace ./bot-a/workspace --name bot-a
+```
+
+`--background` is a lightweight detached process. `install-service` is for
+login/startup integration: Linux uses a systemd user service; macOS uses a
+LaunchAgent plist. System services run the foreground gateway under the OS
+supervisor rather than nesting another background process.
 
 Default health endpoint:
 

@@ -15,10 +15,19 @@ First confirm your provider and model can answer:
 nanobot agent -m "Hello!"
 ```
 
-Then merge the WebSocket channel into your existing `~/.nanobot/config.json`:
+Then merge the WebSocket channel into your existing `~/.nanobot/config.json`.
+Set `tokenIssueSecret` to the password you will enter in the WebUI login form:
 
 ```json
-{ "channels": { "websocket": { "enabled": true } } }
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true
+    }
+  }
+}
 ```
 
 If you are new to JSON snippets, see
@@ -34,6 +43,7 @@ Leave the gateway running and open
 [`http://127.0.0.1:8765`](http://127.0.0.1:8765). The WebUI is served by the
 WebSocket channel on port `8765` by default. The gateway health endpoint,
 `18790` by default, is not the browser UI.
+Enter `tokenIssueSecret` when the WebUI asks for a password.
 
 ## What It Is For
 
@@ -88,6 +98,12 @@ nanobot can call from a chat. CLI Apps install local adapters that nanobot runs
 on your machine; they do not modify the native apps themselves. MCP presets add
 predefined MCP server configurations.
 
+Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
+preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
+extraction tools without requiring an API key. This does not replace nanobot's
+built-in web search provider; mention the Firecrawl MCP preset with `@` when a
+turn needs Firecrawl's richer web data tools.
+
 After an App or MCP preset is available, mention it from the composer with `@`
 to attach that capability to the next message.
 
@@ -102,7 +118,12 @@ to perform that task.
 
 Automations are scheduled agent turns. They should be created from the chat,
 channel, or session where they are supposed to run so nanobot keeps the correct
-target context.
+target context. When an automation runs, it normally delivers the result back to
+that linked chat.
+
+For recurring background checks that should stay quiet unless there is something
+useful to report, use the protected heartbeat job by editing `HEARTBEAT.md`
+instead of creating a chat automation.
 
 Use the Automations view to:
 

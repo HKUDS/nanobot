@@ -93,8 +93,8 @@ class _PreparedCommand:
             nullable=True,
         ),
         login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default true).",
-            default=True,
+            description="Whether to run bash/zsh with login shell semantics (default false).",
+            default=False,
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
@@ -397,6 +397,7 @@ class ExecTool(Tool):
             command,
             cwd,
             restrict_to_workspace=access.restrict_to_workspace,
+            workspace_root=workspace_root,
         )
         if guard_error:
             return guard_error
@@ -431,7 +432,7 @@ class ExecTool(Tool):
             env=env,
             timeout=effective_timeout,
             shell_program=shell_program,
-            login=True if login is None else login,
+            login=False if login is None else login,
         )
 
     def _compose_path(self, current_path: str) -> str:
@@ -460,7 +461,7 @@ class ExecTool(Tool):
     async def _spawn(
         command: str, cwd: str, env: dict[str, str],
         shell_program: str | None = None,
-        login: bool = True,
+        login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
     ) -> asyncio.subprocess.Process:
@@ -540,8 +541,9 @@ class ExecTool(Tool):
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
 
-        On Unix, only HOME/LANG/TERM are passed; ``bash -l`` sources the
-        user's profile which sets PATH and other essentials.
+        On Unix, only HOME/LANG/TERM are passed by default. If callers request
+        ``login=True``, bash/zsh may source the user's profile and add PATH or
+        other variables.
 
         On Windows, ``cmd.exe`` has no login-profile mechanism, so a curated
         set of system variables (including PATH) is forwarded.  API keys and
@@ -591,6 +593,7 @@ class ExecTool(Tool):
         cwd: str,
         *,
         restrict_to_workspace: bool | None = None,
+        workspace_root: str | None = None,
     ) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
@@ -600,7 +603,7 @@ class ExecTool(Tool):
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
         # from the hardcoded deny list via configuration.
         explicitly_allowed = bool(self.allow_patterns) and any(
-            re.search(p, lower) for p in self.allow_patterns
+            re.fullmatch(p, lower) for p in self.allow_patterns
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
@@ -629,6 +632,11 @@ class ExecTool(Tool):
                 )
 
             cwd_path = Path(cwd).resolve()
+            resolved_workspace = (
+                Path(workspace_root).expanduser().resolve()
+                if workspace_root
+                else None
+            )
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -646,10 +654,13 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                if p.is_absolute() and not (
+                allowed = (
                     is_path_within(p, cwd_path)
                     or is_path_within(p, media_path)
-                ):
+                )
+                if not allowed and resolved_workspace is not None:
+                    allowed = is_path_within(p, resolved_workspace)
+                if p.is_absolute() and not allowed:
                     return (
                         "Error: Command blocked by safety guard (path outside working dir)"
                         + _WORKSPACE_BOUNDARY_NOTE

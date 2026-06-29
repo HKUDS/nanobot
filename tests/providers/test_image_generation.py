@@ -787,6 +787,146 @@ async def test_openai_gpt_image_uses_supported_orientation_sizes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_reference_images_use_edits_endpoint(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(PNG_BYTES)
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = OpenAIImageGenerationClient(
+        api_key="sk-openai-test",
+        api_base="https://api.openai.com/v1",
+        extra_headers={"X-Test": "1"},
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="make a warmer version",
+        model="gpt-image-1",
+        reference_images=[str(ref)],
+        aspect_ratio="16:9",
+    )
+
+    assert response.images == [PNG_DATA_URL]
+    call = fake.calls[0]
+    assert call["url"] == "https://api.openai.com/v1/images/edits"
+    assert call["headers"]["Authorization"] == "Bearer sk-openai-test"
+    assert call["headers"]["X-Test"] == "1"
+    assert "Content-Type" not in call["headers"]
+    assert "json" not in call
+    assert call["data"]["model"] == "gpt-image-1"
+    assert call["data"]["prompt"] == "make a warmer version"
+    assert call["data"]["size"] == "1536x1024"
+    assert len(call["files"]) == 1
+    assert call["files"][0][0] == "image[]"
+    assert call["files"][0][1][0] == "ref.png"
+    assert call["files"][0][1][2] == "image/png"
+    assert call["files"][0][1][1].closed is True
+
+
+@pytest.mark.asyncio
+async def test_openai_reference_images_expand_user_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(PNG_BYTES)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = OpenAIImageGenerationClient(
+        api_key="sk-openai-test",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="use a home-relative reference",
+        model="gpt-image-1",
+        reference_images=["~/ref.png"],
+    )
+
+    call = fake.calls[0]
+    assert call["url"] == "https://api.openai.com/v1/images/edits"
+    assert call["files"][0][0] == "image[]"
+    assert call["files"][0][1][0] == "ref.png"
+    assert call["files"][0][1][2] == "image/png"
+    assert call["files"][0][1][1].closed is True
+
+
+@pytest.mark.asyncio
+async def test_openai_reference_images_send_multiple_multipart_files(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(PNG_BYTES)
+    second.write_bytes(PNG_BYTES)
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = OpenAIImageGenerationClient(
+        api_key="sk-openai-test",
+        extra_body={
+            "quality": "high",
+            "seed": 0,
+            "safety_checker": False,
+            "metadata": {"ignored": True},
+            "background": None,
+        },
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="combine these references",
+        model="openai/gpt-image-1",
+        reference_images=[str(first), str(second)],
+    )
+
+    call = fake.calls[0]
+    assert call["url"] == "https://api.openai.com/v1/images/edits"
+    assert call["data"]["model"] == "gpt-image-1"
+    assert call["data"]["prompt"] == "combine these references"
+    assert call["data"]["quality"] == "high"
+    assert call["data"]["seed"] == "0"
+    assert call["data"]["safety_checker"] == "false"
+    assert "metadata" not in call["data"]
+    assert "background" not in call["data"]
+    assert [item[0] for item in call["files"]] == ["image[]", "image[]"]
+    assert [item[1][0] for item in call["files"]] == ["first.png", "second.png"]
+    assert all(item[1][1].closed for item in call["files"])
+
+
+@pytest.mark.asyncio
+async def test_openai_gpt_image_without_reference_images_uses_generations_json() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = OpenAIImageGenerationClient(
+        api_key="sk-openai-test",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(prompt="draw", model="gpt-image-1", aspect_ratio="16:9")
+
+    call = fake.calls[0]
+    assert call["url"] == "https://api.openai.com/v1/images/generations"
+    assert call["headers"]["Content-Type"] == "application/json"
+    assert call["json"]["model"] == "gpt-image-1"
+    assert call["json"]["prompt"] == "draw"
+    assert call["json"]["size"] == "1536x1024"
+    assert "data" not in call
+    assert "files" not in call
+
+
+@pytest.mark.asyncio
+async def test_openai_dalle_reference_images_raise_clear_error(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(PNG_BYTES)
+    client = OpenAIImageGenerationClient(api_key="sk-openai-test")
+
+    with pytest.raises(ImageGenerationError, match="does not support reference images"):
+        await client.generate(
+            prompt="edit this",
+            model="dall-e-3",
+            reference_images=[str(ref)],
+        )
+
+
+@pytest.mark.asyncio
 async def test_openai_default_size_when_no_aspect_ratio() -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = OpenAIImageGenerationClient(
