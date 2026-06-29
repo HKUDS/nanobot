@@ -918,6 +918,10 @@
             "title": "Long-running goal",
             "description": "Tell the agent to treat this as a sustained multi-step goal."
           },
+          "trigger": {
+            "title": "Create local trigger",
+            "description": "Create a CLI trigger bound to this chat session."
+          },
           "help": {
             "title": "Show help",
             "description": "List available slash commands."

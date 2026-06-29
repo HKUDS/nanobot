@@ -2516,6 +2516,38 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["api_key"] == ""
 
 
+def test_trigger_cli_queues_message_in_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.triggers.store import ExternalTriggerStore
+
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    _patch_cli_command_runtime(monkeypatch, config)
+
+    store = ExternalTriggerStore(config.workspace_path)
+    trigger = store.create(
+        name="Review hook",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+
+    result = runner.invoke(
+        app,
+        ["trigger", "--config", str(config_file), trigger.id, "Review PR #4502"],
+    )
+
+    assert result.exit_code == 0
+    assert f"Queued {trigger.id}" in result.stdout
+    deliveries = store.claim_deliveries()
+    assert len(deliveries) == 1
+    assert deliveries[0].trigger_id == trigger.id
+    assert deliveries[0].content == "Review PR #4502"
+
+
 def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()

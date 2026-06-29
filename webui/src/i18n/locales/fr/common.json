@@ -908,6 +908,10 @@
             "title": "Objectif long terme",
             "description": "Demandez à l’agent de traiter ceci comme un objectif multi‑étapes durable."
           },
+          "trigger": {
+            "title": "Créer un trigger local",
+            "description": "Crée un trigger CLI lié à cette session de chat."
+          },
           "help": {
             "title": "Afficher l’aide",
             "description": "Lister les commandes slash disponibles."

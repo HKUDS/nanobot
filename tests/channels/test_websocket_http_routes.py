@@ -20,6 +20,7 @@ from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
+from nanobot.triggers.store import ExternalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
@@ -46,6 +47,7 @@ def _make_handler(
     workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
+    external_trigger_store: ExternalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
@@ -61,6 +63,7 @@ def _make_handler(
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
         cron_service=cron_service,
+        external_trigger_store=external_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
     )
 
@@ -74,6 +77,7 @@ def _ch(
     port: int = _PORT,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
+    external_trigger_store: ExternalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
@@ -93,6 +97,7 @@ def _ch(
         workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
         cron_service=cron_service,
+        external_trigger_store=external_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
@@ -314,6 +319,50 @@ async def test_session_automations_route_ignores_unified_owner(
         )
         assert resp.status_code == 200
         assert resp.json()["jobs"] == []
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_automations_route_lists_external_triggers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    trigger_store = ExternalTriggerStore(tmp_path)
+    trigger = trigger_store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="abc",
+        session_key="websocket:abc",
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        external_trigger_store=trigger_store,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        resp = await _http_get(
+            f"{base_url}/api/sessions/websocket%3Aabc/automations",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [job["id"] for job in body["jobs"]] == [trigger.id]
+        job = body["jobs"][0]
+        assert job["kind"] == "external_trigger"
+        assert job["schedule"]["kind"] == "external"
+        assert job["payload"]["kind"] == "external_trigger"
+        assert job["payload"]["command"] == f'nanobot trigger {trigger.id} "message"'
     finally:
         await channel.stop()
         await server_task
@@ -1081,6 +1130,86 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
 
 
 @pytest.mark.asyncio
+async def test_webui_automations_route_manages_external_triggers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    trigger_store = ExternalTriggerStore(tmp_path)
+    trigger = trigger_store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="abc",
+        session_key="websocket:abc",
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        external_trigger_store=trigger_store,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        listed = await _http_get(f"{base_url}/api/webui/automations", headers=auth)
+        assert listed.status_code == 200
+        by_id = {job["id"]: job for job in listed.json()["jobs"]}
+        assert by_id[trigger.id]["kind"] == "external_trigger"
+        assert by_id[trigger.id]["trigger"]["command"] == f'nanobot trigger {trigger.id} "message"'
+
+        disabled = await _http_get(
+            f"{base_url}/api/webui/automations/disable?id={trigger.id}",
+            headers=auth,
+        )
+        assert disabled.status_code == 200
+        stored = trigger_store.get(trigger.id)
+        assert stored is not None
+        assert stored.enabled is False
+
+        run = await _http_get(
+            f"{base_url}/api/webui/automations/run?id={trigger.id}",
+            headers=auth,
+        )
+        assert run.status_code == 409
+        assert "CLI message" in run.text
+
+        renamed = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={trigger.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"name": "Release review"}),
+            },
+        )
+        assert renamed.status_code == 200
+        stored = trigger_store.get(trigger.id)
+        assert stored is not None
+        assert stored.name == "Release review"
+
+        bad_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={trigger.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"message": "coupled"}),
+            },
+        )
+        assert bad_update.status_code == 400
+
+        deleted = await _http_get(
+            f"{base_url}/api/webui/automations/delete?id={trigger.id}",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert trigger_store.get(trigger.id) is None
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_delete_blocks_when_bound_automation_exists(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1116,6 +1245,54 @@ async def test_session_delete_blocks_when_bound_automation_exists(
         assert [job["name"] for job in body["automations"]] == ["Daily check"]
         assert path.exists()
         assert cron.list_bound_cron_jobs_for_session("websocket:doomed")
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_blocks_and_cascades_external_triggers(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    sm = _seed_session(tmp_path, key="websocket:doomed")
+    trigger_store = ExternalTriggerStore(tmp_path)
+    trigger = trigger_store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="doomed",
+        session_key="websocket:doomed",
+    )
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        external_trigger_store=trigger_store,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        blocked = await _http_get(
+            f"{base_url}/api/sessions/websocket:doomed/delete",
+            headers=auth,
+        )
+        assert blocked.status_code == 200
+        assert blocked.json()["blocked_by_automations"] is True
+        assert trigger_store.get(trigger.id) is not None
+
+        deleted = await _http_get(
+            f"{base_url}/api/sessions/websocket:doomed/delete?delete_automations=true",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert trigger_store.get(trigger.id) is None
     finally:
         await channel.stop()
         await server_task

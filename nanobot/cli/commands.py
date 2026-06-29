@@ -710,6 +710,21 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _read_trigger_cli_message(message: str | None) -> str:
+    """Read a trigger message from an argument or stdin."""
+    if message and message.strip():
+        return message
+    try:
+        if not sys.stdin.isatty():
+            content = sys.stdin.read()
+            if content.strip():
+                return content
+    except Exception:
+        pass
+    console.print("[red]Error: trigger message is required[/red]")
+    raise typer.Exit(1)
+
+
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
@@ -739,6 +754,35 @@ def _migrate_cron_store(config: "Config") -> None:
         import shutil
 
         shutil.move(str(legacy_path), str(new_path))
+
+
+@app.command()
+def trigger(
+    trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
+    message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Deliver a local trigger message to its bound chat session."""
+    from nanobot.triggers.store import (
+        ExternalTriggerStore,
+        TriggerDisabledError,
+        TriggerNotFoundError,
+        TriggerStoreError,
+    )
+
+    runtime_config = _load_runtime_config(config, workspace)
+    content = _read_trigger_cli_message(message)
+    store = ExternalTriggerStore(runtime_config.workspace_path)
+    try:
+        delivery = store.enqueue(trigger_id, content)
+    except (TriggerNotFoundError, TriggerDisabledError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    except (TriggerStoreError, ValueError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Queued[/green] {delivery.trigger_id} ({delivery.id})")
 
 
 # ============================================================================
@@ -857,6 +901,8 @@ def _run_gateway(
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.triggers.runner import run_external_trigger_queue
+    from nanobot.triggers.store import ExternalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -879,6 +925,7 @@ def _run_gateway(
     # Create cron service with workspace-scoped store
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    trigger_store = ExternalTriggerStore(config.workspace_path)
 
     # Create agent with cron service
     agent = AgentLoop.from_config(
@@ -899,6 +946,7 @@ def _run_gateway(
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
+    agent.external_trigger_store = trigger_store
 
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
@@ -1095,6 +1143,7 @@ def _run_gateway(
         bus,
         session_manager=session_manager,
         cron_service=cron,
+        external_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
         webui_static_dist=webui_static_dist,
@@ -1237,6 +1286,10 @@ def _run_gateway(
             tasks = [
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
+                asyncio.create_task(
+                    run_external_trigger_queue(store=trigger_store, bus=bus),
+                    name="nanobot-external-triggers",
+                ),
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(

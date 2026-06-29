@@ -908,6 +908,10 @@
             "title": "Mục tiêu dài hạn",
             "description": "Yêu cầu agent xử lý đây là mục tiêu nhiều bước kéo dài."
           },
+          "trigger": {
+            "title": "Tạo trigger cục bộ",
+            "description": "Tạo trigger CLI gắn với phiên chat này."
+          },
           "help": {
             "title": "Hiển thị trợ giúp",
             "description": "Liệt kê các lệnh slash có sẵn."

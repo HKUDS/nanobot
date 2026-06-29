@@ -917,6 +917,10 @@
             "title": "长期目标",
             "description": "让助手把当前请求当作需要多步骤持续推进的目标。"
           },
+          "trigger": {
+            "title": "创建本地触发器",
+            "description": "创建绑定到当前聊天会话的 CLI 触发器。"
+          },
           "help": {
             "title": "查看帮助",
             "description": "列出可用的斜杠命令。"

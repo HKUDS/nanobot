@@ -908,6 +908,10 @@
             "title": "長期目標",
             "description": "請助理把這則請求當成需要多步驟持續推進的目標。"
           },
+          "trigger": {
+            "title": "建立本機觸發器",
+            "description": "建立綁定到目前聊天工作階段的 CLI 觸發器。"
+          },
           "help": {
             "title": "查看說明",
             "description": "列出可用的斜線命令。"
