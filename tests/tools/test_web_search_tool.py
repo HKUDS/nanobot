@@ -640,3 +640,73 @@ async def test_olostep_package_missing_returns_install_hint(monkeypatch):
     result = await tool.execute(query="test query")
 
     assert result == "Error: olostep package not installed. Run: pip install olostep"
+
+
+@pytest.mark.asyncio
+async def test_youcom_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.you.com/v1/agents/search"
+        assert kw["headers"]["X-API-Key"] == "you-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {"query": "test", "max_results": 5}
+        return _response(json={
+            "results": [
+                {"title": "You.com Result", "url": "https://you.com", "snippet": "AI search"}
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="youcom", api_key="you-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="test")
+    assert "You.com Result" in result
+    assert "https://you.com" in result
+    assert "AI search" in result
+
+
+@pytest.mark.asyncio
+async def test_youcom_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["X-API-Key"] == "env-you-key"
+        return _response(json={
+            "results": [
+                {"title": "Env Result", "url": "https://you.com/env", "snippet": "env key"}
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("YDC_API_KEY", "env-you-key")
+    tool = _tool(provider="youcom", api_key="")
+    result = await tool.execute(query="test", count=1)
+
+    assert "Env Result" in result
+    assert "env key" in result
+
+
+@pytest.mark.asyncio
+async def test_youcom_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("YDC_API_KEY", raising=False)
+
+    tool = _tool(provider="youcom")
+    result = await tool.execute(query="test")
+
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_youcom_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="youcom", api_key="bad-key")
+    result = await tool.execute(query="test")
+
+    assert "Error" in result

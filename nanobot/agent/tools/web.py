@@ -317,6 +317,12 @@ class WebSearchTool(Tool):
                 or os.environ.get("WEB_SEARCH_API_KEY", "")
             )
             return "volcengine" if api_key else "duckduckgo"
+        if provider == "youcom":
+            api_key = (
+                self.config.api_key
+                or os.environ.get("YDC_API_KEY", "")
+            )
+            return "youcom" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -371,6 +377,8 @@ class WebSearchTool(Tool):
                 n,
                 freshness=kwargs.get("freshness", "noLimit"),
             )
+        elif provider == "youcom":
+            return await self._search_youcom(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -481,6 +489,39 @@ class WebSearchTool(Tool):
                 )
                 r.raise_for_status()
             return _format_results(query, r.json().get("results", []), n)
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _search_youcom(self, query: str, n: int) -> str:
+        api_key = (
+            self.config.api_key
+            or os.environ.get("YDC_API_KEY", "")
+        )
+        if not api_key:
+            logger.warning("YDC_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    "https://api.you.com/v1/agents/search",
+                    headers={
+                        "X-API-Key": api_key,
+                        "Content-Type": "application/json",
+                        "User-Agent": self.user_agent,
+                    },
+                    json={"query": query, "max_results": n},
+                    timeout=15.0,
+                )
+                r.raise_for_status()
+            items = [
+                {
+                    "title": x.get("title", ""),
+                    "url": x.get("url", ""),
+                    "content": x.get("snippet", "") or x.get("content", ""),
+                }
+                for x in r.json().get("results", [])
+            ]
+            return _format_results(query, items, n)
         except Exception as e:
             return f"Error: {e}"
 

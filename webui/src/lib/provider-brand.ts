@@ -153,6 +153,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   ]),
   tavily: brand("tavily.com", "#111827", "T"),
   volcengine: brand("volcengine.com", "#1664FF", "VE"),
+  youcom: brand("you.com", "#5B5BF6", "Y"),
   vllm: brand("vllm.ai", "#2563EB", "VL"),
   xiaomi_mimo: brand("mimo.xiaomi.com", "#FF6900", "MI", [
     "https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg",
