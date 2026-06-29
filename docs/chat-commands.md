@@ -16,6 +16,8 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
 | `/skill` | List enabled skills and their descriptions |
+| `/trigger` | Create a local external trigger for the current chat/session |
+| `/trigger <name>` | Create a named local external trigger for the current chat/session |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
@@ -54,6 +56,53 @@ To switch presets for future turns:
 ```
 
 Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
+
+## External Triggers
+
+Use `/trigger` when a local script or another service should be able to send a
+message into the current chat/session later.
+
+Create the trigger from the chat where future messages should arrive:
+
+```text
+/trigger PR review
+```
+
+nanobot replies with a trigger ID and a command shaped like:
+
+```bash
+nanobot trigger trg_8K4P2Q9X "Review PR #4502"
+```
+
+Replace `"Review PR #4502"` with the message you want nanobot to receive. The
+trigger is bound to the session where it was created, so the message goes back
+to that same chat. Keep `nanobot gateway` running so trigger messages can be
+delivered.
+
+For longer or generated content, omit the message argument and pipe stdin:
+
+```bash
+printf '%s\n' "Review the latest failed CI job" | nanobot trigger trg_8K4P2Q9X
+```
+
+If an external webhook should wake nanobot up, run your own small webhook
+service and have it call the trigger command after it builds the final message:
+
+```bash
+nanobot trigger <trigger-id> "<message>"
+```
+
+If you run multiple nanobot instances, pass the same config or workspace
+selector used by the gateway:
+
+```bash
+nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
+nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
+```
+
+Manage triggers from the WebUI Automations view. You can search, pause/resume,
+rename, delete, and copy the trigger command there. A session may have multiple
+triggers, just like it may have multiple scheduled automations.
 
 ## Periodic Tasks
 
