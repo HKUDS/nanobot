@@ -289,6 +289,13 @@ def test_exec_extract_absolute_paths_captures_home_paths() -> None:
     assert "~/out.txt" in paths
 
 
+def test_exec_extract_absolute_paths_captures_paths_after_equals() -> None:
+    cmd = "curl --output=/etc/passwd --config=~/.nanobot/config.json"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert "/etc/passwd" in paths
+    assert "~/.nanobot/config.json" in paths
+
+
 def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
     cmd = 'cat "/tmp/data.txt" "~/.nanobot/config.json"'
     paths = ExecTool._extract_absolute_paths(cmd)
