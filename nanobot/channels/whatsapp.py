@@ -29,6 +29,8 @@ class WhatsAppConfig(Base):
     group_policy: Literal["open", "mention"] = "open"
     database_path: str = ""
     lid_mappings: dict[str, str] = Field(default_factory=dict)
+    typing_presence: bool = True
+    react_emoji: str = "👀"
 
 
 class _NeonizeAPI(NamedTuple):
@@ -38,6 +40,8 @@ class _NeonizeAPI(NamedTuple):
     MessageEv: Any
     PairStatusEv: Any
     build_jid: Any
+    ChatPresence: Any
+    ChatPresenceMedia: Any
 
 
 class _MediaInfo(NamedTuple):
@@ -46,6 +50,11 @@ class _MediaInfo(NamedTuple):
     mimetype: str
     filename: str
     is_voice: bool = False
+
+
+class _ReactionTarget(NamedTuple):
+    message_id: str
+    sender_jid: str
 
 
 _NEONIZE_API: _NeonizeAPI | None = None
@@ -69,6 +78,7 @@ def _load_neonize() -> _NeonizeAPI:
     try:
         from neonize.aioze.client import NewAClient
         from neonize.aioze.events import ConnectedEv, DisconnectedEv, MessageEv, PairStatusEv
+        from neonize.utils.enum import ChatPresence, ChatPresenceMedia
         from neonize.utils.jid import build_jid
     except ImportError as exc:
         raise RuntimeError(
@@ -82,6 +92,8 @@ def _load_neonize() -> _NeonizeAPI:
         MessageEv=MessageEv,
         PairStatusEv=PairStatusEv,
         build_jid=build_jid,
+        ChatPresence=ChatPresence,
+        ChatPresenceMedia=ChatPresenceMedia,
     )
     return _NEONIZE_API
 
@@ -174,6 +186,61 @@ def _classify_sender_ids(jids: list[Any]) -> tuple[str, str]:
             phone_id = jid
 
     return phone_id, lid_id
+
+
+def _mention_token(raw: Any) -> tuple[str, bool]:
+    text = _normalize_jid(raw)
+    if not text:
+        return "", False
+
+    is_lid = False
+    match = _JID_RE.match(text)
+    if match:
+        text = match.group("user")
+        is_lid = match.group("server") in {"lid", "lid.whatsapp.net"}
+
+    token = re.sub(r"\D+", "", text.split(":", 1)[0])
+    return token, is_lid
+
+
+def _ghost_mentions_from_metadata(metadata: dict[str, Any]) -> tuple[str | None, bool]:
+    raw_mentions = (
+        metadata.get("mentions")
+        or metadata.get("mentioned_jids")
+        or metadata.get("mentionedJids")
+        or []
+    )
+    if isinstance(raw_mentions, (str, int)):
+        raw_mentions = [raw_mentions]
+    if not isinstance(raw_mentions, list | tuple | set):
+        return None, False
+
+    phone_tokens: list[str] = []
+    lid_tokens: list[str] = []
+    seen: set[tuple[bool, str]] = set()
+    for value in raw_mentions:
+        if isinstance(value, dict):
+            value = (
+                value.get("jid")
+                or value.get("id")
+                or value.get("phone")
+                or value.get("lid")
+                or ""
+            )
+        token, is_lid = _mention_token(value)
+        if not token or (is_lid, token) in seen:
+            continue
+        seen.add((is_lid, token))
+        if is_lid:
+            lid_tokens.append(token)
+        else:
+            phone_tokens.append(token)
+
+    if phone_tokens:
+        return " ".join(f"@{token}" for token in phone_tokens), False
+    if lid_tokens:
+        return " ".join(f"@{token}" for token in lid_tokens), True
+    return None, False
 
 
 def _context_infos(message: Any) -> list[Any]:
@@ -293,6 +360,8 @@ class WhatsAppChannel(BaseChannel):
         self._lid_to_phone = self._load_lid_mappings()
         self._self_jids: set[str] = set()
         self._started_at = 0.0
+        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
+        self._reaction_targets: dict[str, _ReactionTarget] = {}
 
     def _database_path(self) -> Path:
         configured = self.config.database_path.strip()
@@ -359,6 +428,8 @@ class WhatsAppChannel(BaseChannel):
     async def stop(self) -> None:
         self._running = False
         self._connected = False
+        for chat_id in list(self._typing_tasks):
+            self._stop_typing(chat_id)
         client = self._client
         self._client = None
         if client is not None:
@@ -394,8 +465,20 @@ class WhatsAppChannel(BaseChannel):
             raise RuntimeError("WhatsApp channel is not connected")
 
         to = self._build_jid(msg.chat_id)
+        if not msg.metadata.get("_progress", False):
+            await self._finish_activity(msg.chat_id)
+
         if msg.content:
-            await client.send_message(to, msg.content)
+            ghost_mentions, mentions_are_lids = _ghost_mentions_from_metadata(msg.metadata)
+            if ghost_mentions:
+                await client.send_message(
+                    to,
+                    msg.content,
+                    ghost_mentions=ghost_mentions,
+                    mentions_are_lids=mentions_are_lids,
+                )
+            else:
+                await client.send_message(to, msg.content)
 
         for media_path in msg.media or []:
             await self._send_media(client, to, media_path)
@@ -428,6 +511,91 @@ class WhatsAppChannel(BaseChannel):
                 filename=Path(path).name,
                 mimetype=mimetype,
             )
+
+    def _start_typing(self, chat_id: str) -> None:
+        if not self.config.typing_presence or not self._client or not self._connected:
+            return
+        self._stop_typing(chat_id)
+        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+
+    def _stop_typing(self, chat_id: str) -> bool:
+        task = self._typing_tasks.pop(chat_id, None)
+        if not task:
+            return False
+        if not task.done():
+            task.cancel()
+        return True
+
+    async def _typing_loop(self, chat_id: str) -> None:
+        try:
+            while self._client and self._connected:
+                await self._send_presence(chat_id, composing=True)
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            self.logger.debug("WhatsApp typing indicator stopped for {}: {}", chat_id, exc)
+
+    async def _send_presence(self, chat_id: str, *, composing: bool) -> None:
+        client = self._client
+        if client is None or not self._connected:
+            return
+        try:
+            api = _load_neonize()
+            state = (
+                api.ChatPresence.CHAT_PRESENCE_COMPOSING
+                if composing
+                else api.ChatPresence.CHAT_PRESENCE_PAUSED
+            )
+            await client.send_chat_presence(
+                self._build_jid(chat_id),
+                state,
+                api.ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT,
+            )
+        except Exception as exc:
+            self.logger.debug("WhatsApp presence update failed: {}", exc)
+
+    async def _send_reaction(
+        self,
+        chat_id: str,
+        sender_jid: str,
+        message_id: str,
+        emoji: str,
+    ) -> None:
+        client = self._client
+        if client is None or not self._connected or not message_id or not sender_jid:
+            return
+        try:
+            reaction_message = await client.build_reaction(
+                self._build_jid(chat_id),
+                self._build_jid(sender_jid),
+                message_id,
+                emoji,
+            )
+            await client.send_message(self._build_jid(chat_id), reaction_message)
+        except Exception as exc:
+            self.logger.debug("WhatsApp reaction update failed: {}", exc)
+
+    async def _start_activity(
+        self,
+        *,
+        chat_id: str,
+        message_id: str,
+        sender_jid: str,
+    ) -> None:
+        self._start_typing(chat_id)
+        if self.config.react_emoji and message_id and sender_jid:
+            self._reaction_targets[chat_id] = _ReactionTarget(message_id, sender_jid)
+            await self._send_reaction(chat_id, sender_jid, message_id, self.config.react_emoji)
+
+    async def _finish_activity(self, chat_id: str) -> None:
+        stopped_typing = self._stop_typing(chat_id)
+        if stopped_typing:
+            await self._send_presence(chat_id, composing=False)
+
+        target = self._reaction_targets.pop(chat_id, None)
+        if target is not None:
+            await self._send_reaction(chat_id, target.sender_jid, target.message_id, "")
 
     def _register_handlers(
         self,
@@ -537,6 +705,7 @@ class WhatsAppChannel(BaseChannel):
         sender_candidates = [sender_alt_jid, participant_jid]
         if not is_group:
             sender_candidates.append(chat_jid)
+        reaction_sender_jid = sender_alt_jid or participant_jid or chat_jid
 
         phone_id, lid_id = _classify_sender_ids(sender_candidates)
         if phone_id and lid_id:
@@ -552,6 +721,7 @@ class WhatsAppChannel(BaseChannel):
             "is_forwarded": self._is_forwarded(message),
             "participant": participant_jid or None,
             "sender_alt": sender_alt_jid or None,
+            "reaction_sender": reaction_sender_jid or None,
             "lid": lid_id or None,
             "phone": phone_id or None,
             "is_reply_to_bot": self._is_reply_to_bot(message),
@@ -593,6 +763,12 @@ class WhatsAppChannel(BaseChannel):
 
         if not text and not media_paths:
             return
+
+        await self._start_activity(
+            chat_id=chat_jid,
+            message_id=message_id,
+            sender_jid=reaction_sender_jid,
+        )
 
         await self._handle_message(
             sender_id=sender_id,

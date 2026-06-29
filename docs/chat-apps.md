@@ -343,6 +343,24 @@ Optional session database path:
 }
 ```
 
+Optional activity cues:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "typingPresence": true,
+      "reactEmoji": "👀"
+    }
+  }
+}
+```
+
+Set `typingPresence` to `false` to stop sending composing indicators. Set
+`reactEmoji` to `""` to disable the temporary reaction while nanobot works.
+Outbound WhatsApp messages preserve explicit mention metadata when a tool or
+channel sends native WhatsApp mentions.
+
 **Migrating from the old bridge**
 
 - Remove `bridgeUrl` and `bridgeToken`; WhatsApp no longer runs a local Node.js bridge.

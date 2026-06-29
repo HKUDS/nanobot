@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels import whatsapp as whatsapp_module
-from nanobot.channels.whatsapp import WhatsAppChannel, _legacy_bridge_config_fields, _NeonizeAPI
+from nanobot.channels.whatsapp import (
+    WhatsAppChannel,
+    _legacy_bridge_config_fields,
+    _NeonizeAPI,
+    _ReactionTarget,
+)
 
 
 class _Proto:
@@ -72,6 +78,11 @@ def _make_channel(config: dict | None = None) -> WhatsAppChannel:
 
 
 def _patch_neonize_api(monkeypatch) -> None:
+    chat_presence = SimpleNamespace(
+        CHAT_PRESENCE_COMPOSING="composing",
+        CHAT_PRESENCE_PAUSED="paused",
+    )
+    chat_presence_media = SimpleNamespace(CHAT_PRESENCE_MEDIA_TEXT="text")
     monkeypatch.setattr(
         whatsapp_module,
         "_NEONIZE_API",
@@ -82,6 +93,8 @@ def _patch_neonize_api(monkeypatch) -> None:
             MessageEv=object(),
             PairStatusEv=object(),
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
+            ChatPresence=chat_presence,
+            ChatPresenceMedia=chat_presence_media,
         ),
     )
 
@@ -168,6 +181,195 @@ async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
     await ch.send(OutboundMessage(channel="whatsapp", chat_id="12345@s.whatsapp.net", content="hi"))
 
     client.send_message.assert_awaited_once_with(("12345", "s.whatsapp.net"), "hi")
+
+
+@pytest.mark.asyncio
+async def test_send_text_passes_metadata_mentions_to_neonize(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="hi",
+            metadata={
+                "mentions": [
+                    "+15551234567@s.whatsapp.net",
+                    {"jid": "15557654321@s.whatsapp.net"},
+                    "not-a-number",
+                ]
+            },
+        )
+    )
+
+    client.send_message.assert_awaited_once_with(
+        ("12345", "s.whatsapp.net"),
+        "hi",
+        ghost_mentions="@15551234567 @15557654321",
+        mentions_are_lids=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_text_passes_lid_mentions_to_neonize(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(send_message=AsyncMock())
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="hi",
+            metadata={"mentioned_jids": ["123456789012345@lid"]},
+        )
+    )
+
+    client.send_message.assert_awaited_once_with(
+        ("12345", "s.whatsapp.net"),
+        "hi",
+        ghost_mentions="@123456789012345",
+        mentions_are_lids=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_inbound_message_starts_typing_and_reaction(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        download_any=AsyncMock(),
+        send_chat_presence=AsyncMock(),
+        build_reaction=AsyncMock(return_value="reaction-message"),
+        send_message=AsyncMock(),
+    )
+    ch = _make_channel({"reactEmoji": "👀"})
+    ch._client = client
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_neonize_message(
+        client,
+        _event(
+            message=_Proto(conversation="hello"),
+            message_id="wamid.1",
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("LID99", "lid"),
+            sender_alt=_jid("15559998888", "s.whatsapp.net"),
+            is_group=True,
+        ),
+    )
+    await asyncio.sleep(0)
+
+    client.send_chat_presence.assert_any_await(
+        ("120363000", "g.us"),
+        "composing",
+        "text",
+    )
+    client.build_reaction.assert_awaited_once_with(
+        ("120363000", "g.us"),
+        ("15559998888", "s.whatsapp.net"),
+        "wamid.1",
+        "👀",
+    )
+    assert call(("120363000", "g.us"), "reaction-message") in client.send_message.await_args_list
+    assert ch._reaction_targets["120363000@g.us"] == _ReactionTarget(
+        "wamid.1",
+        "15559998888@s.whatsapp.net",
+    )
+
+    ch._stop_typing("120363000@g.us")
+
+
+@pytest.mark.asyncio
+async def test_final_send_stops_typing_and_removes_reaction(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_chat_presence=AsyncMock(),
+        build_reaction=AsyncMock(return_value="remove-reaction"),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+    chat_id = "12345@s.whatsapp.net"
+    typing_task = asyncio.create_task(asyncio.sleep(60))
+    ch._typing_tasks[chat_id] = typing_task
+    ch._reaction_targets[chat_id] = _ReactionTarget("wamid.1", "15551234567@s.whatsapp.net")
+
+    await ch.send(OutboundMessage(channel="whatsapp", chat_id=chat_id, content="done"))
+    await asyncio.sleep(0)
+
+    assert typing_task.cancelled()
+    assert chat_id not in ch._typing_tasks
+    assert chat_id not in ch._reaction_targets
+    client.send_chat_presence.assert_awaited_once_with(
+        ("12345", "s.whatsapp.net"),
+        "paused",
+        "text",
+    )
+    client.build_reaction.assert_awaited_once_with(
+        ("12345", "s.whatsapp.net"),
+        ("15551234567", "s.whatsapp.net"),
+        "wamid.1",
+        "",
+    )
+    client.send_message.assert_has_awaits(
+        [
+            call(("12345", "s.whatsapp.net"), "remove-reaction"),
+            call(("12345", "s.whatsapp.net"), "done"),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_progress_send_keeps_typing_and_reaction(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_chat_presence=AsyncMock(),
+        build_reaction=AsyncMock(return_value="remove-reaction"),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+    chat_id = "12345@s.whatsapp.net"
+    typing_task = asyncio.create_task(asyncio.sleep(60))
+    ch._typing_tasks[chat_id] = typing_task
+    ch._reaction_targets[chat_id] = _ReactionTarget("wamid.1", "15551234567@s.whatsapp.net")
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id=chat_id,
+            content="working",
+            metadata={"_progress": True},
+        )
+    )
+
+    assert ch._typing_tasks[chat_id] is typing_task
+    assert ch._reaction_targets[chat_id] == _ReactionTarget(
+        "wamid.1",
+        "15551234567@s.whatsapp.net",
+    )
+    client.send_chat_presence.assert_not_awaited()
+    client.build_reaction.assert_not_awaited()
+    client.send_message.assert_awaited_once_with(("12345", "s.whatsapp.net"), "working")
+
+    typing_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await typing_task
 
 
 @pytest.mark.asyncio
