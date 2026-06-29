@@ -411,7 +411,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("status", "Show bot status"),
         BotCommand("history", "Show recent conversation messages"),
         BotCommand("goal", "Start a sustained objective (long-running task)"),
-        BotCommand("trigger", "Create a local trigger for this chat"),
+        BotCommand("trigger", "Create a named local trigger"),
         BotCommand("pairing", "Manage DM pairing (approve/deny/list)"),
         BotCommand("model", "Switch runtime model preset"),
         BotCommand("skill", "List enabled skills"),

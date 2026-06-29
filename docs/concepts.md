@@ -144,7 +144,7 @@ protected heartbeat system job. They run as scheduled turns in their origin
 chat/session and normally deliver the result back to that channel.
 
 External triggers are also session-bound, but they do not have their own
-schedule. Create one from the target chat with `/trigger [name]`, then call
+schedule. Create one from the target chat with `/trigger <name>`, then call
 `nanobot trigger <id> "<message>"` when a local script or external service wants
 nanobot to respond in that session. Webhook servers, third-party auth, and
 event-to-message formatting stay outside nanobot.

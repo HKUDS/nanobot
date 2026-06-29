@@ -125,7 +125,7 @@ There are two user-facing automation types:
 
 - Scheduled automations, created by the agent's cron tool, run at a time,
   interval, or cron expression.
-- External triggers, created with `/trigger [name]`, run when you call a local
+- External triggers, created with `/trigger <name>`, run when you call a local
   command such as `nanobot trigger trg_8K4P2Q9X "Review PR #4502"`.
 
 If a GitHub webhook, CI system, or another service should wake nanobot up, keep
