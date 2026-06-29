@@ -1240,3 +1240,15 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
         await stack.aclose()
 
     assert registry.tool_names == ["mcp_test_My_Tool"]
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://user:secret@host.example/sse", "https://host.example/sse"),
+        ("https://host.example:8443/mcp?token=abc#frag", "https://host.example:8443/mcp"),
+        ("https://host.example/sse", "https://host.example/sse"),
+    ],
+)
+def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
+    assert mcp_mod._redact_url(url) == expected
