@@ -44,7 +44,7 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "view": {
             "density": "comfortable",
             "show_previews": False,
-            "show_timestamps": False,
+            "show_timestamps": True,
             "show_archived": False,
             "sort": "updated_desc",
         },
