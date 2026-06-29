@@ -155,9 +155,9 @@ class AgentDefaults(Base):
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
     max_messages: int = Field(
-        default=120,
+        default=500,
         ge=0,
-    )  # Max messages to replay from session history (0 = use default 120, respects token budget)
+    )  # Last-resort max messages to replay from session history (0 = use default 500)
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,

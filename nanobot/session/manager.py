@@ -132,7 +132,7 @@ class Session:
 
     def get_history(
         self,
-        max_messages: int = 120,
+        max_messages: int = 500,
         *,
         max_tokens: int = 0,
         extend_to_user: bool = False,
@@ -143,7 +143,7 @@ class Session:
         token budget from the tail (``max_tokens``) when provided.
         """
         unconsolidated = self.messages[self.last_consolidated:]
-        max_messages = max_messages if max_messages > 0 else 120
+        max_messages = max_messages if max_messages > 0 else 500
         start_idx = recent_message_start_index(
             unconsolidated,
             max_messages,

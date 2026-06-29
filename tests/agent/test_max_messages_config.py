@@ -13,7 +13,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
 
-DEFAULT_MAX_MESSAGES = 120
+DEFAULT_MAX_MESSAGES = 500
 
 
 def _make_loop(tmp_path: Path, max_messages: int = DEFAULT_MAX_MESSAGES) -> AgentLoop:
