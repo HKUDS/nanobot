@@ -908,6 +908,10 @@
             "title": "Tujuan jangka panjang",
             "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."
           },
+          "trigger": {
+            "title": "Buat trigger lokal",
+            "description": "Buat trigger CLI yang terikat ke sesi chat ini."
+          },
           "help": {
             "title": "Tampilkan bantuan",
             "description": "Daftar perintah slash yang tersedia."
