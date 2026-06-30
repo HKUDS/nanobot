@@ -367,6 +367,30 @@ class MemoryStore:
         """Return history entries with a valid cursor > *since_cursor*."""
         return [e for e, c in self._iter_valid_entries() if c > since_cursor]
 
+    def search_history(
+        self,
+        query: str | None = None,
+        *,
+        limit: int = 20,
+        newest_first: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return validated history entries, newest-first by default.
+
+        When *query* is given, only entries whose ``content`` contains it
+        (case-insensitive substring) are returned. Malformed rows are dropped
+        (see :meth:`_iter_valid_entries`), and the result is capped at *limit*
+        (non-positive *limit* means no cap).
+        """
+        needle = query.lower() if query else None
+        matches = [
+            entry
+            for entry, _cursor in self._iter_valid_entries()
+            if needle is None or needle in entry.get("content", "").lower()
+        ]
+        if newest_first:
+            matches.reverse()
+        return matches[:limit] if limit > 0 else matches
+
     @classmethod
     def _is_internal_history_session(cls, session_key: str | None) -> bool:
         if not session_key:
