@@ -269,6 +269,14 @@ if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
   exit 0
 fi
 
+if ! tty -s; then
+  info "Input is not a terminal (stdin is a pipe or redirected)."
+  info "The setup wizard needs an interactive terminal."
+  info "Install completed. Start the wizard manually with:"
+  info "  $(nanobot_try_command) onboard --wizard"
+  exit 0
+fi
+
 info "Starting setup wizard..."
 run_nanobot onboard --wizard
 
