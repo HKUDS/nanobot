@@ -824,6 +824,16 @@ class AgentLoop:
             )
 
         session_metadata = session.metadata if session is not None else None
+        # Restore per-session model preset if one was set via /model.
+        saved_preset = self._active_preset
+        if session is not None and "model_preset" in session.metadata:
+            preset_name = session.metadata["model_preset"]
+            if preset_name and preset_name != self._active_preset:
+                try:
+                    self.set_model_preset(preset_name)
+                except (KeyError, ValueError):
+                    # Stale preset — fall back to global default.
+                    session.metadata.pop("model_preset", None)
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -864,6 +874,11 @@ class AgentLoop:
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
             reset_file_states(file_state_token)
+            if saved_preset is not None and self._active_preset != saved_preset:
+                try:
+                    self.set_model_preset(saved_preset)
+                except (KeyError, ValueError):
+                    pass
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
