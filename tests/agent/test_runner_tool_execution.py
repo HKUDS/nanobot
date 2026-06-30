@@ -358,3 +358,79 @@ async def test_runner_blocks_repeated_external_fetches():
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
     assert "repeated external lookup blocked" in blocked_tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_adds_budget_notice_near_long_tool_budget():
+    provider = MagicMock()
+    captured_final_call: list[dict] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= 16:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="work", arguments={})],
+                usage={},
+            )
+        captured_final_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "finish a large task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    notices = [
+        msg["content"]
+        for msg in captured_final_call
+        if msg.get("role") == "user" and "[Runtime Budget Notice]" in str(msg.get("content"))
+    ]
+    assert len(notices) == 1
+    assert "15 of 20 model/tool iterations" in notices[0]
+    assert "Switch to convergence mode" in notices[0]
+    assert tools.execute.await_count == 16
+
+
+@pytest.mark.asyncio
+async def test_runner_budget_notice_does_not_affect_short_runs():
+    provider = MagicMock()
+    captured_final_call: list[dict] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= 2:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="work", arguments={})],
+                usage={},
+            )
+        captured_final_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="tool result")
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "small task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert all("[Runtime Budget Notice]" not in str(msg.get("content")) for msg in captured_final_call)

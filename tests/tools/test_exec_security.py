@@ -9,7 +9,11 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -64,6 +68,21 @@ def test_exec_core_full_workspace_scope_blocks_loopback(tmp_path):
             error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
     finally:
         reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_explicit_local_service_access_allows_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), allow_local_service_access=True)
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+        error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    assert error is None
+
+
+def test_exec_explicit_local_service_access_still_blocks_metadata(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), allow_local_service_access=True)
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
+        error = tool._guard_command("curl http://169.254.169.254/latest/meta-data/", str(tmp_path))
     assert error is not None
     assert "internal/private" in error
 

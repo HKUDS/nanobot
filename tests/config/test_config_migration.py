@@ -283,3 +283,16 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
     config = load_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is False
+
+
+def test_load_config_accepts_exec_local_service_access(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tools": {"exec": {"allowLocalServiceAccess": True}}}),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.tools.exec.allow_local_service_access is True
+    assert not hasattr(config.tools, "allow_local_service_access")

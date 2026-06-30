@@ -42,6 +42,27 @@ SUSTAINED_GOAL_CONTINUE_PROMPT = (
     "objective using your tools, or call complete_goal if the work is truly finished."
 )
 
+RUNTIME_BUDGET_CONVERGENCE_PROMPT = """\
+[Runtime Budget Notice]
+You have used {used_iterations} of {max_iterations} model/tool iterations for this turn. \
+{remaining_iterations} iteration(s) remain before NanoBot must finalize without more tools.
+
+Switch to convergence mode: stop broad exploration, choose the smallest high-signal command or edit, \
+verify the likely solution, and preserve enough budget for a final answer. For coding or \
+file-producing tasks, do not mark the work complete until the smallest reliable verification passes, \
+or clearly state remaining failures.
+[/Runtime Budget Notice]"""
+
+RUNTIME_BUDGET_FINAL_PROMPT = """\
+[Runtime Budget Notice]
+Only {remaining_iterations} of {max_iterations} model/tool iteration(s) remain before NanoBot must \
+finalize without more tools.
+
+Finalize the solution path now: avoid new broad searches or builds unless essential, make the \
+smallest final fix or artifact, run one targeted verification if possible, then answer honestly with \
+the evidence or remaining failures.
+[/Runtime Budget Notice]"""
+
 
 def empty_tool_result_message(tool_name: str) -> str:
     """Short prompt-safe marker for tools that completed without visible output."""
@@ -86,6 +107,25 @@ def build_length_recovery_message() -> dict[str, str]:
 def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:
     """Prompt the model to continue when a sustained goal is still active."""
     return {"role": "user", "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT}
+
+
+def build_runtime_budget_notice_message(
+    *,
+    level: int,
+    max_iterations: int,
+    used_iterations: int,
+    remaining_iterations: int,
+) -> dict[str, str]:
+    """Prompt the model to converge as the generic tool-iteration budget runs low."""
+    template = RUNTIME_BUDGET_FINAL_PROMPT if level >= 2 else RUNTIME_BUDGET_CONVERGENCE_PROMPT
+    return {
+        "role": "user",
+        "content": template.format(
+            max_iterations=max_iterations,
+            used_iterations=used_iterations,
+            remaining_iterations=remaining_iterations,
+        ),
+    }
 
 
 def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:

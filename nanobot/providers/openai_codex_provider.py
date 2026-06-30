@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -26,6 +27,25 @@ from nanobot.providers.openai_responses import (
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
+_RESPONSE_FAILED_PREFIX = "Response failed:"
+_RETRYABLE_RESPONSE_FAILED_TOKENS = frozenset({
+    "overloaded",
+    "overloaded_error",
+    "rate_limit_exceeded",
+    "request_limit_exceeded",
+    "requests_limit_exceeded",
+    "server_error",
+    "server_is_overloaded",
+    "service_unavailable",
+    "temporarily_unavailable",
+    "too_many_requests",
+})
+_NON_RETRYABLE_RESPONSE_FAILED_TOKENS = frozenset({
+    "content_filter",
+    "content_policy_violation",
+    "cyber_policy",
+    "safety_violation",
+})
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -246,6 +266,8 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
 
     status_code = getattr(exc, "status_code", None)
     error_kind: str | None = None
+    error_type = getattr(exc, "error_type", None)
+    error_code = getattr(exc, "error_code", None)
     default_detail: str | None = None
     should_retry: bool | None = getattr(exc, "should_retry", None)
 
@@ -265,12 +287,20 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         error_kind = "http"
         default_detail = "HTTP request failed"
 
+    failed_type, failed_code = _extract_response_failed_error(detail)
+    if failed_type or failed_code:
+        error_kind = error_kind or "provider"
+        error_type = failed_type or error_type
+        error_code = failed_code or error_code
+        if should_retry is None:
+            should_retry = _should_retry_response_failed(error_type, error_code, detail)
+
     if status_code is not None and should_retry is None:
         retry_content = None if int(status_code) == 429 and isinstance(exc, _CodexHTTPError) else detail
         should_retry = _should_retry_status(
             int(status_code),
-            getattr(exc, "error_type", None),
-            getattr(exc, "error_code", None),
+            error_type,
+            error_code,
             retry_content,
         )
 
@@ -283,11 +313,54 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         retry_after=retry_after,
         error_status_code=int(status_code) if status_code is not None else None,
         error_kind=error_kind,
-        error_type=getattr(exc, "error_type", None),
-        error_code=getattr(exc, "error_code", None),
+        error_type=error_type,
+        error_code=error_code,
         error_retry_after_s=retry_after,
         error_should_retry=should_retry,
     )
+
+
+def _extract_response_failed_error(detail: str) -> tuple[str | None, str | None]:
+    """Extract provider semantic error fields from Responses SSE failures."""
+    if _RESPONSE_FAILED_PREFIX not in detail:
+        return None, None
+
+    payload = detail.split(_RESPONSE_FAILED_PREFIX, 1)[1].strip()
+    if not payload:
+        return None, None
+
+    parsed: Any = None
+    try:
+        parsed = json.loads(payload)
+    except Exception:
+        try:
+            parsed = ast.literal_eval(payload)
+        except Exception:
+            parsed = None
+
+    error_type, error_code = LLMProvider._extract_error_type_code(parsed or payload)
+    return error_type, error_code
+
+
+def _should_retry_response_failed(
+    error_type: str | None,
+    error_code: str | None,
+    detail: str,
+) -> bool | None:
+    semantic_tokens = {
+        token for token in (
+            LLMProvider._normalize_error_token(error_type),
+            LLMProvider._normalize_error_token(error_code),
+        )
+        if token is not None
+    }
+    if any(token in _NON_RETRYABLE_RESPONSE_FAILED_TOKENS for token in semantic_tokens):
+        return False
+    if any(token in _RETRYABLE_RESPONSE_FAILED_TOKENS for token in semantic_tokens):
+        return True
+    if LLMProvider._is_transient_error(detail):
+        return True
+    return None
 
 
 def _codex_log_summary(exc_type: str, response: LLMResponse) -> str:

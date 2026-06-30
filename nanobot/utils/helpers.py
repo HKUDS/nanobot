@@ -290,7 +290,8 @@ def current_time_str(timezone: str | None = None) -> str:
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
-_TOOL_RESULT_PREVIEW_CHARS = 1200
+_TOOL_RESULT_SUMMARY_MAX_EDGE_CHARS = 800
+_TOOL_RESULT_SUMMARY_MIN_EDGE_CHARS = 80
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -404,22 +405,106 @@ def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
     return "\n".join(parts)
 
 
-def _render_tool_result_reference(
-    filepath: Path,
+def build_structured_output_summary(
+    title: str,
+    text: str,
     *,
-    original_size: int,
-    preview: str,
-    truncated_preview: bool,
+    max_chars: int,
+    metadata: list[tuple[str, Any]] | None = None,
+    analysis: Any | None = None,
+    guidance: str | None = None,
 ) -> str:
-    result = (
-        f"[tool output persisted]\n"
-        f"Full output saved to: {filepath}\n"
-        f"Original size: {original_size} chars\n"
-        f"Preview:\n{preview}"
+    """Return a compact, structured head/tail summary for oversized tool output."""
+
+    if max_chars <= 0:
+        return text
+    edge_chars = min(
+        _TOOL_RESULT_SUMMARY_MAX_EDGE_CHARS,
+        max(_TOOL_RESULT_SUMMARY_MIN_EDGE_CHARS, max_chars // 3),
     )
-    if truncated_preview:
-        result += "\n...\n(Read the saved file if you need the full output.)"
-    return result
+    while True:
+        head = text[:edge_chars]
+        if len(text) > edge_chars * 2:
+            tail: str | None = text[-edge_chars:]
+            omitted_middle_chars = len(text) - len(head) - len(tail)
+        else:
+            tail = None
+            omitted_middle_chars = 0
+        result = _render_structured_output_summary(
+            title,
+            metadata=metadata or [],
+            guidance=guidance,
+            analysis=analysis,
+            head=head,
+            tail=tail,
+            omitted_middle_chars=omitted_middle_chars,
+        )
+        if len(result) <= max_chars or edge_chars <= _TOOL_RESULT_SUMMARY_MIN_EDGE_CHARS:
+            return truncate_text(result, max_chars)
+        overflow = len(result) - max_chars
+        edge_chars = max(
+            _TOOL_RESULT_SUMMARY_MIN_EDGE_CHARS,
+            edge_chars - max(overflow // 2 + 1, 16),
+        )
+
+
+def _render_structured_output_summary(
+    title: str,
+    *,
+    metadata: list[tuple[str, Any]],
+    guidance: str | None,
+    analysis: Any | None,
+    head: str,
+    tail: str | None,
+    omitted_middle_chars: int,
+) -> str:
+    lines = [title]
+    lines.extend(f"{key}: {value}" for key, value in metadata)
+    if omitted_middle_chars:
+        lines.append(f"truncation: {omitted_middle_chars:,} chars truncated from the middle")
+    if guidance:
+        lines.append(f"guidance: {guidance}")
+    lines.extend(_verification_summary_lines(analysis))
+    lines.extend(["head:", head])
+    if tail is not None:
+        lines.extend(["tail:", tail])
+    return "\n".join(lines)
+
+
+def _verification_summary_lines(analysis: Any | None) -> list[str]:
+    if analysis is None or getattr(analysis, "status", None) != "failed":
+        return []
+    lines = ["verification_status: failed"]
+    if getattr(analysis, "timed_out", False):
+        lines.append("failure_type: command timeout")
+    if getattr(analysis, "failed_tests", ()):
+        lines.append("failed_tests:")
+        lines.extend(f"- {item}" for item in analysis.failed_tests)
+    if getattr(analysis, "primary_errors", ()):
+        lines.append("primary_errors:")
+        lines.extend(f"- {item}" for item in analysis.primary_errors)
+    if getattr(analysis, "missing_artifacts", ()):
+        lines.append("missing_artifacts:")
+        lines.extend(f"- {item}" for item in analysis.missing_artifacts)
+    return lines
+
+
+def _build_tool_result_reference(filepath: Path, text: str, *, max_chars: int) -> str:
+    return build_structured_output_summary(
+        "[tool output persisted]",
+        text,
+        max_chars=max_chars,
+        metadata=[
+            ("tool_output_id", filepath.stem),
+            ("original_size_chars", len(text)),
+            ("storage", "internal audit artifact"),
+        ],
+        guidance=(
+            "Use this head/tail summary first. Avoid reading persisted "
+            "tool-output files wholesale; rerun a narrower command when "
+            "more detail is needed."
+        ),
+    )
 
 
 def _bucket_mtime(path: Path) -> float:
@@ -494,13 +579,7 @@ def maybe_persist_tool_result(
         else:
             _write_text_atomic(path, text_payload)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
-    return _render_tool_result_reference(
-        path,
-        original_size=len(text_payload),
-        preview=preview,
-        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
-    )
+    return _build_tool_result_reference(path, text_payload, max_chars=max_chars)
 
 
 def split_message(content: str, max_len: int = 2000) -> list[str]:

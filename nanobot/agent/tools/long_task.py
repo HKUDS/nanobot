@@ -23,6 +23,11 @@ from typing import TYPE_CHECKING, Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+from nanobot.agent.verification_state import (
+    clear_verification_observation,
+    format_completion_gate_message,
+    latest_verification_observation,
+)
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
@@ -187,6 +192,29 @@ class LongTaskTool(Tool, _GoalToolsMixin):
             max_length=8000,
             nullable=True,
         ),
+        verification_summary=StringSchema(
+            "For coding or file-producing tasks, summarize how the work was verified. "
+            "Mention the most relevant test/check command and whether it passed. "
+            "If no verification was possible, say why.",
+            max_length=4000,
+            nullable=True,
+        ),
+        commands_run=StringSchema(
+            "Optional concise list of verification/build commands run before completion.",
+            max_length=4000,
+            nullable=True,
+        ),
+        artifacts_created=StringSchema(
+            "Optional concise list of files, outputs, or artifacts created.",
+            max_length=4000,
+            nullable=True,
+        ),
+        remaining_failures=StringSchema(
+            "Known unresolved failures, if intentionally stopping before success. "
+            "Leave empty when verification passes.",
+            max_length=4000,
+            nullable=True,
+        ),
         required=[],
     )
 )
@@ -222,30 +250,67 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         return (
             "End bookkeeping for the active sustained goal. "
             "Use when the objective is fully achieved and verified—recap what was delivered. "
+            "For coding/file-producing tasks, run the smallest reliable verification first and include "
+            "verification_summary / commands_run / artifacts_created. "
             "Also call when the user cancels, redirects, or replaces the goal: recap must reflect "
             "what actually happened (not necessarily success). "
+            "If recent verification failed and no later verification passed, this tool will ask you to "
+            "continue fixing unless remaining_failures describes an intentional incomplete stop. "
             "If no goal is active, the tool reports that and leaves metadata unchanged."
         )
 
-    async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        recap: str | None = None,
+        verification_summary: str | None = None,
+        commands_run: str | None = None,
+        artifacts_created: str | None = None,
+        remaining_failures: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         sess = self._session()
         if sess is None:
             return "Error: complete_goal requires an active chat session."
+
+        session_key = self._request_ctx.get().session_key if self._request_ctx.get() else None
+        observation = latest_verification_observation(session_key)
+        if (
+            observation is not None
+            and observation.analysis.status == "failed"
+            and not _has_meaningful_remaining_failures(remaining_failures)
+        ):
+            return format_completion_gate_message(observation)
+
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active goal to complete."
 
         ended = _iso_now()
-        sess.metadata[GOAL_STATE_KEY] = {
+        completed = {
             **prior,
             "status": "completed",
             "completed_at": ended,
             "recap": (recap or "").strip(),
         }
+        if verification_summary:
+            completed["verification_summary"] = verification_summary.strip()
+        if commands_run:
+            completed["commands_run"] = commands_run.strip()
+        if artifacts_created:
+            completed["artifacts_created"] = artifacts_created.strip()
+        if remaining_failures:
+            completed["remaining_failures"] = remaining_failures.strip()
+        sess.metadata[GOAL_STATE_KEY] = completed
         discard_legacy_goal_state_key(sess.metadata)
         self._sessions.save(sess)
+        clear_verification_observation(session_key)
         await self._publish_goal_state_changed(sess.metadata)
         tail = (recap or "").strip()
         if tail:
             return f"Goal marked complete ({ended}). Recap:\n{tail}"
         return f"Goal marked complete ({ended})."
+
+
+def _has_meaningful_remaining_failures(value: str | None) -> bool:
+    text = (value or "").strip().lower()
+    return bool(text and text not in {"none", "no", "n/a", "na", "no remaining failures"})

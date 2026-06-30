@@ -640,6 +640,7 @@ class SessionManager:
         the most recent writes.
         """
         path = self._get_session_path(session.key)
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(".jsonl.tmp")
 
         try:

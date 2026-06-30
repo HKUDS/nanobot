@@ -50,6 +50,7 @@ from nanobot.utils.runtime import (
     build_finalization_retry_message,
     build_goal_continue_message,
     build_length_recovery_message,
+    build_runtime_budget_notice_message,
     is_blank_text,
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
@@ -67,6 +68,7 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_BUDGET_NOTICE_MIN_ITERATIONS = 20
 # Backward-compatible module attribute for tests/extensions that monkeypatch
 # the former single-file tracker hook. Runtime uses prepare_file_edit_trackers.
 prepare_file_edit_tracker = _prepare_file_edit_tracker
@@ -357,6 +359,7 @@ class AgentRunner:
         length_recovery_count = 0
         had_injections = False
         injection_cycles = 0
+        budget_notice_level_sent = 0
         compacted_tool_call_ids: set[str] = set()
         governance_config = ContextGovernanceConfig(
             provider=self.provider,
@@ -519,6 +522,12 @@ class AgentRunner:
                 )
                 if _drained:
                     had_injections = True
+                budget_notice_level_sent = self._append_runtime_budget_notice_if_needed(
+                    spec,
+                    messages,
+                    completed_iterations=iteration + 1,
+                    sent_level=budget_notice_level_sent,
+                )
                 await hook.after_iteration(context)
                 continue
 
@@ -1035,6 +1044,53 @@ class AgentRunner:
         retry_messages = list(messages)
         retry_messages.append(build_budget_exhausted_finalization_message())
         return retry_messages
+
+    @classmethod
+    def _append_runtime_budget_notice_if_needed(
+        cls,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        *,
+        completed_iterations: int,
+        sent_level: int,
+    ) -> int:
+        level = cls._runtime_budget_notice_level(
+            max_iterations=spec.max_iterations,
+            completed_iterations=completed_iterations,
+        )
+        if level <= sent_level:
+            return sent_level
+
+        remaining_iterations = max(0, spec.max_iterations - completed_iterations)
+        messages.append(build_runtime_budget_notice_message(
+            level=level,
+            max_iterations=spec.max_iterations,
+            used_iterations=completed_iterations,
+            remaining_iterations=remaining_iterations,
+        ))
+        return level
+
+    @staticmethod
+    def _runtime_budget_notice_level(
+        *,
+        max_iterations: int,
+        completed_iterations: int,
+    ) -> int:
+        """Return the convergence-warning level for a long tool loop."""
+        if max_iterations < _BUDGET_NOTICE_MIN_ITERATIONS:
+            return 0
+
+        remaining_iterations = max_iterations - completed_iterations
+        if remaining_iterations <= 0:
+            return 0
+
+        convergence_threshold = max(5, (max_iterations + 9) // 10)
+        final_threshold = max(3, (max_iterations + 32) // 33)
+        if remaining_iterations <= final_threshold:
+            return 2
+        if remaining_iterations <= convergence_threshold:
+            return 1
+        return 0
 
     @staticmethod
     def _max_iterations_fallback(spec: AgentRunSpec) -> str:

@@ -13,6 +13,11 @@ from nanobot.agent.tools.long_task import (
     CompleteGoalTool,
     LongTaskTool,
 )
+from nanobot.agent.verification_state import (
+    VerificationAnalysis,
+    clear_verification_observation,
+    record_verification_observation,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.session.goal_state import GOAL_STATE_KEY
@@ -190,6 +195,66 @@ async def test_complete_goal_without_active_is_noop_message(tmp_path):
 
     out = await cg.execute(recap="n/a")
     assert "No active" in out
+
+
+@pytest.mark.asyncio
+async def test_complete_goal_blocks_unresolved_verification_failure(tmp_path):
+    sm = SessionManager(tmp_path)
+    lt, cg = _tools(sm)
+    await lt.execute(goal="Fix the tests")
+    record_verification_observation(
+        "websocket:c1",
+        VerificationAnalysis(
+            status="failed",
+            command="pytest /tests/test_outputs.py",
+            exit_code=1,
+            failed_tests=("test_outputs.py::test_output",),
+            primary_errors=("AssertionError: wrong output",),
+        ),
+    )
+
+    out = await cg.execute(recap="Done.")
+
+    assert "not marked complete" in out
+    assert "test_outputs.py::test_output" in out
+    assert sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["status"] == "active"
+    clear_verification_observation("websocket:c1")
+
+
+@pytest.mark.asyncio
+async def test_complete_goal_allows_after_later_successful_verification(tmp_path):
+    sm = SessionManager(tmp_path)
+    lt, cg = _tools(sm)
+    await lt.execute(goal="Fix the tests")
+    record_verification_observation(
+        "websocket:c1",
+        VerificationAnalysis(
+            status="failed",
+            command="pytest /tests/test_outputs.py",
+            exit_code=1,
+            failed_tests=("test_outputs.py::test_output",),
+        ),
+    )
+    record_verification_observation(
+        "websocket:c1",
+        VerificationAnalysis(
+            status="passed",
+            command="pytest /tests/test_outputs.py",
+            exit_code=0,
+        ),
+    )
+
+    out = await cg.execute(
+        recap="Done.",
+        verification_summary="pytest /tests/test_outputs.py passed",
+        commands_run="pytest /tests/test_outputs.py",
+        artifacts_created="/app/out.txt",
+    )
+
+    assert "marked complete" in out
+    blob = sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
+    assert blob["status"] == "completed"
+    assert blob["verification_summary"] == "pytest /tests/test_outputs.py passed"
 
 
 @pytest.mark.asyncio

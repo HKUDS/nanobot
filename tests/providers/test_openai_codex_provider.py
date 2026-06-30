@@ -303,6 +303,37 @@ async def test_codex_http_error_preserves_status_and_retry_after(monkeypatch) ->
     assert response.error_should_retry is True
 
 
+def test_codex_response_failed_server_error_is_retryable() -> None:
+    response = _codex_error_response(
+        RuntimeError(
+            "Response failed: {'type': 'server_error', 'code': 'server_error', "
+            "'message': 'The server had an error while processing your request.'}"
+        )
+    )
+
+    assert response.finish_reason == "error"
+    assert response.error_kind == "provider"
+    assert response.error_type == "server_error"
+    assert response.error_code == "server_error"
+    assert response.error_should_retry is True
+    assert provider_base.LLMProvider._is_transient_response(response) is True
+
+
+def test_codex_response_failed_cyber_policy_is_not_retryable() -> None:
+    response = _codex_error_response(
+        RuntimeError(
+            "Response failed: {'type': 'invalid_request_error', 'code': 'cyber_policy', "
+            "'message': 'Request denied.'}"
+        )
+    )
+
+    assert response.error_kind == "provider"
+    assert response.error_type == "invalid_request_error"
+    assert response.error_code == "cyber_policy"
+    assert response.error_should_retry is False
+    assert provider_base.LLMProvider._is_transient_response(response) is False
+
+
 @pytest.mark.asyncio
 async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
     log_capture = _capture_codex_warnings(monkeypatch)
