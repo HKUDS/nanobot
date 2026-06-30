@@ -25,6 +25,12 @@ async def run_external_trigger_queue(
 ) -> None:
     """Poll local trigger deliveries and publish them as normal inbound messages."""
     logger.info("External trigger queue started")
+    recovered = store.recover_processing_deliveries()
+    if recovered:
+        logger.warning(
+            "Trigger: recovered {} interrupted delivery file(s) from processing",
+            recovered,
+        )
     while True:
         deliveries = store.claim_deliveries(limit=batch_size)
         if not deliveries:

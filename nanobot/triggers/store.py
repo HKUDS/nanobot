@@ -19,6 +19,7 @@ from nanobot.triggers.types import ExternalTrigger, TriggerDelivery, TriggerRunR
 _TRIGGER_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _MAX_RUN_HISTORY = 20
 _MAX_DELIVERY_ATTEMPTS = 10
+_PROCESSING_RECOVERY_ERROR = "delivery was recovered from interrupted processing"
 
 
 class TriggerStoreError(RuntimeError):
@@ -194,6 +195,26 @@ class ExternalTriggerStore:
                 claimed.append(delivery)
         return claimed
 
+    def recover_processing_deliveries(self) -> int:
+        """Requeue deliveries left in processing by an interrupted gateway."""
+        self._ensure_dirs()
+        recovered = 0
+        with self._lock:
+            for path in sorted(self.processing_dir.glob("*.json")):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    delivery = TriggerDelivery.from_dict(
+                        data.get("delivery", data),
+                        path=path,
+                    )
+                except Exception:
+                    logger.exception("Trigger: failed to parse processing delivery {}", path)
+                    self._move_bad_delivery_unlocked(path)
+                    continue
+                if self._retry_delivery_unlocked(delivery, _PROCESSING_RECOVERY_ERROR):
+                    recovered += 1
+        return recovered
+
     def complete_delivery(self, delivery: TriggerDelivery) -> None:
         """Delete a claimed delivery after it is handled."""
         if delivery.path is None:
@@ -208,19 +229,7 @@ class ExternalTriggerStore:
             return False
         self._ensure_dirs()
         with self._lock:
-            if delivery.attempts + 1 >= _MAX_DELIVERY_ATTEMPTS:
-                delivery.attempts += 1
-                delivery.last_error = error
-                failed = self.failed_dir / delivery.path.name
-                self._atomic_write(failed, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
-                delivery.path.unlink(missing_ok=True)
-                return False
-            delivery.attempts += 1
-            delivery.last_error = error
-            target = self.inbox_dir / delivery.path.name
-            self._atomic_write(target, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
-            delivery.path.unlink(missing_ok=True)
-            return True
+            return self._retry_delivery_unlocked(delivery, error)
 
     def record_delivery(
         self,
@@ -297,6 +306,23 @@ class ExternalTriggerStore:
         target = self.failed_dir / f"{path.name}.bad"
         with suppress(OSError):
             os.replace(path, target)
+
+    def _retry_delivery_unlocked(self, delivery: TriggerDelivery, error: str) -> bool:
+        if delivery.path is None:
+            return False
+        if delivery.attempts + 1 >= _MAX_DELIVERY_ATTEMPTS:
+            delivery.attempts += 1
+            delivery.last_error = error
+            failed = self.failed_dir / delivery.path.name
+            self._atomic_write(failed, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
+            delivery.path.unlink(missing_ok=True)
+            return False
+        delivery.attempts += 1
+        delivery.last_error = error
+        target = self.inbox_dir / delivery.path.name
+        self._atomic_write(target, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
+        delivery.path.unlink(missing_ok=True)
+        return True
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
