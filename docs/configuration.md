@@ -191,8 +191,6 @@ These variables are process-level switches. Set them in the same terminal, servi
 
 Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by nanobot itself and are not a supported user configuration surface.
 
-For Windows service wrappers such as WinSW or nssm, set `gateway.restartMode` to `exit` so `/restart` exits and lets the service manager perform the restart. The default `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere.
-
 ## Langfuse Observability
 
 nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper. This is configured with environment variables, not `config.json`.
@@ -1976,6 +1974,7 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
 | `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
+| `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 
 ## Subagent Concurrency
