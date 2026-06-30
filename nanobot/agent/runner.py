@@ -18,6 +18,7 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tools.clarification import ASK_CLARIFICATION_TOOL_NAME
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -117,6 +118,7 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    final_content_streamed: bool = False
 
 
 class AgentRunner:
@@ -356,6 +358,7 @@ class AgentRunner:
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
+        final_content_streamed = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
         governance_config = ContextGovernanceConfig(
@@ -432,9 +435,27 @@ class AgentRunner:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
+                clarification = self._find_clarification_call(response.tool_calls)
+                if clarification is not None and len(response.tool_calls) > 1:
+                    cancelled_tool_names = [
+                        tool_call.name
+                        for tool_call in response.tool_calls
+                        if tool_call is not clarification
+                    ]
+                    logger.info(
+                        "ask_clarification cancelled {} same-turn tool call(s) for {}; "
+                        "replanning after user reply: {}",
+                        len(cancelled_tool_names),
+                        spec.session_key or "default",
+                        ", ".join(cancelled_tool_names),
+                    )
+                tool_calls_for_turn = (
+                    [clarification] if clarification is not None else response.tool_calls
+                )
+                context.tool_calls = list(tool_calls_for_turn)
                 assistant_message = build_assistant_message(
                     response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+                    tool_calls=[tc.to_openai_tool_call() for tc in tool_calls_for_turn],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
@@ -447,11 +468,78 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in tool_calls_for_turn],
                     },
                 )
 
                 await hook.before_execute_tools(context)
+
+                if clarification is not None:
+                    result, event, fatal_error = await self._run_tool(
+                        spec,
+                        clarification,
+                        external_lookup_counts,
+                        workspace_violation_counts,
+                    )
+                    content = self.context_governor.normalize_tool_result(
+                        governance_config,
+                        clarification.id,
+                        clarification.name,
+                        result,
+                    )
+                    tool_events.append(event)
+                    if event.get("status") == "ok":
+                        tools_used.append(ASK_CLARIFICATION_TOOL_NAME)
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": clarification.id,
+                        "name": clarification.name,
+                        "content": content,
+                    }
+                    messages.append(tool_message)
+                    completed_tool_results = [tool_message]
+                    context.tool_results = [result]
+                    context.tool_events = [event]
+                    if event.get("status") != "ok":
+                        await self._emit_checkpoint(
+                            spec,
+                            {
+                                "phase": "tools_completed",
+                                "iteration": iteration,
+                                "model": spec.model,
+                                "assistant_message": assistant_message,
+                                "completed_tool_results": completed_tool_results,
+                                "pending_tool_calls": [],
+                            },
+                        )
+                        await hook.after_iteration(context)
+                        continue
+                    final_content = (
+                        f"Error: {type(fatal_error).__name__}: {fatal_error}"
+                        if fatal_error is not None else content
+                    )
+                    stop_reason = "tool_error" if fatal_error is not None else "clarification"
+                    self._append_final_message(messages, final_content)
+                    context.final_content = final_content
+                    if fatal_error is not None:
+                        error = final_content
+                        context.error = error
+                    context.stop_reason = stop_reason
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "tools_completed",
+                            "iteration": iteration,
+                            "model": spec.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": completed_tool_results,
+                            "pending_tool_calls": [],
+                        },
+                    )
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    await hook.after_iteration(context)
+                    break
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
@@ -667,6 +755,7 @@ class AgentRunner:
             final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
+            final_content_streamed = context.streamed_content
             await hook.after_iteration(context)
             break
         else:
@@ -703,6 +792,7 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            final_content_streamed=final_content_streamed,
         )
 
     def _build_request_kwargs(
@@ -1158,6 +1248,15 @@ class AgentRunner:
             if error is not None and fatal_error is None:
                 fatal_error = error
         return results, events, fatal_error
+
+    @staticmethod
+    def _find_clarification_call(
+        tool_calls: list[ToolCallRequest],
+    ) -> ToolCallRequest | None:
+        return next(
+            (tc for tc in tool_calls if tc.name == ASK_CLARIFICATION_TOOL_NAME),
+            None,
+        )
 
     async def _run_tool(
         self,

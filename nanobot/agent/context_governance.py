@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.tools.clarification import ASK_CLARIFICATION_TOOL_NAME
 from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -422,7 +423,10 @@ class ContextGovernor:
             kept_tokens += msg_tokens
         kept.reverse()
 
-        return system_messages + self._legal_history_tail(kept, non_system)
+        return system_messages + self._with_latest_clarification_pair(
+            non_system,
+            self._legal_history_tail(kept, non_system),
+        )
 
     @staticmethod
     def _summary_for(message: dict[str, Any]) -> str:
@@ -447,6 +451,67 @@ class ContextGovernor:
             if messages[idx].get("role") == "user":
                 return messages[idx:]
         return []
+
+    @staticmethod
+    def _tool_call_name(tool_call: dict[str, Any]) -> str:
+        function = tool_call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            return name if isinstance(name, str) else ""
+        name = tool_call.get("name")
+        return name if isinstance(name, str) else ""
+
+    @classmethod
+    def _is_ask_clarification_message(cls, message: dict[str, Any]) -> bool:
+        if message.get("name") == ASK_CLARIFICATION_TOOL_NAME:
+            return True
+        return any(
+            isinstance(tc, dict) and cls._tool_call_name(tc) == ASK_CLARIFICATION_TOOL_NAME
+            for tc in (message.get("tool_calls") or [])
+        )
+
+    @classmethod
+    def _with_latest_clarification_pair(
+        cls,
+        original: list[dict[str, Any]],
+        kept: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not kept or kept[-1].get("role") != "user":
+            return kept
+
+        reply = kept[-1]
+        try:
+            reply_idx = next(
+                idx for idx in range(len(original) - 1, -1, -1)
+                if original[idx] is reply or original[idx] == reply
+            )
+        except StopIteration:
+            return kept
+
+        if reply_idx < 3:
+            return kept
+        if not (
+            original[reply_idx - 3].get("role") == "assistant"
+            and cls._is_ask_clarification_message(original[reply_idx - 3])
+            and original[reply_idx - 2].get("role") == "tool"
+            and cls._is_ask_clarification_message(original[reply_idx - 2])
+            and original[reply_idx - 1].get("role") == "assistant"
+        ):
+            return kept
+
+        start = reply_idx - 3
+        if start and original[start - 1].get("role") == "user":
+            start -= 1
+        protected = [dict(message) for message in original[start: reply_idx + 1]]
+        if len(kept) >= len(protected) and kept[-len(protected):] == protected:
+            return kept
+
+        overlap = 0
+        for size in range(min(len(kept), len(protected)), 0, -1):
+            if kept[-size:] == protected[-size:]:
+                overlap = size
+                break
+        return kept[:-overlap] + protected if overlap else kept + protected
 
     def _apply_recorded_compactions(
         self,

@@ -23,8 +23,8 @@ def _make_loop(tmp_path):
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
 
@@ -198,6 +198,132 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_streamed_flag_not_set_on_clarification_without_text_delta(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.clarification import AskClarificationTool
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    async def chat_stream_with_retry(*, on_content_delta, **_kwargs):
+        return LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_clarify",
+                    name="ask_clarification",
+                    arguments={
+                        "question": "What span should I use?",
+                        "clarification_type": "missing_info",
+                        "options": ["18m", "24m"],
+                    },
+                )
+            ],
+            usage={},
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.register(AskClarificationTool())
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    result = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="design frame"),
+        on_stream=AsyncMock(),
+        on_stream_end=AsyncMock(),
+    )
+
+    assert result is not None
+    assert result.content == "What span should I use?\n\nOptions:\n1. 18m\n2. 24m"
+    assert not result.metadata.get("_streamed"), (
+        "_streamed must only be set when assistant text was actually streamed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_streamed_flag_not_set_when_only_prefinal_tool_text_streamed(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    async def chat_stream_with_retry(*, on_content_delta, **_kwargs):
+        if chat_stream_with_retry.calls == 0:
+            chat_stream_with_retry.calls += 1
+            await on_content_delta("Checking")
+            return LLMResponse(
+                content="Checking",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_list",
+                        name="list_dir",
+                        arguments={"path": "."},
+                    )
+                ],
+                usage={},
+            )
+        return LLMResponse(content="Final answer", tool_calls=[], usage={})
+
+    chat_stream_with_retry.calls = 0
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.tools.prepare_call = MagicMock(return_value=(None, {"path": "."}, None))
+    loop.tools.execute = AsyncMock(return_value="ok")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    result = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="list files"),
+        on_stream=AsyncMock(),
+        on_stream_end=AsyncMock(),
+    )
+
+    assert result is not None
+    assert result.content == "Final answer"
+    assert not result.metadata.get("_streamed"), (
+        "_streamed must not hide an unstreamed final answer after tool execution"
+    )
+
+
+@pytest.mark.asyncio
+async def test_streamed_flag_set_when_loop_streams_max_iterations_message(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="working",
+        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        usage={},
+    ))
+
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.tools.execute = AsyncMock(return_value="ok")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.max_iterations = 1
+
+    result = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="keep going"),
+        on_stream=AsyncMock(),
+        on_stream_end=AsyncMock(),
+    )
+
+    assert result is not None
+    assert "maximum number of tool call iterations" in result.content
+    assert result.metadata.get("_streamed") is True
+
+
+@pytest.mark.asyncio
 async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
@@ -215,14 +341,20 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
         )],
         usage={},
     )
-    provider.chat_stream_with_retry = AsyncMock(side_effect=[
-        tool_call_resp,
-        LLMResponse(
+    async def chat_stream_with_retry(*, on_content_delta, **_kwargs):
+        if chat_stream_with_retry.calls == 0:
+            chat_stream_with_retry.calls += 1
+            return tool_call_resp
+        await on_content_delta("I cannot access private URLs.")
+        await on_content_delta(" Please share the local file.")
+        return LLMResponse(
             content="I cannot access private URLs. Please share the local file.",
             tool_calls=[],
             usage={},
-        ),
-    ])
+        )
+
+    chat_stream_with_retry.calls = 0
+    provider.chat_stream_with_retry = chat_stream_with_retry
 
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -230,6 +362,7 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
     loop.tools.execute = AsyncMock(return_value=(
         "Error: Command blocked by safety guard (internal/private URL detected)"
     ))
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     result = await loop._process_message(
         InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hi"),

@@ -37,8 +37,17 @@ async def test_probe_returns_false_for_closed_port():
 
 @pytest.mark.asyncio
 async def test_probe_uses_default_port_for_http():
-    """When no port in URL, should default to 80 (will fail -> False)."""
-    assert await _probe_http_url("http://unreachable-host.test/mcp") is False
+    """When no port is in the URL, the probe should default to port 80."""
+    calls: list[tuple[str, int]] = []
+
+    async def _refuse(host: str, port: int):
+        calls.append((host, port))
+        raise OSError("closed")
+
+    with patch("nanobot.agent.tools.mcp.asyncio.open_connection", _refuse):
+        assert await _probe_http_url("http://example.test/mcp") is False
+
+    assert calls == [("example.test", 80)]
 
 
 # ---------------------------------------------------------------------------

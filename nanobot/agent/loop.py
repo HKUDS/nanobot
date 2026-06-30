@@ -115,6 +115,7 @@ class TurnContext:
     all_messages: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = ""
     had_injections: bool = False
+    final_content_streamed: bool = False
 
     user_persisted_early: bool = False
     save_skip: int = 0
@@ -140,6 +141,27 @@ class TurnContext:
     turn_latency_ms: int | None = None
 
     trace: list[StateTraceEntry] = field(default_factory=list)
+
+
+@dataclass
+class AgentLoopRunResult:
+    final_content: str | None
+    tools_used: list[str]
+    messages: list[dict]
+    stop_reason: str
+    had_injections: bool
+    final_content_streamed: bool = False
+
+    def __iter__(self):
+        yield self.final_content
+        yield self.tools_used
+        yield self.messages
+        yield self.stop_reason
+        yield self.had_injections
+
+
+def _run_result_final_content_streamed(result: Any) -> bool:
+    return bool(getattr(result, "final_content_streamed", False))
 
 
 class AgentLoop:
@@ -709,7 +731,7 @@ class AgentLoop:
         run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
-    ) -> tuple[str | None, list[str], list[dict], str, bool]:
+    ) -> AgentLoopRunResult:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -717,7 +739,7 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
 
-        Returns (final_content, tools_used, messages, stop_reason, had_injections).
+        Unpacks as (final_content, tools_used, messages, stop_reason, had_injections).
         """
         self._sync_subagent_runtime_limits()
 
@@ -865,6 +887,7 @@ class AgentLoop:
             reset_request_context(request_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
+        final_content_streamed = _run_result_final_content_streamed(result)
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             should_stream = turn_continuation.should_stream_budget_response(
@@ -878,9 +901,17 @@ class AgentLoop:
             if on_stream and on_stream_end and should_stream:
                 await on_stream(result.final_content or "")
                 await on_stream_end(resuming=False)
+                final_content_streamed = bool(result.final_content)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-        return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
+        return AgentLoopRunResult(
+            result.final_content,
+            result.tools_used,
+            result.messages,
+            result.stop_reason,
+            result.had_injections,
+            final_content_streamed,
+        )
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -1360,6 +1391,7 @@ class AgentLoop:
         had_injections: bool,
         on_stream: Callable[[str], Awaitable[None]] | None,
         *,
+        final_content_streamed: bool = False,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
@@ -1372,7 +1404,11 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason not in {"error", "tool_error"}:
+        if (
+            on_stream is not None
+            and final_content_streamed
+            and stop_reason not in {"error", "tool_error"}
+        ):
             meta["_streamed"] = True
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
@@ -1505,10 +1541,19 @@ class AgentLoop:
             "running",
             started_at=ctx.visible_run_started_at,
         )
+        legacy_final_content_streamed = False
+
+        async def _on_stream(delta: str) -> None:
+            nonlocal legacy_final_content_streamed
+            if delta:
+                legacy_final_content_streamed = True
+            if ctx.on_stream is not None:
+                await ctx.on_stream(delta)
+
         result = await self._run_agent_loop(
             ctx.initial_messages,
             on_progress=ctx.on_progress,
-            on_stream=ctx.on_stream,
+            on_stream=_on_stream if ctx.on_stream is not None else None,
             on_stream_end=ctx.on_stream_end,
             on_retry_wait=ctx.on_retry_wait,
             session=ctx.session,
@@ -1529,6 +1574,9 @@ class AgentLoop:
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
+        ctx.final_content_streamed = _run_result_final_content_streamed(result)
+        if not hasattr(result, "final_content_streamed"):
+            ctx.final_content_streamed = ctx.final_content_streamed or legacy_final_content_streamed
         await turn_continuation.maybe_continue_turn(ctx)
         return "ok"
 
@@ -1582,6 +1630,7 @@ class AgentLoop:
             ctx.stop_reason,
             ctx.had_injections,
             ctx.on_stream,
+            final_content_streamed=ctx.final_content_streamed,
             turn_latency_ms=ctx.turn_latency_ms,
         )
         if ctx.ephemeral and ctx.outbound is not None:

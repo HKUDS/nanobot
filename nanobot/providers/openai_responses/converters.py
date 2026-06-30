@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from nanobot.providers.base import tool_arguments_json_for_replay
+from nanobot.providers.tool_call_ids import shorten_overlong_tool_call_id
 
 
 def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -42,6 +43,7 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
             for tool_call in msg.get("tool_calls", []) or []:
                 fn = tool_call.get("function") or {}
                 call_id, item_id = split_tool_call_id(tool_call.get("id"))
+                call_id = shorten_overlong_tool_call_id(call_id)
                 response_item_id = _unique_item_id(item_id or f"fc_{idx}", used_item_ids)
                 input_items.append({
                     "type": "function_call",
@@ -54,6 +56,7 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
 
         if role == "tool":
             call_id, _ = split_tool_call_id(msg.get("tool_call_id"))
+            call_id = shorten_overlong_tool_call_id(call_id)
             output_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
             input_items.append({"type": "function_call_output", "call_id": call_id, "output": output_text})
 
