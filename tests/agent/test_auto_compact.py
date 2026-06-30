@@ -91,7 +91,6 @@ def _make_fake_compact(
 
         tail = list(session.messages[session.last_consolidated:])
         if not tail:
-            session.updated_at = datetime.now()
             loop.sessions.save(session)
             return ""
 
@@ -111,7 +110,6 @@ def _make_fake_compact(
         archive_msgs = result.dropped[result.already_consolidated_count:]
 
         if not archive_msgs and not kept:
-            session.updated_at = datetime.now()
             loop.sessions.save(session)
             return ""
 
@@ -132,7 +130,6 @@ def _make_fake_compact(
 
         session.messages = kept
         session.last_consolidated = 0
-        session.updated_at = datetime.now()
         loop.sessions.save(session)
         return s
 
@@ -1021,27 +1018,28 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
         assert _fake_compact.state["count"] == 1
 
-        # Second tick: should NOT re-schedule (updated_at is fresh after clear)
+        # Second tick: should NOT re-schedule because the session has no removable tail.
         await self._run_check_expired(loop)
         assert _fake_compact.state["count"] == 1  # Still 1, not re-scheduled
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_empty_skip_refreshes_updated_at_prevents_reschedule(self, tmp_path):
-        """Empty session skip refreshes updated_at, preventing immediate re-scheduling."""
+    async def test_empty_session_does_not_schedule_idle_compact(self, tmp_path):
+        """Empty expired sessions have no removable tail and should not schedule."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        loop.consolidator.compact_idle_session = _make_fake_compact(loop)
+        _fake_compact = _make_fake_compact(loop)
+        loop.consolidator.compact_idle_session = _fake_compact
 
-        # First tick: skips (no messages), refreshes updated_at
         await self._run_check_expired(loop)
+        assert _fake_compact.state["count"] == 0
         assert "cli:test" not in loop.auto_compact._summaries
 
-        # Second tick: should NOT re-schedule because updated_at is fresh
         await self._run_check_expired(loop)
+        assert _fake_compact.state["count"] == 0
         assert "cli:test" not in loop.auto_compact._summaries
         await loop.close_mcp()
 
