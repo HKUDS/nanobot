@@ -24,6 +24,14 @@ from nanobot.providers.base import (
 
 _ALNUM = string.ascii_letters + string.digits
 
+# Boundary inside the system prompt that separates the stable prefix (identity /
+# bootstrap / tool_contract / memory / skills) from the per-turn-mutating
+# "Recent History" tail. Kept in sync with
+# ``nanobot.agent.context.RECENT_HISTORY_HEADING`` — duplicated here as a literal
+# to avoid a providers -> agent import dependency. The leading separator is the
+# ``"\n\n---\n\n"`` join used by ``ContextBuilder.build_system_prompt``.
+_RECENT_HISTORY_BOUNDARY = "\n\n---\n\n# Recent History"
+
 
 def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
@@ -494,7 +502,24 @@ class AnthropicProvider(LLMProvider):
         marker = {"type": "ephemeral"}
 
         if isinstance(system, str) and system:
-            system = [{"type": "text", "text": system, "cache_control": marker}]
+            # The system prompt ends with a "# Recent History" block that grows
+            # every turn. Putting the only breakpoint at the end of the whole
+            # string would re-cache the large stable prefix (identity /
+            # tool_contract / memory / skills) on every turn. Split the prompt at
+            # the Recent History boundary and place the breakpoint at the end of
+            # the *stable* prefix, leaving the mutating tail uncached. This keeps
+            # the system at a single breakpoint (relocated, not added).
+            prefix, sep, tail = system.partition(_RECENT_HISTORY_BOUNDARY)
+            if sep:
+                # ``tail`` is everything after the boundary; rebuild the dropped
+                # heading so the second block is self-contained.
+                history_block = "# Recent History" + tail
+                system = [
+                    {"type": "text", "text": prefix, "cache_control": marker},
+                    {"type": "text", "text": history_block},
+                ]
+            else:
+                system = [{"type": "text", "text": system, "cache_control": marker}]
         elif isinstance(system, list) and system:
             system = list(system)
             system[-1] = {**system[-1], "cache_control": marker}
