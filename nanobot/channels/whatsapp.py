@@ -499,9 +499,7 @@ class WhatsAppChannel(BaseChannel):
                 self._self_jids.add(jid)
                 self._self_jids.add(_bare_jid(jid))
 
-    async def _send_read_receipt(
-        self, client: Any, info: Any, source: Any, message_id: str
-    ) -> None:
+    async def _send_read_receipt(self, client: Any, source: Any, message_id: str) -> None:
         """Send a read receipt (blue double-check) for an incoming message.
 
         Best-effort: any failure is logged at debug level and swallowed so it
@@ -559,7 +557,7 @@ class WhatsAppChannel(BaseChannel):
                 self._processed_message_ids.popitem(last=False)
 
         # Mark the incoming message as read (blue double-check). Best-effort.
-        await self._send_read_receipt(client, info, source, message_id)
+        await self._send_read_receipt(client, source, message_id)
 
         participant_jid = _normalize_jid(_safe_attr(source, "Sender"))
         sender_alt_jid = _normalize_jid(_safe_attr(source, "SenderAlt"))
