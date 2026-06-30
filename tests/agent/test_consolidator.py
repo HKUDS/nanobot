@@ -6,6 +6,7 @@ import pytest
 
 from nanobot.agent.memory import (
     _ARCHIVE_SUMMARY_MAX_CHARS,
+    LAST_COMPACTED_AT_META,
     Consolidator,
     MemoryStore,
 )
@@ -430,9 +431,11 @@ class TestCompactIdleSession:
         )
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:test")
+        old_ts = session.updated_at
         for i in range(20):
             session.add_message("user", f"user msg {i}")
             session.add_message("assistant", f"assistant msg {i}")
+        session.updated_at = old_ts
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session("cli:test", max_suffix=8)
@@ -445,6 +448,8 @@ class TestCompactIdleSession:
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
         assert "last_active" in meta
+        assert LAST_COMPACTED_AT_META in reloaded.metadata
+        assert reloaded.updated_at == old_ts
 
     @pytest.mark.asyncio
     async def test_summarizes_retained_suffix_not_just_dropped_prefix(
@@ -518,8 +523,10 @@ class TestCompactIdleSession:
         assert entries[0]["session_key"] == "cli:test"
 
     @pytest.mark.asyncio
-    async def test_empty_session_refreshes_timestamp(self, real_consolidator):
-        """Empty session with old updated_at → refreshed after call, returns ''."""
+    async def test_empty_session_records_compaction_without_refreshing_timestamp(
+        self, real_consolidator
+    ):
+        """Empty session with old updated_at records maintenance separately."""
         from datetime import datetime, timedelta
 
         sessions = real_consolidator.sessions
@@ -532,7 +539,8 @@ class TestCompactIdleSession:
         assert result == ""
 
         reloaded = sessions.get_or_create("cli:empty")
-        assert reloaded.updated_at > old_ts
+        assert reloaded.updated_at == old_ts
+        assert LAST_COMPACTED_AT_META in reloaded.metadata
 
     @pytest.mark.asyncio
     async def test_nothing_summary_not_stored(self, real_consolidator, mock_provider):

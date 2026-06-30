@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Callable, Coroutine
 
 from loguru import logger
 
+from nanobot.agent.memory import LAST_COMPACTED_AT_META
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -26,13 +27,36 @@ class AutoCompact:
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
 
+    @staticmethod
+    def _timestamp(ts: datetime | str | None) -> float | None:
+        if not ts:
+            return None
+        if isinstance(ts, str):
+            try:
+                ts = datetime.fromisoformat(ts)
+            except ValueError:
+                return None
+        return ts.timestamp()
+
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
-        if self._ttl <= 0 or not ts:
+        ts_epoch = self._timestamp(ts)
+        if self._ttl <= 0 or ts_epoch is None:
             return False
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts)
-        return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
+        now_epoch = self._timestamp(now or datetime.now())
+        return now_epoch is not None and now_epoch - ts_epoch >= self._ttl * 60
+
+    def _compacted_after_activity(self, key: str, last_active: datetime | str | None) -> bool:
+        metadata_row = self.sessions.read_session_metadata(key)
+        metadata = metadata_row.get("metadata") if isinstance(metadata_row, dict) else None
+        if not isinstance(metadata, dict):
+            return False
+        compacted_at = metadata.get(LAST_COMPACTED_AT_META)
+        if not isinstance(compacted_at, str):
+            return False
+        compacted_epoch = self._timestamp(compacted_at)
+        active_epoch = self._timestamp(last_active)
+        return compacted_epoch is not None and active_epoch is not None and compacted_epoch >= active_epoch
 
     @staticmethod
     def _format_summary(text: str, last_active: datetime) -> str:
@@ -52,7 +76,8 @@ class AutoCompact:
                 continue
             if key in active_session_keys:
                 continue
-            if self._is_expired(info.get("updated_at"), now):
+            updated_at = info.get("updated_at")
+            if self._is_expired(updated_at, now) and not self._compacted_after_activity(key, updated_at):
                 self._archiving.add(key)
                 schedule_background(self._archive(key))
 

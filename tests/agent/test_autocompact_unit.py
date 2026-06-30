@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.agent.memory import LAST_COMPACTED_AT_META
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -272,6 +273,24 @@ class TestCheckExpired:
 
         scheduler.assert_not_called()
         assert "dream:20260602-155256" not in ac._archiving
+
+    def test_already_compacted_session_skips(self):
+        """Expired session already maintained after last activity should not be re-scheduled."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        last_active = datetime(2026, 1, 1, 10, 0, 0)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:done", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.read_session_metadata.return_value = {
+            "metadata": {LAST_COMPACTED_AT_META: datetime(2026, 1, 1, 10, 30, 0).isoformat()},
+        }
+        ac.sessions = mock_sm
+
+        scheduler = MagicMock()
+        ac.check_expired(scheduler)
+
+        scheduler.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
