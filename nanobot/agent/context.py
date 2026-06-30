@@ -6,6 +6,7 @@ import platform
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from nanobot.agent import attachment_registry
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
@@ -269,10 +270,14 @@ class ContextBuilder:
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
+            # Mint a turn-scoped opaque handle so a non-vision model whose
+            # image_url block gets stripped still has a forwardable reference
+            # (the id, never the path). See nanobot.agent.attachment_registry.
+            handle = attachment_registry.mint(str(p))
             images.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
+                "_meta": {"path": str(p), "id": handle},
             })
 
         if not images:

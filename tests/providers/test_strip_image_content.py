@@ -170,3 +170,67 @@ class TestStripImageContentInplace:
         # The original list was mutated
         assert original_content[1]["type"] == "text"
         assert "/img.png" not in original_content[1]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Opaque attachment handle marker (#4345): id present -> forwardable marker,
+# id absent -> plain "omitted" placeholder. The path is never in either.
+# ---------------------------------------------------------------------------
+
+
+class TestStrippedImageHandleMarker:
+    def test_marker_carries_id_when_meta_id_present(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                        "_meta": {"path": "/srv/uploads/a.png", "id": "attachment_1"},
+                    },
+                ],
+            }
+        ]
+        result = LLMProvider._strip_image_content(messages)
+        assert result is not None
+        text = result[0]["content"][0]["text"]
+        assert text == "[image attachment: attachment_1; cannot be viewed by this model]"
+        assert "/srv/uploads/a.png" not in text  # still no raw path
+
+    def test_marker_falls_back_to_placeholder_when_no_id(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                        "_meta": {"path": "/srv/uploads/a.png"},
+                    },
+                ],
+            }
+        ]
+        result = LLMProvider._strip_image_content(messages)
+        assert result is not None
+        text = result[0]["content"][0]["text"]
+        assert "not delivered" in text.lower()
+        assert "attachment_" not in text
+
+    def test_inplace_marker_carries_id_when_meta_id_present(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                        "_meta": {"path": "/srv/uploads/b.png", "id": "attachment_2"},
+                    },
+                ],
+            }
+        ]
+        assert LLMProvider._strip_image_content_inplace(messages) is True
+        text = messages[0]["content"][0]["text"]
+        assert text == "[image attachment: attachment_2; cannot be viewed by this model]"
+        assert "/srv/uploads/b.png" not in text

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent import attachment_registry
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
@@ -1463,6 +1464,9 @@ class AgentLoop:
             ctx.msg.metadata,
             session_key=ctx.session_key,
         )
+        # Reset the turn-scoped attachment registry before _build_user_content
+        # mints handles for this turn's uploads (in _build_initial_messages below).
+        attachment_registry.begin_turn()
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()

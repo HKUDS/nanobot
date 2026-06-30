@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent import attachment_registry
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
@@ -36,6 +37,15 @@ from nanobot.security.workspace_access import current_tool_workspace
             description=(
                 "Optional list of existing file paths to attach. "
                 "Use artifact paths returned by generate_image here when delivering generated images."
+            ),
+        ),
+        attachment_handles=ArraySchema(
+            StringSchema(""),
+            description=(
+                "Optional list of opaque attachment ids (from "
+                "'[image attachment: <id>; cannot be viewed by this model]' markers) to "
+                "forward an uploaded file you cannot view. These are NOT file paths and are "
+                "not interchangeable with media — pass the id exactly as shown in the marker."
             ),
         ),
         buttons=ArraySchema(
@@ -186,6 +196,7 @@ class MessageTool(Tool, ContextAware):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
+        attachment_handles: list[str] | None = None,
         buttons: list[list[str]] | None = None,
         **kwargs: Any,
     ) -> str:
@@ -239,6 +250,22 @@ class MessageTool(Tool, ContextAware):
                 media = self._resolve_media(media)
             except (OSError, PermissionError, ValueError) as e:
                 return f"Error: media path is not allowed: {str(e)}"
+
+        # Resolve opaque attachment handles via a pure turn-scoped registry lookup
+        # — never path resolution. A forged id, a path passed as a handle, or a
+        # stale id from a previous turn all miss and are dropped. Resolved paths
+        # are server-minted from this turn's actual upload, so they bypass the
+        # workspace restriction that _resolve_media enforces for model-supplied paths.
+        if attachment_handles:
+            resolved_handles: list[str] = []
+            for handle in attachment_handles:
+                path = attachment_registry.resolve(handle) if isinstance(handle, str) else None
+                if path:
+                    resolved_handles.append(path)
+                else:
+                    logger.warning("MessageTool: unknown attachment handle dropped: %r", handle)
+            if resolved_handles:
+                media = (media or []) + resolved_handles
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id:
