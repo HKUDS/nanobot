@@ -493,6 +493,7 @@
       "emptyHint": "Créez-la depuis son point d'exécution pour que nanobot conserve le bon contexte.",
       "oneShot": "Ponctuelle",
       "systemTask": "Automatisation gérée par le système",
+      "localTrigger": "Déclencheur local",
       "labels": {
         "schedule": "Planning",
         "next": "Prochaine",
@@ -551,11 +552,13 @@
         "weekdaysAt": "Jours ouvrés à {{time}}",
         "hourlyAt": "Toutes les heures à :{{minute}}",
         "hourlyWindow": "Toutes les heures {{start}}-{{end}} à :{{minute}}",
+        "local": "Déclencheur local",
         "custom": "Planning personnalisé"
       },
       "next": {
         "paused": "En pause",
         "pending": "En cours d’exécution",
+        "local": "En attente du déclencheur",
         "none": "Aucune prochaine exécution"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "Tous les {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Déclencheur local",
       "unknown": "Planification personnalisée"
     },
     "next": {
       "label": "Prochaine exécution : {{time}}",
       "disabled": "En pause",
+      "local": "En attente du déclencheur",
       "none": "Aucune prochaine exécution"
     }
   },
@@ -791,12 +796,14 @@
         "every": "Toutes les {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Déclencheur local",
         "unknown": "Planification personnalisée"
       },
       "next": {
         "label": "Prochaine {{time}}",
         "pending": "Exécution imminente",
         "disabled": "En pause",
+        "local": "En attente du déclencheur",
         "none": "Aucune prochaine exécution"
       }
     },

@@ -2998,8 +2998,8 @@ def test_handle_webui_thread_get_does_not_backfill_trigger_internal_prompt(
     session = sessions.get_or_create(key)
     session.add_message(
         "user",
-        "External trigger received: PR review",
-        **{AUTOMATION_HISTORY_META: {"kind": "trigger", "trigger_id": "trg_123"}},
+        "Local trigger received: PR review",
+        **{AUTOMATION_HISTORY_META: {"kind": "local_trigger", "trigger_id": "trg_123"}},
     )
     session.add_message("assistant", "PR #4502 已经开始 review。")
     sessions.save(session)

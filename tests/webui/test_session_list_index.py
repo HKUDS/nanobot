@@ -94,8 +94,8 @@ def test_webui_session_list_skips_trigger_internal_user_preview(tmp_path: Path) 
     session = manager.get_or_create("websocket:trigger-preview")
     session.add_message(
         "user",
-        "External trigger received: PR review",
-        **{AUTOMATION_HISTORY_META: {"kind": "trigger", "trigger_id": "trg_123"}},
+        "Local trigger received: PR review",
+        **{AUTOMATION_HISTORY_META: {"kind": "local_trigger", "trigger_id": "trg_123"}},
     )
     session.add_message("assistant", "PR #4502 已经开始 review。")
     manager.save(session)

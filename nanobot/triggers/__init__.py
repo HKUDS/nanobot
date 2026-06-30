@@ -1,16 +1,16 @@
-"""Local external trigger support."""
+"""Local trigger support."""
 
-from nanobot.triggers.store import (
-    ExternalTriggerStore,
+from nanobot.triggers.local_store import (
+    LocalTriggerStore,
     TriggerDisabledError,
     TriggerNotFoundError,
     TriggerStoreError,
 )
-from nanobot.triggers.types import ExternalTrigger, TriggerDelivery, TriggerRunRecord
+from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery, TriggerRunRecord
 
 __all__ = [
-    "ExternalTrigger",
-    "ExternalTriggerStore",
+    "LocalTrigger",
+    "LocalTriggerStore",
     "TriggerDelivery",
     "TriggerDisabledError",
     "TriggerNotFoundError",

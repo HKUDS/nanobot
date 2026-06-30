@@ -14,7 +14,7 @@ from typing import Any
 from filelock import FileLock
 from loguru import logger
 
-from nanobot.triggers.types import ExternalTrigger, TriggerDelivery, TriggerRunRecord
+from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery, TriggerRunRecord
 
 _TRIGGER_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _MAX_RUN_HISTORY = 20
@@ -34,7 +34,7 @@ class TriggerDisabledError(TriggerStoreError):
     """Raised when a trigger is disabled."""
 
 
-class ExternalTriggerStore:
+class LocalTriggerStore:
     """Persistent local triggers for one workspace."""
 
     def __init__(self, workspace_path: Path):
@@ -55,8 +55,8 @@ class ExternalTriggerStore:
         session_key: str,
         sender_id: str = "trigger",
         origin_metadata: dict[str, Any] | None = None,
-    ) -> ExternalTrigger:
-        """Create a new session-bound external trigger."""
+    ) -> LocalTrigger:
+        """Create a new session-bound local trigger."""
         clean_name = _clean_name(name)
         channel = channel.strip()
         chat_id = chat_id.strip()
@@ -70,7 +70,7 @@ class ExternalTriggerStore:
             triggers = self._load_triggers_unlocked()
             existing_ids = {trigger.id for trigger in triggers}
             trigger_id = _new_trigger_id(existing_ids)
-            trigger = ExternalTrigger(
+            trigger = LocalTrigger(
                 id=trigger_id,
                 name=clean_name,
                 enabled=True,
@@ -86,7 +86,7 @@ class ExternalTriggerStore:
             self._save_triggers_unlocked(triggers)
             return trigger
 
-    def list_triggers(self, *, include_disabled: bool = False) -> list[ExternalTrigger]:
+    def list_triggers(self, *, include_disabled: bool = False) -> list[LocalTrigger]:
         """List triggers in this workspace."""
         self._ensure_dirs()
         with self._lock:
@@ -100,7 +100,7 @@ class ExternalTriggerStore:
         session_key: str,
         *,
         include_disabled: bool = True,
-    ) -> list[ExternalTrigger]:
+    ) -> list[LocalTrigger]:
         """List triggers bound to one session key."""
         return [
             trigger
@@ -108,13 +108,13 @@ class ExternalTriggerStore:
             if trigger.session_key == session_key
         ]
 
-    def get(self, trigger_id: str) -> ExternalTrigger | None:
+    def get(self, trigger_id: str) -> LocalTrigger | None:
         """Return one trigger by ID."""
         self._ensure_dirs()
         with self._lock:
             return self._find_unlocked(self._load_triggers_unlocked(), trigger_id)
 
-    def enable(self, trigger_id: str, *, enabled: bool) -> ExternalTrigger | None:
+    def enable(self, trigger_id: str, *, enabled: bool) -> LocalTrigger | None:
         """Enable or disable a trigger."""
         self._ensure_dirs()
         with self._lock:
@@ -127,7 +127,7 @@ class ExternalTriggerStore:
             self._save_triggers_unlocked(triggers)
             return trigger
 
-    def update(self, trigger_id: str, *, name: str | None = None) -> ExternalTrigger | None:
+    def update(self, trigger_id: str, *, name: str | None = None) -> LocalTrigger | None:
         """Update mutable trigger fields."""
         self._ensure_dirs()
         with self._lock:
@@ -267,13 +267,13 @@ class ExternalTriggerStore:
         self.processing_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir.mkdir(parents=True, exist_ok=True)
 
-    def _load_triggers_unlocked(self) -> list[ExternalTrigger]:
+    def _load_triggers_unlocked(self) -> list[LocalTrigger]:
         if not self.store_path.exists():
             return []
         try:
             data = json.loads(self.store_path.read_text(encoding="utf-8"))
             return [
-                ExternalTrigger.from_dict(raw)
+                LocalTrigger.from_dict(raw)
                 for raw in data.get("triggers", [])
                 if isinstance(raw, dict)
             ]
@@ -288,7 +288,7 @@ class ExternalTriggerStore:
                 "as a .corrupt-<ts> backup"
             ) from exc
 
-    def _save_triggers_unlocked(self, triggers: list[ExternalTrigger]) -> None:
+    def _save_triggers_unlocked(self, triggers: list[LocalTrigger]) -> None:
         payload = {
             "version": 1,
             "triggers": [trigger.to_dict() for trigger in triggers],
@@ -297,9 +297,9 @@ class ExternalTriggerStore:
 
     @staticmethod
     def _find_unlocked(
-        triggers: list[ExternalTrigger],
+        triggers: list[LocalTrigger],
         trigger_id: str,
-    ) -> ExternalTrigger | None:
+    ) -> LocalTrigger | None:
         return next((trigger for trigger in triggers if trigger.id == trigger_id), None)
 
     def _move_bad_delivery_unlocked(self, path: Path) -> None:
@@ -356,7 +356,7 @@ def _new_trigger_id(existing_ids: set[str]) -> str:
 
 def _clean_name(name: str) -> str:
     stripped = " ".join(name.strip().split())
-    return (stripped or "External trigger")[:120]
+    return (stripped or "Local trigger")[:120]
 
 
 def _now_ms() -> int:

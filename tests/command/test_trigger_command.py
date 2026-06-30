@@ -8,15 +8,15 @@ import pytest
 from nanobot.bus.events import InboundMessage
 from nanobot.command.builtin import build_help_text, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
-from nanobot.triggers.store import ExternalTriggerStore
+from nanobot.triggers.local_store import LocalTriggerStore
 
 
 @pytest.mark.asyncio
 async def test_trigger_command_creates_session_bound_local_trigger(tmp_path: Path) -> None:
     router = CommandRouter()
     register_builtin_commands(router)
-    store = ExternalTriggerStore(tmp_path)
-    loop = SimpleNamespace(workspace=tmp_path, external_trigger_store=store)
+    store = LocalTriggerStore(tmp_path)
+    loop = SimpleNamespace(workspace=tmp_path, local_trigger_store=store)
     msg = InboundMessage(
         channel="websocket",
         sender_id="user",
@@ -49,8 +49,8 @@ async def test_trigger_command_creates_session_bound_local_trigger(tmp_path: Pat
 async def test_trigger_command_without_name_returns_usage_only(tmp_path: Path) -> None:
     router = CommandRouter()
     register_builtin_commands(router)
-    store = ExternalTriggerStore(tmp_path)
-    loop = SimpleNamespace(workspace=tmp_path, external_trigger_store=store)
+    store = LocalTriggerStore(tmp_path)
+    loop = SimpleNamespace(workspace=tmp_path, local_trigger_store=store)
     msg = InboundMessage(
         channel="websocket",
         sender_id="user",

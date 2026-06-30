@@ -1,4 +1,4 @@
-"""Persistent types for local external triggers."""
+"""Persistent types for local triggers."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class TriggerRunRecord:
 
 
 @dataclass
-class ExternalTrigger:
+class LocalTrigger:
     """A session-bound local trigger."""
 
     id: str
@@ -59,7 +59,7 @@ class ExternalTrigger:
     run_history: list[TriggerRunRecord] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExternalTrigger":
+    def from_dict(cls, data: dict[str, Any]) -> "LocalTrigger":
         history = [
             record if isinstance(record, TriggerRunRecord) else TriggerRunRecord.from_dict(record)
             for record in data.get("runHistory", data.get("run_history", []))

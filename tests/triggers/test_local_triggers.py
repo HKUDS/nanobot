@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from nanobot.bus.events import InboundMessage
-from nanobot.triggers.runner import run_external_trigger_queue
-from nanobot.triggers.store import ExternalTriggerStore, TriggerDisabledError
+from nanobot.triggers.local_runner import run_local_trigger_queue
+from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 
 def test_trigger_store_allows_multiple_triggers_per_session(tmp_path: Path) -> None:
-    store = ExternalTriggerStore(tmp_path)
+    store = LocalTriggerStore(tmp_path)
 
     first = store.create(
         name="PR review",
@@ -36,7 +36,7 @@ def test_trigger_store_allows_multiple_triggers_per_session(tmp_path: Path) -> N
 
 
 def test_enqueue_rejects_disabled_trigger(tmp_path: Path) -> None:
-    store = ExternalTriggerStore(tmp_path)
+    store = LocalTriggerStore(tmp_path)
     trigger = store.create(
         name="Disabled",
         channel="telegram",
@@ -50,7 +50,7 @@ def test_enqueue_rejects_disabled_trigger(tmp_path: Path) -> None:
 
 
 def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path) -> None:
-    store = ExternalTriggerStore(tmp_path)
+    store = LocalTriggerStore(tmp_path)
     trigger = store.create(
         name="PR review",
         channel="websocket",
@@ -63,9 +63,9 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
     assert len(claimed) == 1
     assert claimed[0].path is not None
     assert claimed[0].path.parent.name == "processing"
-    assert ExternalTriggerStore(tmp_path).claim_deliveries() == []
+    assert LocalTriggerStore(tmp_path).claim_deliveries() == []
 
-    restarted = ExternalTriggerStore(tmp_path)
+    restarted = LocalTriggerStore(tmp_path)
     assert restarted.recover_processing_deliveries() == 1
 
     reclaimed = restarted.claim_deliveries()
@@ -77,8 +77,8 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_external_trigger_queue_publishes_bound_inbound_message(tmp_path: Path) -> None:
-    store = ExternalTriggerStore(tmp_path)
+async def test_local_trigger_queue_publishes_bound_inbound_message(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
     trigger = store.create(
         name="PR review",
         channel="websocket",
@@ -94,7 +94,7 @@ async def test_external_trigger_queue_publishes_bound_inbound_message(tmp_path: 
             published.append(msg)
 
     task = asyncio.create_task(
-        run_external_trigger_queue(store=store, bus=_Bus(), poll_interval_s=0.01)
+        run_local_trigger_queue(store=store, bus=_Bus(), poll_interval_s=0.01)
     )
     try:
         for _ in range(100):
@@ -116,10 +116,10 @@ async def test_external_trigger_queue_publishes_bound_inbound_message(tmp_path: 
     assert msg.metadata[WEBUI_TURN_METADATA_KEY].startswith(f"trigger:{trigger.id}:")
     assert msg.metadata[WEBUI_TURN_METADATA_KEY] != "old-turn"
     assert msg.metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] == {
-        "kind": "trigger",
+        "kind": "local_trigger",
         "label": "PR review",
     }
-    assert msg.metadata["_external_trigger"]["trigger_id"] == trigger.id
+    assert msg.metadata["_local_trigger"]["trigger_id"] == trigger.id
 
     stored = store.get(trigger.id)
     assert stored is not None
@@ -129,10 +129,10 @@ async def test_external_trigger_queue_publishes_bound_inbound_message(tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_external_trigger_queue_recovers_processing_delivery_on_start(
+async def test_local_trigger_queue_recovers_processing_delivery_on_start(
     tmp_path: Path,
 ) -> None:
-    store = ExternalTriggerStore(tmp_path)
+    store = LocalTriggerStore(tmp_path)
     trigger = store.create(
         name="PR review",
         channel="websocket",
@@ -147,9 +147,9 @@ async def test_external_trigger_queue_recovers_processing_delivery_on_start(
         async def publish_inbound(self, msg: InboundMessage) -> None:
             published.append(msg)
 
-    restarted = ExternalTriggerStore(tmp_path)
+    restarted = LocalTriggerStore(tmp_path)
     task = asyncio.create_task(
-        run_external_trigger_queue(store=restarted, bus=_Bus(), poll_interval_s=0.01)
+        run_local_trigger_queue(store=restarted, bus=_Bus(), poll_interval_s=0.01)
     )
     try:
         for _ in range(100):
@@ -163,5 +163,5 @@ async def test_external_trigger_queue_recovers_processing_delivery_on_start(
 
     assert len(published) == 1
     assert published[0].content == "Review PR #4591"
-    assert published[0].metadata["_external_trigger"]["trigger_id"] == trigger.id
+    assert published[0].metadata["_local_trigger"]["trigger_id"] == trigger.id
     assert restarted.claim_deliveries() == []

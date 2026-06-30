@@ -8,9 +8,9 @@ from typing import Any, Protocol
 from nanobot.cron.types import CronJob
 from nanobot.session.automation_turns import is_automation_history_message
 from nanobot.session.manager import _message_preview_text
-from nanobot.triggers.types import ExternalTrigger
+from nanobot.triggers.local_types import LocalTrigger
 
-AutomationJob = CronJob | ExternalTrigger
+AutomationJob = CronJob | LocalTrigger
 
 
 class _CronServiceLike(Protocol):
@@ -24,15 +24,15 @@ class _CronServiceLike(Protocol):
     ) -> list[CronJob]: ...
 
 
-class _ExternalTriggerStoreLike(Protocol):
-    def list_triggers(self, *, include_disabled: bool = False) -> list[ExternalTrigger]: ...
+class _LocalTriggerStoreLike(Protocol):
+    def list_triggers(self, *, include_disabled: bool = False) -> list[LocalTrigger]: ...
 
     def list_for_session(
         self,
         session_key: str,
         *,
         include_disabled: bool = True,
-    ) -> list[ExternalTrigger]: ...
+    ) -> list[LocalTrigger]: ...
 
 
 class _SessionManagerLike(Protocol):
@@ -43,7 +43,7 @@ def session_automation_jobs(
     cron_service: _CronServiceLike | None,
     session_key: str,
     *,
-    external_trigger_store: _ExternalTriggerStoreLike | None = None,
+    local_trigger_store: _LocalTriggerStoreLike | None = None,
 ) -> list[AutomationJob]:
     """Return user automations attached to the WebUI session."""
     jobs: list[AutomationJob] = []
@@ -54,9 +54,9 @@ def session_automation_jobs(
                 include_disabled=True,
             )
         )
-    if external_trigger_store is not None:
+    if local_trigger_store is not None:
         jobs.extend(
-            external_trigger_store.list_for_session(
+            local_trigger_store.list_for_session(
                 session_key,
                 include_disabled=True,
             )
@@ -68,7 +68,7 @@ def session_automations_payload(
     cron_service: _CronServiceLike | None,
     session_key: str,
     *,
-    external_trigger_store: _ExternalTriggerStoreLike | None = None,
+    local_trigger_store: _LocalTriggerStoreLike | None = None,
     pending_job_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Return user-created automation jobs attached to a WebUI session."""
@@ -77,7 +77,7 @@ def session_automations_payload(
             session_automation_jobs(
                 cron_service,
                 session_key,
-                external_trigger_store=external_trigger_store,
+                local_trigger_store=local_trigger_store,
             ),
             pending_job_ids=pending_job_ids,
         )
@@ -87,7 +87,7 @@ def session_automations_payload(
 def all_automations_payload(
     cron_service: _CronServiceLike | None,
     *,
-    external_trigger_store: _ExternalTriggerStoreLike | None = None,
+    local_trigger_store: _LocalTriggerStoreLike | None = None,
     session_manager: _SessionManagerLike | None = None,
     pending_job_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
@@ -95,8 +95,8 @@ def all_automations_payload(
     jobs: list[AutomationJob] = []
     if cron_service is not None:
         jobs.extend(cron_service.list_jobs(include_disabled=True))
-    if external_trigger_store is not None:
-        jobs.extend(external_trigger_store.list_triggers(include_disabled=True))
+    if local_trigger_store is not None:
+        jobs.extend(local_trigger_store.list_triggers(include_disabled=True))
     return {
         "jobs": serialize_automation_jobs(
             jobs,
@@ -132,7 +132,7 @@ def _serialize_job(
     include_details: bool = False,
     session_manager: _SessionManagerLike | None = None,
 ) -> dict[str, Any]:
-    if isinstance(job, ExternalTrigger):
+    if isinstance(job, LocalTrigger):
         return _serialize_trigger(
             job,
             include_details=include_details,
@@ -187,7 +187,7 @@ def _serialize_job(
 
 
 def _serialize_trigger(
-    trigger: ExternalTrigger,
+    trigger: LocalTrigger,
     *,
     include_details: bool = False,
     session_manager: _SessionManagerLike | None = None,
@@ -197,16 +197,16 @@ def _serialize_trigger(
         "id": trigger.id,
         "name": trigger.name,
         "enabled": trigger.enabled,
-        "kind": "external_trigger",
+        "kind": "local_trigger",
         "schedule": {
-            "kind": "external",
+            "kind": "local",
             "at_ms": None,
             "every_ms": None,
             "expr": None,
             "tz": None,
         },
         "payload": {
-            "kind": "external_trigger",
+            "kind": "local_trigger",
             "message": command,
             "command": command,
         },
@@ -273,7 +273,7 @@ def _origin_payload(
 
 
 def _trigger_origin_payload(
-    trigger: ExternalTrigger,
+    trigger: LocalTrigger,
     session_manager: _SessionManagerLike | None,
 ) -> dict[str, Any] | None:
     channel = trigger.channel

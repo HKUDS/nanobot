@@ -493,6 +493,7 @@
       "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
       "oneShot": "Satu kali",
       "systemTask": "Automasi yang dikelola sistem",
+      "localTrigger": "Pemicu lokal",
       "labels": {
         "schedule": "Jadwal",
         "next": "Berikutnya",
@@ -551,11 +552,13 @@
         "weekdaysAt": "Hari kerja pukul {{time}}",
         "hourlyAt": "Setiap jam pada :{{minute}}",
         "hourlyWindow": "Setiap jam {{start}}-{{end}} pada :{{minute}}",
+        "local": "Pemicu lokal",
         "custom": "Jadwal khusus"
       },
       "next": {
         "paused": "Dijeda",
         "pending": "Sedang berjalan",
+        "local": "Menunggu pemicu",
         "none": "Tidak ada jadwal berikutnya"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "Setiap {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Pemicu lokal",
       "unknown": "Jadwal khusus"
     },
     "next": {
       "label": "Berikutnya: {{time}}",
       "disabled": "Dijeda",
+      "local": "Menunggu pemicu",
       "none": "Tidak ada jadwal berikutnya"
     }
   },
@@ -791,12 +796,14 @@
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Pemicu lokal",
         "unknown": "Jadwal khusus"
       },
       "next": {
         "label": "Berikutnya {{time}}",
         "pending": "Segera berjalan",
         "disabled": "Dijeda",
+        "local": "Menunggu pemicu",
         "none": "Tidak ada jadwal berikutnya"
       }
     },

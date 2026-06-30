@@ -740,7 +740,7 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
 
-    from nanobot.triggers.store import ExternalTriggerStore
+    from nanobot.triggers.local_store import LocalTriggerStore
 
     loop = ctx.loop
     workspace = getattr(loop, "workspace", None)
@@ -749,9 +749,9 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
     if workspace is None:
         raise RuntimeError("workspace unavailable for trigger creation")
 
-    store = getattr(loop, "external_trigger_store", None)
+    store = getattr(loop, "local_trigger_store", None)
     if store is None:
-        store = ExternalTriggerStore(workspace)
+        store = LocalTriggerStore(workspace)
 
     trigger = store.create(
         name=name,

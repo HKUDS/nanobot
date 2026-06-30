@@ -122,8 +122,8 @@ function formatAutomationSchedule(
         })
       : t("deleteConfirm.schedule.cron", { expr: job.schedule.expr });
   }
-  if (job.schedule.kind === "external" || job.payload.kind === "external_trigger") {
-    return t("deleteConfirm.schedule.external", { defaultValue: "External trigger" });
+  if (job.schedule.kind === "local" || job.payload.kind === "local_trigger") {
+    return t("deleteConfirm.schedule.local", { defaultValue: "Local trigger" });
   }
   return t("deleteConfirm.schedule.unknown");
 }
@@ -134,8 +134,8 @@ function formatAutomationNextRun(
   locale: string,
 ): string {
   if (!job.enabled) return t("deleteConfirm.next.disabled");
-  if (job.schedule.kind === "external" || job.payload.kind === "external_trigger") {
-    return t("deleteConfirm.next.external", { defaultValue: "Waiting for trigger" });
+  if (job.schedule.kind === "local" || job.payload.kind === "local_trigger") {
+    return t("deleteConfirm.next.local", { defaultValue: "Waiting for trigger" });
   }
   const next = job.state.next_run_at_ms;
   if (!next) return t("deleteConfirm.next.none");

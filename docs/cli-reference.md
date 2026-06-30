@@ -13,7 +13,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running, or use `nanobot gateway --background` |
-| Deliver a local external trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
+| Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
