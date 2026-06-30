@@ -416,7 +416,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream", "Run Dream memory consolidation now"),
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
-        BotCommand("dream_prompt", "Show or initialize the Dream prompt override"),
+        BotCommand("dream_prompt", "Tell Dream how to organize memory"),
         BotCommand("help", "Show available commands"),
     ]
 
