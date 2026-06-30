@@ -1246,16 +1246,26 @@ class WeixinChannel(BaseChannel):
         meta = metadata or {}
         if meta.get("_reasoning_delta") or meta.get("_reasoning"):
             return
-        if delta:
+        is_end = meta.get("_stream_end")
+        # Accumulate intermediate deltas. The _stream_end message's own content
+        # (present when the manager coalesces deltas into the end message) is
+        # folded into `full` below instead of appended here, so a send retry
+        # recomputes the same `full` from an unchanged buffer rather than
+        # double-counting that delta.
+        if delta and not is_end:
             self._stream_buffers.setdefault(chat_id, []).append(delta)
-        if not meta.get("_stream_end"):
+        if not is_end:
             return
-        full = "".join(self._stream_buffers.pop(chat_id, [])).strip()
+        full = ("".join(self._stream_buffers.get(chat_id, [])) + (delta or "")).strip()
         await self._flush_tool_hints(chat_id)
         if full:
+            # Send before clearing the buffer: if the send raises, the buffer is
+            # left intact so ChannelManager._send_with_retry can re-deliver the
+            # same _stream_end message instead of silently losing the reply.
             await self.send(
                 OutboundMessage(channel=self.name, chat_id=chat_id, content=full)
             )
+        self._stream_buffers.pop(chat_id, None)
 
     async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
         """Start typing indicator immediately when a message is received."""
