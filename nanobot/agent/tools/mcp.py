@@ -8,7 +8,7 @@ import shutil
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
-from typing import Any, Mapping
+from typing import Any, Mapping, TextIO
 from weakref import WeakKeyDictionary
 
 import httpx
@@ -737,7 +737,10 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry
+    mcp_servers: dict,
+    registry: ToolRegistry,
+    *,
+    stdio_errlog: TextIO | None = None,
 ) -> dict[str, AsyncExitStack]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -792,7 +795,12 @@ async def connect_mcp_servers(
                     env=env,
                     cwd=cfg.cwd or None,
                 )
-                read, write = await server_stack.enter_async_context(stdio_client(params))
+                if stdio_errlog is None:
+                    read, write = await server_stack.enter_async_context(stdio_client(params))
+                else:
+                    read, write = await server_stack.enter_async_context(
+                        stdio_client(params, errlog=stdio_errlog)
+                    )
             elif transport_type == "sse":
                 if not await _probe_http_url(cfg.url):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
@@ -1053,7 +1061,11 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         return
     state._mcp_connecting = True
     try:
-        connected = await connect_mcp_servers(missing_servers, registry)
+        connected = await connect_mcp_servers(
+            missing_servers,
+            registry,
+            stdio_errlog=getattr(state, "_mcp_stdio_errlog", None),
+        )
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         state._mcp_connected = bool(state._mcp_stacks)
@@ -1114,7 +1126,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, AsyncExitStack] = {}
         if to_connect:
-            connected = await connect_mcp_servers(to_connect, registry)
+            connected = await connect_mcp_servers(
+                to_connect,
+                registry,
+                stdio_errlog=getattr(state, "_mcp_stdio_errlog", None),
+            )
             state._mcp_stacks.update(connected)
             _attach_reconnect_handlers(state, registry, connected)
 
@@ -1270,7 +1286,11 @@ async def _refresh_terminated_server(
         _unregister_server_tools(state, registry, server_name)
         await _close_server(state, server_name)
 
-        connected = await connect_mcp_servers({server_name: cfg}, registry)
+        connected = await connect_mcp_servers(
+            {server_name: cfg},
+            registry,
+            stdio_errlog=getattr(state, "_mcp_stdio_errlog", None),
+        )
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         state._mcp_connected = bool(state._mcp_stacks)

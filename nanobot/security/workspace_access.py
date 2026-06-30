@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +114,23 @@ class WorkspaceScopeResolver:
     default_workspace: str | Path
     default_restrict_to_workspace: bool
     scoped_channel: str = "websocket"
+    scoped_channels: frozenset[str] | None = None
+
+    def __init__(
+        self,
+        default_workspace: str | Path,
+        default_restrict_to_workspace: bool,
+        scoped_channel: str = "websocket",
+        scoped_channels: Iterable[str] | None = None,
+    ) -> None:
+        object.__setattr__(self, "default_workspace", default_workspace)
+        object.__setattr__(self, "default_restrict_to_workspace", default_restrict_to_workspace)
+        object.__setattr__(self, "scoped_channel", scoped_channel)
+        if scoped_channels is None:
+            channels = frozenset({scoped_channel})
+        else:
+            channels = frozenset(str(item) for item in scoped_channels)
+        object.__setattr__(self, "scoped_channels", channels)
 
     @property
     def sandbox_status(self) -> WorkspaceSandboxStatus:
@@ -142,7 +160,7 @@ class WorkspaceScopeResolver:
         message_metadata: Any,
         session_metadata: Any,
     ) -> WorkspaceScope:
-        if channel != self.scoped_channel:
+        if channel not in (self.scoped_channels or frozenset({self.scoped_channel})):
             return self.default()
         return resolve_effective_workspace_scope(
             message_metadata=message_metadata,
@@ -153,7 +171,7 @@ class WorkspaceScopeResolver:
         )
 
     def persist_message_scope(self, session: Any, msg: Any) -> None:
-        if getattr(msg, "channel", None) != self.scoped_channel:
+        if getattr(msg, "channel", None) not in (self.scoped_channels or frozenset({self.scoped_channel})):
             return
         metadata = getattr(msg, "metadata", None)
         if not isinstance(metadata, dict):

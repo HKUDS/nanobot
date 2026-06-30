@@ -102,8 +102,11 @@ async def test_skill_command_excludes_disabled(tmp_path: Path) -> None:
 
     out = await cmd_skill(_ctx(loop))
 
-    assert "alpha" not in out.content
+    # Disabled skills are excluded from the available bullet list...
+    assert "**alpha** — Alpha skill" not in out.content
     assert "**beta** — Beta skill" in out.content
+    # ...but are surfaced under a Disabled line so they can be re-enabled.
+    assert "Disabled: alpha" in out.content
 
 
 @pytest.mark.asyncio
