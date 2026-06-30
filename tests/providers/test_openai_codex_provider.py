@@ -14,6 +14,9 @@ from nanobot.providers.openai_codex_provider import (
     _build_reasoning_options,
     _codex_error_response,
     _CodexHTTPError,
+    _dedup_reasoning_items,
+    _drop_reasoning_id,
+    _extract_duplicate_id,
     _friendly_error,
     _request_codex,
     _should_retry_status,
@@ -453,3 +456,249 @@ async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
 
 async def _append(target: list[str], value: str) -> None:
     target.append(value)
+
+
+# --- HKUDS/nanobot#3633: dedup reasoning items + duplicate-item 400 retry -----
+
+
+def test_dedup_reasoning_items_drops_repeated_rs_ids_keeping_first() -> None:
+    items = [
+        {"type": "message", "id": "msg_1", "content": "hi"},
+        {"type": "reasoning", "id": "rs_alpha", "encrypted_content": "first"},
+        {"type": "message", "id": "msg_2", "content": "ok"},
+        {"type": "reasoning", "id": "rs_alpha", "encrypted_content": "second"},
+        {"type": "reasoning", "id": "rs_beta", "encrypted_content": "third"},
+        {"type": "reasoning", "id": "rs_alpha", "encrypted_content": "fourth"},
+    ]
+
+    result = _dedup_reasoning_items(items)
+
+    rs_alphas = [item for item in result if item.get("id") == "rs_alpha"]
+    assert len(rs_alphas) == 1
+    assert rs_alphas[0]["encrypted_content"] == "first"
+    rs_betas = [item for item in result if item.get("id") == "rs_beta"]
+    assert len(rs_betas) == 1
+    # Non-reasoning items must pass through untouched and in order.
+    assert [item.get("id") for item in result if item.get("type") == "message"] == [
+        "msg_1",
+        "msg_2",
+    ]
+
+
+def test_dedup_reasoning_items_ignores_non_reasoning_and_non_rs_ids() -> None:
+    items = [
+        {"type": "message", "id": "rs_alpha", "content": "not a reasoning item"},
+        {"type": "message", "id": "rs_alpha", "content": "still not"},
+        {"type": "reasoning", "id": "not_rs_prefix", "encrypted_content": "skip"},
+        {"type": "reasoning", "id": "not_rs_prefix", "encrypted_content": "skip2"},
+    ]
+
+    result = _dedup_reasoning_items(items)
+
+    # No rs_* id was present on a reasoning item — nothing should be dropped.
+    assert result == items
+
+
+def test_extract_duplicate_id_pulls_id_from_friendly_or_raw_payload() -> None:
+    raw = (
+        '{"error":{"type":"invalid_request_error","code":"duplicate_item",'
+        '"message":"Duplicate item found with id rs_xyz789"}}'
+    )
+
+    assert _extract_duplicate_id(raw, "") == "rs_xyz789"
+    assert _extract_duplicate_id("", "Duplicate item found with id rs_only_message") == (
+        "rs_only_message"
+    )
+    assert _extract_duplicate_id("", "") is None
+
+
+def test_drop_reasoning_id_removes_only_matching_reasoning_entries() -> None:
+    items = [
+        {"type": "reasoning", "id": "rs_keep"},
+        {"type": "reasoning", "id": "rs_drop"},
+        {"type": "message", "id": "rs_drop", "content": "different type — keep"},
+        {"type": "reasoning", "id": "rs_drop"},
+    ]
+
+    result = _drop_reasoning_id(items, "rs_drop")
+
+    assert result == [
+        {"type": "reasoning", "id": "rs_keep"},
+        {"type": "message", "id": "rs_drop", "content": "different type — keep"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_codex_dedups_reasoning_items_before_outgoing_request(monkeypatch) -> None:
+    """Outgoing payload must carry each rs_* id at most once (HKUDS/nanobot#3633)."""
+    _mock_codex_token(monkeypatch)
+    captured_bodies: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        on_content_delta=None,
+        on_thinking_delta=None,
+        on_tool_call_delta=None,
+    ):
+        captured_bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    def fake_convert_messages(_messages):
+        return (
+            "sys",
+            [
+                {"type": "message", "role": "user", "content": "first turn"},
+                {"type": "reasoning", "id": "rs_duplicate", "encrypted_content": "a"},
+                {"type": "message", "role": "assistant", "content": "answer"},
+                {"type": "reasoning", "id": "rs_duplicate", "encrypted_content": "b"},
+                {"type": "message", "role": "user", "content": "second turn"},
+            ],
+        )
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex", fake_request
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.convert_messages", fake_convert_messages
+    )
+
+    provider = OpenAICodexProvider()
+    response = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert response.content == "ok"
+    assert len(captured_bodies) == 1
+    sent_input = captured_bodies[0]["input"]
+    rs_duplicates = [
+        item
+        for item in sent_input
+        if isinstance(item, dict) and item.get("id") == "rs_duplicate"
+    ]
+    assert len(rs_duplicates) == 1, (
+        f"expected exactly one rs_duplicate in outgoing payload, got "
+        f"{len(rs_duplicates)} (full payload: {sent_input})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_codex_retries_once_on_duplicate_item_400(monkeypatch) -> None:
+    """On 400 code:duplicate_item, strip the offending id and retry once."""
+    _mock_codex_token(monkeypatch)
+    calls: list[dict[str, Any]] = []
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        on_content_delta=None,
+        on_thinking_delta=None,
+        on_tool_call_delta=None,
+    ):
+        # Snapshot the body the caller saw on each attempt.
+        calls.append({"input": list(body["input"])})
+        if len(calls) == 1:
+            raise _CodexHTTPError(
+                "HTTP 400: Codex API request failed",
+                status_code=400,
+                error_code="duplicate_item",
+                duplicate_id="rs_offender",
+            )
+        return "ok", [], "stop", {}, None
+
+    def fake_convert_messages(_messages):
+        return (
+            "sys",
+            [
+                {"type": "message", "role": "user", "content": "first"},
+                {"type": "reasoning", "id": "rs_keep", "encrypted_content": "k"},
+                {"type": "reasoning", "id": "rs_offender", "encrypted_content": "x"},
+            ],
+        )
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex", fake_request
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.convert_messages", fake_convert_messages
+    )
+
+    provider = OpenAICodexProvider()
+    response = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert response.content == "ok"
+    assert len(calls) == 2, "expected exactly one retry after duplicate_item 400"
+    first_payload_ids = [
+        item.get("id") for item in calls[0]["input"] if isinstance(item, dict)
+    ]
+    retry_payload_ids = [
+        item.get("id") for item in calls[1]["input"] if isinstance(item, dict)
+    ]
+    assert "rs_offender" in first_payload_ids
+    assert "rs_offender" not in retry_payload_ids
+    assert "rs_keep" in retry_payload_ids
+
+
+@pytest.mark.asyncio
+async def test_codex_does_not_retry_when_duplicate_id_is_unknown(monkeypatch) -> None:
+    """If the upstream payload didn't surface a duplicate_id, bubble through normally."""
+    _mock_codex_token(monkeypatch)
+    calls = 0
+
+    async def fake_request(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise _CodexHTTPError(
+            "HTTP 400: Codex API request failed",
+            status_code=400,
+            error_code="duplicate_item",
+            duplicate_id=None,
+        )
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex", fake_request
+    )
+
+    provider = OpenAICodexProvider()
+    response = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert response.finish_reason == "error"
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_codex_request_marks_duplicate_item_400_and_extracts_id(monkeypatch) -> None:
+    """Upstream 400 duplicate-item payloads must surface as structured metadata."""
+    original_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "duplicate_item",
+                    "message": "Duplicate item found with id rs_abc123",
+                }
+            },
+            request=request,
+        )
+
+    def fake_client(*, timeout: float, verify: bool) -> httpx.AsyncClient:
+        return original_client(transport=httpx.MockTransport(handler), timeout=timeout)
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.httpx.AsyncClient", fake_client
+    )
+
+    with pytest.raises(_CodexHTTPError) as caught:
+        await _request_codex(
+            "https://codex.example/responses", {}, {"input": []}, verify=True
+        )
+
+    error = caught.value
+    assert error.status_code == 400
+    assert error.error_code == "duplicate_item"
+    assert error.duplicate_id == "rs_abc123"

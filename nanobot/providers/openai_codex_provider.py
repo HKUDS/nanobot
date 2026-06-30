@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -26,6 +27,8 @@ from nanobot.providers.openai_responses import (
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
+
+_REASONING_ID_RE = re.compile(r"rs_[A-Za-z0-9_-]+")
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -60,7 +63,7 @@ class OpenAICodexProvider(LLMProvider):
             "store": False,
             "stream": True,
             "instructions": system_prompt,
-            "input": input_items,
+            "input": _dedup_reasoning_items(input_items),
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages[:2]),
@@ -75,8 +78,10 @@ class OpenAICodexProvider(LLMProvider):
 
         try:
             try:
-                content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=True,
+                content, tool_calls, finish_reason, usage, reasoning_content = await _send_codex_request(
+                    body,
+                    headers,
+                    verify=True,
                     on_content_delta=on_content_delta,
                     on_thinking_delta=on_thinking_delta,
                     on_tool_call_delta=on_tool_call_delta,
@@ -85,8 +90,10 @@ class OpenAICodexProvider(LLMProvider):
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
                 logger.warning("SSL verification failed for Codex API; retrying with verify=False")
-                content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=False,
+                content, tool_calls, finish_reason, usage, reasoning_content = await _send_codex_request(
+                    body,
+                    headers,
+                    verify=False,
                     on_content_delta=on_content_delta,
                     on_thinking_delta=on_thinking_delta,
                     on_tool_call_delta=on_tool_call_delta,
@@ -163,6 +170,112 @@ def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | N
     return options
 
 
+def _dedup_reasoning_items(input_items: list[Any]) -> list[Any]:
+    """Drop duplicate ``{type: "reasoning", id: "rs_..."}`` entries.
+
+    The Codex Responses backend rejects requests whose ``input`` array
+    re-sends a reasoning item it has already accepted, producing
+    ``400 Duplicate item found with id rs_...`` and breaking multi-turn
+    conversations (see HKUDS/nanobot#3633). This helper walks the list once
+    and keeps only the first occurrence of each ``rs_*`` id; non-reasoning
+    items and reasoning items without a recognized id are passed through
+    untouched.
+    """
+    seen: set[str] = set()
+    out: list[Any] = []
+    for item in input_items:
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "reasoning"
+            and isinstance(item.get("id"), str)
+            and item["id"].startswith("rs_")
+        ):
+            rs_id = item["id"]
+            if rs_id in seen:
+                continue
+            seen.add(rs_id)
+        out.append(item)
+    return out
+
+
+def _drop_reasoning_id(input_items: list[Any], rs_id: str) -> list[Any]:
+    """Return ``input_items`` with every ``{type:"reasoning", id: rs_id}`` removed."""
+    return [
+        item
+        for item in input_items
+        if not (
+            isinstance(item, dict)
+            and item.get("type") == "reasoning"
+            and item.get("id") == rs_id
+        )
+    ]
+
+
+def _extract_duplicate_id(raw: str, message: str) -> str | None:
+    """Pull the offending ``rs_*`` id from a duplicate-item 400 payload.
+
+    The Responses API surfaces the duplicate id inline ("Duplicate item
+    found with id rs_abc123"). Prefer the structured upstream body and
+    fall back to the friendly message string the provider already built.
+    """
+    for source in (raw, message):
+        if not source:
+            continue
+        match = _REASONING_ID_RE.search(source)
+        if match:
+            return match.group(0)
+    return None
+
+
+async def _send_codex_request(
+    body: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    verify: bool,
+    on_content_delta: Callable[[str], Awaitable[None]] | None,
+    on_thinking_delta: Callable[[str], Awaitable[None]] | None,
+    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None,
+) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+    """Send the Codex request, retrying once after a duplicate-item 400.
+
+    A retry is only attempted when the upstream payload identifies a
+    specific ``rs_*`` id; in that case the duplicate is stripped from the
+    outgoing ``input`` array (in place — same body dict) before the
+    second attempt. Any other error is re-raised for the caller's normal
+    error path.
+    """
+    try:
+        return await _request_codex(
+            DEFAULT_CODEX_URL,
+            headers,
+            body,
+            verify=verify,
+            on_content_delta=on_content_delta,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
+        )
+    except _CodexHTTPError as exc:
+        if exc.status_code != 400 or exc.error_code != "duplicate_item":
+            raise
+        rs_id = exc.duplicate_id
+        if not rs_id:
+            raise
+        logger.warning(
+            "Codex API rejected duplicate reasoning id {}; retrying once after dedup",
+            rs_id,
+        )
+        body["input"] = _drop_reasoning_id(body["input"], rs_id)
+        return await _request_codex(
+            DEFAULT_CODEX_URL,
+            headers,
+            body,
+            verify=verify,
+            on_content_delta=on_content_delta,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
+        )
+
+
 def _build_headers(account_id: str, token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
@@ -185,6 +298,7 @@ class _CodexHTTPError(RuntimeError):
         error_type: str | None = None,
         error_code: str | None = None,
         should_retry: bool | None = None,
+        duplicate_id: str | None = None,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -192,6 +306,7 @@ class _CodexHTTPError(RuntimeError):
         self.error_type = error_type
         self.error_code = error_code
         self.should_retry = should_retry
+        self.duplicate_id = duplicate_id
 
 
 async def _request_codex(
@@ -211,13 +326,21 @@ async def _request_codex(
                 raw = text.decode("utf-8", "ignore")
                 retry_after = LLMProvider._extract_retry_after_from_headers(response.headers)
                 error_type, error_code = LLMProvider._extract_error_type_code(raw)
+                friendly = _friendly_error(response.status_code, raw)
+                duplicate_id: str | None = None
+                if response.status_code == 400 and _is_duplicate_item_error(error_code, raw):
+                    # Normalize the error_code so the retry path can detect it
+                    # regardless of how upstream framed the payload.
+                    error_code = "duplicate_item"
+                    duplicate_id = _extract_duplicate_id(raw, friendly)
                 raise _CodexHTTPError(
-                    _friendly_error(response.status_code, raw),
+                    friendly,
                     status_code=response.status_code,
                     retry_after=retry_after,
                     error_type=error_type,
                     error_code=error_code,
                     should_retry=_should_retry_status(response.status_code, error_type, error_code, raw),
+                    duplicate_id=duplicate_id,
                 )
             return await consume_sse_with_reasoning(
                 response,
@@ -225,6 +348,12 @@ async def _request_codex(
                 on_tool_call_delta=on_tool_call_delta,
                 on_reasoning_delta=on_thinking_delta,
             )
+
+
+def _is_duplicate_item_error(error_code: str | None, raw: str) -> bool:
+    if error_code and "duplicate_item" in error_code:
+        return True
+    return "Duplicate item found" in raw
 
 
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
