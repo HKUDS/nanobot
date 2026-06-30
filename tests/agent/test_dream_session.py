@@ -24,8 +24,13 @@ class TestDreamSessionKey:
 
 class TestPruneDreamSessions:
     def test_keeps_n_most_recent(self, tmp_path):
+        import os
+        import time
+
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
+
+        base_time = time.time() - 100
 
         for i in range(15):
             key = f"dream:20260528-{100000 + i:06d}"
@@ -37,6 +42,7 @@ class TestPruneDreamSessions:
                 f'"updated_at": "2026-05-28T10:00:{i:02d}"}}\n',
                 encoding="utf-8",
             )
+            os.utime(path, (base_time + i, base_time + i))
 
         normal_path = sessions_dir / "telegram_123.jsonl"
         normal_path.write_text('{"_type": "metadata"}\n', encoding="utf-8")

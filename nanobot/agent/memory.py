@@ -61,7 +61,7 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
-        self._corruption_logged = False  # rate-limit non-int cursor warning
+        self._corruption_logged = False  # rate-limit invalid cursor warning
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
@@ -291,8 +291,8 @@ class MemoryStore:
 
     @staticmethod
     def _valid_cursor(value: Any) -> int | None:
-        """Int cursors only — reject bool (``isinstance(True, int)`` is True)."""
-        if isinstance(value, bool) or not isinstance(value, int):
+        """Non-negative int cursors only; reject bool (``isinstance(True, int)`` is True)."""
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return None
         return value
 
@@ -315,7 +315,7 @@ class MemoryStore:
         if poisoned is not None and not self._corruption_logged:
             self._corruption_logged = True
             logger.warning(
-                "history.jsonl contains a non-int cursor ({!r}); dropping it. "
+                "history.jsonl contains an invalid cursor ({!r}); dropping it. "
                 "Usually caused by an external writer; further occurrences suppressed.",
                 poisoned,
             )
@@ -336,18 +336,32 @@ class MemoryStore:
         session_key = entry.get("session_key")
         return session_key is None or isinstance(session_key, str)
 
+    def _read_cursor_counter(self) -> int | None:
+        """Return the persisted cursor counter when it is usable."""
+        if not self._cursor_file.exists():
+            return None
+        with suppress(ValueError, OSError):
+            cursor = int(self._cursor_file.read_text(encoding="utf-8").strip())
+            if cursor >= 0:
+                return cursor
+        return None
+
     def _next_cursor(self) -> int:
         """Read the current cursor counter and return the next value."""
-        if self._cursor_file.exists():
-            with suppress(ValueError, OSError):
-                return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
+        cursor_counter = self._read_cursor_counter()
+        last = self._read_last_entry() or {}
+        last_cursor = self._valid_cursor(last.get("cursor"))
+        if cursor_counter is not None:
+            if last_cursor is not None:
+                return max(cursor_counter, last_cursor) + 1
+            max_history_cursor = max((c for _, c in self._iter_valid_entries()), default=0)
+            return max(cursor_counter, max_history_cursor) + 1
+
         # Fast path: trust the tail when intact.  Otherwise scan the whole
         # file and take ``max`` — that stays correct even if the monotonic
         # invariant was broken by external writes.
-        last = self._read_last_entry() or {}
-        cursor = self._valid_cursor(last.get("cursor"))
-        if cursor is not None:
-            return cursor + 1
+        if last_cursor is not None:
+            return last_cursor + 1
         return max((c for _, c in self._iter_valid_entries()), default=0) + 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
@@ -464,6 +478,9 @@ class MemoryStore:
 
     def set_last_dream_cursor(self, cursor: int) -> None:
         self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
+
+    def get_latest_cursor(self) -> int:
+        return max(self._next_cursor() - 1, 0)
 
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
@@ -784,17 +801,12 @@ class Consolidator:
     @staticmethod
     def _full_unconsolidated_history(
         session: Session,
-        *,
-        include_timestamps: bool = False,
     ) -> list[dict[str, Any]]:
         """Return the whole unconsolidated tail for consolidation decisions."""
         unconsolidated_count = len(session.messages) - session.last_consolidated
         if unconsolidated_count <= 0:
             return []
-        return session.get_history(
-            max_messages=unconsolidated_count,
-            include_timestamps=include_timestamps,
-        )
+        return session.get_history(max_messages=unconsolidated_count)
 
     @staticmethod
     def _replay_overflow_boundary(
@@ -878,7 +890,7 @@ class Consolidator:
         session: Session,
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
-        history = self._full_unconsolidated_history(session, include_timestamps=True)
+        history = self._full_unconsolidated_history(session)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
@@ -1175,9 +1187,9 @@ class Consolidator:
                 metadata={},
                 last_consolidated=0,
             )
-            dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
+            result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
             messages_to_keep = probe.messages
-            messages_to_remove = dropped[already_consolidated:]
+            messages_to_remove = result.dropped[result.already_consolidated_count:]
             kept_ids = {id(m) for m in messages_to_keep}
             retained_eager = sum(
                 1 for i, m in enumerate(original_messages)

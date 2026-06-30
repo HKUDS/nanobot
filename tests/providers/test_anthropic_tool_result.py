@@ -10,6 +10,8 @@ Also tests that bare dicts without a "type" field are coerced to text
 blocks, fixing Anthropic "content.0.type: Field required" rejections (#3993).
 """
 
+from types import SimpleNamespace
+
 from nanobot.providers.anthropic_provider import AnthropicProvider
 
 
@@ -68,7 +70,7 @@ def test_convert_user_content_coerces_typeless_dict():
         {"foo": "bar"},
         {"type": "text", "text": "ok"},
     ])
-    assert result[0] == {"type": "text", "text": str({"foo": "bar"})}
+    assert result[0] == {"type": "text", "text": '{"foo": "bar"}'}
     assert result[1] == {"type": "text", "text": "ok"}
 
 
@@ -79,7 +81,16 @@ def test_convert_user_content_coerces_mixed_typeless():
         {"key": "val"},
     ])
     assert result[0] == {"type": "text", "text": "42"}
-    assert result[1] == {"type": "text", "text": str({"key": "val"})}
+    assert result[1] == {"type": "text", "text": '{"key": "val"}'}
+
+
+def test_assistant_blocks_coerce_typeless_dict_to_json_text():
+    blocks = AnthropicProvider._assistant_blocks({
+        "role": "assistant",
+        "content": [{"answer": "ok", "count": 2}],
+    })
+
+    assert blocks == [{"type": "text", "text": '{"answer": "ok", "count": 2}'}]
 
 
 def test_convert_assistant_message_repairs_history_tool_arguments():
@@ -132,3 +143,79 @@ def test_anthropic_sanitized_tool_ids_avoid_simple_collisions():
     ids = [block["id"] for block in blocks if block["type"] == "tool_use"]
     assert len(ids) == len(set(ids)) == 2
     assert all(all(ch.isalnum() or ch in "_-" for ch in tool_id) for tool_id in ids)
+
+
+def test_anthropic_convert_messages_remaps_duplicate_history_tool_ids():
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+
+    _system, messages = provider._convert_messages([
+        {"role": "user", "content": "check both files"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "toolu_same",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'},
+                },
+                {
+                    "id": "toolu_same",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"b.txt"}'},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "toolu_same", "name": "read_file", "content": "a"},
+        {"role": "tool", "tool_call_id": "toolu_same", "name": "read_file", "content": "b"},
+    ])
+
+    tool_uses = [
+        block
+        for block in messages[1]["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
+    tool_results = [
+        block
+        for block in messages[2]["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_result"
+    ]
+    tool_use_ids = [block["id"] for block in tool_uses]
+    tool_result_ids = [block["tool_use_id"] for block in tool_results]
+
+    assert len(tool_use_ids) == 2
+    assert tool_use_ids[0] == "toolu_same"
+    assert tool_use_ids[1] == "toolu_same__dedupe_2"
+    assert tool_result_ids == tool_use_ids
+    assert tool_uses[0]["input"] == {"path": "a.txt"}
+    assert tool_uses[1]["input"] == {"path": "b.txt"}
+
+
+def test_anthropic_parse_response_remaps_duplicate_tool_use_ids():
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_same",
+                name="read_file",
+                input={"path": "a.txt"},
+            ),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_same",
+                name="read_file",
+                input={"path": "b.txt"},
+            ),
+        ],
+        stop_reason="tool_use",
+        usage=None,
+    )
+
+    result = AnthropicProvider._parse_response(response)
+
+    assert len(result.tool_calls) == 2
+    assert result.tool_calls[0].id == "toolu_same"
+    assert result.tool_calls[0].arguments == {"path": "a.txt"}
+    assert result.tool_calls[1].id != "toolu_same"
+    assert result.tool_calls[1].id.startswith("toolu_")
+    assert result.tool_calls[1].arguments == {"path": "b.txt"}

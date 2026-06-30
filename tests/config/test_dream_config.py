@@ -33,12 +33,18 @@ def test_dream_config_honors_legacy_cron_override() -> None:
     assert cfg.describe_schedule() == "cron 0 */4 * * * (legacy)"
 
 
-def test_dream_config_dump_uses_interval_h_and_hides_legacy_cron() -> None:
+def test_dream_config_dump_preserves_legacy_cron_override() -> None:
     cfg = DreamConfig.model_validate({"intervalH": 5, "cron": "0 */4 * * *"})
 
     dumped = cfg.model_dump(by_alias=True)
 
     assert dumped["intervalH"] == 5
+    assert dumped["cron"] == "0 */4 * * *"
+
+
+def test_dream_config_dump_omits_empty_legacy_cron() -> None:
+    dumped = DreamConfig().model_dump(by_alias=True)
+
     assert "cron" not in dumped
 
 

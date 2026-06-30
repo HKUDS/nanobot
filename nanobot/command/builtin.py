@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import time
 from contextlib import suppress
@@ -50,7 +51,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/restart",
         "Restart nanobot",
-        "Restart the bot process in place.",
+        "Restart the bot process.",
         "rotate-cw",
     ),
     BuiltinCommandSpec(
@@ -130,6 +131,15 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     msg = ctx.msg
     total = await loop._cancel_active_tasks(ctx.key)
+    # Also drain pending queue to prevent mid-turn injection deadlock
+    pending = loop._pending_queues.pop(ctx.key, None)
+    if pending is not None:
+        while not pending.empty():
+            try:
+                pending.get_nowait()
+                total += 1
+            except Exception:
+                break
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -138,7 +148,7 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
-    """Restart the process in-place via os.execv."""
+    """Restart the process."""
     msg = ctx.msg
     set_restart_notice_to_env(
         channel=msg.channel,
@@ -148,7 +158,19 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
     async def _do_restart():
         await asyncio.sleep(1)
-        os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
+        argv = [sys.executable, "-m", "nanobot"] + sys.argv[1:]
+        mode = getattr(ctx.loop, "restart_mode", "auto") or "auto"
+        if mode == "auto":
+            mode = "spawn" if sys.platform == "win32" else "exec"
+        if mode == "exec":
+            os.execv(sys.executable, argv)
+            return
+        if mode == "spawn":
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(argv, **kwargs)
+        os._exit(0)
 
     asyncio.create_task(_do_restart())
     return OutboundMessage(
