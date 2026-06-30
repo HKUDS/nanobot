@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
 
-
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
@@ -1169,7 +1168,6 @@ class Consolidator:
 
             messages_to_summarize = list(session.messages[session.last_consolidated:])
             if not messages_to_summarize:
-                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -1197,7 +1195,6 @@ class Consolidator:
             )
 
             if not messages_to_remove and not messages_to_keep:
-                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -1224,7 +1221,6 @@ class Consolidator:
                 session.last_eager_consolidated = len(messages_to_keep)
             else:
                 session.last_eager_consolidated = retained_eager
-            session.updated_at = datetime.now()
             self.sessions.save(session)
 
             if messages_to_remove:
