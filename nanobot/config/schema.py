@@ -315,6 +315,11 @@ class GatewayConfig(Base):
     port: int = 18790
     restart_mode: Literal["auto", "exec", "spawn", "exit"] = "auto"
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    # Shared secret required to POST cross-channel sends to the gateway's
+    # ``/api/send`` endpoint (used by ``nanobot agent`` to relay proactive
+    # messages to a channel that only lives in the gateway process). When
+    # empty, the endpoint is restricted to localhost connections.
+    send_token: str = Field(default="", alias="sendToken")
 
 
 class MCPServerConfig(Base):
