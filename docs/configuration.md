@@ -677,6 +677,16 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
+For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
+```bash
+export NANOBOT_GITHUB_COPILOT_CLIENT_ID="your-enterprise-client-id"
+export NANOBOT_GITHUB_DEVICE_CODE_URL="https://ghe.example/login/device/code"
+export NANOBOT_GITHUB_ACCESS_TOKEN_URL="https://ghe.example/login/oauth/access_token"
+export NANOBOT_GITHUB_USER_URL="https://api.ghe.example/user"
+export NANOBOT_COPILOT_TOKEN_URL="https://api.ghe.example/copilot_internal/v2/token"
+export NANOBOT_COPILOT_BASE_URL="https://copilot-api.ghe.example"
+```
+
 **1. Login:**
 ```bash
 nanobot provider login github-copilot
@@ -1974,6 +1984,7 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
 | `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
+| `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 
 ## Subagent Concurrency

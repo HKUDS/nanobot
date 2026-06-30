@@ -91,6 +91,23 @@ function makeLongMessages(count: number): UIMessage[] {
   }));
 }
 
+function makePromptExchangeMessages(count: number): UIMessage[] {
+  return Array.from({ length: count }, (_, index) => ([
+    {
+      id: `m${index}`,
+      role: "user" as const,
+      content: `message ${index}`,
+      createdAt: index * 2,
+    },
+    {
+      id: `a${index}`,
+      role: "assistant" as const,
+      content: `answer ${index}`,
+      createdAt: index * 2 + 1,
+    },
+  ])).flat();
+}
+
 function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   return (
@@ -604,7 +621,7 @@ describe("ThreadViewport", () => {
       screen.queryByText(`message ${firstVisible - 1}`),
     ).not.toBeInTheDocument();
     expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
-    expect(screen.getByText("message 299")).toBeInTheDocument();
+    expect(screen.getAllByText("message 299").length).toBeGreaterThan(0);
   });
 
   it("automatically requests older transcript pages near the top", () => {
@@ -635,7 +652,7 @@ describe("ThreadViewport", () => {
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {
-    const promptMessages = makeLongMessages(5);
+    const promptMessages = makePromptExchangeMessages(5);
     const { container } = render(
       <ThreadViewport
         messages={promptMessages}
@@ -670,9 +687,31 @@ describe("ThreadViewport", () => {
     });
 
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
+    const promptMarkers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    const markerTops = promptMarkers.map((marker) => Number.parseFloat(marker.style.top));
+    expect(markerTops[2]).toBeCloseTo(50);
+    expect(markerTops[1] - markerTops[0]).toBeCloseTo(16 / 3);
+    expect(markerTops[4] - markerTops[0]).toBeCloseTo(64 / 3);
+
+    const railMarkers = screen.getAllByTestId("prompt-rail-marker");
+    expect(railMarkers).toHaveLength(promptMarkers.length);
+    expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
+
+    fireEvent.pointerEnter(promptMarkers[2]);
+    expect(railMarkers.map((marker) => marker.style.width)).toEqual([
+      "16px",
+      "22px",
+      "28px",
+      "22px",
+      "16px",
+    ]);
+
+    fireEvent.pointerLeave(promptMarkers[2]);
+    expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
 
     const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
     expect(within(targetPrompt).getByText("message 3")).toBeInTheDocument();
+    expect(within(targetPrompt).getByText("answer 3")).toBeInTheDocument();
 
     fireEvent.click(targetPrompt);
 
