@@ -179,6 +179,22 @@ _SYNTHETIC_USER_CONTENT = "(conversation continued)"
 _IMAGE_OMITTED_PLACEHOLDER = "[image not delivered to model; omitted and cannot be viewed]"
 
 
+def _stripped_image_marker(block: dict[str, Any]) -> str:
+    """Text marker that replaces a stripped ``image_url`` block.
+
+    When the agent layer minted a turn-scoped attachment handle (``_meta.id``),
+    emit an opaque, forwardable marker carrying only that id — never the path.
+    Otherwise fall back to the plain "omitted" placeholder. This module never
+    imports the agent registry; the id rides inside ``_meta`` in the message data.
+    """
+    meta = block.get("_meta")
+    if isinstance(meta, dict):
+        handle = meta.get("id")
+        if isinstance(handle, str) and handle:
+            return f"[image attachment: {handle}; cannot be viewed by this model]"
+    return _IMAGE_OMITTED_PLACEHOLDER
+
+
 class LLMProvider(ABC):
     """Base class for LLM providers."""
 
@@ -564,7 +580,7 @@ class LLMProvider(ABC):
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
                         new_content.append(
-                            {"type": "text", "text": _IMAGE_OMITTED_PLACEHOLDER}
+                            {"type": "text", "text": _stripped_image_marker(b)}
                         )
                         found = True
                     else:
@@ -588,7 +604,7 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 for i, b in enumerate(content):
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        content[i] = {"type": "text", "text": _IMAGE_OMITTED_PLACEHOLDER}
+                        content[i] = {"type": "text", "text": _stripped_image_marker(b)}
                         found = True
         return found
 

@@ -457,3 +457,109 @@ async def test_message_tool_cli_context_may_target_other_ws_chat(tmp_path) -> No
     assert result.startswith("Message sent")
     assert sent[0].channel == "websocket"
     assert sent[0].chat_id == target
+
+
+# ---------------------------------------------------------------------------
+# Opaque attachment handles (#4345): forward an uploaded file the model can't
+# view, via a turn-scoped registry lookup that never resolves paths.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_attachment_handle_resolves_and_forwards() -> None:
+    from nanobot.agent import attachment_registry
+
+    attachment_registry.begin_turn()
+    handle = attachment_registry.mint("/srv/uploads/photo.png")
+
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send, restrict_to_workspace=True)
+    result = await tool.execute(
+        content="forwarding",
+        channel="telegram",
+        chat_id="1",
+        attachment_handles=[handle],
+    )
+    assert len(sent) == 1
+    # Registry path is delivered even under workspace restriction (server-minted).
+    assert sent[0].media == ["/srv/uploads/photo.png"]
+    assert "1 attachment" in result
+    assert "/srv/uploads/photo.png" not in result  # count only, no path echo
+
+
+@pytest.mark.asyncio
+async def test_unknown_handle_dropped() -> None:
+    from nanobot.agent import attachment_registry
+
+    attachment_registry.begin_turn()  # empty registry
+
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    result = await tool.execute(
+        content="forwarding",
+        channel="telegram",
+        chat_id="1",
+        attachment_handles=["attachment_99"],
+    )
+    # Unknown handle dropped; message still sends, just with no attachment.
+    assert len(sent) == 1
+    assert sent[0].media == []
+    assert "attachment" not in result.split("Message sent")[1]
+
+
+@pytest.mark.asyncio
+async def test_path_string_as_handle_resolves_to_nothing() -> None:
+    """A raw path passed through the handle channel is not a registry key, so it
+    is dropped — the handle channel never performs path resolution."""
+    from nanobot.agent import attachment_registry
+
+    attachment_registry.begin_turn()
+    attachment_registry.mint("/srv/uploads/real.png")
+
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send, restrict_to_workspace=True)
+    await tool.execute(
+        content="smuggle",
+        channel="telegram",
+        chat_id="1",
+        attachment_handles=["/etc/passwd"],
+    )
+    assert sent[0].media == []
+
+
+@pytest.mark.asyncio
+async def test_handle_delivery_updates_turn_delivered_tracking() -> None:
+    from nanobot.agent import attachment_registry
+
+    attachment_registry.begin_turn()
+    handle = attachment_registry.mint("/srv/uploads/a.png")
+
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    from nanobot.agent.tools.context import RequestContext
+
+    tool.set_context(RequestContext(channel="telegram", chat_id="1", metadata={}))
+    tool.start_turn()
+    await tool.execute(
+        content="forwarding",
+        channel="telegram",
+        chat_id="1",
+        attachment_handles=[handle],
+    )
+    assert "/srv/uploads/a.png" in tool.turn_delivered_media_paths()
