@@ -6,7 +6,6 @@ import pytest
 
 from nanobot.agent.memory import (
     _ARCHIVE_SUMMARY_MAX_CHARS,
-    LAST_COMPACTED_AT_META,
     Consolidator,
     MemoryStore,
 )
@@ -448,7 +447,6 @@ class TestCompactIdleSession:
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
         assert "last_active" in meta
-        assert LAST_COMPACTED_AT_META in reloaded.metadata
         assert reloaded.updated_at == old_ts
 
     @pytest.mark.asyncio
@@ -523,10 +521,10 @@ class TestCompactIdleSession:
         assert entries[0]["session_key"] == "cli:test"
 
     @pytest.mark.asyncio
-    async def test_empty_session_records_compaction_without_refreshing_timestamp(
+    async def test_empty_session_does_not_refresh_timestamp(
         self, real_consolidator
     ):
-        """Empty session with old updated_at records maintenance separately."""
+        """Empty session with old updated_at does not look active after compaction."""
         from datetime import datetime, timedelta
 
         sessions = real_consolidator.sessions
@@ -540,7 +538,7 @@ class TestCompactIdleSession:
 
         reloaded = sessions.get_or_create("cli:empty")
         assert reloaded.updated_at == old_ts
-        assert LAST_COMPACTED_AT_META in reloaded.metadata
+        assert reloaded.metadata == {}
 
     @pytest.mark.asyncio
     async def test_nothing_summary_not_stored(self, real_consolidator, mock_provider):

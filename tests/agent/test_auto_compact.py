@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.memory import LAST_COMPACTED_AT_META
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
@@ -89,11 +88,9 @@ def _make_fake_compact(
     async def _fake_compact(key: str, max_suffix: int = 8) -> str:
         state["count"] += 1
         session = loop.sessions.get_or_create(key)
-        compacted_at = datetime.now().isoformat()
 
         tail = list(session.messages[session.last_consolidated:])
         if not tail:
-            session.metadata[LAST_COMPACTED_AT_META] = compacted_at
             loop.sessions.save(session)
             return ""
 
@@ -113,7 +110,6 @@ def _make_fake_compact(
         archive_msgs = result.dropped[result.already_consolidated_count:]
 
         if not archive_msgs and not kept:
-            session.metadata[LAST_COMPACTED_AT_META] = compacted_at
             loop.sessions.save(session)
             return ""
 
@@ -134,7 +130,6 @@ def _make_fake_compact(
 
         session.messages = kept
         session.last_consolidated = 0
-        session.metadata[LAST_COMPACTED_AT_META] = compacted_at
         loop.sessions.save(session)
         return s
 
@@ -1023,27 +1018,28 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
         assert _fake_compact.state["count"] == 1
 
-        # Second tick: should NOT re-schedule (maintenance timestamp is fresh)
+        # Second tick: should NOT re-schedule because the session has no removable tail.
         await self._run_check_expired(loop)
         assert _fake_compact.state["count"] == 1  # Still 1, not re-scheduled
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_empty_skip_records_compaction_prevents_reschedule(self, tmp_path):
-        """Empty session skip records maintenance, preventing immediate re-scheduling."""
+    async def test_empty_session_does_not_schedule_idle_compact(self, tmp_path):
+        """Empty expired sessions have no removable tail and should not schedule."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        loop.consolidator.compact_idle_session = _make_fake_compact(loop)
+        _fake_compact = _make_fake_compact(loop)
+        loop.consolidator.compact_idle_session = _fake_compact
 
-        # First tick: skips (no messages), records compaction metadata
         await self._run_check_expired(loop)
+        assert _fake_compact.state["count"] == 0
         assert "cli:test" not in loop.auto_compact._summaries
 
-        # Second tick: should NOT re-schedule because maintenance metadata is fresh
         await self._run_check_expired(loop)
+        assert _fake_compact.state["count"] == 0
         assert "cli:test" not in loop.auto_compact._summaries
         await loop.close_mcp()
 

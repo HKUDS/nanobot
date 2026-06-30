@@ -177,23 +177,25 @@ def test_webui_session_list_sorts_by_message_activity_not_maintenance_timestamp(
 ) -> None:
     manager = SessionManager(tmp_path)
     old = manager.get_or_create("websocket:old")
-    old.created_at = datetime(2026, 6, 5, 10, 0, 0)
-    old.add_message("user", "old real activity")
+    old.created_at = datetime(2026, 6, 1, 10, 0, 0)
+    old.add_message("user", "old first visible activity")
+    old.messages[-1]["timestamp"] = "2026-06-01T10:00:00"
+    old.add_message("assistant", "automation result")
     old.messages[-1]["timestamp"] = "2026-06-05T10:00:00"
     old.updated_at = datetime(2026, 6, 30, 17, 40, 0)
     manager.save(old)
 
     newer = manager.get_or_create("websocket:newer")
-    newer.created_at = datetime(2026, 6, 24, 10, 0, 0)
+    newer.created_at = datetime(2026, 6, 4, 10, 0, 0)
     newer.add_message("user", "newer real activity")
-    newer.messages[-1]["timestamp"] = "2026-06-24T10:00:00"
-    newer.updated_at = datetime(2026, 6, 24, 10, 0, 0)
+    newer.messages[-1]["timestamp"] = "2026-06-04T10:00:00"
+    newer.updated_at = datetime(2026, 6, 4, 10, 0, 0)
     manager.save(newer)
 
     rows = list_webui_sessions(manager)
 
-    assert [row["key"] for row in rows] == ["websocket:newer", "websocket:old"]
-    assert rows[1]["updated_at"] == "2026-06-05T10:00:00"
+    assert [row["key"] for row in rows] == ["websocket:old", "websocket:newer"]
+    assert rows[0]["updated_at"] == "2026-06-05T10:00:00"
 
 
 def list_webui_sessions(manager: SessionManager) -> list[dict]:

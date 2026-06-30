@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Callable, Coroutine
 
 from loguru import logger
 
-from nanobot.agent.memory import LAST_COMPACTED_AT_META
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -46,17 +45,25 @@ class AutoCompact:
         now_epoch = self._timestamp(now or datetime.now())
         return now_epoch is not None and now_epoch - ts_epoch >= self._ttl * 60
 
-    def _compacted_after_activity(self, key: str, last_active: datetime | str | None) -> bool:
-        metadata_row = self.sessions.read_session_metadata(key)
-        metadata = metadata_row.get("metadata") if isinstance(metadata_row, dict) else None
-        if not isinstance(metadata, dict):
+    def _has_compactable_idle_tail(self, key: str) -> bool:
+        session = self.sessions.get_or_create(key)
+        tail = list(session.messages[session.last_consolidated:])
+        if not tail:
             return False
-        compacted_at = metadata.get(LAST_COMPACTED_AT_META)
-        if not isinstance(compacted_at, str):
-            return False
-        compacted_epoch = self._timestamp(compacted_at)
-        active_epoch = self._timestamp(last_active)
-        return compacted_epoch is not None and active_epoch is not None and compacted_epoch >= active_epoch
+        probe = Session(
+            key=session.key,
+            messages=tail.copy(),
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            metadata={},
+            last_consolidated=0,
+        )
+        result = probe.retain_recent_legal_suffix(
+            self._RECENT_SUFFIX_MESSAGES,
+            extend_to_user=True,
+        )
+        messages_to_remove = result.dropped[result.already_consolidated_count:]
+        return bool(messages_to_remove)
 
     @staticmethod
     def _format_summary(text: str, last_active: datetime) -> str:
@@ -77,7 +84,7 @@ class AutoCompact:
             if key in active_session_keys:
                 continue
             updated_at = info.get("updated_at")
-            if self._is_expired(updated_at, now) and not self._compacted_after_activity(key, updated_at):
+            if self._is_expired(updated_at, now) and self._has_compactable_idle_tail(key):
                 self._archiving.add(key)
                 schedule_background(self._archive(key))
 
