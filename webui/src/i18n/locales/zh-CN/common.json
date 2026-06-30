@@ -920,6 +920,10 @@
             "title": "恢复记忆",
             "description": "将记忆恢复到之前的 Dream 快照。"
           },
+          "dream_prompt": {
+            "title": "Dream 记忆",
+            "description": "设置 Dream 如何整理当前工作区的记忆。"
+          },
           "goal": {
             "title": "长期目标",
             "description": "让助手把当前请求当作需要多步骤持续推进的目标。"

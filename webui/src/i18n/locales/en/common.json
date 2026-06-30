@@ -921,6 +921,10 @@
             "title": "Restore memory",
             "description": "Revert memory to a previous Dream snapshot."
           },
+          "dream_prompt": {
+            "title": "Dream memory",
+            "description": "Tell Dream how to organize this workspace's memory."
+          },
           "goal": {
             "title": "Long-running goal",
             "description": "Tell the agent to treat this as a sustained multi-step goal."

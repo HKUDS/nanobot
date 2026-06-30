@@ -911,6 +911,10 @@
             "title": "메모리 복원",
             "description": "이전 Dream 스냅샷으로 메모리를 되돌립니다."
           },
+          "dream_prompt": {
+            "title": "Dream 메모리",
+            "description": "Dream이 이 워크스페이스의 메모리를 정리하는 방식을 설정합니다."
+          },
           "goal": {
             "title": "장기 목표",
             "description": "에이전트에게 지속적인 다단계 목표로 처리하도록 지시합니다."

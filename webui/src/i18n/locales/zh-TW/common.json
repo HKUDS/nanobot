@@ -911,6 +911,10 @@
             "title": "恢復記憶",
             "description": "將記憶恢復到之前的 Dream 快照。"
           },
+          "dream_prompt": {
+            "title": "Dream 記憶",
+            "description": "設定 Dream 如何整理目前工作區的記憶。"
+          },
           "goal": {
             "title": "長期目標",
             "description": "請助理把這則請求當成需要多步驟持續推進的目標。"

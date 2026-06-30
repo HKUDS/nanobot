@@ -911,6 +911,10 @@
             "title": "Restaurer la mémoire",
             "description": "Revenir à un instantané Dream précédent."
           },
+          "dream_prompt": {
+            "title": "Mémoire Dream",
+            "description": "Indiquez à Dream comment organiser la mémoire de cet espace de travail."
+          },
           "goal": {
             "title": "Objectif long terme",
             "description": "Demandez à l’agent de traiter ceci comme un objectif multi‑étapes durable."
