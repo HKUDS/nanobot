@@ -20,7 +20,7 @@ from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
-from nanobot.triggers.store import ExternalTriggerStore
+from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
@@ -47,7 +47,7 @@ def _make_handler(
     workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
-    external_trigger_store: ExternalTriggerStore | None = None,
+    local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
@@ -63,7 +63,7 @@ def _make_handler(
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
         cron_service=cron_service,
-        external_trigger_store=external_trigger_store,
+        local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
     )
 
@@ -77,7 +77,7 @@ def _ch(
     port: int = _PORT,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
-    external_trigger_store: ExternalTriggerStore | None = None,
+    local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
@@ -97,7 +97,7 @@ def _ch(
         workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
         cron_service=cron_service,
-        external_trigger_store=external_trigger_store,
+        local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
@@ -325,12 +325,12 @@ async def test_session_automations_route_ignores_unified_owner(
 
 
 @pytest.mark.asyncio
-async def test_session_automations_route_lists_external_triggers(
+async def test_session_automations_route_lists_local_triggers(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
-    trigger_store = ExternalTriggerStore(tmp_path)
+    trigger_store = LocalTriggerStore(tmp_path)
     trigger = trigger_store.create(
         name="PR review",
         channel="websocket",
@@ -340,7 +340,7 @@ async def test_session_automations_route_lists_external_triggers(
     channel = _ch(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
-        external_trigger_store=trigger_store,
+        local_trigger_store=trigger_store,
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
@@ -359,9 +359,9 @@ async def test_session_automations_route_lists_external_triggers(
         body = resp.json()
         assert [job["id"] for job in body["jobs"]] == [trigger.id]
         job = body["jobs"][0]
-        assert job["kind"] == "external_trigger"
-        assert job["schedule"]["kind"] == "external"
-        assert job["payload"]["kind"] == "external_trigger"
+        assert job["kind"] == "local_trigger"
+        assert job["schedule"]["kind"] == "local"
+        assert job["payload"]["kind"] == "local_trigger"
         assert job["payload"]["command"] == f'nanobot trigger {trigger.id} "message"'
     finally:
         await channel.stop()
@@ -1130,12 +1130,12 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
 
 
 @pytest.mark.asyncio
-async def test_webui_automations_route_manages_external_triggers(
+async def test_webui_automations_route_manages_local_triggers(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
-    trigger_store = ExternalTriggerStore(tmp_path)
+    trigger_store = LocalTriggerStore(tmp_path)
     trigger = trigger_store.create(
         name="PR review",
         channel="websocket",
@@ -1145,7 +1145,7 @@ async def test_webui_automations_route_manages_external_triggers(
     channel = _ch(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
-        external_trigger_store=trigger_store,
+        local_trigger_store=trigger_store,
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
@@ -1158,7 +1158,7 @@ async def test_webui_automations_route_manages_external_triggers(
         listed = await _http_get(f"{base_url}/api/webui/automations", headers=auth)
         assert listed.status_code == 200
         by_id = {job["id"]: job for job in listed.json()["jobs"]}
-        assert by_id[trigger.id]["kind"] == "external_trigger"
+        assert by_id[trigger.id]["kind"] == "local_trigger"
         assert by_id[trigger.id]["trigger"]["command"] == f'nanobot trigger {trigger.id} "message"'
 
         disabled = await _http_get(
@@ -1251,14 +1251,14 @@ async def test_session_delete_blocks_when_bound_automation_exists(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_blocks_and_cascades_external_triggers(
+async def test_session_delete_blocks_and_cascades_local_triggers(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
     sm = _seed_session(tmp_path, key="websocket:doomed")
-    trigger_store = ExternalTriggerStore(tmp_path)
+    trigger_store = LocalTriggerStore(tmp_path)
     trigger = trigger_store.create(
         name="PR review",
         channel="websocket",
@@ -1268,7 +1268,7 @@ async def test_session_delete_blocks_and_cascades_external_triggers(
     channel = _ch(
         bus,
         session_manager=sm,
-        external_trigger_store=trigger_store,
+        local_trigger_store=trigger_store,
         port=port,
     )
     server_task = asyncio.create_task(channel.start())

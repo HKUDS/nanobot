@@ -493,6 +493,7 @@
       "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
       "oneShot": "Una vez",
       "systemTask": "Automatización administrada por el sistema",
+      "localTrigger": "Activador local",
       "labels": {
         "schedule": "Programación",
         "next": "Siguiente",
@@ -551,11 +552,13 @@
         "weekdaysAt": "Días laborables a las {{time}}",
         "hourlyAt": "Cada hora en :{{minute}}",
         "hourlyWindow": "Cada hora {{start}}-{{end}} en :{{minute}}",
+        "local": "Activador local",
         "custom": "Programación personalizada"
       },
       "next": {
         "paused": "Pausada",
         "pending": "Ejecutándose ahora",
+        "local": "Esperando activador",
         "none": "Sin próxima ejecución"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "Cada {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Activador local",
       "unknown": "Programación personalizada"
     },
     "next": {
       "label": "Siguiente: {{time}}",
       "disabled": "Pausada",
+      "local": "Esperando activador",
       "none": "Sin próxima ejecución"
     }
   },
@@ -791,12 +796,14 @@
         "every": "Cada {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Activador local",
         "unknown": "Programación personalizada"
       },
       "next": {
         "label": "Siguiente {{time}}",
         "pending": "Se ejecutará pronto",
         "disabled": "En pausa",
+        "local": "Esperando activador",
         "none": "Sin próxima ejecución"
       }
     },

@@ -34,7 +34,7 @@ from nanobot.session.webui_turns import (
     clean_generated_title,
     maybe_generate_webui_title,
 )
-from nanobot.triggers.session_turns import EXTERNAL_TRIGGER_META
+from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -118,7 +118,7 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert message["cron_prompt_ref"] == prompt_ref
 
 
-def test_persist_external_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
+def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
 
@@ -129,7 +129,7 @@ def test_persist_external_trigger_turn_uses_hidden_automation_marker(tmp_path: P
             chat_id="auto",
             content="Review PR #4502",
             metadata={
-                EXTERNAL_TRIGGER_META: {
+                LOCAL_TRIGGER_META: {
                     "trigger_id": "trg_123",
                     "trigger_name": "PR review",
                     "delivery_id": "tdel_456",
@@ -142,15 +142,15 @@ def test_persist_external_trigger_turn_uses_hidden_automation_marker(tmp_path: P
 
     assert persisted is True
     message = session.messages[-1]
-    assert message["content"] == "External trigger received: PR review"
+    assert message["content"] == "Local trigger received: PR review"
     assert "Review PR #4502" not in message["content"]
     assert message[AUTOMATION_HISTORY_META] == {
-        "kind": "trigger",
+        "kind": "local_trigger",
         "trigger_id": "trg_123",
         "trigger_name": "PR review",
         "trigger_delivery_id": "tdel_456",
     }
-    assert EXTERNAL_TRIGGER_META not in message
+    assert LOCAL_TRIGGER_META not in message
     assert message["trigger_id"] == "trg_123"
     assert message["trigger_name"] == "PR review"
     assert message["trigger_delivery_id"] == "tdel_456"

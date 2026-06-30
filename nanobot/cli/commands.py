@@ -772,8 +772,8 @@ def trigger(
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
 ):
     """Deliver a local trigger message to its bound chat session."""
-    from nanobot.triggers.store import (
-        ExternalTriggerStore,
+    from nanobot.triggers.local_store import (
+        LocalTriggerStore,
         TriggerDisabledError,
         TriggerNotFoundError,
         TriggerStoreError,
@@ -781,7 +781,7 @@ def trigger(
 
     runtime_config = _load_runtime_config(config, workspace)
     content = _read_trigger_cli_message(message)
-    store = ExternalTriggerStore(runtime_config.workspace_path)
+    store = LocalTriggerStore(runtime_config.workspace_path)
     try:
         delivery = store.enqueue(trigger_id, content)
     except (TriggerNotFoundError, TriggerDisabledError) as exc:
@@ -909,8 +909,8 @@ def _run_gateway(
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
-    from nanobot.triggers.runner import run_external_trigger_queue
-    from nanobot.triggers.store import ExternalTriggerStore
+    from nanobot.triggers.local_runner import run_local_trigger_queue
+    from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -933,7 +933,7 @@ def _run_gateway(
     # Create cron service with workspace-scoped store
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    trigger_store = ExternalTriggerStore(config.workspace_path)
+    trigger_store = LocalTriggerStore(config.workspace_path)
 
     # Create agent with cron service
     agent = AgentLoop.from_config(
@@ -954,7 +954,7 @@ def _run_gateway(
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
-    agent.external_trigger_store = trigger_store
+    agent.local_trigger_store = trigger_store
 
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
@@ -1151,7 +1151,7 @@ def _run_gateway(
         bus,
         session_manager=session_manager,
         cron_service=cron,
-        external_trigger_store=trigger_store,
+        local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
         webui_static_dist=webui_static_dist,
@@ -1295,8 +1295,8 @@ def _run_gateway(
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
                 asyncio.create_task(
-                    run_external_trigger_queue(store=trigger_store, bus=bus),
-                    name="nanobot-external-triggers",
+                    run_local_trigger_queue(store=trigger_store, bus=bus),
+                    name="nanobot-local-triggers",
                 ),
             ]
             if health_server_enabled:

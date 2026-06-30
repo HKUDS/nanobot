@@ -1,4 +1,4 @@
-"""Gateway delivery loop for local external triggers."""
+"""Gateway delivery loop for local triggers."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.triggers.session_turns import EXTERNAL_TRIGGER_META
-from nanobot.triggers.store import ExternalTriggerStore
-from nanobot.triggers.types import ExternalTrigger, TriggerDelivery
+from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+from nanobot.triggers.local_store import LocalTriggerStore
+from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 
-async def run_external_trigger_queue(
+async def run_local_trigger_queue(
     *,
-    store: ExternalTriggerStore,
+    store: LocalTriggerStore,
     bus: MessageBus,
     poll_interval_s: float = 0.5,
     batch_size: int = 20,
 ) -> None:
     """Poll local trigger deliveries and publish them as normal inbound messages."""
-    logger.info("External trigger queue started")
+    logger.info("Local trigger queue started")
     recovered = store.recover_processing_deliveries()
     if recovered:
         logger.warning(
@@ -80,7 +80,7 @@ class _TerminalDeliveryError(RuntimeError):
 
 
 async def _publish_delivery(
-    store: ExternalTriggerStore,
+    store: LocalTriggerStore,
     bus: MessageBus,
     delivery: TriggerDelivery,
 ) -> None:
@@ -107,9 +107,9 @@ async def _publish_delivery(
     )
 
 
-def _delivery_metadata(trigger: ExternalTrigger, delivery: TriggerDelivery) -> dict[str, Any]:
+def _delivery_metadata(trigger: LocalTrigger, delivery: TriggerDelivery) -> dict[str, Any]:
     metadata = dict(trigger.origin_metadata or {})
-    metadata[EXTERNAL_TRIGGER_META] = {
+    metadata[LOCAL_TRIGGER_META] = {
         "trigger_id": trigger.id,
         "trigger_name": trigger.name,
         "delivery_id": delivery.id,
@@ -118,7 +118,7 @@ def _delivery_metadata(trigger: ExternalTrigger, delivery: TriggerDelivery) -> d
     if trigger.channel == "websocket":
         metadata.pop(WEBUI_TURN_METADATA_KEY, None)
         metadata[WEBUI_TURN_METADATA_KEY] = f"trigger:{trigger.id}:{uuid.uuid4().hex}"
-        source: dict[str, str] = {"kind": "trigger"}
+        source: dict[str, str] = {"kind": "local_trigger"}
         if trigger.name:
             source["label"] = trigger.name
         metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] = source

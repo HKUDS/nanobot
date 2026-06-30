@@ -2520,14 +2520,14 @@ def test_trigger_cli_queues_message_in_workspace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from nanobot.triggers.store import ExternalTriggerStore
+    from nanobot.triggers.local_store import LocalTriggerStore
 
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     _patch_cli_command_runtime(monkeypatch, config)
 
-    store = ExternalTriggerStore(config.workspace_path)
+    store = LocalTriggerStore(config.workspace_path)
     trigger = store.create(
         name="Review hook",
         channel="websocket",

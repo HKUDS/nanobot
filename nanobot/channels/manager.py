@@ -68,7 +68,7 @@ class ChannelManager:
         *,
         session_manager: "SessionManager | None" = None,
         cron_service: Any | None = None,
-        external_trigger_store: Any | None = None,
+        local_trigger_store: Any | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         webui_static_dist: bool = True,
@@ -79,7 +79,7 @@ class ChannelManager:
         self.bus = bus
         self._session_manager = session_manager
         self._cron_service = cron_service
-        self._external_trigger_store = external_trigger_store
+        self._local_trigger_store = local_trigger_store
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
         self._webui_static_dist = webui_static_dist
@@ -141,7 +141,7 @@ class ChannelManager:
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
                         cron_service=self._cron_service,
-                        external_trigger_store=self._external_trigger_store,
+                        local_trigger_store=self._local_trigger_store,
                         cron_pending_job_ids=self._webui_cron_pending_job_ids,
                         logger=logger,
                     )

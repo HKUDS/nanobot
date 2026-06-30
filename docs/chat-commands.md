@@ -16,8 +16,8 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
 | `/skill` | List enabled skills and their descriptions |
-| `/trigger` | Show external trigger usage |
-| `/trigger <name>` | Create a named local external trigger for the current chat/session |
+| `/trigger` | Show local trigger usage |
+| `/trigger <name>` | Create a named local trigger for the current chat/session |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
@@ -57,7 +57,7 @@ To switch presets for future turns:
 
 Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
 
-## External Triggers
+## Local triggers
 
 Use `/trigger <name>` when a local script or another service should be able to
 send a message into the current chat/session later. A name is required; plain

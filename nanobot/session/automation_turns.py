@@ -56,9 +56,9 @@ def automation_history_overrides_for_spec(
 def _automation_specs() -> tuple[AutomationTurnSpec, ...]:
     # Source modules import the generic helpers above, so keep spec loading lazy.
     from nanobot.cron.session_turns import CRON_AUTOMATION_SPEC
-    from nanobot.triggers.session_turns import EXTERNAL_TRIGGER_AUTOMATION_SPEC
+    from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_AUTOMATION_SPEC
 
-    return (CRON_AUTOMATION_SPEC, EXTERNAL_TRIGGER_AUTOMATION_SPEC)
+    return (CRON_AUTOMATION_SPEC, LOCAL_TRIGGER_AUTOMATION_SPEC)
 
 
 def automation_history_overrides(
@@ -87,4 +87,6 @@ def is_automation_history_message(message: Mapping[str, Any] | None) -> bool:
 
 
 def is_automation_kind(value: Any) -> bool:
-    return isinstance(value, str) and any(spec.kind == value for spec in _automation_specs())
+    return isinstance(value, str) and (
+        value == "trigger" or any(spec.kind == value for spec in _automation_specs())
+    )

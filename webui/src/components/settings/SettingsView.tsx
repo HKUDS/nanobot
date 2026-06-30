@@ -3756,10 +3756,10 @@ function AutomationDetailPanel({
     : null;
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
-  const externalTrigger = isExternalTriggerAutomation(job);
+  const localTrigger = isLocalTriggerAutomation(job);
   const triggerCommand = automationTriggerCommand(job);
   const message = automationDetailText(job, tx);
-  const messageLabel = externalTrigger
+  const messageLabel = localTrigger
     ? tx("settings.automations.fields.command", "Command")
     : tx("settings.automations.fields.message", "Message");
   const schedule = formatAutomationSchedule(job, locale, tx);
@@ -3807,7 +3807,7 @@ function AutomationDetailPanel({
               <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
                 {messageLabel}
               </div>
-              {externalTrigger && triggerCommand ? (
+              {localTrigger && triggerCommand ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -3833,7 +3833,7 @@ function AutomationDetailPanel({
             <div
               className={cn(
                 "mt-3 whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85",
-                externalTrigger && "font-mono text-[12.5px]",
+                localTrigger && "font-mono text-[12.5px]",
                 !messageExpanded && messageNeedsExpansion && "line-clamp-6",
               )}
             >
@@ -3940,8 +3940,8 @@ function AutomationActionGroup({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const canManage = !job.protected;
   const hasLinkedChat = Boolean(job.origin);
-  const externalTrigger = isExternalTriggerAutomation(job);
-  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending && !externalTrigger;
+  const localTrigger = isLocalTriggerAutomation(job);
+  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending && !localTrigger;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
   const canToggle = canManage && (job.enabled || hasLinkedChat);
   const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
@@ -3963,7 +3963,7 @@ function AutomationActionGroup({
       >
         <Pencil className="h-4 w-4" aria-hidden />
       </AppsActionButton>
-      {!externalTrigger ? (
+      {!localTrigger ? (
         <AppsActionButton
           ariaLabel={tx("settings.automations.runNow", "Run now")}
           busy={actionKey === `run:${job.id}`}
@@ -4095,7 +4095,7 @@ function AutomationEditDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [draft, setDraft] = useState<AutomationEditDraft>(() => automationDraftFromJob(null));
-  const externalTrigger = isExternalTriggerAutomation(job);
+  const localTrigger = isLocalTriggerAutomation(job);
 
   useEffect(() => {
     setDraft(automationDraftFromJob(job));
@@ -4145,7 +4145,7 @@ function AutomationEditDialog({
                 />
               </label>
 
-              {!externalTrigger ? (
+              {!localTrigger ? (
                 <label className="block space-y-1.5">
                   <span className="text-[12px] font-medium text-muted-foreground">
                     {tx("settings.automations.fields.message", "Message")}
@@ -4158,7 +4158,7 @@ function AutomationEditDialog({
                 </label>
               ) : null}
 
-              {!externalTrigger ? (
+              {!localTrigger ? (
                 <div className="space-y-2">
                   <span className="text-[12px] font-medium text-muted-foreground">
                     {tx("settings.automations.fields.scheduleType", "Schedule type")}
@@ -4176,7 +4176,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {!externalTrigger && draft.scheduleKind === "every" ? (
+              {!localTrigger && draft.scheduleKind === "every" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4217,7 +4217,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {!externalTrigger && draft.scheduleKind === "cron" ? (
+              {!localTrigger && draft.scheduleKind === "cron" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4244,7 +4244,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {!externalTrigger && draft.scheduleKind === "at" ? (
+              {!localTrigger && draft.scheduleKind === "at" ? (
                 <label className="block space-y-1.5">
                   <span className="text-[12px] font-medium text-muted-foreground">
                     {tx("settings.automations.fields.runAt", "Run at")}
@@ -4340,11 +4340,11 @@ function AutomationDeleteDialog({
   );
 }
 
-function isExternalTriggerAutomation(job: SessionAutomationJob | null): boolean {
+function isLocalTriggerAutomation(job: SessionAutomationJob | null): boolean {
   if (!job) return false;
-  return job.kind === "external_trigger"
-    || job.payload.kind === "external_trigger"
-    || job.schedule.kind === "external";
+  return job.kind === "local_trigger"
+    || job.payload.kind === "local_trigger"
+    || job.schedule.kind === "local";
 }
 
 function automationTriggerCommand(job: SessionAutomationJob): string {
@@ -4355,8 +4355,8 @@ function automationSummary(
   job: SessionAutomationJob,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
-  if (isExternalTriggerAutomation(job)) {
-    return automationTriggerCommand(job) || tx("settings.automations.externalTrigger", "External trigger");
+  if (isLocalTriggerAutomation(job)) {
+    return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
   }
   return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
 }
@@ -4379,7 +4379,7 @@ function automationStatusKey(
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
   if (job.state.last_status === "error") return "failed";
-  if (isExternalTriggerAutomation(job)) return "active";
+  if (isLocalTriggerAutomation(job)) return "active";
   if (job.delete_after_run && !job.state.next_run_at_ms && job.state.last_status === "ok") {
     return "completed";
   }
@@ -4443,7 +4443,7 @@ function automationEditDraftError(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
   if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
-  if (isExternalTriggerAutomation(job)) return null;
+  if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
     return tx("settings.automations.validation.messageRequired", "Message is required.");
   }
@@ -4473,7 +4473,7 @@ function automationUpdatePayloadFromDraft(
   job: SessionAutomationJob | null,
 ): AutomationUpdatePayload | string {
   const name = draft.name.trim();
-  if (isExternalTriggerAutomation(job)) {
+  if (isLocalTriggerAutomation(job)) {
     if (!name) return "invalid";
     return { name };
   }
@@ -4604,7 +4604,7 @@ function automationSearchParts(
     job.payload.message,
     job.payload.command,
     job.trigger?.command,
-    isExternalTriggerAutomation(job) ? "trigger external" : null,
+    isLocalTriggerAutomation(job) ? "trigger local" : null,
     ...scheduleParts,
     automationStatusKey(job),
     ...originParts,
@@ -4794,8 +4794,8 @@ function formatAutomationSchedule(
         })
       : tx("settings.automations.schedule.cron", "Cron {{expr}}", { expr: job.schedule.expr });
   }
-  if (isExternalTriggerAutomation(job)) {
-    return tx("settings.automations.schedule.external", "External trigger");
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.schedule.local", "Local trigger");
   }
   return tx("settings.automations.schedule.custom", "Custom schedule");
 }
@@ -4851,8 +4851,8 @@ function formatAutomationNext(
 ): string {
   if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
   if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
-  if (isExternalTriggerAutomation(job)) {
-    return tx("settings.automations.next.external", "Waiting for trigger");
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.next.local", "Waiting for trigger");
   }
   if (!job.state.next_run_at_ms) return tx("settings.automations.next.none", "No next run");
   return relativeTime(job.state.next_run_at_ms);

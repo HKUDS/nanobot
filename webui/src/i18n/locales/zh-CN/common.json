@@ -493,6 +493,7 @@
       "emptyHint": "请从它应该运行的来源处创建，这样 nanobot 才能保留正确上下文。",
       "oneShot": "一次性",
       "systemTask": "系统管理的自动任务",
+      "localTrigger": "本地触发器",
       "labels": {
         "schedule": "计划",
         "next": "下次",
@@ -551,11 +552,13 @@
         "weekdaysAt": "工作日 {{time}}",
         "hourlyAt": "每小时第 {{minute}} 分钟",
         "hourlyWindow": "{{start}}-{{end}} 点每小时第 {{minute}} 分钟",
+        "local": "本地触发器",
         "custom": "自定义计划"
       },
       "next": {
         "paused": "已暂停",
         "pending": "正在运行",
+        "local": "等待触发",
         "none": "没有下次运行"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "本地触发器",
       "unknown": "自定义计划"
     },
     "next": {
       "label": "下次：{{time}}",
       "disabled": "已暂停",
+      "local": "等待触发",
       "none": "没有下次运行"
     }
   },
@@ -791,12 +796,14 @@
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "本地触发器",
         "unknown": "自定义计划"
       },
       "next": {
         "label": "下次 {{time}}",
         "pending": "即将执行",
         "disabled": "已暂停",
+        "local": "等待触发",
         "none": "没有下次运行"
       }
     },

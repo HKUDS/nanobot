@@ -56,7 +56,7 @@ Enter `tokenIssueSecret` when the WebUI asks for a password.
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for Apps or MCP presets |
 | Apps | Install, test, update, and use local CLI App adapters and MCP presets |
 | Skills | Inspect available built-in and workspace skills before relying on them |
-| Automations | Review, search, run, pause, edit, and delete scheduled and external-trigger agent turns |
+| Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
 ## Chat Workspace
@@ -125,7 +125,7 @@ There are two user-facing automation types:
 
 - Scheduled automations, created by the agent's cron tool, run at a time,
   interval, or cron expression.
-- External triggers, created with `/trigger <name>`, run when you call a local
+- Local triggers, created with `/trigger <name>`, run when you call a local
   command such as `nanobot trigger trg_8K4P2Q9X "Review PR #4502"`.
 
 If a GitHub webhook, CI system, or another service should wake nanobot up, keep
@@ -148,7 +148,7 @@ Use the Automations view to:
 - Sort by next run, last run, updated time, or name.
 - Run scheduled automations now.
 - Pause or resume, rename, or delete user-created automations.
-- Copy the CLI command for external triggers.
+- Copy the CLI command for local triggers.
 - Inspect protected system automations without changing them.
 
 Search accepts plain text and field filters such as `name:backup`,
@@ -159,7 +159,7 @@ An automation without a linked chat cannot be enabled or run from the WebUI,
 because nanobot would not know where to deliver the scheduled turn. Recreate it
 from the target chat or channel so the automation has complete context.
 
-External triggers do not have a WebUI "Run now" action because each run needs a
+Local triggers do not have a WebUI "Run now" action because each run needs a
 message. Use the copied `nanobot trigger ...` command and replace `"message"`
 with the content that should be delivered.
 

@@ -32,7 +32,7 @@ export interface UIMediaAttachment {
   name?: string;
 }
 
-export interface UIMessageSource { kind: "cron" | "trigger" | string; label?: string; }
+export interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string; label?: string; }
 
 export interface UIMessage {
   id: string;
@@ -104,9 +104,9 @@ export interface SessionAutomationJob {
   delete_after_run?: boolean;
   created_at_ms?: number | null;
   updated_at_ms?: number | null;
-  kind?: "external_trigger" | "cron" | string;
+  kind?: "local_trigger" | "cron" | string;
   schedule: {
-    kind: "at" | "every" | "cron" | "external" | string;
+    kind: "at" | "every" | "cron" | "local" | string;
     at_ms?: number | null;
     every_ms?: number | null;
     expr?: string | null;
@@ -114,7 +114,7 @@ export interface SessionAutomationJob {
   };
   payload: {
     message: string;
-    kind?: "agent_turn" | "system_event" | "external_trigger" | string;
+    kind?: "agent_turn" | "system_event" | "local_trigger" | string;
     command?: string;
   };
   state: {
