@@ -168,12 +168,13 @@ export function MessageBubble({
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
   const automationSourceKind = message.source?.kind;
+  const automationSourceName = message.source?.label?.trim();
   const automationSourceLabel = (
     automationSourceKind === "cron"
     || automationSourceKind === "local_trigger"
     || automationSourceKind === "trigger"
   )
-    ? (message.source.label?.trim() || t("message.automationSourceFallback"))
+    ? (automationSourceName || t("message.automationSourceFallback"))
     : "";
   const automationTriggeredLabel = t("message.automationTriggered");
 
