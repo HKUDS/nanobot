@@ -19,14 +19,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from blackcat.agent.loop import AgentLoop
-from blackcat.bus.events import InboundMessage
-from blackcat.bus.queue import MessageBus
-from blackcat.command.builtin import cmd_new, register_builtin_commands
-from blackcat.command.router import CommandContext, CommandRouter
-from blackcat.config.schema import AgentDefaults, Config
-from blackcat.session.keys import UNIFIED_SESSION_KEY
-from blackcat.session.manager import Session, SessionManager
+from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.command.builtin import cmd_new, register_builtin_commands
+from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.config.schema import AgentDefaults, Config
+from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.session.manager import Session, SessionManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,8 +38,8 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    with patch("blackcat.agent.loop.SessionManager"), \
-         patch("blackcat.agent.loop.SubagentManager") as mock_sub_mgr:
+    with patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
             bus=bus,
@@ -185,8 +185,8 @@ class TestUnifiedSessionConfig:
         assert config.agents.defaults.unified_session is True
 
     def test_onboard_generated_config_contains_unified_session(self, tmp_path: Path):
-        """save_config() writes 'unifiedSession' into config.json (simulates blackcat onboard)."""
-        from blackcat.config.loader import save_config
+        """save_config() writes 'unifiedSession' into config.json (simulates nanobot onboard)."""
+        from nanobot.config.loader import save_config
 
         config = Config()
         config_path = tmp_path / "config.json"
@@ -301,7 +301,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
     @pytest.mark.asyncio
     async def test_consolidation_skips_empty_session_for_unified_key(self):
         """Empty unified:default session → consolidation exits immediately, archive not called."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from nanobot.agent.memory import Consolidator, MemoryStore
 
         store = MagicMock(spec=MemoryStore)
         mock_provider = MagicMock()
@@ -333,7 +333,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
     async def test_consolidation_behaviour_identical_for_any_key(self):
         """archive call count is the same for 'telegram:123' and 'unified:default'
         under identical token conditions."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from nanobot.agent.memory import Consolidator, MemoryStore
 
         archive_calls: dict[str, int] = {}
 
@@ -367,7 +367,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
     async def test_consolidation_triggers_when_over_budget_unified_key(self):
         """When tokens exceed budget, consolidation attempts to find a boundary —
         behaviour is identical to any other session key."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from nanobot.agent.memory import Consolidator, MemoryStore
 
         store = MagicMock(spec=MemoryStore)
         mock_provider = MagicMock()
@@ -441,7 +441,7 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_finds_task_in_unified_mode(self, tmp_path: Path):
         """cmd_stop can cancel tasks when unified_session=True."""
-        from blackcat.command.builtin import cmd_stop
+        from nanobot.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)
 
@@ -473,7 +473,7 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_uses_effective_key_without_session_override(self, tmp_path: Path):
         """Priority /stop must cancel the unified session even before dispatch rewrites the message."""
-        from blackcat.command.builtin import cmd_stop
+        from nanobot.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)
 
@@ -498,7 +498,7 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_cross_channel_in_unified_mode(self, tmp_path: Path):
         """In unified mode, /stop from one channel cancels tasks from another channel."""
-        from blackcat.command.builtin import cmd_stop
+        from nanobot.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)
 

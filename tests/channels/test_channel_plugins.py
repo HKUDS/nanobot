@@ -1223,6 +1223,43 @@ async def test_stop_all_handles_channel_exception():
 
 
 @pytest.mark.asyncio
+async def test_stop_all_handles_channel_stop_cancelled_task():
+    """stop_all should treat a channel's already-cancelled internals as stopped."""
+
+    class _StopCancelledChannel(BaseChannel):
+        name = "stopcancelled"
+        display_name = "Stop Cancelled"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            raise asyncio.CancelledError("server task cancelled")
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    next_channel = _StartableChannel(fake_config, mgr.bus)
+    mgr.channels = {
+        "stopcancelled": _StopCancelledChannel(fake_config, mgr.bus),
+        "next": next_channel,
+    }
+    mgr._dispatch_task = None
+
+    await mgr.stop_all()
+
+    assert next_channel.stopped is True
+
+
+@pytest.mark.asyncio
 async def test_start_all_no_channels_logs_warning():
     """start_all should log warning when no channels are enabled."""
     fake_config = SimpleNamespace(

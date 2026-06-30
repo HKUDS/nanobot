@@ -2,22 +2,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import AliasChoices, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-from blackcat.config.paths import get_workspace_path
-from blackcat.config_base import Base
-from blackcat.cron.types import CronSchedule
+from nanobot.config_base import Base
+from nanobot.cron.types import CronSchedule
 
 if TYPE_CHECKING:
-    from blackcat.agent.tools.cli_apps import CliAppsToolConfig
-    from blackcat.agent.tools.filesystem import FileToolsConfig
-    from blackcat.agent.tools.image_generation import ImageGenerationToolConfig
-    from blackcat.agent.tools.self import MyToolConfig
-    from blackcat.agent.tools.shell import ExecToolConfig
-    from blackcat.agent.tools.web import WebToolsConfig
+    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
+    from nanobot.agent.tools.filesystem import FileToolsConfig
+    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
+    from nanobot.agent.tools.self import MyToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.agent.tools.web import WebToolsConfig
 
 
 class ChannelsConfig(Base):
@@ -43,7 +42,7 @@ class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
     enabled: bool = True
-    provider: str | None = None  # Validated by blackcat.audio.transcription_registry.
+    provider: str | None = None  # Validated by nanobot.audio.transcription_registry.
     model: str | None = None
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     max_duration_sec: int = Field(default=120, ge=1, le=600)
@@ -57,7 +56,10 @@ class DreamConfig(Base):
 
     enabled: bool = True  # Register the periodic Dream consolidation job on startup
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
-    cron: str | None = Field(default=None, exclude=True)  # Legacy cron expression override
+    cron: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )  # Legacy cron expression override
     model_override: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
@@ -101,12 +103,12 @@ class ModelPresetConfig(Base):
     model: str
     provider: str = "auto"
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
 
     def to_generation_settings(self) -> Any:
-        from blackcat.providers.base import GenerationSettings
+        from nanobot.providers.base import GenerationSettings
         return GenerationSettings(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
@@ -117,19 +119,20 @@ class ModelPresetConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.blackcat/workspace"
+    workspace: str = "~/.nanobot/workspace"
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    context_window_tokens: int = 200_000
     context_block_limit: int | None = None
     temperature: float = 0.1
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
+    fail_on_tool_error: bool = True
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
@@ -141,8 +144,8 @@ class AgentDefaults(Base):
     )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
     reasoning_effort: str | None = None  # low / medium / high / adaptive / none — LLM thinking effort; None preserves the provider default
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
-    bot_name: str = "blackcat"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
-    bot_icon: str = "🐈‍⬛"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
+    bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
+    bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
     session_ttl_minutes: int = Field(
@@ -180,6 +183,29 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
+    thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+
+    # Valid values mirror the keys of _THINKING_STYLE_MAP in
+    # nanobot/providers/openai_compat_provider.py. Kept duplicated here to
+    # avoid an import cycle (schema.py must not import from providers/).
+    _VALID_THINKING_STYLES: ClassVar[tuple[str, ...]] = (
+        "thinking_type",
+        "enable_thinking",
+        "reasoning_split",
+    )
+
+    @field_validator("thinking_style")
+    @classmethod
+    def _validate_thinking_style(cls, v: str | None) -> str | None:
+        if not v:  # None or "" -> no injection, valid (backwards compatible)
+            return v
+        if v not in cls._VALID_THINKING_STYLES:
+            raise ValueError(
+                f"Invalid thinking_style {v!r}. "
+                f"Must be one of: {', '.join(repr(s) for s in cls._VALID_THINKING_STYLES)} "
+                f"(or empty/omitted)."
+            )
+        return v
 
 
 class BedrockProviderConfig(ProviderConfig):
@@ -218,6 +244,7 @@ class ProvidersConfig(Base):
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    kimi_coding: ProviderConfig = Field(default_factory=ProviderConfig)  # Kimi Coding Plan (Anthropic Messages API)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -236,12 +263,14 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
+    opencode_zen: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (curated coding models)
+    opencode_go: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Go (low-cost coding models)
 
     @model_validator(mode="after")
     def convert_extra_providers(self):
         """Convert extra fields (custom providers) to ProviderConfig objects."""
         if self.model_extra:
-            from blackcat.providers.registry import find_by_name
+            from nanobot.providers.registry import find_by_name
 
             for key, value in self.model_extra.items():
                 if spec := find_by_name(key):
@@ -291,57 +320,6 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
-class WorkspaceConfig(Base):
-    """Per-workspace Lens configuration."""
-
-    path: str  # absolute path to workspace
-    diagnostics_source: Literal["cli", "vscode"] | None = None
-    """Override global diagnostics_source for this workspace. None = use global default."""
-
-
-class LensConfig(Base):
-    """Lens LSP bridge configuration."""
-
-    enabled: bool = False
-    workspaces: dict[str, str | WorkspaceConfig] = Field(default_factory=dict)
-    """Workspace name -> path (str) or full config (WorkspaceConfig).
-
-    Examples:
-        # Simple: just a path
-        "black-cat-py": "/path/to/black-cat-py"
-
-        # Full config with overrides
-        "Nomad's Map": {"path": "/path/to/NomadsMap", "diagnostics_source": "vscode"}
-    """
-    diagnostics_source: Literal["cli", "vscode"] = "cli"
-    """Default source for diagnostics.
-
-    - "cli": Run pyright/tsc directly (fresh results, works for healthy codebases)
-    - "vscode": Use VSCode extension (faster but may be stale, fallback for broken codebases)
-
-    Default is "cli" since most projects are healthy. Use "vscode" for large/complex
-    TypeScript projects where tsc --noEmit would be slow or fail.
-
-    Can be overridden per-workspace via WorkspaceConfig.diagnostics_source.
-    """
-
-    def get_workspace_paths(self) -> dict[str, str]:
-        """Get workspace name -> path mapping (normalizes str | WorkspaceConfig)."""
-        return {
-            name: str(get_workspace_path(
-                cfg.path if isinstance(cfg, WorkspaceConfig) else cfg
-            ))
-            for name, cfg in self.workspaces.items()
-        }
-
-    def get_workspace_source(self, workspace: str) -> Literal["cli", "vscode"]:
-        """Get diagnostics_source for a workspace (with per-workspace override)."""
-        ws_config = self.workspaces.get(workspace)
-        if isinstance(ws_config, WorkspaceConfig) and ws_config.diagnostics_source:
-            return ws_config.diagnostics_source
-        return self.diagnostics_source
-
-
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -353,7 +331,7 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all capabilities (tools, resources, prompts); any restriction = only listed tools, no resources/prompts
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
@@ -362,13 +340,6 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     module = importlib.import_module(module_path)
     return getattr(module, class_name)()
 
-class PlatformIdentity(Base): # TODO: add all the other platforms
-    """Platform identifiers for a single author (user IDs per channel)."""
-
-    whatsapp: str | int | None = None
-    telegram: str | int | None = None
-    discord: str | int | None = None
-    cli: str | int | None = None
 
 class ToolsConfig(Base):
     """Tools configuration.
@@ -378,13 +349,13 @@ class ToolsConfig(Base):
     tool implementations.
     """
 
-    web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.web", "WebToolsConfig"))
-    exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.shell", "ExecToolConfig"))
-    file: FileToolsConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.filesystem", "FileToolsConfig"))
-    cli_apps: CliAppsToolConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.cli_apps", "CliAppsToolConfig"))
-    my: MyToolConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.self", "MyToolConfig"))
+    web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig"))
+    exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.shell", "ExecToolConfig"))
+    file: FileToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.filesystem", "FileToolsConfig"))
+    cli_apps: CliAppsToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.cli_apps", "CliAppsToolConfig"))
+    my: MyToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.self", "MyToolConfig"))
     image_generation: ImageGenerationToolConfig = Field(
-        default_factory=lambda: _lazy_default("blackcat.agent.tools.image_generation", "ImageGenerationToolConfig"),
+        default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
     webui_allow_local_service_access: bool = Field(
@@ -401,7 +372,7 @@ class ToolsConfig(Base):
 
 
 class Config(BaseSettings):
-    """Root configuration for blackcat."""
+    """Root configuration for nanobot."""
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
@@ -410,8 +381,6 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    lens: LensConfig = Field(default_factory=LensConfig)
-    authors: dict[str, PlatformIdentity] = Field(default_factory=dict)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
@@ -463,7 +432,7 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from blackcat.providers.registry import (
+        from nanobot.providers.registry import (
             PROVIDERS,
             find_by_name,
         )
@@ -597,7 +566,7 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> str | None:
         """Get API base URL for the given model, falling back to the provider default when present."""
-        from blackcat.providers.registry import find_by_name
+        from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model, preset=preset)
         if p and p.api_base:
@@ -608,7 +577,7 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="BLACKCAT_", env_nested_delimiter="__")
+    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
 
 
 def _resolve_tool_config_refs() -> None:
@@ -616,16 +585,16 @@ def _resolve_tool_config_refs() -> None:
 
     Must be called after all modules are loaded (breaks circular imports).
     Re-exports the classes into this module's namespace so existing imports
-    like ``from blackcat.config.schema import ExecToolConfig`` continue to work.
+    like ``from nanobot.config.schema import ExecToolConfig`` continue to work.
     """
     import sys
 
-    from blackcat.agent.tools.cli_apps import CliAppsToolConfig
-    from blackcat.agent.tools.filesystem import FileToolsConfig
-    from blackcat.agent.tools.image_generation import ImageGenerationToolConfig
-    from blackcat.agent.tools.self import MyToolConfig
-    from blackcat.agent.tools.shell import ExecToolConfig
-    from blackcat.agent.tools.web import WebFetchConfig, WebSearchConfig, WebToolsConfig
+    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
+    from nanobot.agent.tools.filesystem import FileToolsConfig
+    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
+    from nanobot.agent.tools.self import MyToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.agent.tools.web import WebFetchConfig, WebSearchConfig, WebToolsConfig
 
     # Re-export into this module's namespace
     mod = sys.modules[__name__]

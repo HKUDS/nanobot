@@ -1,87 +1,87 @@
 import {
-    useCallback,
-    useEffect,
-    useLayoutEffect,
-    useMemo,
-    useRef,
-    useState,
-    type CSSProperties,
-    type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
-import {
-    CliAppMentionToken,
-    McpPresetMentionToken,
-    cliAppInitials,
-    mcpPresetInitials,
-    splitCapabilityMentionSegments,
-    type CapabilityMentionSegment,
-} from "@/components/CliAppMentionText";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
-    Activity,
-    ArrowUp,
-    BookOpen,
-    Brain,
-    ChevronDown,
-    ChevronUp,
-    CircleHelp,
-    CornerDownRight,
-    GripVertical,
-    History,
-    ImageIcon,
-    Loader2,
-    Mic,
-    Plus,
-    RotateCw,
-    Shield,
-    Sparkles,
-    Square,
-    SquarePen,
-    Target,
-    Trash2,
-    Undo2,
-    X,
-    type LucideIcon,
+  CliAppMentionToken,
+  McpPresetMentionToken,
+  cliAppInitials,
+  mcpPresetInitials,
+  splitCapabilityMentionSegments,
+  type CapabilityMentionSegment,
+} from "@/components/CliAppMentionText";
+import {
+  Activity,
+  ArrowUp,
+  BookOpen,
+  Brain,
+  ChevronDown,
+  ChevronUp,
+  CircleHelp,
+  CornerDownRight,
+  GripVertical,
+  History,
+  ImageIcon,
+  Loader2,
+  Mic,
+  Plus,
+  RotateCw,
+  Shield,
+  Sparkles,
+  Square,
+  SquarePen,
+  Target,
+  Trash2,
+  Undo2,
+  X,
+  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import {
-    WorkspaceAccessMenu,
-    WorkspaceProjectPicker,
-} from "@/components/thread/WorkspaceControls";
 import { Button } from "@/components/ui/button";
 import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-    MAX_IMAGES_PER_MESSAGE,
-    useAttachedImages,
-    type AttachedImage,
-    type AttachmentError,
-    type RestoredReadyImage,
-} from "@/hooks/useAttachedImages";
-import type { SendImage, SendOptions } from "@/hooks/useBlackcatStream";
-import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
-import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
+  WorkspaceAccessMenu,
+  WorkspaceProjectPicker,
+} from "@/components/thread/WorkspaceControls";
 import {
-    inferProviderFromModelName,
-    logoFallbackUrls,
-    providerBrand,
-} from "@/lib/provider-brand";
+  useAttachedImages,
+  type AttachedImage,
+  type AttachmentError,
+  MAX_IMAGES_PER_MESSAGE,
+  type RestoredReadyImage,
+} from "@/hooks/useAttachedImages";
+import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
+import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
-    CliAppInfo,
-    GoalStateWsPayload,
-    McpPresetInfo,
-    OutboundCliAppMention,
-    OutboundMcpPresetMention,
-    SlashCommand,
-    WorkspaceScopePayload,
-    WorkspacesPayload,
+  CliAppInfo,
+  GoalStateWsPayload,
+  McpPresetInfo,
+  OutboundCliAppMention,
+  OutboundMcpPresetMention,
+  SlashCommand,
+  WorkspaceScopePayload,
+  WorkspacesPayload,
 } from "@/lib/types";
+import {
+  inferProviderFromModelName,
+  logoFallbackUrls,
+  providerBrand,
+} from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
@@ -172,6 +172,7 @@ interface ThreadComposerProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
+  transcriptionProvider?: string | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -192,9 +193,9 @@ const SLASH_PALETTE_GAP_PX = 8;
 const SLASH_PALETTE_MAX_HEIGHT_PX = 288;
 const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 12;
-const SLASH_RECENTS_STORAGE_KEY = "blackcat.webui.slashCommandRecents";
+const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
-const QUEUED_PROMPTS_STORAGE_PREFIX = "blackcat.webui.composerQueuedGuidance.v1:";
+const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
 
@@ -665,10 +666,10 @@ function RunElapsedStrip({
       {goalPanelOpen && canExpandGoal && markdownBody ? (
         <div
           ref={panelRef}
-          id="blackcat-goal-panel-root"
+          id="nanobot-goal-panel-root"
           role="dialog"
           aria-modal="false"
-          aria-labelledby="blackcat-goal-panel-title"
+          aria-labelledby="nanobot-goal-panel-title"
           tabIndex={-1}
           className={cn(
             "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
@@ -679,7 +680,7 @@ function RunElapsedStrip({
         >
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
             <h2
-              id="blackcat-goal-panel-title"
+              id="nanobot-goal-panel-title"
               className="min-w-0 truncate text-[13px] font-semibold tracking-tight text-foreground"
             >
               {t("thread.composer.goalStateSheetTitle")}
@@ -698,7 +699,7 @@ function RunElapsedStrip({
             </button>
           </div>
           <div
-            id="blackcat-goal-panel-scroll"
+            id="nanobot-goal-panel-scroll"
             className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
           >
             <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
@@ -740,7 +741,7 @@ function RunElapsedStrip({
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             aria-expanded={goalPanelOpen}
-            aria-controls={goalPanelOpen ? "blackcat-goal-panel-root" : undefined}
+            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
             aria-label={t("thread.composer.goalStateExpandAria")}
             title={t("thread.composer.goalStateExpandAria")}
             onClick={() => setGoalPanelOpen((o) => !o)}
@@ -782,6 +783,7 @@ export function ThreadComposer({
   workspaceError = null,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
+  transcriptionProvider = null,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -1193,6 +1195,7 @@ export function ThreadComposer({
     onError: setVoiceError,
     onTranscript: appendTranscription,
     onTranscribeAudio,
+    wantsWav: transcriptionProvider === "xiaomi_mimo",
   });
 
   useEffect(() => {
@@ -1566,10 +1569,10 @@ export function ThreadComposer({
     "w-full resize-none bg-transparent",
     isHero
       ? cn(
-          "min-h-[78px] px-4 text-[15px] leading-6 sm:px-5",
+          "min-h-[78px] px-4 text-[16px] leading-6 sm:px-5",
           relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
         )
-      : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[13.5px] leading-5 sm:px-4",
+      : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
   );
 
   return (

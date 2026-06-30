@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from blackcat.bus.events import InboundMessage, OutboundMessage
-from blackcat.command.builtin import cmd_dream, cmd_dream_log, cmd_dream_restore
-from blackcat.command.router import CommandContext
-from blackcat.utils.gitstore import CommitInfo
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.command.builtin import cmd_dream, cmd_dream_log, cmd_dream_restore
+from nanobot.command.router import CommandContext
+from nanobot.utils.gitstore import CommitInfo
 
 
 class _FakeStore:

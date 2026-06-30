@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
-from blackcat.session.manager import Session
-from blackcat.utils.gitstore import GitStore
-from blackcat.utils.helpers import (
+from nanobot.session.manager import Session
+from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -27,11 +27,11 @@ from blackcat.utils.helpers import (
     truncate_text,
     truncate_text_to_tokens,
 )
-from blackcat.utils.prompt_templates import render_template
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from blackcat.providers.base import LLMProvider
-    from blackcat.session.manager import SessionManager
+    from nanobot.providers.base import LLMProvider
+    from nanobot.session.manager import SessionManager
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
-        self._corruption_logged = False  # rate-limit non-int cursor warning
+        self._corruption_logged = False  # rate-limit invalid cursor warning
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
@@ -291,8 +291,8 @@ class MemoryStore:
 
     @staticmethod
     def _valid_cursor(value: Any) -> int | None:
-        """Int cursors only — reject bool (``isinstance(True, int)`` is True)."""
-        if isinstance(value, bool) or not isinstance(value, int):
+        """Non-negative int cursors only; reject bool (``isinstance(True, int)`` is True)."""
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return None
         return value
 
@@ -315,7 +315,7 @@ class MemoryStore:
         if poisoned is not None and not self._corruption_logged:
             self._corruption_logged = True
             logger.warning(
-                "history.jsonl contains a non-int cursor ({!r}); dropping it. "
+                "history.jsonl contains an invalid cursor ({!r}); dropping it. "
                 "Usually caused by an external writer; further occurrences suppressed.",
                 poisoned,
             )
@@ -336,38 +336,33 @@ class MemoryStore:
         session_key = entry.get("session_key")
         return session_key is None or isinstance(session_key, str)
 
+    def _read_cursor_counter(self) -> int | None:
+        """Return the persisted cursor counter when it is usable."""
+        if not self._cursor_file.exists():
+            return None
+        with suppress(ValueError, OSError):
+            cursor = int(self._cursor_file.read_text(encoding="utf-8").strip())
+            if cursor >= 0:
+                return cursor
+        return None
+
     def _next_cursor(self) -> int:
         """Read the current cursor counter and return the next value."""
-        if self._cursor_file.exists():
-            with suppress(ValueError, OSError):
-                return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
+        cursor_counter = self._read_cursor_counter()
+        last = self._read_last_entry() or {}
+        last_cursor = self._valid_cursor(last.get("cursor"))
+        if cursor_counter is not None:
+            if last_cursor is not None:
+                return max(cursor_counter, last_cursor) + 1
+            max_history_cursor = max((c for _, c in self._iter_valid_entries()), default=0)
+            return max(cursor_counter, max_history_cursor) + 1
+
         # Fast path: trust the tail when intact.  Otherwise scan the whole
         # file and take ``max`` — that stays correct even if the monotonic
         # invariant was broken by external writes.
-        last = self._read_last_entry() or {}
-        cursor = self._valid_cursor(last.get("cursor"))
-        if cursor is not None:
-            return cursor + 1
+        if last_cursor is not None:
+            return last_cursor + 1
         return max((c for _, c in self._iter_valid_entries()), default=0) + 1
-
-    _INTERNAL_HISTORY_SESSION_KEYS: ClassVar[frozenset[str]] = frozenset({
-        "echo",
-        "consolidation",
-        "curation",
-    })
-    _INTERNAL_HISTORY_SESSION_PREFIXES: ClassVar[tuple[str, ...]] = (
-        "dream:",
-        "cron:",
-    )
-
-    @classmethod
-    def _is_internal_history_session(cls, session_key: str | None) -> bool:
-        if not session_key:
-            return False
-        return (
-            session_key in cls._INTERNAL_HISTORY_SESSION_KEYS
-            or session_key.startswith(cls._INTERNAL_HISTORY_SESSION_PREFIXES)
-        )
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with a valid cursor > *since_cursor*."""
@@ -484,12 +479,15 @@ class MemoryStore:
     def set_last_dream_cursor(self, cursor: int) -> None:
         self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
+    def get_latest_cursor(self) -> int:
+        return max(self._next_cursor() - 1, 0)
+
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
         """
-        from blackcat.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
@@ -510,11 +508,11 @@ class MemoryStore:
 
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
-        from blackcat.agent.skills import BUILTIN_SKILLS_DIR
-        from blackcat.agent.tools.apply_patch import ApplyPatchTool
-        from blackcat.agent.tools.file_state import FileStates
-        from blackcat.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
-        from blackcat.agent.tools.registry import ToolRegistry
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.tools.apply_patch import ApplyPatchTool
+        from nanobot.agent.tools.file_state import FileStates
+        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+        from nanobot.agent.tools.registry import ToolRegistry
 
         tools = ToolRegistry()
         file_states = FileStates()
@@ -670,7 +668,6 @@ class Consolidator:
         self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
-        self._estimate_tokens = estimate_message_tokens
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -708,7 +705,7 @@ class Consolidator:
                 last_boundary = (idx, removed_tokens)
                 if removed_tokens >= tokens_to_remove:
                     return last_boundary
-            removed_tokens += self._estimate_tokens(message)
+            removed_tokens += estimate_message_tokens(message)
 
         return last_boundary
 
@@ -795,7 +792,7 @@ class Consolidator:
             }
             self.sessions.save(session)
 
-    async def estimate_session_prompt_tokens(
+    def estimate_session_prompt_tokens(
         self,
         session: Session,
     ) -> tuple[int, str]:
@@ -805,7 +802,7 @@ class Consolidator:
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
         summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
-        probe_messages = await self._build_messages(
+        probe_messages = self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
@@ -916,7 +913,7 @@ class Consolidator:
                 replay_max_messages,
             )
             try:
-                estimated, source = await self.estimate_session_prompt_tokens(
+                estimated, source = self.estimate_session_prompt_tokens(
                     session,
                 )
             except Exception:
@@ -981,7 +978,7 @@ class Consolidator:
                     break
 
                 try:
-                    estimated, source = await self.estimate_session_prompt_tokens(
+                    estimated, source = self.estimate_session_prompt_tokens(
                         session,
                     )
                 except Exception:

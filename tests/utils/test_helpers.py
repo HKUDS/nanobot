@@ -1,6 +1,6 @@
 import tiktoken
 
-from blackcat.utils.helpers import split_message, truncate_text_to_tokens
+from nanobot.utils.helpers import split_message, truncate_text_to_tokens
 
 
 def test_split_message_no_code_blocks_unchanged():

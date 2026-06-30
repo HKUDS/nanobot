@@ -14,9 +14,9 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
-from blackcat.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
-from blackcat.bus.queue import MessageBus
-from blackcat.channels.websocket import (
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.websocket import (
     WebSocketChannel,
     WebSocketConfig,
     _is_valid_chat_id,
@@ -24,28 +24,28 @@ from blackcat.channels.websocket import (
     _parse_inbound_payload,
     publish_runtime_model_update,
 )
-from blackcat.config.loader import load_config, save_config
-from blackcat.config.schema import Config, ModelPresetConfig
-from blackcat.session import webui_turns as wth
-from blackcat.session.manager import SessionManager
-from blackcat.webui.gateway_services import GatewayServices, build_gateway_services
-from blackcat.webui.http_utils import (
+from nanobot.config.loader import load_config, save_config
+from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.session import webui_turns as wth
+from nanobot.session.manager import SessionManager
+from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
+from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
 )
-from blackcat.webui.http_utils import (
+from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
 )
-from blackcat.webui.http_utils import (
+from nanobot.webui.http_utils import (
     normalize_http_path as _normalize_http_path,
 )
-from blackcat.webui.http_utils import (
+from nanobot.webui.http_utils import (
     parse_query as _parse_query,
 )
-from blackcat.webui.http_utils import (
+from nanobot.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
-from blackcat.webui.settings_api import settings_payload, update_provider_settings
-from blackcat.webui.transcript import append_transcript_object, read_transcript_lines
+from nanobot.webui.settings_api import settings_payload, update_provider_settings
+from nanobot.webui.transcript import append_transcript_object, read_transcript_lines
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -96,6 +96,27 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
     )
 
 
+@pytest.mark.asyncio
+async def test_stop_treats_cancelled_server_task_as_shutdown() -> None:
+    channel = _ch(MessageBus())
+    channel._running = True
+    channel._stop_event = asyncio.Event()
+
+    async def _server_task() -> None:
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_server_task())
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    channel._server_task = task
+
+    await channel.stop()
+
+    assert channel._server_task is None
+    assert task.cancelled()
+
+
 @pytest.fixture()
 def bus() -> MagicMock:
     b = MagicMock()
@@ -105,9 +126,9 @@ def bus() -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "blackcat.webui.workspaces.get_webui_dir",
+        "nanobot.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",
     )
 
@@ -115,7 +136,7 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
 async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Response:
     """Run GET in a thread to avoid blocking the asyncio loop shared with websockets."""
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -274,7 +295,7 @@ def test_issue_route_secret_matches_bearer_and_header() -> None:
     secret = "my-secret"
     bearer_headers = Headers([("Authorization", "Bearer my-secret")])
     assert _issue_route_secret_matches(bearer_headers, secret) is True
-    x_headers = Headers([("X-Blackcat-Auth", "my-secret")])
+    x_headers = Headers([("X-Nanobot-Auth", "my-secret")])
     assert _issue_route_secret_matches(x_headers, secret) is True
     wrong = Headers([("Authorization", "Bearer other")])
     assert _issue_route_secret_matches(wrong, secret) is False
@@ -319,7 +340,7 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
 
 @pytest.mark.asyncio
 async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
-    from blackcat.webui.transcript import read_transcript_lines
+    from nanobot.webui.transcript import read_transcript_lines
 
     channel = _ch(bus)
     conn = MagicMock()
@@ -360,9 +381,9 @@ async def test_webui_message_envelope_persists_user_transcript_for_refresh(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
+    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
 
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -393,9 +414,9 @@ async def test_webui_stop_control_message_is_not_persisted_as_user_bubble(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from blackcat.webui.transcript import read_transcript_lines
+    from nanobot.webui.transcript import read_transcript_lines
 
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -419,7 +440,7 @@ async def test_webui_user_transcript_append_failure_does_not_block_inbound(
     def fail_append(_session_key: str, _obj: dict[str, Any]) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("blackcat.webui.transcript.append_transcript_object", fail_append)
+    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", fail_append)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -851,8 +872,8 @@ async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -
     def fake_media_dir(channel: str | None = None):
         return ws_media if channel == "websocket" else media_root
 
-    monkeypatch.setattr("blackcat.channels.websocket.get_media_dir", fake_media_dir)
-    monkeypatch.setattr("blackcat.webui.media_gateway.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
@@ -1093,8 +1114,8 @@ async def test_send_delta_stream_end_rewrites_local_markdown_image(monkeypatch, 
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    monkeypatch.setattr("blackcat.channels.websocket.get_media_dir", fake_media_dir)
-    monkeypatch.setattr("blackcat.webui.media_gateway.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
         bus,
@@ -1126,8 +1147,8 @@ async def test_send_delta_stream_end_rewrites_inline_final_text(monkeypatch, tmp
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    monkeypatch.setattr("blackcat.channels.websocket.get_media_dir", fake_media_dir)
-    monkeypatch.setattr("blackcat.webui.media_gateway.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
         bus,
@@ -1231,7 +1252,7 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_transcript_persists_without_subscribers() -> None:
-    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
+    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
 
     bus = MagicMock()
     channel = WebSocketChannel(
@@ -1464,7 +1485,7 @@ async def test_maybe_push_turn_run_wall_clock_skips_when_no_active_turn() -> Non
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    from blackcat.session import webui_turns as wth
+    from nanobot.session import webui_turns as wth
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     await channel._maybe_push_turn_run_wall_clock("chat-1")
@@ -1477,7 +1498,7 @@ async def test_maybe_push_turn_run_wall_clock_replays_running() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    from blackcat.session import webui_turns as wth
+    from nanobot.session import webui_turns as wth
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     try:
@@ -1639,7 +1660,7 @@ async def test_wrong_path_returns_404(bus: MagicMock) -> None:
 
 
 def test_registry_discovers_websocket_channel() -> None:
-    from blackcat.channels.registry import load_channel_class
+    from nanobot.channels.registry import load_channel_class
 
     cls = load_channel_class("websocket")
     assert cls.name == "websocket"
@@ -1709,9 +1730,9 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     config.tools.web.search.provider = "brave"
     config.tools.web.search.api_key = "brave-secret"
     save_config(config, config_path)
-    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
-        "blackcat.webui.settings_api._oauth_provider_status",
+        "nanobot.webui.settings_api._oauth_provider_status",
         lambda _spec: {
             "configured": False,
             "account": None,
@@ -1767,7 +1788,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_providers["exa"]["credential"] == "api_key"
         assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
-        assert search_providers["keenable"]["credential"] == "api_key"
+        assert search_providers["keenable"]["credential"] == "optional_api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
         assert body["image_generation"]["provider"] == "openrouter"
@@ -1784,7 +1805,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert image_providers["gemini"]["label"] == "Gemini"
         assert body["runtime"]["config_path"] == str(config_path)
         workspace_path = body["runtime"]["workspace_path"].replace("\\", "/")
-        assert workspace_path.endswith("/.blackcat/workspace")
+        assert workspace_path.endswith("/.nanobot/workspace")
         assert body["runtime"]["gateway_port"] == 18790
         assert body["advanced"]["exec_enabled"] is True
         assert body["advanced"]["webui_allow_local_service_access"] is True
@@ -2056,7 +2077,7 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
     try:
         response = await _http_get(
             f"http://127.0.0.1:{port}/webui/bootstrap",
-            headers={"X-Blackcat-Auth": "native-secret"},
+            headers={"X-Nanobot-Auth": "native-secret"},
         )
         assert response.status_code == 200
         body = response.json()
@@ -2078,7 +2099,7 @@ def test_settings_payload_normalizes_camel_case_provider(
     config = Config()
     config.agents.defaults.provider = "minimaxAnthropic"
     save_config(config, config_path)
-    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = settings_payload()
 
@@ -2090,7 +2111,7 @@ def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path
     config = Config()
     config.providers.openai.api_type = "responses"
     save_config(config, config_path)
-    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = settings_payload()
     providers = {provider["name"]: provider for provider in body["providers"]}
@@ -2104,8 +2125,8 @@ def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> No
     config = Config()
     config.tools.restrict_to_workspace = True
     save_config(config, config_path)
-    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
-    monkeypatch.setenv("BLACKCAT_SANDBOX_ENFORCED", "macos_app_sandbox")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setenv("NANOBOT_SANDBOX_ENFORCED", "macos_app_sandbox")
 
     body = settings_payload()
     sandbox = body["advanced"]["workspace_sandbox"]
@@ -2120,7 +2141,7 @@ def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> No
 def test_settings_payload_includes_native_runtime_surface(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
-    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = settings_payload(
         surface="native",
@@ -2140,7 +2161,7 @@ def test_settings_payload_includes_native_runtime_surface(monkeypatch, tmp_path)
 def test_update_provider_settings_ignores_api_type_for_non_openai(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
-    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = update_provider_settings({
         "provider": ["custom"],
@@ -2460,7 +2481,7 @@ async def test_fork_chat_copies_only_prefix_session_and_transcript(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sessions = SessionManager(tmp_path / "sessions")
     source = sessions.get_or_create("websocket:source")
     source.metadata["webui"] = True
@@ -2512,7 +2533,7 @@ async def test_webui_message_envelope_appends_user_transcript(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sessions = SessionManager(tmp_path / "sessions")
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
@@ -2666,8 +2687,8 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from blackcat.session import webui_turns as wth
-    from blackcat.webui import ws_http as ws_http_module
+    from nanobot.session import webui_turns as wth
+    from nanobot.webui import ws_http as ws_http_module
 
     bus = MagicMock()
     session_manager = MagicMock()
@@ -2745,9 +2766,9 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from blackcat.webui.transcript import append_transcript_object
+    from nanobot.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:c1"
     append_transcript_object(key, {"event": "user", "chat_id": "c1", "text": "hi"})
     bus = MagicMock()
@@ -2770,9 +2791,9 @@ def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch)
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from blackcat.webui.transcript import append_transcript_object
+    from nanobot.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:paged-route"
     for idx in range(1, 4):
         append_transcript_object(
@@ -2810,7 +2831,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     from websockets.http11 import Request
 
     workspace = tmp_path / "workspace"
-    source = workspace / "blackcat" / "agent" / "hook.py"
+    source = workspace / "nanobot" / "agent" / "hook.py"
     source.parent.mkdir(parents=True)
     source.write_text("print('hello')\n", encoding="utf-8")
 
@@ -2818,7 +2839,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
     key = "websocket:file-preview"
     enc = quote(key, safe="")
-    path = quote("blackcat/agent/hook.py:12", safe="")
+    path = quote("nanobot/agent/hook.py:12", safe="")
     req = Request(
         f"/api/sessions/{enc}/file-preview?path={path}",
         Headers([("Authorization", "Bearer tok")]),
@@ -2828,14 +2849,14 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["display_path"] == "blackcat/agent/hook.py"
+    assert body["display_path"] == "nanobot/agent/hook.py"
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
 
 
 def test_file_preview_normalizes_windows_file_url() -> None:
-    from blackcat.webui.file_preview import _clean_preview_path
+    from nanobot.webui.file_preview import _clean_preview_path
 
     assert _clean_preview_path("file:///C:/Users/me/project/app.py") == (
         "C:/Users/me/project/app.py"
@@ -2877,9 +2898,9 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from blackcat.webui.transcript import append_transcript_object
+    from nanobot.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     workspace = tmp_path / "workspace"
     sessions = SessionManager(workspace)
     key = "websocket:c-legacy"
@@ -2921,10 +2942,10 @@ def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from blackcat.cron.session_turns import CRON_HISTORY_META
-    from blackcat.webui.transcript import append_transcript_object
+    from nanobot.cron.session_turns import CRON_HISTORY_META
+    from nanobot.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     workspace = tmp_path / "workspace"
     sessions = SessionManager(workspace)
     key = "websocket:c-cron"

@@ -30,15 +30,15 @@ Restart the deployed process after editing `config.json`. Long-running processes
 ## Docker
 
 > [!TIP]
-> The `-v ~/.blackcat:/home/blackcat/.blackcat` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
-> The container runs as the non-root user `blackcat` (UID 1000) and reads config from `/home/blackcat/.blackcat`. Always mount your host config directory to `/home/blackcat/.blackcat`, not `/root/.blackcat`.
-> If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.blackcat`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
+> The `-v ~/.nanobot:/home/nanobot/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The container runs as the non-root user `nanobot` (UID 1000) and reads config from `/home/nanobot/.nanobot`. Always mount your host config directory to `/home/nanobot/.nanobot`, not `/root/.nanobot`.
+> If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.nanobot`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
 >
 > [!IMPORTANT]
 > Official Docker usage currently means building from this repository with the included `Dockerfile`. Docker Hub images under third-party namespaces are not maintained or verified by HKUDS/nanobot; do not mount API keys or bot tokens into them unless you trust the publisher.
 
 > [!IMPORTANT]
-> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `blackcat/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.blackcat/config.json` before starting the container. To serve the bundled WebUI from Docker, enable the WebSocket channel and protect bootstrap with a secret:
+> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `nanobot/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.nanobot/config.json` before starting the container. To serve the bundled WebUI from Docker, enable the WebSocket channel and protect bootstrap with a secret:
 >
 > ```json
 > {
@@ -59,14 +59,14 @@ Restart the deployed process after editing `config.json`. Long-running processes
 ### Docker Compose
 
 ```bash
-docker compose run --rm blackcat-cli onboard   # first-time setup
-vim ~/.blackcat/config.json                     # add API keys
-docker compose up -d blackcat-gateway           # start gateway
+docker compose run --rm nanobot-cli onboard   # first-time setup
+vim ~/.nanobot/config.json                     # add API keys
+docker compose up -d nanobot-gateway           # start gateway
 ```
 
 ```bash
-docker compose run --rm blackcat-cli agent -m "Hello!"   # run CLI
-docker compose logs -f blackcat-gateway                   # view logs
+docker compose run --rm nanobot-cli agent -m "Hello!"   # run CLI
+docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
@@ -74,13 +74,13 @@ docker compose down                                      # stop
 
 ```bash
 # Build the image
-docker build -t blackcat .
+docker build -t nanobot .
 
 # Initialize config (first time only)
-docker run -v ~/.blackcat:/home/blackcat/.blackcat --rm blackcat onboard
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 
 # Edit config on host to add API keys
-vim ~/.blackcat/config.json
+vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
 # Mirrors the security caps and port mappings declared in docker-compose.yml:
@@ -93,61 +93,54 @@ docker run \
   --cap-drop ALL --cap-add SYS_ADMIN \
   --security-opt apparmor=unconfined \
   --security-opt seccomp=unconfined \
-  -v ~/.blackcat:/home/blackcat/.blackcat \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
   -p 18790:18790 -p 8765:8765 \
-  blackcat gateway
+  nanobot gateway
 
 # Or run a single command
-docker run -v ~/.blackcat:/home/blackcat/.blackcat --rm blackcat agent -m "Hello!"
-docker run -v ~/.blackcat:/home/blackcat/.blackcat --rm blackcat status
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
 ```
 
 ## Linux Service
 
 Run the gateway as a systemd user service so it starts automatically and restarts on failure.
 
-**1. Find the blackcat binary path:**
+Preview the generated unit first:
 
 ```bash
-which blackcat   # e.g. /home/user/.local/bin/blackcat
+nanobot gateway install-service --manager systemd --dry-run
 ```
 
-**2. Create the service file** at `~/.config/systemd/user/blackcat-gateway.service` (replace `ExecStart` path if needed):
-
-```ini
-[Unit]
-Description=Blackcat Gateway
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/blackcat gateway
-Restart=always
-RestartSec=10
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=%h
-
-[Install]
-WantedBy=default.target
-```
-
-**3. Enable and start:**
+Install, enable, and start it:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now blackcat-gateway
+nanobot gateway install-service --manager systemd
 ```
 
-**Common operations:**
+For a custom instance, pass the same config/workspace selector you use to run the gateway:
 
 ```bash
-systemctl --user status blackcat-gateway        # check status
-systemctl --user restart blackcat-gateway       # restart after config changes
-journalctl --user -u blackcat-gateway -f        # follow logs
+nanobot gateway install-service \
+  --manager systemd \
+  --name nanobot-telegram \
+  --config ~/.nanobot-telegram/config.json \
+  --workspace ~/.nanobot-telegram/workspace
 ```
 
-If you edit the `.service` file itself, run `systemctl --user daemon-reload` before restarting.
+Common operations:
+
+```bash
+systemctl --user status nanobot-gateway        # check status
+systemctl --user restart nanobot-gateway       # restart after config changes
+journalctl --user -u nanobot-gateway -f        # follow logs
+nanobot gateway uninstall-service --manager systemd
+```
+
+The installer writes `~/.config/systemd/user/nanobot-gateway.service`, runs
+`systemctl --user daemon-reload`, enables the unit, and restarts it. It uses the
+current Python executable with `python -m nanobot gateway --foreground`, so the
+service runs in the same environment you used to install nanobot.
 
 > **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
 >
@@ -157,72 +150,40 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 
 ## macOS LaunchAgent
 
-Use a LaunchAgent when you want `blackcat gateway` to stay online after you log in, without keeping a terminal open.
+Use a LaunchAgent when you want `nanobot gateway` to stay online after you log in, without keeping a terminal open.
 
-**1. Get the absolute `blackcat` path:**
-
-```bash
-which blackcat   # e.g. /Users/youruser/.local/bin/blackcat
-```
-
-Use that exact path in the plist. It keeps the Python environment from your install method.
-
-**2. Create `~/Library/LaunchAgents/ai.blackcat.gateway.plist`:**
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>ai.blackcat.gateway</string>
-
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/youruser/.local/bin/blackcat</string>
-    <string>gateway</string>
-    <string>--workspace</string>
-    <string>/Users/youruser/.blackcat/workspace</string>
-  </array>
-
-  <key>WorkingDirectory</key>
-  <string>/Users/youruser/.blackcat/workspace</string>
-
-  <key>RunAtLoad</key>
-  <true/>
-
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-
-  <key>StandardOutPath</key>
-  <string>/Users/youruser/.blackcat/logs/gateway.log</string>
-
-  <key>StandardErrorPath</key>
-  <string>/Users/youruser/.blackcat/logs/gateway.error.log</string>
-</dict>
-</plist>
-```
-
-**3. Load and start it:**
+Preview the generated plist first:
 
 ```bash
-mkdir -p ~/Library/LaunchAgents ~/.blackcat/logs
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.blackcat.gateway.plist
-launchctl enable gui/$(id -u)/ai.blackcat.gateway
-launchctl kickstart -k gui/$(id -u)/ai.blackcat.gateway
+nanobot gateway install-service --manager launchd --dry-run
 ```
 
-**Common operations:**
+Install, load, enable, and start it:
 
 ```bash
-launchctl list | grep ai.blackcat.gateway
-launchctl kickstart -k gui/$(id -u)/ai.blackcat.gateway   # restart
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.blackcat.gateway.plist
+nanobot gateway install-service --manager launchd
 ```
 
-After editing the plist, run `launchctl bootout ...` and `launchctl bootstrap ...` again.
+For a custom instance:
 
-> **Note:** if startup fails with "address already in use", stop the manually started `blackcat gateway` process first.
+```bash
+nanobot gateway install-service \
+  --manager launchd \
+  --name nanobot-telegram \
+  --config ~/.nanobot-telegram/config.json \
+  --workspace ~/.nanobot-telegram/workspace
+```
+
+Common operations:
+
+```bash
+launchctl list | grep ai.nanobot.gateway
+launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
+nanobot gateway uninstall-service --manager launchd
+```
+
+The installer writes `~/Library/LaunchAgents/ai.nanobot.gateway.plist`, uses the
+current Python executable with `python -m nanobot gateway --foreground`, and
+writes LaunchAgent logs under `~/.nanobot/logs/`.
+
+> **Note:** if startup fails with "address already in use", stop the manually started `nanobot gateway` process first.

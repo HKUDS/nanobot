@@ -90,7 +90,7 @@ async def _http_get(
     url: str, headers: dict[str, str] | None = None
 ) -> httpx.Response:
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 

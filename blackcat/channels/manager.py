@@ -252,6 +252,10 @@ class ChannelManager:
             try:
                 await channel.stop()
                 logger.info("Stopped {} channel", name)
+            except asyncio.CancelledError:
+                if asyncio.current_task() and asyncio.current_task().cancelling():
+                    raise
+                logger.debug("Channel {} stop task was already cancelled", name)
             except Exception:
                 logger.exception("Error stopping {}", name)
 

@@ -2,9 +2,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
-    assistantCopyFlags,
-    buildDisplayUnits,
-    ThreadMessages,
+  assistantCopyFlags,
+  buildDisplayUnits,
+  ThreadMessages,
+  unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
 import type { UIMessage } from "@/lib/types";
 
@@ -70,6 +71,42 @@ describe("ThreadMessages", () => {
     );
 
     expect(screen.getByText("Forked from history")).toBeInTheDocument();
+  });
+
+  it("keeps turn unit keys stable across replayed ids and mutable turn sequence", () => {
+    const liveUnits = buildDisplayUnits([
+      { id: "optimistic-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 0, createdAt: 1 },
+      {
+        id: "live-a1",
+        role: "assistant",
+        content: "first answer slice",
+        turnId: "turn-1",
+        turnPhase: "answer",
+        turnSeq: 2,
+        createdAt: 2,
+      },
+      {
+        id: "live-a2",
+        role: "assistant",
+        content: "second answer slice",
+        turnId: "turn-1",
+        turnPhase: "answer",
+        turnSeq: 20,
+        createdAt: 3,
+      },
+    ]);
+    const replayUnits = buildDisplayUnits([
+      { id: "replayed-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 10, createdAt: 10 },
+      { id: "replayed-a1", role: "assistant", content: "first answer slice", turnId: "turn-1", turnPhase: "answer", turnSeq: 11, createdAt: 11 },
+      { id: "replayed-a2", role: "assistant", content: "second answer slice", turnId: "turn-1", turnPhase: "answer", turnSeq: 99, createdAt: 12 },
+    ]);
+
+    expect(unitKeysForDisplay(liveUnits)).toEqual(unitKeysForDisplay(replayUnits));
+    expect(unitKeysForDisplay(liveUnits)).toEqual([
+      "turn-turn-1-user",
+      "turn-turn-1-answer-1",
+      "turn-turn-1-answer-2",
+    ]);
   });
 
   it("keeps file edits as their own activity row inside a turn", () => {
@@ -308,8 +345,45 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Thought for 9s")).toBeInTheDocument();
+    expect(screen.getByText("Worked for 9s")).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
+  });
+
+  it("uses final turn latency when an earlier reasoning segment has its own latency", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "plan",
+        reasoningStreaming: false,
+        latencyMs: 3_000,
+        createdAt: 1,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "shell()",
+        traces: ["shell()"],
+        createdAt: 2,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "done",
+        latencyMs: 20_000,
+        createdAt: 3,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+
+    expect(units[0].type === "activity" ? units[0].turnLatencyMs : undefined).toBe(20_000);
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    expect(screen.getByText("Worked for 20s")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
   });
 
   it("keeps late activity after the live assistant answer while streaming", () => {
@@ -626,8 +700,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getByText("Thought for 15s")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
+    expect(screen.getByText("Worked for 15s")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
   it("shows copy only on the last assistant slice before the next user turn", () => {
@@ -667,30 +741,6 @@ describe("ThreadMessages", () => {
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
-  });
-
-  it("uses turn ids as activity grouping boundaries when available", () => {
-    const units = buildDisplayUnits([
-      { id: "u1", role: "user", content: "one", turnId: "turn-1", createdAt: 1 },
-      { id: "a1", role: "assistant", content: "answer one", turnId: "turn-1", createdAt: 2 },
-      {
-        id: "t2",
-        role: "tool",
-        kind: "trace",
-        content: "search()",
-        traces: ["search()"],
-        turnId: "turn-2",
-        createdAt: 3,
-      },
-      { id: "a2", role: "assistant", content: "answer two", turnId: "turn-2", createdAt: 4 },
-    ]);
-
-    expect(units.map((unit) => unit.type === "message" ? unit.message.id : "activity")).toEqual([
-      "u1",
-      "a1",
-      "activity",
-      "a2",
-    ]);
   });
 
   it("uses turn ids as activity grouping boundaries when available", () => {

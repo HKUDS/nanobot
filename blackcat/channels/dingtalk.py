@@ -94,11 +94,23 @@ class BlackcatDingTalkHandler(CallbackHandler):
                 for item in rich_list:
                     if not isinstance(item, dict):
                         continue
-                    if item.get("type") == "text":
-                        t = item.get("text", "").strip()
-                        if t:
-                            content = (content + " " + t).strip() if content else t
-                    elif item.get("downloadCode"):
+                    # A rich-text item may carry text and/or a downloadCode; the
+                    # DingTalk SDK treats them independently, so handle both.
+                    t = item.get("text", "").strip()
+                    if t:
+                        fmt = item.get("type", "")
+                        if fmt == "bold":
+                            formatted = f"**{t}**"
+                        elif fmt == "italic":
+                            formatted = f"*{t}*"
+                        elif fmt == "inlineCode":
+                            formatted = f"`{t}`"
+                        elif fmt == "pre":
+                            formatted = f"```\n{t}\n```"
+                        else:
+                            formatted = t
+                        content = (content + " " + formatted).strip() if content else formatted
+                    if item.get("downloadCode"):
                         dc = item["downloadCode"]
                         fname = item.get("fileName") or "file"
                         sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
@@ -214,7 +226,9 @@ class DingTalkChannel(BaseChannel):
                 return
 
             self._running = True
-            self._http = httpx.AsyncClient()
+            self._http = httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=10.0, read=30.0, write=30.0, pool=10.0)
+            )
 
             self.logger.info(
                 "Initializing Stream Client with Client ID: {}...",

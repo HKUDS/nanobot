@@ -30,6 +30,7 @@ from blackcat.utils.formatting import (
     IncrementalThinkExtractor,
     build_assistant_message,
     extract_reasoning,
+    strip_reasoning_tags,
     strip_think,
     truncate_text,
 )
@@ -55,6 +56,8 @@ from blackcat.utils.tokens import (
     estimate_prompt_tokens_chain,
 )
 from blackcat.utils.tools import maybe_persist_tool_result
+
+GoalContinueMessage = str | Callable[[], str | None]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -111,7 +114,7 @@ class AgentRunSpec:
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
-    goal_continue_message: str | None = None
+    goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
 
 
@@ -200,7 +203,7 @@ class AgentRunner:
         if not injections and allow_goal_continue and assistant_message is not None:
             predicate = spec.goal_active_predicate
             if predicate is not None and predicate():
-                injections = [build_goal_continue_message(spec.goal_continue_message)]
+                injections = [self._build_goal_continue_message(spec)]
         if not injections:
             return False, injection_cycles
         if real_injection:
@@ -228,6 +231,16 @@ class AgentRunner:
         else:
             logger.info("Injected sustained-goal continuation {}", phase)
         return True, injection_cycles
+
+    def _build_goal_continue_message(self, spec: AgentRunSpec) -> dict[str, str]:
+        custom = spec.goal_continue_message
+        if callable(custom):
+            try:
+                custom = custom()
+            except Exception:
+                logger.exception("goal_continue_message callback failed")
+                custom = None
+        return build_goal_continue_message(custom)
 
     async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
         """Drain pending user messages via the injection callback.
@@ -259,12 +272,17 @@ class AgentRunner:
             return []
         injected_messages: list[dict[str, Any]] = []
         for item in items:
-            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
-                injected_messages.append(item)
+            if item is None:
                 continue
-            text = getattr(item, "content", str(item))
-            if text.strip():
-                injected_messages.append({"role": "user", "content": text})
+            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
+                if self._has_injection_content(item.get("content")):
+                    injected_messages.append(item)
+                continue
+            if isinstance(item, dict):
+                continue
+            content = getattr(item, "content") if hasattr(item, "content") else str(item)
+            if self._has_injection_content(content):
+                injected_messages.append({"role": "user", "content": content})
         if len(injected_messages) > _MAX_INJECTIONS_PER_TURN:
             dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
             logger.warning(
@@ -273,6 +291,16 @@ class AgentRunner:
             )
             injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
+
+    @staticmethod
+    def _has_injection_content(content: Any) -> bool:
+        if content is None:
+            return False
+        if isinstance(content, str):
+            return bool(content.strip())
+        if isinstance(content, list):
+            return bool(content)
+        return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
@@ -754,16 +782,24 @@ class AgentRunner:
                 await live_file_edits.update(delta)
 
         if wants_streaming:
+            thinking_buf = ""
+
             async def _stream(delta: str) -> None:
                 if delta:
                     context.streamed_content = True
                 await hook.on_stream(context, delta)
 
             async def _thinking(delta: str) -> None:
+                nonlocal thinking_buf
                 if not delta:
                     return
-                context.streamed_reasoning = True
-                await hook.emit_reasoning(delta)
+                prev_clean = strip_reasoning_tags(thinking_buf)
+                thinking_buf += delta
+                new_clean = strip_reasoning_tags(thinking_buf)
+                incremental = new_clean[len(prev_clean):]
+                if incremental:
+                    context.streamed_reasoning = True
+                    await hook.emit_reasoning(incremental)
 
             async def _stream_recover() -> None:
                 await hook.on_stream_end(context, resuming=True)

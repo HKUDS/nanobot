@@ -17,6 +17,7 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
 | If you have... | Configure... |
 |---|---|
 | An API key from a hosted provider or gateway | That provider's `providers.<name>.apiKey`, then a preset with that provider name and a model ID from that service. |
+| An OpenCode Zen or Go key | `providers.opencodeZen.apiKey` or `providers.opencodeGo.apiKey`, then a preset with `provider: "opencode_zen"` or `provider: "opencode_go"`. |
 | A company proxy or regional endpoint | The matching provider block plus `apiBase` if the proxy gives you a URL. |
 | A local OpenAI-compatible server | A local provider block such as `ollama`, `vllm`, `lmStudio`, or `custom`, usually with `apiBase`. |
 | An OAuth-based account | Run the matching `nanobot provider login ...` command, then select that provider explicitly in a preset. |
@@ -94,6 +95,62 @@ Gateway-style setup for model IDs served through OpenRouter.
 
 Use the model ID exactly as OpenRouter lists it.
 
+### OpenCode Zen and Go
+
+OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
+They share `OPENCODE_API_KEY`, but use separate provider config keys and default base
+URLs in nanobot.
+
+```json
+{
+  "providers": {
+    "opencodeZen": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "opencode_zen",
+      "model": "opencode/deepseek-v4-pro",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+For OpenCode Go, switch the provider block and preset:
+
+```json
+{
+  "providers": {
+    "opencodeGo": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "opencode_go",
+      "model": "opencode-go/deepseek-v4-flash",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  }
+}
+```
+
+OpenCode documents model IDs with `opencode/<model-id>` for Zen and
+`opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them
+before sending the request to OpenCode. Use model IDs that OpenCode lists under
+the `chat/completions` endpoint; models listed only under `responses`,
+`messages`, or provider-specific endpoints are not handled by this
+OpenAI-compatible provider path.
+
 ### Anthropic Direct
 
 ```json
@@ -120,6 +177,27 @@ Use the model ID exactly as OpenRouter lists it.
 ```
 
 Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter model ID unless the provider is OpenRouter.
+
+If you use an Anthropic-compatible proxy, keep the provider as `anthropic` and override `apiBase`:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "apiBase": "https://anthropic-proxy.example.com"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5"
+    }
+  }
+}
+```
+
+Arbitrary custom provider names are OpenAI-compatible only; they do not use the Anthropic Messages API request format.
 
 ### OpenAI Direct
 
@@ -150,7 +228,7 @@ Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter mo
 
 ### Custom OpenAI-Compatible Endpoint
 
-The `custom` provider fits OpenAI-compatible endpoints that are not represented by a named provider.
+The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.
 
 ```json
 {
@@ -177,6 +255,47 @@ The `custom` provider fits OpenAI-compatible endpoints that are not represented 
 ```
 
 `custom` does not infer a default base URL. Set `apiBase`.
+
+If you have more than one custom OpenAI-compatible endpoint, give each endpoint its own provider key under `providers` and use that same key in the model preset. The key can be a name that makes sense in your environment, such as `companyProxy`, `tenant-a`, or `dev-local`.
+
+```json
+{
+  "providers": {
+    "companyProxy": {
+      "apiKey": "${COMPANY_PROXY_API_KEY}",
+      "apiBase": "https://llm-proxy.example.com/v1"
+    },
+    "tenant-a": {
+      "apiBase": "https://tenant-a.example.com/v1"
+    }
+  },
+  "modelPresets": {
+    "company": {
+      "provider": "companyProxy",
+      "model": "gpt-4o-mini",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    },
+    "tenantA": {
+      "provider": "tenant-a",
+      "model": "served-model-name",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "company"
+    }
+  }
+}
+```
+
+Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Choose a name that does not conflict with a built-in provider name or alias, such as `openai`, `openai-codex`, `github-copilot`, or `lm-studio`. Do not set `apiType` on custom provider keys; `apiType` is only for `providers.openai`.
+
+If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
+
+This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
 
 ### Ollama
 
@@ -316,6 +435,16 @@ Provider selection follows this practical rule:
 - `provider: "auto"` tries model-name keywords, configured keys, local base URLs, and gateway providers.
 - Gateway providers such as OpenRouter and AiHubMix can route many model families, so the model name must be valid for that gateway.
 - Local providers should normally be explicit because generic local model names such as `llama3.2` do not always contain provider keywords.
+
+### Model Name Prefixes
+
+`family/model-name` does not always select provider `family`. Prefix-based provider inference only runs when the active provider is `"auto"`.
+
+- Explicit provider wins: `provider: "openrouter"` with `model: "anthropic/claude-sonnet-4.5"` calls OpenRouter, not Anthropic.
+- With `provider: "auto"`, a prefix matching a configured built-in or named custom provider can select that provider. Named custom prefixes are stripped before request, so `companyProxy/gpt-4o-mini` is sent upstream as `gpt-4o-mini`.
+- With an explicit named custom provider, the model is sent as written; `provider: "companyProxy"` with `model: "openai/gpt-4o-mini"` sends `openai/gpt-4o-mini` to `companyProxy`.
+
+Pin `provider` in presets when using gateway catalog IDs such as `anthropic/claude-sonnet-4.5`.
 
 ## Model Presets
 

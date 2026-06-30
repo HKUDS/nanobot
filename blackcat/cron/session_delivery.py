@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from blackcat.cron.types import CronJob
+from nanobot.cron.types import CronJob
 
 
 def origin_delivery_context(job: CronJob) -> tuple[str, str, dict[str, Any]]:

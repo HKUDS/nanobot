@@ -368,6 +368,56 @@ class TestFallbackOnStreamStalledAfterContent:
         assert recoveries == ["recover"]
 
 
+class TestFailoverOnEmptyChoices:
+    """Fallback should trigger when API returns empty choices (no error metadata)."""
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_text_fallback(self) -> None:
+        """_should_fallback should return True for 'API returned empty choices'."""
+        from nanobot.providers.fallback_provider import FallbackProvider
+
+        response = _make_response(
+            "Error: API returned empty choices.",
+            finish_reason="error",
+            error_kind="empty",
+        )
+        # error_kind="empty" matches _FALLBACK_ERROR_KINDS via kind check
+        assert FallbackProvider._should_fallback(response)
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_no_error_kind_text_fallback(self) -> None:
+        """_should_fallback should also match via text token when error_kind is None."""
+        from nanobot.providers.fallback_provider import FallbackProvider
+
+        response = _make_response(
+            "Error: API returned empty choices.",
+            finish_reason="error",
+            # error_kind=None, no status — pure text matching
+        )
+        # "empty" token in _FALLBACK_ERROR_TOKENS matches via text fallback
+        assert FallbackProvider._should_fallback(response)
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_triggers_failover(self) -> None:
+        """End-to-end: empty choices on primary triggers fallback."""
+        primary = _FakeProvider(
+            "primary",
+            _make_response("Error: API returned empty choices.", finish_reason="error"),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once()
+
+
 class TestFailoverOnTransientError:
     @pytest.mark.asyncio
     async def test_rate_limit(self) -> None:

@@ -2,14 +2,14 @@
 
 import pytest
 
-from blackcat.agent.memory import MemoryStore
-from blackcat.providers.base import LLMResponse
-from blackcat.security.workspace_access import (
+from nanobot.agent.memory import MemoryStore
+from nanobot.providers.base import LLMResponse
+from nanobot.security.workspace_access import (
     bind_workspace_scope,
     default_workspace_scope,
     reset_workspace_scope,
 )
-from blackcat.utils.prompt_templates import render_template
+from nanobot.utils.prompt_templates import render_template
 
 
 @pytest.fixture
@@ -287,9 +287,9 @@ class TestEphemeralDirect:
         """Factory fixture that builds a minimal AgentLoop with mocked deps."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from blackcat.agent.loop import AgentLoop
-        from blackcat.agent.memory import MemoryStore
-        from blackcat.bus.queue import MessageBus
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.memory import MemoryStore
+        from nanobot.bus.queue import MessageBus
 
         store = MemoryStore(tmp_path)
         store.write_soul("# Soul")
@@ -305,9 +305,9 @@ class TestEphemeralDirect:
         )
 
         with (
-            patch("blackcat.agent.loop.SessionManager"),
-            patch("blackcat.agent.loop.SubagentManager") as mock_sub,
-            patch("blackcat.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.SessionManager"),
+            patch("nanobot.agent.loop.SubagentManager") as mock_sub,
+            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
@@ -414,8 +414,8 @@ class TestEphemeralDirect:
         """Dream must only see the batch selected by build_dream_prompt."""
         from unittest.mock import MagicMock
 
-        from blackcat.agent.loop import AgentLoop
-        from blackcat.bus.queue import MessageBus
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
 
         store = MemoryStore(tmp_path)
         for i in range(60):
@@ -469,9 +469,9 @@ class TestEphemeralHooks:
         """Build an AgentLoop with a spy hook to verify hook firing behavior."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        from blackcat.agent.hook import AgentHook
-        from blackcat.agent.loop import AgentLoop
-        from blackcat.bus.queue import MessageBus
+        from nanobot.agent.hook import AgentHook
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
 
         bus = MessageBus()
         provider = MagicMock()
@@ -490,9 +490,9 @@ class TestEphemeralHooks:
         spy.after_iteration = AsyncMock()
 
         with (
-            patch("blackcat.agent.loop.SessionManager"),
-            patch("blackcat.agent.loop.SubagentManager") as mock_sub,
-            patch("blackcat.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.SessionManager"),
+            patch("nanobot.agent.loop.SubagentManager") as mock_sub,
+            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
             mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
@@ -529,7 +529,7 @@ class TestDreamCommitMessage:
         import subprocess
         from unittest.mock import AsyncMock, MagicMock
 
-        from blackcat.agent.memory import MemoryStore
+        from nanobot.agent.memory import MemoryStore
 
         store = MemoryStore(tmp_path)
         store.write_soul("# Soul")

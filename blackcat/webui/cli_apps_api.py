@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from typing import Any
 
-from blackcat.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
-from blackcat.config.loader import load_config
+from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.config.loader import load_config
 
 QueryParams = dict[str, list[str]]
 
@@ -19,6 +21,28 @@ _CLI_APP_ATTACHMENT_KEYS = (
     "logo_url",
     "brand_color",
 )
+_CATALOG_REFRESH_RETRY_SECONDS = 60.0
+_catalog_refresh_task: asyncio.Task[None] | None = None
+_catalog_refresh_last_started = 0.0
+
+
+async def _refresh_catalog(manager: CliAppManager) -> None:
+    try:
+        await manager.refresh_catalog_cache(force_refresh=True)
+    except Exception:
+        pass
+
+
+def _start_catalog_refresh(manager: CliAppManager) -> bool:
+    global _catalog_refresh_last_started, _catalog_refresh_task
+    now = time.monotonic()
+    if _catalog_refresh_task is not None and not _catalog_refresh_task.done():
+        return True
+    if now - _catalog_refresh_last_started < _CATALOG_REFRESH_RETRY_SECONDS:
+        return False
+    _catalog_refresh_last_started = now
+    _catalog_refresh_task = asyncio.create_task(_refresh_catalog(manager))
+    return True
 
 
 def _clip_ws_string(value: Any, limit: int = 240) -> str | None:
@@ -73,11 +97,20 @@ def _manager() -> CliAppManager:
     )
 
 
-def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
+async def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
     manager = _manager()
     if installed_only:
         return manager.installed_payload()
-    return manager.payload()
+    payload = manager.payload(cache_only=True)
+    refresh_pending = False
+    if not manager.catalog_cache_fresh(include_optional=True):
+        refresh_pending = _start_catalog_refresh(manager)
+    if not payload["apps"]:
+        installed = manager.installed_payload()
+        if installed["apps"]:
+            payload = installed
+    payload["catalog_refresh_pending"] = refresh_pending
+    return payload
 
 
 def cli_apps_action(action: str, query: QueryParams) -> dict[str, Any]:

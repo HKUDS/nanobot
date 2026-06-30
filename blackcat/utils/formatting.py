@@ -241,3 +241,18 @@ def extract_reasoning(
     if content:
         return extract_think(content)
     return None, content
+
+
+def strip_reasoning_tags(text: object) -> str:
+    """Remove wrapper tags from text that is already known to be reasoning."""
+    if not isinstance(text, str):
+        return ""
+    # Well-formed wrappers
+    text = re.sub(r"^\s*<think>\s*", "", text)
+    text = re.sub(r"\s*</think>\s*$", "", text)
+    text = re.sub(r"^\s*<thought>\s*", "", text)
+    text = re.sub(r"\s*</thought>\s*$", "", text)
+    # Partial trailing tags
+    partial = r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought)>?"
+    text = re.sub(rf"\s*(?:{partial})$", "", text)
+    return text.strip()

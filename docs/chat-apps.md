@@ -1,16 +1,16 @@
 # Chat Apps
 
-Connect blackcat to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./channel-plugin-guide.md).
+Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./channel-plugin-guide.md).
 
 Before configuring a chat app, make sure the local CLI path works:
 
 ```bash
-blackcat agent -m "Hello!"
+nanobot agent -m "Hello!"
 ```
 
-If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `blackcat gateway` to stay running after the channel is configured.
+If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `nanobot gateway` to stay running after the channel is configured.
 
-Most examples below are snippets to merge into `~/.blackcat/config.json`.
+Most examples below are snippets to merge into `~/.nanobot/config.json`.
 
 ## Common Setup Pattern
 
@@ -18,23 +18,23 @@ Every chat app uses the same shape:
 
 1. Create or prepare the bot/account in the chat platform.
 2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
-3. Merge that platform's JSON snippet into `~/.blackcat/config.json`.
+3. Merge that platform's JSON snippet into `~/.nanobot/config.json`.
 4. Keep access control narrow at first with `allowFrom` or the platform-specific allow list.
-5. Check that blackcat can see the configured channel:
+5. Check that nanobot can see the configured channel:
 
 ```bash
-blackcat channels status
+nanobot channels status
 ```
 
 6. Start the gateway and leave that terminal running:
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 7. Send a message from the allowed account. In group chats, follow that channel's `groupPolicy` behavior: many channels default to mention-only, while Matrix and WhatsApp default to open group replies.
 
-If `blackcat channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one blackcat is reading. If the channel is enabled but messages do not arrive, run `blackcat gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
+If `nanobot channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one nanobot is reading. If the channel is enabled but messages do not arrive, run `nanobot gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
 
 > `["*"]` allows anyone who can reach that channel to talk to the bot. Use it only when that is intentional, or temporarily while testing in a private sandbox.
 
@@ -42,9 +42,9 @@ If `blackcat channels status` does not show the channel as enabled, the config s
 |---------|---------------|
 | **Telegram** | Bot token from @BotFather |
 | **Discord** | Bot token + Message Content intent |
-| **WhatsApp** | QR code scan (`blackcat channels login whatsapp`) |
-| **WeChat (Weixin)** | QR code scan (`blackcat channels login weixin`) |
-| **Feishu** | App ID + App Secret |
+| **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
+| **WeChat (Weixin)** | QR code scan (`nanobot channels login weixin`) |
+| **Feishu** | QR code scan (`nanobot channels login feishu`) or App ID + App Secret |
 | **DingTalk** | App Key + App Secret |
 | **Slack** | Bot token + App-Level token |
 | **Matrix** | Homeserver URL + Access token |
@@ -79,17 +79,19 @@ If `blackcat channels status` does not show the channel as enabled, the config s
 ```
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
 **3. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 **Webhook mode (optional)**
 
-Telegram uses long polling by default. To receive updates through a webhook, expose a public HTTPS URL that forwards to blackcat's local listener and set `mode` to `webhook`:
+Telegram uses long polling by default. To receive updates through a webhook, expose a public HTTPS URL that forwards to nanobot's local listener and set `mode` to `webhook`:
 
 ```json
 {
@@ -110,9 +112,9 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 }
 ```
 
-> `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; blackcat only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; blackcat still serializes Telegram updates per conversation before forwarding them to the agent.
+> `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot still serializes Telegram updates per conversation before forwarding them to the agent.
 >
-> `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path blackcat listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
+> `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path nanobot listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
 
 </details>
 
@@ -121,30 +123,30 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 
 Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
 
-**1. Ask blackcat to set up Mochat for you**
+**1. Ask nanobot to set up Mochat for you**
 
-Simply send this message to blackcat (replace `xxx@xxx` with your real email):
+Simply send this message to nanobot (replace `xxx@xxx` with your real email):
 
 ```
-Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/blackcat/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
+Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
 ```
 
-blackcat will automatically register, configure `~/.blackcat/config.json`, and connect to Mochat.
+nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
 
 **2. Restart gateway**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
-That's it — blackcat handles the rest!
+That's it — nanobot handles the rest!
 
 <br>
 
 <details>
 <summary>Manual configuration (advanced)</summary>
 
-If you prefer to configure manually, add the following to `~/.blackcat/config.json`:
+If you prefer to configure manually, add the following to `~/.nanobot/config.json`:
 
 > Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
 
@@ -223,7 +225,7 @@ If you prefer to configure manually, add the following to `~/.blackcat/config.js
 **6. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -234,7 +236,7 @@ blackcat gateway
 Install Matrix dependencies first:
 
 ```bash
-python -m pip install "blackcat-ai[matrix]"
+python -m pip install "nanobot-ai[matrix]"
 ```
 
 > [!NOTE]
@@ -248,7 +250,7 @@ python -m pip install "blackcat-ai[matrix]"
 **2. Get credentials**
 
 - You need:
-  - `userId` (example: `@blackcat:matrix.org`)
+  - `userId` (example: `@nanobot:matrix.org`)
   - `password`
 
 (Note: `accessToken` and `deviceId` are still supported for legacy reasons, but for reliable encryption, password login is recommended instead. If the `password` is provided, `accessToken` and `deviceId` will be ignored.)
@@ -261,7 +263,7 @@ python -m pip install "blackcat-ai[matrix]"
     "matrix": {
       "enabled": true,
       "homeserver": "https://matrix.org",
-      "userId": "@blackcat:matrix.org",
+      "userId": "@nanobot:matrix.org",
       "password": "mypasswordhere",
       "e2eeEnabled": true,
       "sasVerification": true,
@@ -293,7 +295,7 @@ python -m pip install "blackcat-ai[matrix]"
 **4. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -306,7 +308,7 @@ Requires **Node.js ≥18**.
 **1. Link device**
 
 ```bash
-blackcat channels login whatsapp
+nanobot channels login whatsapp
 # Scan QR with WhatsApp → Settings → Linked Devices
 ```
 
@@ -327,14 +329,33 @@ blackcat channels login whatsapp
 
 ```bash
 # Terminal 1
-blackcat channels login whatsapp
+nanobot channels login whatsapp
 
 # Terminal 2
-blackcat gateway
+nanobot gateway
 ```
 
-> WhatsApp bridge updates are not applied automatically for existing installations. After upgrading blackcat, rebuild the local bridge with:
-> `rm -rf ~/.blackcat/bridge && blackcat channels login whatsapp`
+> WhatsApp bridge updates are not applied automatically for existing installations. After upgrading nanobot, rebuild the local bridge with:
+> `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
+
+**Optional: static LID mappings**
+
+Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
+learns the LID→phone mapping at runtime (and reuses the ones the bridge persists on
+disk), but you can also seed mappings up front so the phone number resolves from the
+very first message:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "allowFrom": ["+1234567890"],
+      "lidMappings": { "123456789012345": "1234567890" }
+    }
+  }
+}
+```
 
 </details>
 
@@ -343,15 +364,28 @@ blackcat gateway
 
 Uses **WebSocket** long connection — no public IP required.
 
+**Quick setup: QR login**
+
+```bash
+nanobot channels login feishu
+# Use --force to create/sign in with a new bot
+```
+
+Open the printed URL or scan the QR code with Feishu/Lark on your phone. If the optional `qrcode` package is installed, nanobot shows a terminal QR code; otherwise it prints the login URL. nanobot writes `appId`, `appSecret`, `domain`, and `enabled` under `channels.feishu` in the active config file. Use `--config <path>` to update a non-default config.
+
+If QR login is unavailable for your account, use manual setup below.
+
+**Manual setup**
+
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
 - Create a new app → Enable **Bot** capability
 - **Permissions**:
   - `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
-  - **Streaming replies** (default in blackcat): add **`cardkit:card:write`** (often labeled **Create and update cards** in the Feishu developer console). Required for CardKit entities and streamed assistant text. Older apps may not have it yet — open **Permission management**, enable the scope, then **publish** a new app version if the console requires it.
+  - **Streaming replies** (default in nanobot): add **`cardkit:card:write`** (often labeled **Create and update cards** in the Feishu developer console). Required for CardKit entities and streamed assistant text. Older apps may not have it yet — open **Permission management**, enable the scope, then **publish** a new app version if the console requires it.
   - If you **cannot** add `cardkit:card:write`, set `"streaming": false` under `channels.feishu` (see below). The bot still works; replies use normal interactive cards without token-by-token streaming.
 - **Events**: Add `im.message.receive_v1` (receive messages)
-  - Select **Long Connection** mode (requires running blackcat first to establish connection)
+  - Select **Long Connection** mode (requires running nanobot first to establish connection)
 - Get **App ID** and **App Secret** from "Credentials & Basic Info"
 - Publish the app
 
@@ -380,7 +414,7 @@ Uses **WebSocket** long connection — no public IP required.
 
 > `streaming` defaults to `true`. Use `false` if your app does not have **`cardkit:card:write`** (see permissions above).
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Add your open_id (find it in blackcat logs when you message the bot). Use `["*"]` to allow all users.
+> `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
 > `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
 > `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
 > `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
@@ -390,7 +424,7 @@ Uses **WebSocket** long connection — no public IP required.
 **3. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 > [!TIP]
@@ -415,7 +449,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 
 **3. Configure**
 
-> - `allowFrom`: Add your openid (find it in blackcat logs when you message the bot). Use `["*"]` for public access.
+> - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
 > - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
@@ -436,7 +470,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 **4. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 Now send a message to the bot from QQ — it should respond!
@@ -524,7 +558,7 @@ Uses **Stream Mode** — no public IP required.
 **3. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -545,9 +579,9 @@ Uses **Socket Mode** — no public URL required.
 - **App Home**: Scroll to **Show Tabs** → Enable **Messages Tab** → Check **"Allow users to send Slash commands and messages from the messages tab"**
 - **Install App**: Click **Install to Workspace** → Authorize → copy the **Bot Token** (`xoxb-...`)
 
-> `files:read` is required to read files users send to blackcat. `files:write` is required for blackcat to send images, videos, and other file uploads. If you add either scope later, reinstall the Slack app to the workspace and restart blackcat so it uses the updated bot token.
+> `files:read` is required to read files users send to nanobot. `files:write` is required for nanobot to send images, videos, and other file uploads. If you add either scope later, reinstall the Slack app to the workspace and restart nanobot so it uses the updated bot token.
 
-**3. Configure blackcat**
+**3. Configure nanobot**
 
 ```json
 {
@@ -566,13 +600,15 @@ Uses **Socket Mode** — no public URL required.
 **4. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 DM the bot directly or @mention it in a channel — it should respond!
 
 > [!TIP]
-> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels).
+> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels via `groupAllowFrom`).
+> - `groupAllowFrom`: channel IDs the bot may respond in when `groupPolicy` is `"allowlist"`.
+> - `groupRequireMention`: when `true` and `groupPolicy` is `"allowlist"`, the bot only replies to channels in `groupAllowFrom` **and** only when @mentioned (instead of every message). No effect for `"mention"`/`"open"`. Use this to scope the bot to approved channels while keeping mention-only behavior.
 > - DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
 
 </details>
@@ -580,10 +616,10 @@ DM the bot directly or @mention it in a channel — it should respond!
 <details>
 <summary><b>Email</b></summary>
 
-Give blackcat its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
+Give nanobot its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
 
 **1. Get credentials (Gmail example)**
-- Create a dedicated Gmail account for your bot (e.g. `my-blackcat@gmail.com`)
+- Create a dedicated Gmail account for your bot (e.g. `my-nanobot@gmail.com`)
 - Enable 2-Step Verification → Create an [App Password](https://myaccount.google.com/apppasswords)
 - Use this app password for both IMAP and SMTP
 
@@ -610,13 +646,13 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
       "consentGranted": true,
       "imapHost": "imap.gmail.com",
       "imapPort": 993,
-      "imapUsername": "my-blackcat@gmail.com",
+      "imapUsername": "my-nanobot@gmail.com",
       "imapPassword": "your-app-password",
       "smtpHost": "smtp.gmail.com",
       "smtpPort": 587,
-      "smtpUsername": "my-blackcat@gmail.com",
+      "smtpUsername": "my-nanobot@gmail.com",
       "smtpPassword": "your-app-password",
-      "fromAddress": "my-blackcat@gmail.com",
+      "fromAddress": "my-nanobot@gmail.com",
       "allowFrom": ["your-real-email@gmail.com"],
       "postAction": "move",
       "postActionMoveMailbox": "[Gmail]/Trash",
@@ -632,7 +668,7 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
 **3. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -645,7 +681,7 @@ Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. 
 **1. Install with WeChat support**
 
 ```bash
-python -m pip install "blackcat-ai[weixin]"
+python -m pip install "nanobot-ai[weixin]"
 ```
 
 **2. Configure**
@@ -661,28 +697,28 @@ python -m pip install "blackcat-ai[weixin]"
 }
 ```
 
-> - `allowFrom`: Add the sender ID you see in blackcat logs for your WeChat account. Use `["*"]` to allow all users.
-> - `token`: Optional. If omitted, log in interactively and blackcat will save the token for you.
-> - `routeTag`: Optional. When your upstream Weixin deployment requires request routing, blackcat will send it as the `SKRouteTag` header.
-> - `stateDir`: Optional. Defaults to blackcat's runtime directory for Weixin state.
+> - `allowFrom`: Add the sender ID you see in nanobot logs for your WeChat account. Use `["*"]` to allow all users.
+> - `token`: Optional. If omitted, log in interactively and nanobot will save the token for you.
+> - `routeTag`: Optional. When your upstream Weixin deployment requires request routing, nanobot will send it as the `SKRouteTag` header.
+> - `stateDir`: Optional. Defaults to nanobot's runtime directory for Weixin state.
 > - `pollTimeout`: Optional long-poll timeout in seconds.
 
 **3. Login**
 
 ```bash
-blackcat channels login weixin
+nanobot channels login weixin
 ```
 
 Use `--force` to re-authenticate and ignore any saved token:
 
 ```bash
-blackcat channels login weixin --force
+nanobot channels login weixin --force
 ```
 
 **4. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -697,7 +733,7 @@ blackcat gateway
 **1. Install the optional dependency**
 
 ```bash
-python -m pip install "blackcat-ai[wecom]"
+python -m pip install "nanobot-ai[wecom]"
 ```
 
 **2. Create a WeCom AI Bot**
@@ -722,7 +758,7 @@ Go to the WeCom admin console → Intelligent Robot → Create Robot → select 
 **4. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -736,7 +772,7 @@ blackcat gateway
 **1. Install the optional dependency**
 
 ```bash
-python -m pip install "blackcat-ai[msteams]"
+python -m pip install "nanobot-ai[msteams]"
 ```
 
 **2. Create a Teams / Azure bot app registration**
@@ -780,7 +816,7 @@ Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot mess
 **4. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 </details>
@@ -842,7 +878,7 @@ signal-cli -a +1234567890 daemon --http localhost:8080
 **3. Run**
 
 ```bash
-blackcat gateway
+nanobot gateway
 ```
 
 > [!TIP]

@@ -16,10 +16,10 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
-from blackcat.config.paths import get_webui_dir
-from blackcat.cron.session_turns import CRON_HISTORY_META
-from blackcat.session.manager import SessionManager
-from blackcat.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.config.paths import get_webui_dir
+from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.manager import SessionManager
+from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -1087,9 +1087,20 @@ def _merge_tool_events(previous: Any, incoming: list[dict[str, Any]]) -> list[di
 def _file_edit_key(edit: dict[str, Any]) -> str:
     call_id = str(edit.get("call_id") or "")
     tool = str(edit.get("tool") or "")
+    path = str(edit.get("path") or "")
+    if call_id and path:
+        return f"{call_id}|{tool}|{path}"
     if call_id:
         return f"{call_id}|{tool}"
-    return f"{tool}|{edit.get('path') or ''}"
+    return f"{tool}|{path}"
+
+
+def _file_edit_tool_event_key(edit: dict[str, Any]) -> str:
+    call_id = str(edit.get("call_id") or "")
+    tool = str(edit.get("tool") or "")
+    if call_id:
+        return f"{call_id}|{tool}"
+    return _file_edit_key(edit)
 
 
 def _message_has_file_edit_for_tool_event(
@@ -1102,7 +1113,10 @@ def _message_has_file_edit_for_tool_event(
     edits = message.get("fileEdits")
     if not isinstance(edits, list):
         return False
-    return any(isinstance(edit, dict) and _file_edit_key(edit) == key for edit in edits)
+    return any(
+        isinstance(edit, dict) and _file_edit_tool_event_key(edit) == key
+        for edit in edits
+    )
 
 
 def _filter_covered_file_edit_tool_events(
@@ -1123,7 +1137,7 @@ def _strip_covered_file_edit_tool_hints(
     edits: list[dict[str, Any]],
 ) -> dict[str, Any]:
     incoming_keys = {
-        _file_edit_key(edit)
+        _file_edit_tool_event_key(edit)
         for edit in edits
         if isinstance(edit, dict)
     }
@@ -1206,7 +1220,7 @@ def replay_transcript_to_ui_messages(
 ) -> list[dict[str, Any]]:
     """Fold JSONL records into ``UIMessage``-shaped dicts for the WebUI.
 
-    Mirrors the core fold in ``useBlackcatStream.ts`` (delta, reasoning,
+    Mirrors the core fold in ``useNanobotStream.ts`` (delta, reasoning,
     message+kind, turn_end). ``augment_user_media`` maps persisted filesystem
     paths to ``{url, name?}`` / attachment dicts the client expects. Assistant
     media gets a separate hook so replay can re-sign outbound attachments after
@@ -1460,6 +1474,11 @@ def replay_transcript_to_ui_messages(
         edits: list[dict[str, Any]],
     ) -> int | None:
         incoming_keys = {_file_edit_key(edit) for edit in edits if isinstance(edit, dict)}
+        incoming_tool_event_keys = {
+            _file_edit_tool_event_key(edit)
+            for edit in edits
+            if isinstance(edit, dict)
+        }
         for i in range(len(messages) - 1, -1, -1):
             candidate = messages[i]
             if candidate.get("role") == "user":
@@ -1471,7 +1490,16 @@ def replay_transcript_to_ui_messages(
             existing_edits = candidate.get("fileEdits")
             if isinstance(existing_edits, list):
                 for existing in existing_edits:
-                    if isinstance(existing, dict) and _file_edit_key(existing) in incoming_keys:
+                    if not isinstance(existing, dict):
+                        continue
+                    if (
+                        _file_edit_key(existing) in incoming_keys
+                        or (
+                            not existing.get("path")
+                            and existing.get("pending")
+                            and _file_edit_tool_event_key(existing) in incoming_tool_event_keys
+                        )
+                    ):
                         return i
             existing_tool_events = candidate.get("toolEvents")
             if isinstance(existing_tool_events, list):
@@ -1479,7 +1507,7 @@ def replay_transcript_to_ui_messages(
                     if not isinstance(event, dict):
                         continue
                     key = _tool_event_file_edit_key(event)
-                    if key and key in incoming_keys:
+                    if key and key in incoming_tool_event_keys:
                         return i
         return None
 
@@ -1535,12 +1563,24 @@ def replay_transcript_to_ui_messages(
             if not isinstance(edit, dict):
                 continue
             key = _file_edit_key(edit)
-            if key in index_by_key:
-                pos = index_by_key[key]
+            pos = index_by_key.get(key)
+            if pos is None and edit.get("path"):
+                event_key = _file_edit_tool_event_key(edit)
+                for existing_pos, existing_edit in enumerate(existing):
+                    if (
+                        isinstance(existing_edit, dict)
+                        and not existing_edit.get("path")
+                        and existing_edit.get("pending")
+                        and _file_edit_tool_event_key(existing_edit) == event_key
+                    ):
+                        pos = existing_pos
+                        break
+            if pos is not None:
                 merged = {**existing[pos], **edit}
                 if edit.get("path") and not edit.get("pending"):
                     merged.pop("pending", None)
                 existing[pos] = merged
+                index_by_key[key] = pos
             else:
                 index_by_key[key] = len(existing)
                 existing.append(dict(edit))

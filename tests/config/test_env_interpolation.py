@@ -81,6 +81,52 @@ class TestResolveConfig:
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["channels"]["telegram"]["token"] == "${MY_TOKEN}"
 
+    def test_save_preserves_dream_legacy_cron(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {"agents": {"defaults": {"dream": {"cron": "0 */4 * * *"}}}}
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(config_path)
+        config.agents.defaults.max_tokens = 1234
+        save_config(config, config_path)
+
+        saved = json.loads(config_path.read_text(encoding="utf-8"))
+        assert saved["agents"]["defaults"]["dream"]["cron"] == "0 */4 * * *"
+
+        reloaded = load_config(config_path)
+        schedule = reloaded.agents.defaults.dream.build_schedule("UTC")
+        assert schedule.kind == "cron"
+        assert schedule.expr == "0 */4 * * *"
+
+    def test_save_keeps_oauth_provider_configs_excluded(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": {"defaults": {"dream": {"cron": "0 */4 * * *"}}},
+                    "providers": {
+                        "openaiCodex": {"apiKey": "codex-secret"},
+                        "githubCopilot": {"apiKey": "copilot-secret"},
+                        "groq": {"apiKey": "groq-secret"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(config_path)
+        save_config(config, config_path)
+
+        saved = json.loads(config_path.read_text(encoding="utf-8"))
+        assert saved["agents"]["defaults"]["dream"]["cron"] == "0 */4 * * *"
+        assert "openaiCodex" not in saved["providers"]
+        assert "githubCopilot" not in saved["providers"]
+        assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
+
     def test_preserves_excluded_fields_when_no_env_refs(self, tmp_path):
         """Regression: fields with ``exclude=True`` (e.g. ProviderConfig.openai_codex)
         must survive ``resolve_config_env_vars`` when the config has no

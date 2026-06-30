@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -59,10 +59,10 @@ from blackcat.session.goal_state import (
 from blackcat.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from blackcat.session.manager import Session, SessionManager
 from blackcat.utils.document import extract_documents, reference_non_image_attachments
+from blackcat.utils.helpers import image_placeholder_text
 from blackcat.utils.helpers import truncate_text as truncate_text_fn
 from blackcat.utils.image_generation_intent import image_generation_prompt
 from blackcat.utils.llm_runtime import LLMRuntime
-from blackcat.utils.media import image_placeholder_text
 from blackcat.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
 )
@@ -74,7 +74,6 @@ if TYPE_CHECKING:
         ToolsConfig,
     )
     from blackcat.cron.service import CronService
-
 
 class TurnState(Enum):
     RESTORE = auto()
@@ -128,6 +127,8 @@ class TurnContext:
     pending_summary: str | None = None
 
     ephemeral: bool = False
+    run_extra_hooks_for_ephemeral: bool = False
+    hooks: list[AgentHook] = field(default_factory=list)
     tools: ToolRegistry | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
@@ -189,6 +190,7 @@ class AgentLoop:
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
+        fail_on_tool_error: bool | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
@@ -197,13 +199,14 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        authors: dict | None = None,
+        bot_name: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
         max_messages: int = 120,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
-        author: Mapping[str, Any] | None = None, # TODO: delete author params from the loops for future upstream merging (x1)
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -214,8 +217,6 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
-        authors: dict | None = None,
-        bot_name: str | None = None,
     ):
         from blackcat.config.schema import ToolsConfig
 
@@ -271,14 +272,7 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(
-            workspace,
-            timezone=timezone,
-            disabled_skills=disabled_skills,
-            authors=authors,
-            bot_name=bot_name,
-        )
-        self._bot_name = self.context.bot_name
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills, authors=authors, bot_name=bot_name)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -296,6 +290,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
+            fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
@@ -386,6 +381,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
+            fail_on_tool_error=defaults.fail_on_tool_error,
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -402,8 +398,6 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
-            authors=config.authors,
-            bot_name=defaults.bot_name,
             **extra,
         )
 
@@ -526,7 +520,7 @@ class AgentLoop:
     def _set_tool_context(
         self, channel: str, chat_id: str,
         message_id: str | None = None, metadata: dict | None = None,
-        session_key: str | None = None, sender_id: str | None = None,
+        session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
         from blackcat.agent.tools.context import ContextAware
@@ -541,7 +535,6 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
             session_key=effective_key,
-            sender_id=sender_id,
             metadata=dict(metadata or {}),
         )
 
@@ -611,15 +604,13 @@ class AgentLoop:
             if text_override is not None:
                 text = text_override
             extra.update(cron_extra)
-            extra["author"] = self.context.resolve_author(msg.sender_id, msg.channel)
-            extra["sender_id"] = msg.sender_id
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
             return True
         return False
 
-    async def _build_initial_messages(
+    def _build_initial_messages(
         self,
         msg: InboundMessage,
         session: Session,
@@ -629,7 +620,7 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        return await self.context.build_messages(
+        return self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
             media=msg.media if msg.media else None,
@@ -708,8 +699,9 @@ class AgentLoop:
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
+        run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
-        sender_id: str | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -735,9 +727,10 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
+        run_hooks = [*self._extra_hooks, *(hooks or [])]
         hook: AgentHook = loop_hook
-        if not ephemeral and self._extra_hooks:
-            hook = CompositeHook([loop_hook] + self._extra_hooks)
+        if run_hooks and (not ephemeral or run_extra_hooks_for_ephemeral):
+            hook = CompositeHook([loop_hook, *run_hooks])
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -806,7 +799,6 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
             session_key=active_session_key,
-            sender_id=sender_id,
             metadata=dict(metadata or {}),
         )
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
@@ -886,89 +878,93 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
-        logger.info("Agent loop started")
+        try:
+            await self._connect_mcp()
+            logger.info("Agent loop started")
 
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-            except asyncio.TimeoutError:
-                self.auto_compact.check_expired(
-                    self._schedule_background,
-                    active_session_keys=self._pending_queues.keys(),
-                )
-                continue
-            except asyncio.CancelledError:
-                # Preserve real task cancellation so shutdown can complete cleanly.
-                # Only ignore non-task CancelledError signals that may leak from integrations.
-                if not self._running or asyncio.current_task().cancelling():
-                    raise
-                continue
-            except Exception as e:
-                logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
+            while self._running:
+                try:
+                    msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    self.auto_compact.check_expired(
+                        self._schedule_background,
+                        active_session_keys=self._pending_queues.keys(),
+                    )
+                    continue
+                except asyncio.CancelledError:
+                    # Preserve real task cancellation so shutdown can complete cleanly.
+                    # Only ignore non-task CancelledError signals that may leak from integrations.
+                    if not self._running or asyncio.current_task().cancelling():
+                        raise
+                    continue
+                except Exception as e:
+                    logger.warning("Error consuming inbound message: {}, continuing...", e)
+                    continue
 
-            raw = msg.content.strip()
-            effective_key = self._effective_session_key(msg)
-            if await agent_context.handle_runtime_control(self, msg, self.tools):
-                continue
-            if self.commands.is_priority(raw):
-                await self._dispatch_command_inline(
-                    msg, effective_key, raw,
-                    self.commands.dispatch_priority,
-                )
-                continue
-            if self._cron_turns.defer_if_active(
-                msg,
-                session_key=effective_key,
-                active_session_keys=self._pending_queues.keys(),
-            ):
-                logger.info(
-                    "Deferred cron turn for active session {}",
-                    effective_key,
-                )
-                continue
-            # If this session already has an active pending queue (i.e. a task
-            # is processing this session), route the message there for mid-turn
-            # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                # Non-priority commands must not be queued for injection;
-                # dispatch them directly (same pattern as priority commands).
-                if self.commands.is_dispatchable_command(raw):
+                raw = msg.content.strip()
+                effective_key = self._effective_session_key(msg)
+                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                    continue
+                if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
-                        self.commands.dispatch,
+                        self.commands.dispatch_priority,
                     )
                     continue
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                try:
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
+                if self._cron_turns.defer_if_active(
+                    msg,
+                    session_key=effective_key,
+                    active_session_keys=self._pending_queues.keys(),
+                ):
                     logger.info(
-                        "Routed follow-up message to pending queue for session {}",
+                        "Deferred cron turn for active session {}",
                         effective_key,
                     )
                     continue
-            # Compute the effective session key before dispatching
-            # This ensures /stop command can find tasks correctly when unified session is enabled
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
-            )
+                # If this session already has an active pending queue (i.e. a task
+                # is processing this session), route the message there for mid-turn
+                # injection instead of creating a competing task.
+                if effective_key in self._pending_queues:
+                    # Non-priority commands must not be queued for injection;
+                    # dispatch them directly (same pattern as priority commands).
+                    if self.commands.is_dispatchable_command(raw):
+                        await self._dispatch_command_inline(
+                            msg, effective_key, raw,
+                            self.commands.dispatch,
+                        )
+                        continue
+                    pending_msg = msg
+                    if effective_key != msg.session_key:
+                        pending_msg = dataclasses.replace(
+                            msg,
+                            session_key_override=effective_key,
+                        )
+                    try:
+                        self._pending_queues[effective_key].put_nowait(pending_msg)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Pending queue full for session {}, falling back to queued task",
+                            effective_key,
+                        )
+                    else:
+                        logger.info(
+                            "Routed follow-up message to pending queue for session {}",
+                            effective_key,
+                        )
+                        continue
+                # Compute the effective session key before dispatching
+                # This ensures /stop command can find tasks correctly when unified session is enabled
+                task = asyncio.create_task(self._dispatch(msg))
+                self._active_tasks.setdefault(effective_key, []).append(task)
+                task.add_done_callback(
+                    lambda t, k=effective_key: self._active_tasks.get(k, [])
+                    and self._active_tasks[k].remove(t)
+                    if t in self._active_tasks.get(k, [])
+                    else None
+                )
+        finally:
+            # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
+            await self.close_mcp()
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
@@ -1195,7 +1191,7 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
-        messages = await self.context.build_messages(
+        messages = self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
             channel=channel,
@@ -1218,7 +1214,6 @@ class AgentLoop:
             metadata=msg.metadata,
             session_key=key,
             pending_queue=pending_queue,
-            sender_id=msg.sender_id,
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
@@ -1257,6 +1252,8 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
+        run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
@@ -1289,6 +1286,8 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
+            run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            hooks=list(hooks or []),
             tools=tools,
         )
 
@@ -1438,7 +1437,7 @@ class AgentLoop:
                     ctx.msg, ctx.session, _command=True
                 )
                 ctx.session.add_message(
-                    "assistant", result.content, _command=True, author=self._bot_name
+                    "assistant", result.content, _command=True
                 )
                 self.sessions.save(ctx.session)
                 self._clear_pending_user_turn(ctx.session)
@@ -1474,7 +1473,7 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = await self._build_initial_messages(
+        ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,
@@ -1515,8 +1514,9 @@ class AgentLoop:
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
+            run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
+            hooks=ctx.hooks,
             tools=ctx.tools,
-            sender_id=ctx.msg.sender_id,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1682,12 +1682,6 @@ class AgentLoop:
                         continue
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
-            if role == "assistant":
-                entry.setdefault("author", self._bot_name)
-            elif role == "user":
-                entry.setdefault("author", self.context.resolve_author(
-                    entry.get("sender_id"), session.key.split(":", 1)[0] if ":" in session.key else None
-                ))
             session.messages.append(entry)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
@@ -1715,17 +1709,10 @@ class AgentLoop:
             for m in session.messages
         ):
             return False
-        meta = msg.metadata if isinstance(msg.metadata, dict) else {}
-        origin_sender_id = meta.get("origin_sender_id")
-        # Persist the originating user's sender_id (who triggered the spawn) so
-        # the subagent-result message traces back to that user. The author stays
-        # as the bot's name — the bot is the one announcing the result.
-        sender_id = origin_sender_id or msg.sender_id
         session.add_message(
             "assistant",
             msg.content,
-            author=self._bot_name,
-            sender_id=sender_id,
+            sender_id=msg.sender_id,
             injected_event="subagent_result",
             subagent_task_id=task_id,
         )
@@ -1824,7 +1811,6 @@ class AgentLoop:
                 {
                     "role": "assistant",
                     "content": "Error: Task interrupted before a response was generated.",
-                    "author": self._bot_name,
                     "timestamp": datetime.now().isoformat(),
                 }
             )
@@ -1839,11 +1825,14 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str = "user",
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
+        _run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
     ) -> OutboundMessage | None:
@@ -1853,7 +1842,7 @@ class AgentLoop:
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id,
+            channel=channel, sender_id=sender_id, chat_id=chat_id,
             content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
@@ -1867,6 +1856,10 @@ class AgentLoop:
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
                 }
+                if _run_extra_hooks_for_ephemeral:
+                    kwargs["run_extra_hooks_for_ephemeral"] = True
+                if hooks is not None:
+                    kwargs["hooks"] = hooks
                 if tools is not None:
                     kwargs["tools"] = tools
                 return await self._process_message(

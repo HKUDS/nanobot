@@ -1,14 +1,14 @@
-# blackcat Docs
+# nanobot Docs
 
-For published release documentation, visit [blackcat.wiki](https://blackcat.wiki/docs/latest/getting-started/blackcat-overview). The pages in this directory track the current repository and may describe features that have not reached the published site yet.
+For published release documentation, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview). The pages in this directory track the current repository and may describe features that have not reached the published site yet.
 
-If you have never used a terminal or edited a config file before, start with [`start-without-technical-background.md`](./start-without-technical-background.md). Otherwise, start with [`quick-start.md`](./quick-start.md) and get one local `blackcat agent -m "Hello!"` reply working before connecting chat apps, WebUI, Docker, or custom tools.
+If you have never used a terminal or edited a config file before, start with [`start-without-technical-background.md`](./start-without-technical-background.md). Otherwise, start with [`quick-start.md`](./quick-start.md) and get one local `nanobot agent -m "Hello!"` reply working before connecting chat apps, WebUI, Docker, or custom tools.
 
-Most JSON examples in these docs are snippets to merge into `~/.blackcat/config.json`, not full replacement files.
+Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.json`, not full replacement files.
 
 Provider examples are concrete walkthroughs, not rankings or endorsements. Use the provider whose key, endpoint, and model ID you actually control.
 
-If you find a docs mistake, outdated command, or confusing step, please open an issue: <https://github.com/HKUDS/blackcat/issues>.
+If you find a docs mistake, outdated command, or confusing step, please open an issue: <https://github.com/HKUDS/nanobot/issues>.
 
 ## Pick a Track
 
@@ -17,7 +17,7 @@ If you find a docs mistake, outdated command, or confusing step, please open an 
 | New to terminals and config files | [`start-without-technical-background.md`](./start-without-technical-background.md) | [`troubleshooting.md`](./troubleshooting.md) if the first reply fails |
 | Comfortable pasting commands and JSON | [`quick-start.md`](./quick-start.md) | [`provider-cookbook.md`](./provider-cookbook.md) for pasteable provider setups |
 | Operating a long-running bot | [`concepts.md`](./concepts.md) | [`chat-apps.md`](./chat-apps.md), [`webui.md`](./webui.md), and [`deployment.md`](./deployment.md) |
-| Integrating or extending blackcat | [`architecture.md`](./architecture.md) | [`configuration.md`](./configuration.md), [`openai-api.md`](./openai-api.md), [`python-sdk.md`](./python-sdk.md), [`development.md`](./development.md), and [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
+| Integrating or extending nanobot | [`architecture.md`](./architecture.md) | [`configuration.md`](./configuration.md), [`openai-api.md`](./openai-api.md), [`python-sdk.md`](./python-sdk.md), [`development.md`](./development.md), and [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
 
 ## Start Here
 
@@ -34,17 +34,18 @@ If you find a docs mistake, outdated command, or confusing step, please open an 
 
 Do not configure everything at once. Pick one next surface:
 
-If a local `blackcat agent` session can already answer normally, you can also ask blackcat to help configure itself: have it read the relevant docs, inspect your current config, make one specific next change, and tell you when to run `/restart`.
+If a local `nanobot agent` session can already answer normally, you can also ask nanobot to help configure itself: have it read the relevant docs, inspect your current config, make one specific next change, and tell you when to run `/restart`.
 
 | Next goal | Read | First check |
 |---|---|---|
-| Use blackcat in a browser | [`webui.md`](./webui.md) | Enable WebSocket, run `blackcat gateway`, open `http://127.0.0.1:8765` |
-| Talk through a chat app | [`chat-apps.md`](./chat-apps.md) | Merge one channel snippet, run `blackcat channels status`, keep `blackcat gateway` running |
+| Use nanobot in a browser | [`webui.md`](./webui.md) | Enable WebSocket, run `nanobot gateway`, open `http://127.0.0.1:8765` |
+| Talk through a chat app | [`chat-apps.md`](./chat-apps.md) | Merge one channel snippet, run `nanobot channels status`, keep `nanobot gateway` running |
 | Change provider or add fallbacks | [`provider-cookbook.md`](./provider-cookbook.md) | Keep `modelPresets` named and set `agents.defaults.modelPreset` |
+| Call nanobot from Python | [`python-sdk.md`](./python-sdk.md) | Reuse the same config/workspace from code, then run or stream one agent turn |
 | Understand before operating long-term | [`concepts.md`](./concepts.md) | Know what config, workspace, gateway, sessions, memory, and tools mean |
-| Diagnose a new failure | [`troubleshooting.md`](./troubleshooting.md) | Start with `blackcat status`, then `blackcat agent -m "Hello!"` |
+| Diagnose a new failure | [`troubleshooting.md`](./troubleshooting.md) | Start with `nanobot status`, then `nanobot agent -m "Hello!"` |
 
-## Use blackcat
+## Use nanobot
 
 | Goal | Read | Outcome |
 |---|---|---|
@@ -68,7 +69,7 @@ If a local `blackcat agent` session can already answer normally, you can also as
 | Observability | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) | Langfuse tracing setup and required environment variables |
 | WebSocket protocol | [`websocket.md`](./websocket.md) | Custom clients, token issuance, multiplexed chats, media, and protocol events |
 | OpenAI-compatible API | [`openai-api.md`](./openai-api.md) | `/v1/chat/completions`, `/v1/models`, file uploads, and SDK-compatible usage |
-| Python SDK | [`python-sdk.md`](./python-sdk.md) | Running blackcat from Python and attaching hooks |
+| Python SDK | [`python-sdk.md`](./python-sdk.md) | SDK 101, sessions, streaming, model overrides, runtime helpers, and hooks |
 | Runtime self-inspection | [`my-tool.md`](./my-tool.md) | Inspecting and tuning the current agent run |
 
 ## Fast Lookup
@@ -80,11 +81,12 @@ If a local `blackcat agent` session can already answer normally, you can also as
 | Langfuse environment variables | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) |
 | WebSocket/WebUI protocol details | [`websocket.md`](./websocket.md) |
 | OpenAI-compatible API usage | [`openai-api.md`](./openai-api.md) |
+| Python SDK usage | [`python-sdk.md`](./python-sdk.md) |
 | Multiple configs, workspaces, and ports | [`multiple-instances.md`](./multiple-instances.md) |
 | Security, sandboxing, and SSRF controls | [`configuration.md#security`](./configuration.md#security) |
 | Channel plugin development | [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
 
-## Extend blackcat
+## Extend nanobot
 
 | Goal | Read | Outcome |
 |---|---|---|

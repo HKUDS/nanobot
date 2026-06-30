@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import httpx
 
-from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 
 def _make_spec(is_local: bool = False) -> MagicMock:

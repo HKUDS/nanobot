@@ -44,9 +44,9 @@ def _load() -> dict[str, Any]:
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
 
-    # Convert approved lists to sets for O(1) lookup
+    # Convert approved lists to str sets for O(1) lookup.
     for channel, users in data.get("approved", {}).items():
-        data["approved"][channel] = set(users)
+        data["approved"][channel] = {str(u) for u in users}
     return data
 
 
@@ -87,7 +87,7 @@ def generate_code(
 
         data.setdefault("pending", {})[code] = {
             "channel": channel,
-            "sender_id": sender_id,
+            "sender_id": str(sender_id),
             "created_at": time.time(),
             "expires_at": time.time() + ttl,
         }
@@ -110,7 +110,7 @@ def approve_code(code: str) -> tuple[str, str] | None:
         if info is None:
             return None
         channel = info["channel"]
-        sender_id = info["sender_id"]
+        sender_id = str(info["sender_id"])
         data.setdefault("approved", {}).setdefault(channel, set()).add(sender_id)
         _save(data)
         logger.info("Approved pairing code {} for {}@{}", code, sender_id, channel)
@@ -162,12 +162,13 @@ def revoke(channel: str, sender_id: str) -> bool:
         data = _load()
         approved: dict[str, set[str]] = data.get("approved", {})
         users = approved.get(channel, set())
-        if sender_id in users:
-            users.discard(sender_id)
+        sid = str(sender_id)
+        if sid in users:
+            users.discard(sid)
             if not users:
                 del approved[channel]
             _save(data)
-            logger.info("Revoked {} from {}", sender_id, channel)
+            logger.info("Revoked {} from {}", sid, channel)
             return True
         return False
 

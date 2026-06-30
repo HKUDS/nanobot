@@ -7,18 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from blackcat.agent.tools.base import Tool, tool_parameters
-from blackcat.agent.tools.file_state import FileStates, _hash_file, current_file_states
-from blackcat.agent.tools.path_utils import resolve_workspace_path
-from blackcat.agent.tools.schema import (
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
+from nanobot.agent.tools.path_utils import resolve_workspace_path
+from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from blackcat.config_base import Base
-from blackcat.security.workspace_access import current_tool_workspace
-from blackcat.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.config_base import Base
+from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
 class FileToolsConfig(Base):
@@ -76,7 +76,7 @@ class _FsTool(Tool):
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        from blackcat.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
         restrict = (
             ctx.config.restrict_to_workspace
@@ -432,7 +432,7 @@ class ReadFileTool(_FsTool):
         return result
 
     def _read_office_doc(self, fp: Path) -> str:
-        from blackcat.utils.document import extract_text
+        from nanobot.utils.document import extract_text
 
         result = extract_text(fp)
 

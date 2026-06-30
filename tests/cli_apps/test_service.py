@@ -270,6 +270,51 @@ def test_optional_extension_registry_failure_does_not_break_payload(
     assert [app["name"] for app in payload["apps"]] == ["gimp"]
 
 
+def test_payload_cache_only_does_not_fetch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("network should not be used")
+
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+
+    payload = manager.payload(cache_only=True)
+
+    assert payload["catalog_updated_at"] == "2026-04-18"
+    assert {app["name"] for app in payload["apps"]} >= {"gimp", "feishu"}
+    assert manager.catalog_cache_fresh() is True
+
+
+def test_catalog_cache_fresh_can_include_optional_sources(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {"meta": {"updated": "2026-04-16"}, "clis": []},
+    )
+    _write_cache(
+        manager._cache_path("public"),
+        {"meta": {"updated": "2026-04-18"}, "clis": []},
+    )
+
+    assert manager.catalog_cache_fresh() is True
+    assert manager.catalog_cache_fresh(include_optional=True) is False
+
+
+def test_payload_cache_only_without_cache_returns_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = _manager(tmp_path)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("network should not be used")
+
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+
+    payload = manager.payload(cache_only=True)
+
+    assert payload == {"apps": [], "installed_count": 0, "catalog_updated_at": None}
+    assert manager.catalog_cache_fresh() is False
+
+
 def test_install_dispatches_safe_pip_and_installs_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

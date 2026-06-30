@@ -513,6 +513,50 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("-3")).toBeInTheDocument();
   });
 
+  it("renders every file from one apply_patch call", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-file-many",
+          role: "tool",
+          kind: "trace",
+          content: "apply_patch()",
+          traces: ["apply_patch()"],
+          fileEdits: [
+            {
+              call_id: "call-patch",
+              tool: "apply_patch",
+              path: "USER.md",
+              phase: "end",
+              added: 0,
+              deleted: 3,
+              approximate: false,
+              status: "done",
+            },
+            {
+              call_id: "call-patch",
+              tool: "apply_patch",
+              path: "MEMORY.md",
+              phase: "end",
+              added: 0,
+              deleted: 4,
+              approximate: false,
+              status: "done",
+            },
+          ],
+          createdAt: 3,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    const fileRefs = screen.getAllByTestId("activity-file-reference");
+    expect(fileRefs).toHaveLength(2);
+    expect(fileRefs[0]).toHaveTextContent("USER.md");
+    expect(fileRefs[1]).toHaveTextContent("MEMORY.md");
+  });
+
   it("renders CLI app runs as dedicated activity rows", () => {
     const line = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
     render(

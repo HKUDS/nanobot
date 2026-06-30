@@ -6,8 +6,8 @@ import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable, Iterable
 
-from blackcat.bus.events import InboundMessage, OutboundMessage
-from blackcat.cron.session_turns import (
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.cron.session_turns import (
     cron_run_id,
     cron_trigger,
     defer_cron_until_session_idle,

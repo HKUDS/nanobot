@@ -4,13 +4,13 @@ import asyncio
 
 import pytest
 
-from blackcat.agent.loop import AgentLoop
-from blackcat.agent.tools.context import RequestContext
-from blackcat.agent.tools.cron import CronTool
-from blackcat.agent.tools.message import MessageTool
-from blackcat.agent.tools.spawn import SpawnTool
-from blackcat.cron.service import CronService
-from blackcat.session.keys import UNIFIED_SESSION_KEY
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.cron.service import CronService
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 
 @pytest.mark.asyncio
@@ -66,7 +66,6 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             origin_chat_id: str,
             session_key: str,
             origin_message_id: str | None = None,
-            origin_sender_id: str | None = None,
             temperature: float | None = None,
             workspace_scope=None,
         ) -> str:
@@ -188,7 +187,6 @@ async def test_spawn_tool_basic_set_context_and_execute() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
-            origin_sender_id=None,
             temperature=None,
             workspace_scope=None,
         ):
@@ -223,7 +221,6 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
-            origin_sender_id=None,
             temperature=None,
             workspace_scope=None,
         ):

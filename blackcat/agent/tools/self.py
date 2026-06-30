@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from blackcat.agent.tools.base import Tool
-from blackcat.agent.tools.context import ContextAware, RequestContext
-from blackcat.agent.tools.runtime_state import RuntimeState
-from blackcat.config_base import Base
+from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.runtime_state import RuntimeState
+from nanobot.config_base import Base
 
 if TYPE_CHECKING:
-    from blackcat.agent.subagent import SubagentStatus
+    from nanobot.agent.subagent import SubagentStatus
 
 
 class MyToolConfig(Base):
@@ -36,7 +36,7 @@ def _has_real_attr(obj: Any, key: str) -> bool:
 
 
 def _is_subagent_status(value: Any) -> bool:
-    from blackcat.agent.subagent import SubagentStatus
+    from nanobot.agent.subagent import SubagentStatus
 
     return isinstance(value, SubagentStatus)
 

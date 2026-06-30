@@ -5,19 +5,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from blackcat.agent.context import ContextBuilder
-from blackcat.agent.loop import AgentLoop
-from blackcat.bus.events import InboundMessage
-from blackcat.bus.queue import MessageBus
-from blackcat.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from blackcat.providers.base import LLMResponse
-from blackcat.session.goal_state import GOAL_STATE_KEY
-from blackcat.session.manager import Session, SessionManager
-from blackcat.session.turn_continuation import (
+from nanobot.agent.context import ContextBuilder
+from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
+from nanobot.providers.base import LLMResponse
+from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
 )
-from blackcat.session.webui_turns import (
+from nanobot.session.webui_turns import (
     TITLE_GENERATION_MAX_TOKENS,
     TITLE_GENERATION_REASONING_EFFORT,
     WEBUI_SESSION_METADATA_KEY,
@@ -26,16 +26,14 @@ from blackcat.session.webui_turns import (
     clean_generated_title,
     maybe_generate_webui_title,
 )
-from blackcat.utils.llm_runtime import LLMRuntime
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _mk_loop() -> AgentLoop:
     loop = AgentLoop.__new__(AgentLoop)
-    from blackcat.config.schema import AgentDefaults
+    from nanobot.config.schema import AgentDefaults
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
-    loop._bot_name = "blackcat"
-    loop.context = ContextBuilder(Path("/tmp"))
     return loop
 
 
@@ -224,7 +222,7 @@ def test_webui_title_update_uses_captured_llm_runtime(
         return False
 
     monkeypatch.setattr(
-        "blackcat.session.webui_turns.maybe_generate_webui_title_after_turn",
+        "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
         fake_title_after_turn,
     )
     coordinator = WebuiTurnCoordinator(
@@ -870,7 +868,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    loop.context.build_messages = AsyncMock(  # type: ignore[method-assign]
+    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
         return_value=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "runtime + hello"},
@@ -921,7 +919,7 @@ async def test_process_message_uses_explicit_session_metadata_for_goal_context(
     system_session.metadata = {}
     loop.sessions.save(system_session)
 
-    loop.context.build_messages = AsyncMock(  # type: ignore[method-assign]
+    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
         return_value=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "runtime + system"},
@@ -961,7 +959,7 @@ async def test_process_message_uses_explicit_session_metadata_for_goal_context(
 async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
     tmp_path: Path,
 ) -> None:
-    from blackcat.agent.runner import AgentRunResult
+    from nanobot.agent.runner import AgentRunResult
 
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:late-goal")
@@ -1081,8 +1079,8 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
 
 @pytest.mark.asyncio
 async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -> None:
-    from blackcat.command.builtin import cmd_stop
-    from blackcat.command.router import CommandContext
+    from nanobot.command.builtin import cmd_stop
+    from nanobot.command.router import CommandContext
 
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
@@ -1288,7 +1286,7 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     ]
 
 
-async def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
+def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
     loop = _mk_loop()
     session = Session(key="cli:merge")
     session.add_message("assistant", "previous assistant")
@@ -1307,7 +1305,7 @@ async def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(t
     assert inserted is True
 
     builder = ContextBuilder(tmp_path)
-    projected = await builder.build_messages(
+    projected = builder.build_messages(
         history=session.get_history(max_messages=0),
         current_message="",
         current_role="assistant",
@@ -1559,131 +1557,3 @@ def test_save_turn_keeps_tool_results_declared_in_prior_history() -> None:
     )
 
     assert [m["role"] for m in session.messages] == ["assistant", "tool"]
-
-
-def _make_authored_loop(tmp_path: Path) -> AgentLoop:
-    from blackcat.config.schema import PlatformIdentity
-
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = SimpleNamespace(max_tokens=4096)
-    return AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-        authors={"skye": PlatformIdentity(cli="u1", telegram="123456789")},
-        bot_name="blackcat",
-    )
-
-
-def test_persist_user_message_early_stamps_author_and_sender_id(tmp_path: Path) -> None:
-    loop = _make_authored_loop(tmp_path)
-    session = loop.sessions.get_or_create("cli:chat-1")
-
-    persisted = loop._persist_user_message_early(
-        InboundMessage(
-            channel="cli",
-            sender_id="u1",
-            chat_id="chat-1",
-            content="hello world",
-        ),
-        session,
-    )
-
-    assert persisted is True
-    msg = session.messages[-1]
-    assert msg["role"] == "user"
-    assert msg["author"] == "skye"
-    assert msg["sender_id"] == "u1"
-
-
-def test_persist_user_message_unknown_sender_records_unknown_author(tmp_path: Path) -> None:
-    loop = _make_authored_loop(tmp_path)
-    session = loop.sessions.get_or_create("cli:chat-2")
-
-    loop._persist_user_message_early(
-        InboundMessage(channel="cli", sender_id="stranger", chat_id="chat-2", content="hi"),
-        session,
-    )
-
-    msg = session.messages[-1]
-    assert msg["author"] == "unknown"
-    assert msg["sender_id"] == "stranger"
-
-
-def test_save_turn_stamps_bot_name_on_assistant_messages(tmp_path: Path) -> None:
-    loop = _make_authored_loop(tmp_path)
-    session = Session(key="cli:chat-3")
-    session.add_message(
-        "assistant",
-        "earlier",
-        tool_calls=[{
-            "id": "call_a",
-            "type": "function",
-            "function": {"name": "exec", "arguments": "{}"},
-        }],
-    )
-
-    loop._save_turn(
-        session,
-        [
-            {"role": "assistant", "content": "the reply", "tool_calls": []},
-            {"role": "tool", "tool_call_id": "call_a", "name": "exec", "content": "ok"},
-        ],
-        skip=0,
-    )
-
-    assistant_msgs = [m for m in session.messages if m["role"] == "assistant"]
-    assert any(m["content"] == "the reply" and m["author"] == "blackcat" for m in assistant_msgs)
-
-
-def test_persist_subagent_followup_stamps_bot_name(tmp_path: Path) -> None:
-    loop = _make_authored_loop(tmp_path)
-    session = loop.sessions.get_or_create("cli:chat-4")
-
-    persisted = loop._persist_subagent_followup(
-        session,
-        InboundMessage(
-            channel="cli",
-            sender_id="subagent",
-            chat_id="chat-4",
-            content="subagent result body",
-            metadata={"subagent_task_id": "task-1"},
-        ),
-    )
-
-    assert persisted is True
-    msg = session.messages[-1]
-    assert msg["role"] == "assistant"
-    assert msg["author"] == "blackcat"
-    assert msg["sender_id"] == "subagent"
-
-
-def test_persist_subagent_followup_reflects_origin_sender_id(tmp_path: Path) -> None:
-    loop = _make_authored_loop(tmp_path)
-    session = loop.sessions.get_or_create("cli:chat-5")
-
-    persisted = loop._persist_subagent_followup(
-        session,
-        InboundMessage(
-            channel="cli",
-            sender_id="subagent",
-            chat_id="chat-5",
-            content="subagent result body",
-            metadata={
-                "subagent_task_id": "task-2",
-                "origin_sender_id": "u1",
-                "origin_channel": "cli",
-            },
-        ),
-    )
-
-    assert persisted is True
-    msg = session.messages[-1]
-    assert msg["role"] == "assistant"
-    # Author stays as the bot — it's the bot announcing the result.
-    assert msg["author"] == "blackcat"
-    # sender_id traces back to the user who triggered the spawn, not "subagent".
-    assert msg["sender_id"] == "u1"
-    assert msg["injected_event"] == "subagent_result"

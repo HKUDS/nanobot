@@ -1,20 +1,18 @@
 """Base class for agent tools."""
 from __future__ import annotations
 
+import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from blackcat.agent.tools.context import RequestContext, ToolContext
+    from nanobot.agent.tools.context import ToolContext
 
-
-def set_context(self, ctx: RequestContext) -> None:
-        """Set routing context for tools that need it (optional override)."""
-        pass
+_ToolT = TypeVar("_ToolT", bound="Tool")
 
 # Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
@@ -30,7 +28,7 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 class Schema(ABC):
     """Abstract base for JSON Schema fragments describing tool parameters.
 
-    Concrete types live in :mod:`blackcat.agent.tools.schema`; all implement
+    Concrete types live in :mod:`nanobot.agent.tools.schema`; all implement
     :meth:`to_json_schema` and :meth:`validate_value`. Class methods
     :meth:`validate_json_schema_value` and :meth:`fragment` are the shared validation and normalization entry points.
     """
@@ -76,20 +74,27 @@ class Schema(ABC):
                 errors.append(f"{label} must be >= {schema['minimum']}")
             if "maximum" in schema and val > schema["maximum"]:
                 errors.append(f"{label} must be <= {schema['maximum']}")
-        if t == "string" and isinstance(val, str):
+        if t == "string":
             if "minLength" in schema and len(val) < schema["minLength"]:
                 errors.append(f"{label} must be at least {schema['minLength']} chars")
             if "maxLength" in schema and len(val) > schema["maxLength"]:
                 errors.append(f"{label} must be at most {schema['maxLength']} chars")
-        if t == "object" and isinstance(val, dict):
+        if t == "object":
             props = schema.get("properties", {})
             for k in schema.get("required", []):
                 if k not in val:
                     errors.append(f"missing required {Schema.subpath(path, k)}")
+            additional = schema.get("additionalProperties", True)
             for k, v in val.items():
                 if k in props:
                     errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
-        if t == "array" and isinstance(val, list):
+                elif additional is False:
+                    errors.append(f"unexpected parameter {Schema.subpath(path, k)}")
+                elif isinstance(additional, dict):
+                    errors.extend(
+                        Schema.validate_json_schema_value(v, additional, Schema.subpath(path, k))
+                    )
+        if t == "array":
             if "minItems" in schema and len(val) < schema["minItems"]:
                 errors.append(f"{label} must have at least {schema['minItems']} items")
             if "maxItems" in schema and len(val) > schema["maxItems"]:
@@ -108,8 +113,7 @@ class Schema(ABC):
         # Try to_json_schema first: Schema instances must be distinguished from dicts that are already JSON Schema
         to_js = getattr(value, "to_json_schema", None)
         if callable(to_js):
-            result = to_js()
-            return result if isinstance(result, dict) else {}
+            return to_js()
         if isinstance(value, dict):
             return value
         raise TypeError(f"Expected schema object or dict, got {type(value).__name__}")
@@ -196,7 +200,16 @@ class Tool(ABC):
         if not isinstance(obj, dict):
             return obj
         props = schema.get("properties", {})
-        return {k: self._cast_value(v, props[k]) if k in props else v for k, v in obj.items()}
+        additional = schema.get("additionalProperties")
+        casted: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k in props:
+                casted[k] = self._cast_value(v, props[k])
+            elif isinstance(additional, dict):
+                casted[k] = self._cast_value(v, additional)
+            else:
+                casted[k] = v
+        return casted
 
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Apply safe schema-driven casts before validation."""
@@ -262,13 +275,6 @@ class Tool(ABC):
                 "parameters": self.parameters,
             },
         }
-
-    def set_context(self, ctx: RequestContext) -> None:
-        """Set routing context for tools that need it (optional override)."""
-        pass
-
-
-_ToolT = TypeVar("_ToolT", bound=Tool)
 
 
 def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_ToolT]]:

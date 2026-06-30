@@ -9,11 +9,11 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 
-from blackcat import __logo__, __name__, __version__
-from blackcat.bus.events import OutboundMessage
-from blackcat.command.router import CommandContext, CommandRouter
-from blackcat.utils.helpers import build_status_content
-from blackcat.utils.restart import set_restart_notice_to_env
+from nanobot import __version__
+from nanobot.bus.events import OutboundMessage
+from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.utils.helpers import build_status_content
+from nanobot.utils.restart import set_restart_notice_to_env
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     ),
     BuiltinCommandSpec(
         "/restart",
-        "Restart blackcat",
+        "Restart nanobot",
         "Restart the bot process in place.",
         "rotate-cw",
     ),
@@ -148,7 +148,7 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
     async def _do_restart():
         await asyncio.sleep(1)
-        os.execv(sys.executable, [sys.executable, "-m", "blackcat"] + sys.argv[1:])
+        os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
 
     asyncio.create_task(_do_restart())
     return OutboundMessage(
@@ -171,7 +171,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     search_usage_text: str | None = None
     # Never let usage fetch break /status
     with suppress(Exception):
-        from blackcat.utils.searchusage import fetch_search_usage
+        from nanobot.utils.searchusage import fetch_search_usage
         web_cfg = getattr(loop, "web_config", None)
         search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
         if search_cfg is not None:
@@ -311,7 +311,10 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from blackcat.agent.memory import MemoryStore
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        from nanobot.agent.memory import MemoryStore
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
@@ -326,7 +329,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             if result is None:
                 await loop.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Dream: nothing to process.",
+                    content=_format_dream_no_input_message(),
+                    metadata={"render_as": "text"},
                 ))
                 return
             prompt, last_cursor = result
@@ -336,6 +340,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 session_key=key,
                 ephemeral=True,
                 tools=store.build_dream_tools(),
+                on_progress=_silent,
             )
             elapsed = time.monotonic() - t0
             if MemoryStore.dream_run_completed(resp):
@@ -350,7 +355,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
-            from blackcat.webui.token_usage import record_response_token_usage
+            from nanobot.webui.token_usage import record_response_token_usage
 
             record_response_token_usage(
                 resp,
@@ -372,6 +377,23 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
     )
+
+
+def _format_dream_no_input_message() -> str:
+    return "\n".join([
+        "Dream has no conversation history to process yet.",
+        "",
+        "Dream reads new entries from `memory/history.jsonl` after the current Dream cursor.",
+        (
+            "Short chats only reach that file after token compaction or idle auto-compact, "
+            "so a fresh or short WebUI chat may leave Dream with no input."
+        ),
+        "",
+        "Next steps:",
+        "- Enable `agents.defaults.idleCompactAfterMinutes` so completed chats become Dream input automatically.",
+        "- Compact the current chat into memory once that manual action is available.",
+        "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
+    ])
 
 
 def _extract_changed_files(diff: str) -> list[str]:
@@ -644,7 +666,7 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
 
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     """List, approve, deny or revoke pairing requests."""
-    from blackcat.pairing import PAIRING_COMMAND_META_KEY, handle_pairing_command
+    from nanobot.pairing import PAIRING_COMMAND_META_KEY, handle_pairing_command
 
     reply = handle_pairing_command(ctx.msg.channel, ctx.args)
     return OutboundMessage(
@@ -686,7 +708,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = [f"{__logo__} {__name__} commands:"] # TODO: check with Nyx
+    lines = ["🐈 nanobot commands:"]
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:

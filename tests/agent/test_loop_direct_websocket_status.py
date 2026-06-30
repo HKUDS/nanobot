@@ -95,3 +95,28 @@ async def test_process_direct_reuses_existing_session_lock(tmp_path) -> None:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+
+
+@pytest.mark.asyncio
+async def test_process_direct_applies_per_run_hooks(tmp_path) -> None:
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+
+    loop = _make_loop(tmp_path)
+    events: list[tuple[str, str | None]] = []
+
+    class RecordingHook(AgentHook):
+        async def before_run(self, context: AgentRunHookContext) -> None:
+            events.append(("before", None))
+
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            events.append(("after", context.final_content))
+
+    response = await loop.process_direct(
+        "hello",
+        session_key="api:per-run-hook",
+        hooks=[RecordingHook()],
+    )
+
+    assert response is not None
+    assert response.content == "done"
+    assert events == [("before", None), ("after", "done")]

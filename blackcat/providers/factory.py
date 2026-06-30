@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from blackcat.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
-from blackcat.providers.base import LLMProvider
-from blackcat.providers.fallback_provider import FallbackProvider
-from blackcat.providers.registry import create_dynamic_spec, find_by_name
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
+from nanobot.providers.base import LLMProvider
+from nanobot.providers.fallback_provider import FallbackProvider
+from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,16 @@ def _resolve_model_preset(
     return preset if preset is not None else config.resolve_preset(preset_name)
 
 
+def _provider_extra_headers(
+    spec: ProviderSpec | None,
+    provider_config: ProviderConfig | None,
+) -> dict[str, str] | None:
+    headers = dict(spec.default_extra_headers) if spec else {}
+    if provider_config and provider_config.extra_headers:
+        headers.update(provider_config.extra_headers)
+    return headers or None
+
+
 def _make_provider_core(
     config: Config,
     *,
@@ -44,7 +54,7 @@ def _make_provider_core(
     if provider_name and not spec and p:
         if not p.api_base:
             raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-        spec = create_dynamic_spec(provider_name)
+        spec = create_dynamic_spec(provider_name, thinking_style=(p.thinking_style or "") if p else "")
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
@@ -62,17 +72,16 @@ def _make_provider_core(
         raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
         needs_key = not (p and p.api_key)
-        is_cloud_model = ":cloud" in model
-        exempt = spec and (spec.is_oauth or (spec.is_local and not is_cloud_model) or spec.is_direct)
+        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
 
     if backend == "openai_codex":
-        from blackcat.providers.openai_codex_provider import OpenAICodexProvider
+        from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(default_model=model)
     elif backend == "azure_openai":
-        from blackcat.providers.azure_openai_provider import AzureOpenAIProvider
+        from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
         provider = AzureOpenAIProvider(
             api_key=p.api_key or "",
@@ -80,20 +89,20 @@ def _make_provider_core(
             default_model=model,
         )
     elif backend == "github_copilot":
-        from blackcat.providers.github_copilot_provider import GitHubCopilotProvider
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
         provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
-        from blackcat.providers.anthropic_provider import AnthropicProvider
+        from nanobot.providers.anthropic_provider import AnthropicProvider
 
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=_provider_extra_headers(spec, p),
         )
     elif backend == "bedrock":
-        from blackcat.providers.bedrock_provider import BedrockProvider
+        from nanobot.providers.bedrock_provider import BedrockProvider
 
         provider = BedrockProvider(
             api_key=p.api_key if p else None,
@@ -104,13 +113,13 @@ def _make_provider_core(
             extra_body=p.extra_body if p else None,
         )
     else:
-        from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p and provider_name == "openai" else "auto",
@@ -192,13 +201,14 @@ def provider_signature(
 
     def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
         fp = config.get_provider(fallback.model, preset=fallback)
+        provider_name = config.get_provider_name(fallback.model, preset=fallback)
         return (
             fallback.model,
             fallback.provider,
-            config.get_provider_name(fallback.model, preset=fallback),
+            provider_name,
             config.get_api_key(fallback.model, preset=fallback),
             config.get_api_base(fallback.model, preset=fallback),
-            fp.extra_headers if fp else None,
+            _provider_extra_headers(find_by_name(provider_name) if provider_name else None, fp),
             fp.extra_body if fp else None,
             fp.api_type if fp else "auto",
             fp.extra_query if fp else None,
@@ -210,13 +220,14 @@ def provider_signature(
             fallback.context_window_tokens,
         )
 
+    provider_name = config.get_provider_name(resolved.model, preset=resolved)
     return (
         resolved.model,
         resolved.provider,
-        config.get_provider_name(resolved.model, preset=resolved),
+        provider_name,
         config.get_api_key(resolved.model, preset=resolved),
         config.get_api_base(resolved.model, preset=resolved),
-        p.extra_headers if p else None,
+        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, p),
         p.extra_body if p else None,
         p.api_type if p else "auto",
         p.extra_query if p else None,
@@ -254,7 +265,7 @@ def load_provider_snapshot(
     *,
     preset_name: str | None = None,
 ) -> ProviderSnapshot:
-    from blackcat.config.loader import load_config, resolve_config_env_vars
+    from nanobot.config.loader import load_config, resolve_config_env_vars
 
     return build_provider_snapshot(
         resolve_config_env_vars(load_config(config_path)),

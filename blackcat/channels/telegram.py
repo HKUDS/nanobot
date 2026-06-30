@@ -22,23 +22,17 @@ from telegram import (
     Update,
 )
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from blackcat.bus.events import OutboundMessage
-from blackcat.bus.queue import MessageBus
-from blackcat.channels.base import BaseChannel
-from blackcat.command.builtin import build_help_text
-from blackcat.config.paths import get_media_dir
-from blackcat.config.schema import Base
-from blackcat.security.network import validate_url_target
-from blackcat.utils.formatting import split_message
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import build_help_text
+from nanobot.config.paths import get_media_dir
+from nanobot.config.schema import Base
+from nanobot.security.network import validate_url_target
+from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
@@ -357,6 +351,8 @@ class TelegramConfig(Base):
     streaming: bool = True
     # Enable inline keyboard buttons in Telegram messages.
     inline_keyboards: bool = False
+    # Opt in to Bot API 10.1 sendRichMessage for richer markdown rendering.
+    rich_messages: bool = False
     stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
     webhook_url: str = ""
     webhook_listen_host: str = "127.0.0.1"
@@ -449,21 +445,18 @@ class TelegramChannel(BaseChannel):
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task] = {}
+        self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
-        allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list:
-            return False
-        if "*" in allow_list:
+        if super().is_allowed(sender_id):
             return True
+
+        allow_list = getattr(self.config, "allow_from", [])
+        if not allow_list or "*" in allow_list:
+            return False
 
         sender_str = str(sender_id)
-        # Direct match first (supports full "id|username" in allow_from)
-        if sender_str in allow_list:
-            return True
-
-        # Legacy Telegram format: exactly "id|username" (two parts)
         if sender_str.count("|") != 1:
             return False
 
@@ -475,7 +468,7 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
-        """Map Telegram-safe command aliases back to canonical blackcat commands."""
+        """Map Telegram-safe command aliases back to canonical nanobot commands."""
         if not content.startswith("/"):
             return content
         if content == "/dream_log" or content.startswith("/dream_log "):
@@ -605,7 +598,7 @@ class TelegramChannel(BaseChannel):
 
         # Cancel all typing indicators
         for chat_id in list(self._typing_tasks):
-            await self._stop_typing(chat_id)
+            self._stop_typing(chat_id)
 
         for task in self._media_group_tasks.values():
             task.cancel()
@@ -642,15 +635,80 @@ class TelegramChannel(BaseChannel):
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
-    async def _send_impl(self, msg: OutboundMessage) -> None:
-        """Internal send implementation - called by BaseChannel.send() after validation."""
+    @staticmethod
+    def _is_rich_capability_error(exc: Exception) -> bool:
+        """True when the error indicates sendRichMessage is unavailable."""
+        err = str(exc).lower()
+        return (
+            "method not found" in err
+            or "unknown method" in err
+            or "bad request: invalid parameter" in err
+        )
+
+    async def _try_send_rich(
+        self,
+        chat_id: int,
+        content: str,
+        reply_params=None,
+        thread_kwargs: dict | None = None,
+        reply_markup=None,
+    ) -> bool:
+        """Attempt sendRichMessage (Bot API 10.1). Returns True on success."""
+        if not self._app:
+            return False
+
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "rich_message": {
+                "markdown": content,
+            },
+        }
+        if reply_params is not None:
+            # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
+            if hasattr(reply_params, "message_id"):
+                payload["reply_parameters"] = {
+                    "message_id": reply_params.message_id,
+                    "allow_sending_without_reply": True,
+                }
+            else:
+                payload["reply_parameters"] = reply_params
+        if thread_kwargs:
+            payload.update({k: v for k, v in thread_kwargs.items() if v is not None})
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+
+        try:
+            await self._call_with_retry(
+                self._app.bot.do_api_request,
+                "sendRichMessage",
+                api_kwargs=payload,
+            )
+            return True
+        except BadRequest as exc:
+            if self._is_rich_capability_error(exc):
+                self.logger.debug("sendRichMessage not available, disabling")
+                self._rich_send_disabled = True
+            else:
+                self.logger.debug("sendRichMessage rejected: {}", exc)
+            return False
+        except Exception as exc:
+            err_str = str(exc).lower()
+            is_timeout = "timed out" in err_str or isinstance(exc, TimedOut)
+            if is_timeout:
+                self.logger.debug("sendRichMessage timeout, falling back to legacy path")
+                return False
+            self.logger.debug("sendRichMessage failed: {}", exc)
+            return False
+
+    async def send(self, msg: OutboundMessage) -> None:
+        """Send a message through Telegram."""
         if not self._app:
             self.logger.warning("bot not running")
             return
 
         # Only stop typing indicator and remove reaction for final responses
         if not msg.metadata.get("_progress", False):
-            await self._stop_typing(msg.chat_id)
+            self._stop_typing(msg.chat_id)
             if reply_to_message_id := msg.metadata.get("message_id"):
                 with suppress(ValueError):
                     await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
@@ -741,6 +799,21 @@ class TelegramChannel(BaseChannel):
             # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
+
+            # Bot API 10.1 rich fast-path: send raw markdown via sendRichMessage.
+            # All non-blockquote content tries rich first; _rich_send_disabled
+            # latches off permanently if the server doesn't support it.
+            if (
+                not render_as_blockquote
+                and self.config.rich_messages
+                and not getattr(self, "_rich_send_disabled", False)
+            ):
+                rich_ok = await self._try_send_rich(
+                    chat_id, text, reply_params, thread_kwargs, reply_markup,
+                )
+                if rich_ok:
+                    return
+
             chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
             for i, chunk in enumerate(chunks):
                 is_last = (i == len(chunks) - 1)
@@ -828,7 +901,7 @@ class TelegramChannel(BaseChannel):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
-            await self._stop_typing(chat_id)
+            self._stop_typing(chat_id)
             if reply_to_message_id := meta.get("message_id"):
                 with suppress(ValueError):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
@@ -836,6 +909,31 @@ class TelegramChannel(BaseChannel):
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
+
+            # Try sendRichMessage for final output (Bot API 10.1).
+            # Skip when a streaming preview already exists to avoid the
+            # delete-and-resend pattern that causes flickering and drops
+            # line breaks (issue #4470).
+            if not buf.message_id and self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
+                reply_params = None
+                if reply_to_message_id := meta.get("message_id"):
+                    reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+                rich_ok = await self._try_send_rich(
+                    int_chat_id, raw_text, reply_params, thread_kwargs, None,
+                )
+                if rich_ok:
+                    # Delete the streaming preview message
+                    try:
+                        await self._call_with_retry(
+                            self._app.bot.delete_message,
+                            chat_id=int_chat_id, message_id=buf.message_id,
+                        )
+                    except Exception:
+                        pass  # Preview stays if delete fails
+                    self._stream_bufs.pop(chat_id, None)
+                    return
+
+            # Legacy path: edit existing streaming message with HTML
             html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
             primary_html = html_chunks[0]
             extra_html_chunks = html_chunks[1:]
@@ -979,7 +1077,7 @@ class TelegramChannel(BaseChannel):
             await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
         await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm blackcat.\n\n"
+            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
@@ -1189,7 +1287,7 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _queue_key_for_message(message) -> str:
-        """Return the final blackcat session key used for ordered Telegram ingress."""
+        """Return the final nanobot session key used for ordered Telegram ingress."""
         return TelegramChannel._derive_topic_session_key(message) or f"telegram:{message.chat_id}"
 
     @staticmethod
@@ -1360,6 +1458,7 @@ class TelegramChannel(BaseChannel):
 
         str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
+        session_key = self._derive_topic_session_key(message)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -1369,8 +1468,9 @@ class TelegramChannel(BaseChannel):
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
                     "metadata": metadata,
+                    "session_key": session_key,
                 }
-                await self._start_typing(str_chat_id)
+                self._start_typing(str_chat_id)
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
@@ -1381,7 +1481,7 @@ class TelegramChannel(BaseChannel):
             return
 
         # Start typing indicator before processing
-        await self._start_typing(str_chat_id)
+        self._start_typing(str_chat_id)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
@@ -1391,6 +1491,7 @@ class TelegramChannel(BaseChannel):
             content=content,
             media=media_paths,
             metadata=metadata,
+            session_key=session_key,
         )
 
     async def _flush_media_group(self, key: str) -> None:
@@ -1404,25 +1505,22 @@ class TelegramChannel(BaseChannel):
                 sender_id=buf["sender_id"], chat_id=buf["chat_id"],
                 content=content, media=list(dict.fromkeys(buf["media"])),
                 metadata=buf["metadata"],
+                session_key=buf.get("session_key"),
             )
         finally:
             self._media_group_tasks.pop(key, None)
 
-    async def _start_typing(self, chat_id: str) -> None:
+    def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
         # Cancel any existing typing task for this chat
-        await self._stop_typing(chat_id)
+        self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
 
-    async def _stop_typing(self, chat_id: str) -> None:
+    def _stop_typing(self, chat_id: str) -> None:
         """Stop the typing indicator for a chat."""
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
 
     async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
         """Add emoji reaction to a message (best-effort, non-blocking)."""

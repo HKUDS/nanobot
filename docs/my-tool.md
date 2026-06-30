@@ -25,7 +25,7 @@ tools:
 
 To allow the agent to set its configuration (e.g. switch models, adjust parameters), set `tools.my.allow_set: true`.
 
-Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and rewritten in-place the next time `blackcat onboard` refreshes the config.
+Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and rewritten in-place the next time `nanobot onboard` refreshes the config.
 
 All modifications are held in memory only — restart restores defaults.
 
@@ -38,7 +38,7 @@ Without parameters, returns a key config overview:
 ```text
 my(action="check")
 # → max_iterations: 40
-#   context_window_tokens: 65536
+#   context_window_tokens: 200000
 #   model: 'anthropic/claude-sonnet-4-20250514'
 #   workspace: PosixPath('/tmp/workspace')
 #   provider_retry_mode: 'standard'
@@ -89,14 +89,14 @@ my(action="set", key="model_preset", value="fast")
 my(action="set", key="model", value="fast-model")
 # → Switch to a raw model and clear the active preset
 
-my(action="set", key="context_window_tokens", value=131072)
+my(action="set", key="context_window_tokens", value=262144)
 # → Expand context window for long documents
 ```
 
 You can also store custom state in your scratchpad:
 
 ```text
-my(action="set", key="current_project", value="blackcat")
+my(action="set", key="current_project", value="nanobot")
 my(action="set", key="user_style_preference", value="concise")
 my(action="set", key="task_complexity", value="high")
 # → These values persist into the next conversation turn
@@ -123,7 +123,7 @@ Other parameters (e.g. `workspace`, `provider_retry_mode`, `max_tool_result_char
 
 ```text
 Agent: This codebase is large, let me expand my context window to handle it.
-→ my(action="set", key="context_window_tokens", value=131072)
+→ my(action="set", key="context_window_tokens", value=262144)
 ```
 
 ### "Simple question, don't waste compute"

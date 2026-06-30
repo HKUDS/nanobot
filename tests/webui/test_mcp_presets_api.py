@@ -135,26 +135,29 @@ def test_enable_no_auth_remote_presets_write_url(tmp_path, monkeypatch: pytest.M
 
     mcp_presets_action("enable", {"name": ["microsoft-learn"]})
     mcp_presets_action("enable", {"name": ["exa"]})
+    mcp_presets_action("enable", {"name": ["firecrawl"]})
 
     config = load_config()
     assert config.tools.mcp_servers["microsoft-learn"].url == "https://learn.microsoft.com/api/mcp"
     assert config.tools.mcp_servers["exa"].url == "https://mcp.exa.ai/mcp"
+    assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
 
 
-def test_enable_firecrawl_writes_scrubbed_env(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_firecrawl_preset_is_keyless(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_config(tmp_path, monkeypatch)
 
-    payload = mcp_presets_action(
-        "enable",
-        {
-            "name": ["firecrawl"],
-            "firecrawl_api_key": ["fc-secret"],
-        },
-    )
+    payload = mcp_presets_action("enable", {"name": ["firecrawl"]})
 
-    assert "fc-secret" not in str(payload)
+    row = next(item for item in payload["presets"] if item["name"] == "firecrawl")
+    assert row["transport"] == "streamableHttp"
+    assert row["requires"] == "Network access"
+    assert row["required_fields"] == []
+    assert row["configured"] is True
+    assert "Keyless" in row["note"]
     config = load_config()
-    assert config.tools.mcp_servers["firecrawl"].env["FIRECRAWL_API_KEY"] == "fc-secret"
+    assert config.tools.mcp_servers["firecrawl"].type == "streamableHttp"
+    assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
+    assert config.tools.mcp_servers["firecrawl"].env == {}
 
 
 def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

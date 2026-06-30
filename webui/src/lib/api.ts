@@ -93,6 +93,10 @@ function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
   return { "X-Blackcat-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
 }
 
+function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
+  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
+}
+
 function splitKey(key: string): { channel: string; chatId: string } {
   const idx = key.indexOf(":");
   if (idx === -1) return { channel: "", chatId: key };

@@ -16,11 +16,16 @@ const target = env.BLACKCAT_API_URL ?? "http://127.0.0.1:8765";
       },
     },
     optimizeDeps: {
-      // Radix dialog was introduced mid-session for the mobile sidebar sheet.
-      // When Vite re-optimizes it on a running dev server, the browser can race
-      // and request stale chunk paths from `.vite/deps`. Excluding it keeps dev
-      // reloads stable instead of rewriting those chunk filenames under us.
-      exclude: ["@radix-ui/react-dialog"],
+      // Keep dev reloads stable for dependencies that can rewrite generated
+      // optimizer chunk filenames while a browser tab is still running. Do not
+      // exclude the markdown/remark/rehype chain: Vite's pre-bundling is needed
+      // there for CommonJS interop such as style-to-js.
+      exclude: [
+        "@radix-ui/react-dialog",
+        "react-syntax-highlighter/dist/esm/prism-async-light",
+        "react-syntax-highlighter/dist/esm/styles/prism/one-dark",
+        "react-syntax-highlighter/dist/esm/styles/prism/one-light",
+      ],
     },
     build: {
       outDir: path.resolve(__dirname, "../blackcat/web/dist"),

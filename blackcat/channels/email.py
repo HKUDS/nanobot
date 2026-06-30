@@ -199,6 +199,8 @@ class EmailChannel(BaseChannel):
             except Exception:
                 self.logger.exception("Polling error")
 
+            if not self._running:
+                break
             await asyncio.sleep(poll_seconds)
 
     async def stop(self) -> None:

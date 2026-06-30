@@ -10,23 +10,23 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from blackcat.agent.hook import AgentHook, AgentHookContext
-from blackcat.agent.runner import AgentRunner, AgentRunSpec
-from blackcat.agent.tools.context import ToolContext
-from blackcat.agent.tools.file_state import FileStates
-from blackcat.agent.tools.loader import ToolLoader
-from blackcat.agent.tools.registry import ToolRegistry
-from blackcat.bus.events import InboundMessage
-from blackcat.bus.queue import MessageBus
-from blackcat.config.schema import AgentDefaults, ToolsConfig
-from blackcat.providers.base import LLMProvider
-from blackcat.security.workspace_access import (
+from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.file_state import FileStates
+from nanobot.agent.tools.loader import ToolLoader
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.providers.base import LLMProvider
+from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from blackcat.utils.prompt_templates import render_template
+from nanobot.utils.prompt_templates import render_template
 
 
 @dataclass(slots=True)
@@ -86,6 +86,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         defaults = AgentDefaults()
@@ -106,6 +107,11 @@ class SubagentManager:
             max_concurrent_subagents
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
+        )
+        self.fail_on_tool_error = (
+            fail_on_tool_error
+            if fail_on_tool_error is not None
+            else defaults.fail_on_tool_error
         )
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
@@ -156,19 +162,13 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
-        origin_sender_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {
-            "channel": origin_channel,
-            "chat_id": origin_chat_id,
-            "session_key": session_key,
-            "sender_id": origin_sender_id,
-        }
+        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
 
         status = SubagentStatus(
             task_id=task_id,
@@ -257,7 +257,7 @@ class SubagentManager:
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,
                     error_message=None,
-                    fail_on_tool_error=True,
+                    fail_on_tool_error=self.fail_on_tool_error,
                     checkpoint_callback=_on_checkpoint,
                     session_key=sess_key,
                     workspace=root,
@@ -324,10 +324,6 @@ class SubagentManager:
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
         }
-        origin_sender_id = origin.get("sender_id")
-        if origin_sender_id:
-            metadata["origin_sender_id"] = origin_sender_id
-            metadata["origin_channel"] = origin.get("channel")
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(
@@ -365,8 +361,8 @@ class SubagentManager:
 
     def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
-        from blackcat.agent.context import ContextBuilder
-        from blackcat.agent.skills import SkillsLoader
+        from nanobot.agent.context import ContextBuilder
+        from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
         root = workspace or self.workspace

@@ -1,19 +1,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChatSummary } from "@/lib/types";
-import { useSessionStore } from "@/stores/session-store";
-import { useShellStore } from "@/stores/shell-store";
-import { readShellRoute } from "@/utils/shell";
+import i18n from "@/i18n";
+import type { ChatSummary, SessionAutomationJob } from "@/lib/types";
 
 const connectSpy = vi.fn();
 const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
+const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomationJob[]>>();
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
+const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -58,7 +58,7 @@ function baseSettingsPayload() {
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "blackcat",
+      bot_name: "nanobot",
       bot_icon: "nb",
       tool_hint_max_length: 40,
     },
@@ -149,9 +149,12 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         refresh: refreshSpy,
         createChat: createChatSpy,
         forkChat: async () => "fork-chat",
-        deleteChat: async (key: string) => {
-          await deleteChatSpy(key);
+        getSessionAutomations: getSessionAutomationsSpy,
+        deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
+          if (options === undefined) await deleteChatSpy(key);
+          else await deleteChatSpy(key, options);
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));
+          return { deleted: true };
         },
       };
     },
@@ -183,7 +186,7 @@ vi.mock("@/lib/bootstrap", () => ({
   clearSavedSecret: vi.fn(),
 }));
 
-vi.mock("@/lib/blackcat-client", () => {
+vi.mock("@/lib/nanobot-client", () => {
   class MockClient {
     status = "idle" as const;
     defaultChatId: string | null = null;
@@ -192,7 +195,10 @@ vi.mock("@/lib/blackcat-client", () => {
     onRuntimeModelUpdate = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
-    onSessionUpdate = () => () => {};
+    onSessionUpdate = (handler: (chatId: string, scope?: string) => void) => {
+      sessionUpdateHandlers.add(handler);
+      return () => sessionUpdateHandlers.delete(handler);
+    };
     onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
       runStatusHandlers.add(handler);
       return () => runStatusHandlers.delete(handler);
@@ -206,47 +212,31 @@ vi.mock("@/lib/blackcat-client", () => {
     updateUrl = updateUrlSpy;
   }
 
-  return { BlackcatClient: MockClient };
+  return { NanobotClient: MockClient };
 });
 
-import App from "@/App";
 import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import App from "@/App";
 
 describe("App layout", () => {
-  beforeEach(() => {
-    useShellStore.setState({
-      ...readShellRoute(),
-      hostSidebarOpen: true,
-      mobileSidebarOpen: false,
-      sessionSearchOpen: false,
-      pendingDelete: null,
-      pendingRename: null,
-      pendingProjectRename: null,
-      restartToast: null,
-      isRestarting: false,
-    });
-    useSessionStore.setState({
-      runningChatIds: new Set(),
-      completedChatIds: new Set(),
-      workspaces: null,
-      workspaceError: null,
-      draftWorkspaceScope: null,
-      workspaceOverrides: {},
-      settingsSnapshot: null,
-    });
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
     mockSessions = [];
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
+    getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
     runStatusHandlers.clear();
+    sessionUpdateHandlers.clear();
     window.history.replaceState(null, "", "/");
     setNavigatorPlatform("Linux x86_64");
-    localStorage.removeItem("blackcat-webui.sidebar");
-    localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
+    localStorage.removeItem("nanobot-webui.sidebar");
+    localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
+    localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -266,6 +256,34 @@ describe("App layout", () => {
     vi.useRealTimers();
   });
 
+  it("shows the auth form without an invalid-password error on first load", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
+    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows an invalid-password error after a submitted password is rejected", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    const password = await screen.findByPlaceholderText("Password");
+    fireEvent.change(password, { target: { value: "wrong-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Invalid password. Try again.")).toBeInTheDocument();
+    expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps sidebar layout out of the main thread width contract", async () => {
     const { container } = render(<App />);
 
@@ -279,6 +297,23 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
+  });
+
+  it("places Automations after Skills in the main sidebar", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
+    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
+    const automationsButton = within(sidebar).getByRole("button", { name: "Automations" });
+
+    expect(appsButton.compareDocumentPosition(skillsButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(
+      skillsButton.compareDocumentPosition(automationsButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("opens Skills from the main sidebar", async () => {
@@ -332,7 +367,7 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Skills · blackcat");
+    expect(document.title).toBe("Skills · nanobot");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
@@ -348,6 +383,331 @@ describe("App layout", () => {
     expect(screen.getByText("Missing CLI")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Raw SKILL.md"));
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
+  });
+
+  it("opens Automations from the main sidebar", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": {
+        jobs: [
+          {
+            id: "job-1",
+            name: "Daily repo check",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: {
+              message: "Check the repo status",
+              kind: "agent_turn",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [],
+            },
+            origin: {
+              session_key: "websocket:chat-a",
+              channel: "websocket",
+              chat_id: "chat-a",
+              title: "Release prep",
+              preview: "Check release blockers",
+            },
+          },
+          {
+            id: "external-quiz",
+            name: "WeChat quiz",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "cron", expr: "30 9-23 * * *", tz: "Asia/Shanghai" },
+            payload: {
+              message: "Send a quiz",
+              kind: "agent_turn",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [],
+            },
+            origin: {
+              channel: "weixin",
+              title: "",
+              preview: "",
+            },
+          },
+          {
+            id: "heartbeat",
+            name: "heartbeat",
+            enabled: true,
+            protected: true,
+            schedule: { kind: "every", every_ms: 60_000 },
+            payload: { message: "", kind: "system_event" },
+            state: { next_run_at_ms: null, pending: false, run_history: [] },
+            origin: null,
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const automationsButton = within(sidebar).getByRole("button", {
+      name: "Automations",
+    });
+
+    fireEvent.click(automationsButton);
+
+    const heading = await screen.findByRole("heading", { name: "Automations" });
+    expect(heading).toBeInTheDocument();
+    const automationsMain = heading.closest("main");
+    expect(automationsMain).not.toBeNull();
+    expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
+    expect(screen.getByText("WeChat")).toBeInTheDocument();
+    expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
+    expect(screen.getByText("heartbeat")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(document.title).toBe("Automations · nanobot");
+
+    const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
+      "Search task, message, linked chat, or schedule",
+    );
+    fireEvent.change(searchInput, { target: { value: "WeChat" } });
+    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
+    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.change(searchInput, { target: { value: "09-23" } });
+    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
+    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("edits a past one-time automation without resubmitting its old schedule", async () => {
+    const pastOneShot = {
+      id: "past-one-shot",
+      name: "Past one-shot",
+      enabled: true,
+      protected: false,
+      delete_after_run: true,
+      schedule: { kind: "at", at_ms: 1 },
+      payload: {
+        message: "Old one-shot message",
+        kind: "agent_turn",
+      },
+      state: {
+        next_run_at_ms: null,
+        last_status: "ok",
+        pending: false,
+        run_history: [],
+      },
+      origin: {
+        session_key: "websocket:chat-a",
+        channel: "websocket",
+        chat_id: "chat-a",
+        title: "Release prep",
+        preview: "Check release blockers",
+      },
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": { jobs: [pastOneShot] },
+      "/api/webui/automations/update?id=past-one-shot": {
+        jobs: [
+          {
+            ...pastOneShot,
+            payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+
+    expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Update the prompt and schedule. The linked chat stays unchanged."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Old one-shot message")).toHaveClass(
+      "min-h-[160px]",
+      "resize-none",
+    );
+
+    fireEvent.change(screen.getByDisplayValue("Old one-shot message"), {
+      target: { value: "Updated one-shot message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/webui/automations/update?id=past-one-shot",
+        expect.any(Object),
+      );
+    });
+    const updateCall = vi.mocked(fetch).mock.calls.find(
+      ([url]) => String(url) === "/api/webui/automations/update?id=past-one-shot",
+    );
+    expect(updateCall).toBeTruthy();
+    const headers = updateCall?.[1]?.headers as Record<string, string>;
+    expect(JSON.parse(decodeURIComponent(headers["X-Nanobot-Automation-Values"]))).toEqual({
+      name: "Past one-shot",
+      message: "Updated one-shot message",
+    });
+  });
+
+  it("keeps long automation details expandable without nested scrolling", async () => {
+    const longMessage = [
+      "Review the release plan and prepare a concise status update for the channel.",
+      "Include blockers, owners, follow-up dates, and any risky assumptions that changed since yesterday.",
+      "Keep the output actionable and avoid repeating context that the team already confirmed in the thread.",
+      "If a dependency looks stale, call it out explicitly and ask for a fresh owner update.",
+      "This message is intentionally long enough to require progressive disclosure in the automation details panel.",
+      "The full content should remain available without forcing the user into a small nested scroll area.",
+    ].join("\n");
+    const history = [
+      { run_at_ms: Date.UTC(2026, 3, 12, 10, 0, 0), status: "error", duration_ms: 900, error: "oldest failure" },
+      { run_at_ms: Date.UTC(2026, 3, 13, 10, 0, 0), status: "error", duration_ms: 800, error: "second oldest failure" },
+      { run_at_ms: Date.UTC(2026, 3, 14, 10, 0, 0), status: "ok", duration_ms: 700 },
+      { run_at_ms: Date.UTC(2026, 3, 15, 10, 0, 0), status: "ok", duration_ms: 600 },
+      { run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0), status: "ok", duration_ms: 500 },
+      { run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0), status: "ok", duration_ms: 400 },
+    ];
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": {
+        jobs: [
+          {
+            id: "long-details",
+            name: "Long detail automation",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 3_600_000 },
+            payload: {
+              message: longMessage,
+              kind: "agent_turn",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: history,
+            },
+            origin: {
+              session_key: "websocket:chat-a",
+              channel: "websocket",
+              chat_id: "chat-a",
+              title: "Release prep",
+              preview: "Check release blockers",
+            },
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+
+    const detailHeading = await screen.findByRole("heading", { name: "Long detail automation" });
+    const detailPanel = detailHeading.closest("article") as HTMLElement;
+    expect(detailPanel).not.toBeNull();
+    const message = Array.from(detailPanel.querySelectorAll("section div")).find(
+      (node) => node.textContent === longMessage,
+    ) as HTMLElement | undefined;
+    expect(message).toBeTruthy();
+    expect(message!).toHaveClass("line-clamp-6");
+
+    fireEvent.click(within(detailPanel).getByRole("button", { name: "Show full message" }));
+    expect(within(detailPanel).getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    expect(message!).not.toHaveClass("line-clamp-6");
+
+    expect(within(detailPanel).queryByText("Recent health")).not.toBeInTheDocument();
+    expect(within(detailPanel).queryByRole("button", { name: /Run history/ })).not.toBeInTheDocument();
+    expect(within(detailPanel).queryByText(/oldest failure/)).not.toBeInTheDocument();
+    expect(within(detailPanel).queryByText("No error recorded")).not.toBeInTheDocument();
+  });
+
+  it("localizes the Automations surface", async () => {
+    await i18n.changeLanguage("zh-CN");
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": {
+        jobs: [
+          {
+            id: "job-zh",
+            name: "每日检查",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: {
+              message: "检查仓库状态",
+              kind: "agent_turn",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              last_run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [
+                {
+                  run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+                  status: "ok",
+                  duration_ms: 500,
+                },
+              ],
+            },
+            origin: {
+              session_key: "websocket:chat-a",
+              channel: "websocket",
+              chat_id: "chat-a",
+              title: "发布准备",
+              preview: "检查发布阻塞项",
+            },
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
+
+    const heading = await screen.findByRole("heading", { name: "自动任务" });
+    expect(heading).toBeInTheDocument();
+    const automationsMain = heading.closest("main");
+    expect(automationsMain).not.toBeNull();
+    expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
+    expect(screen.getByText("任务队列")).toBeInTheDocument();
+    expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("每 1天")).toBeInTheDocument();
+    expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
+    expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    expect(document.title).toBe("自动任务 · nanobot");
   });
 
   it("fully collapses the native host sidebar and previews it on hover", async () => {
@@ -456,6 +816,74 @@ describe("App layout", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
 
+  it("shows localized bound automations in the first delete confirmation", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "First chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Second chat",
+      },
+    ];
+    getSessionAutomationsSpy.mockResolvedValue([
+      {
+        id: "job-1",
+        name: "Daily repo check",
+        enabled: true,
+        schedule: { kind: "every", every_ms: 86_400_000 },
+        payload: { message: "Check the repo" },
+        state: { next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0) },
+      },
+    ]);
+    await i18n.changeLanguage("zh-CN");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("button", { name: /^First chat$/ }),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.pointerDown(screen.getByLabelText(/First chat.*会话操作/), {
+      button: 0,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Daily repo check")).toBeInTheDocument(),
+    );
+    expect(getSessionAutomationsSpy).toHaveBeenCalledWith("websocket:chat-a");
+    expect(
+      screen.getByText("这个对话有关联的自动任务。删除对话也会删除这些自动任务。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("This chat has scheduled automations. Deleting it will also delete them."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    await waitFor(() =>
+      expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", {
+        deleteAutomations: true,
+      }),
+    );
+    expect(deleteChatSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
+  }, 15_000);
+
   it("keeps the mobile session action menu inside the sidebar sheet", async () => {
     mockSessions = [
       {
@@ -488,7 +916,7 @@ describe("App layout", () => {
 
     const sheet = await screen.findByRole("dialog");
     const mobileSidebar = within(sheet).getByRole("navigation", {
-      name: "Mobile sidebar navigation",
+      name: "Sidebar navigation",
     });
     await waitFor(() =>
       expect(
@@ -607,7 +1035,7 @@ describe("App layout", () => {
         chatId: "new",
         createdAt: "2026-04-15T12:00:00Z",
         updatedAt: "2026-04-15T12:00:00Z",
-        preview: "hi blackcat",
+        preview: "hi nanobot",
       },
       {
         key: "websocket:alpha",
@@ -702,15 +1130,15 @@ describe("App layout", () => {
       for (const handler of runStatusHandlers) handler("chat-a", null);
     });
     expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
   });
 
-  it("does not show a completed dot later when the active session finishes", async () => {
+  it("does not show an updated dot later when the active session finishes", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -754,12 +1182,53 @@ describe("App layout", () => {
       for (const handler of runStatusHandlers) handler("chat-a", null);
     });
     expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+  });
+
+  it("marks inactive sessions when a thread update arrives", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Open chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Scheduled update target",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Open chat$/ }));
+    });
+
+    act(() => {
+      for (const handler of sessionUpdateHandlers) handler("chat-b", "thread");
+    });
+
+    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Scheduled update target$/ }));
+    });
+
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
   });
 
   it("restores sidebar run indicators after a page reload", async () => {
@@ -783,21 +1252,18 @@ describe("App layout", () => {
       },
     ];
     localStorage.setItem(
-      "blackcat-webui.sidebar.completed-runs.v1",
+      "nanobot-webui.sidebar.session-updates.v1",
       JSON.stringify(["chat-b"]),
     );
 
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    act(() => {
-      useSessionStore.getState().addCompleted("chat-b");
-    });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
       expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
     );
-    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
     expect(attachSpy).toHaveBeenCalledWith("chat-a");
   });
 
@@ -829,7 +1295,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    await waitFor(() => expect(document.title).toBe("Active after reload · blackcat"));
+    await waitFor(() => expect(document.title).toBe("Active after reload · nanobot"));
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(
       within(sidebar).getByRole("button", { name: /^Active after reload$/ }),
@@ -884,7 +1350,7 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "blackcat",
+                bot_name: "nanobot",
                 bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
@@ -1071,12 +1537,12 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
-    expect(document.title).toBe("Settings · blackcat");
+    expect(document.title).toBe("Settings · nanobot");
     expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-blackcat-gateway")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-blackcat-workspace")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview-logo-nanobot-gateway")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview-logo-nanobot-workspace")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(settingsNav.className).toContain("overflow-x-auto");
@@ -1255,7 +1721,7 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Apps · blackcat");
+    expect(document.title).toBe("Apps · nanobot");
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
@@ -1296,7 +1762,7 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "blackcat",
+                bot_name: "nanobot",
                 bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
@@ -1393,13 +1859,13 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));
-    await waitFor(() => expect(document.title).toBe("blackcat"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
-    await waitFor(() => expect(document.title).toBe("blackcat"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
     expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
   });
 

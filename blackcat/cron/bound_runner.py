@@ -8,13 +8,13 @@ import time
 import uuid
 from typing import Any, Protocol
 
-from blackcat.agent.tools.cron import CronTool
-from blackcat.bus.events import InboundMessage, OutboundMessage
-from blackcat.cron.session_delivery import origin_delivery_context
-from blackcat.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
-from blackcat.cron.types import CronJob
-from blackcat.cron.webui_metadata import cron_proactive_delivery_metadata
-from blackcat.utils.prompt_templates import render_template
+from nanobot.agent.tools.cron import CronTool
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.cron.session_delivery import origin_delivery_context
+from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
+from nanobot.cron.types import CronJob
+from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
+from nanobot.utils.prompt_templates import render_template
 
 
 class BoundCronAgent(Protocol):
