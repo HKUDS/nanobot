@@ -387,12 +387,29 @@ async def handle_health(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
+# Authentication middleware
+# ---------------------------------------------------------------------------
+
+
+@web.middleware
+async def _auth_middleware(request: web.Request, handler):
+    """Validate Bearer token when an API key is configured."""
+    api_key = request.app.get("api_key")
+    if api_key and request.path != "/health":
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header[7:] != api_key:
+            return _error_json(401, "Invalid or missing API key", err_type="authentication_error")
+    return await handler(request)
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
 
 def create_app(
-    agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0
+    agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0,
+    api_key: str | None = None,
 ) -> web.Application:
     """Create the aiohttp application.
 
@@ -400,11 +417,16 @@ def create_app(
         agent_loop: An initialized AgentLoop instance.
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
+        api_key: Optional Bearer token required for all non-health endpoints.
     """
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
+    app = web.Application(
+        client_max_size=20 * 1024 * 1024,  # 20MB for base64 images
+        middlewares=[_auth_middleware],
+    )
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
+    app["api_key"] = api_key
     app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
