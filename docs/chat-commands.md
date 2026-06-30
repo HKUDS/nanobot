@@ -81,6 +81,12 @@ to that same chat. Keep `nanobot gateway` running so trigger messages can be
 delivered. The trigger message starts an automation turn; it is not shown in
 the chat as a normal user message.
 
+Trigger deliveries are stored in the workspace until the gateway consumes them.
+If the gateway exits after claiming a delivery but before marking it complete,
+the next gateway start requeues that delivery. This is an at-least-once local
+queue: a delivery may run more than once if the process exits at the wrong time,
+so external scripts should make repeated trigger messages safe.
+
 For longer or generated content, omit the message argument and pipe stdin:
 
 ```bash
