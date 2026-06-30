@@ -296,6 +296,12 @@ def test_exec_extract_absolute_paths_captures_paths_after_equals() -> None:
     assert "~/.nanobot/config.json" in paths
 
 
+def test_exec_extract_absolute_paths_does_not_capture_query_tilde() -> None:
+    cmd = 'python query.py --query \'{job=~"app"}\''
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert not any(p.startswith("~") for p in paths)
+
+
 def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
     cmd = 'cat "/tmp/data.txt" "~/.nanobot/config.json"'
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -311,6 +317,15 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
         "Error: Command blocked by safety guard (path outside working dir)"
     )
     assert "hard policy boundary" in error
+
+
+def test_exec_guard_blocks_equals_home_path_outside_workspace(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat --config=~/.nanobot/config.json", str(tmp_path))
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
 
 
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:

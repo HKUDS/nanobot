@@ -919,5 +919,5 @@ class ExecTool(Tool):
             command
         )
         posix_paths = re.findall(r"(?:^|[\s|>='\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s>='\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
+        home_paths = re.findall(r"(?:^|[\s>='\"])(~[/+][^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~/ or ~+
         return win_paths + posix_paths + home_paths
