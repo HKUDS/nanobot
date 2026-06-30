@@ -862,6 +862,17 @@ def _run_gateway(
         raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
 
+    # Self-heal the gateway state file with the current PID after any restart.
+    from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths
+    GatewayRuntime.refresh_state_pid(
+        paths=GatewayRuntimePaths.for_instance(
+            workspace=str(config.workspace_path)
+            if not is_default_workspace(config.workspace_path)
+            else None,
+            config_path=config.config_path,
+        )
+    )
+
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
         _migrate_cron_store(config)
