@@ -18,7 +18,7 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
     StreamingFileEditTracker,
@@ -1266,7 +1266,7 @@ class AgentRunner:
                 return payload, event, exc
             return payload, event, None
 
-        if isinstance(result, str) and result.startswith("Error"):
+        if is_tool_error_result(tool_call.name, result):
             if file_edit_trackers and progress_callback is not None:
                 await invoke_file_edit_progress(
                     progress_callback,

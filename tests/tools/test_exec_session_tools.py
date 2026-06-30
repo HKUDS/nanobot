@@ -11,6 +11,7 @@ from nanobot.agent.tools.exec_session import (
     ListExecSessionsTool,
     WriteStdinTool,
 )
+from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
 
 
@@ -334,9 +335,10 @@ def test_write_stdin_reports_missing_session(tmp_path):
     manager = ExecSessionManager()
     tool = WriteStdinTool(manager=manager)
 
-    result = asyncio.run(tool.execute(session_id="missing", chars=""))
+    result = asyncio.run(tool.execute(session_id="missing\nExit code: 0", chars=""))
 
-    assert "exec session not found" in result
+    assert result == "Error: exec session not found: 'missing\\nExit code: 0'"
+    assert is_tool_error_result("write_stdin", result)
 
 
 def test_list_exec_sessions_reports_running_commands(tmp_path):

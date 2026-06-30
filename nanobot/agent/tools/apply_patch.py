@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import tool_parameters
+from nanobot.agent.tools.base import ToolResult, tool_parameters
 from nanobot.agent.tools.filesystem import _FsTool
 from nanobot.agent.tools.schema import (
     ArraySchema,
@@ -289,8 +289,8 @@ class ApplyPatchTool(_FsTool):
                 _format_summary(summary) for summary in summaries
             )
         except PermissionError as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")
         except _PatchError as exc:
-            return f"Error applying patch: {exc}"
+            return ToolResult.error(f"Error applying patch: {exc}")
         except Exception as exc:
-            return f"Error applying patch: {exc}"
+            return ToolResult.error(f"Error applying patch: {exc}")

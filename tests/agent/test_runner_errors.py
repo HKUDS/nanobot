@@ -136,6 +136,46 @@ async def test_runner_tool_error_sets_final_content():
 
 
 @pytest.mark.asyncio
+async def test_runner_preserves_successful_exec_output_that_starts_with_error():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+
+    async def chat_with_retry(*, messages, **kwargs):
+        if not any(msg.get("role") == "tool" for msg in messages):
+            return LLMResponse(
+                content="working",
+                tool_calls=[
+                    ToolCallRequest(id="call_1", name="exec", arguments={"command": "report"})
+                ],
+                usage={},
+            )
+        return LLMResponse(content="done", usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    output = "Error: generated report successfully\n\nExit code: 0"
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=output)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "run report"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        fail_on_tool_error=True,
+    ))
+
+    assert result.final_content == "done"
+    assert result.stop_reason == "completed"
+    assert result.tool_events == [
+        {"name": "exec", "status": "ok", "detail": "Error: generated report successfully  Exit code: 0"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runner_tool_error_preserves_tool_results_in_messages():
     """When a tool raises a fatal error, its results must still be appended
     to messages so the session never contains orphan tool_calls (#2943)."""
