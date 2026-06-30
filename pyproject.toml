@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.2.1"
+version = "0.2.2"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -31,7 +31,7 @@ dependencies = [
     "websocket-client>=1.9.0,<2.0.0",
     "httpx>=0.28.0,<1.0.0",
     "ddgs>=9.5.5,<10.0.0",
-    "oauth-cli-kit>=0.1.3,<1.0.0",
+    "oauth-cli-kit>=0.1.6,<1.0.0",
     "loguru>=0.7.3,<1.0.0",
     "readability-lxml>=0.8.4,<1.0.0",
     "lxml-html-clean>=0.4.0,<1.0.0",
@@ -93,6 +93,10 @@ matrix = [
 discord = [
     "discord.py>=2.5.2,<3.0.0",
 ]
+whatsapp = [
+    "neonize>=0.3.18.post0,<0.4.0",
+    "segno>=1.6.1,<2.0.0",
+]
 langsmith = [
     "langsmith>=0.1.0",
 ]
@@ -150,14 +154,10 @@ packages = ["nanobot"]
 [tool.hatch.build.targets.wheel.sources]
 "nanobot" = "nanobot"
 
-[tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
-
 [tool.hatch.build.targets.sdist]
 include = [
     "nanobot/",
     "nanobot/web/dist/",
-    "bridge/",
     "hatch_build.py",
     "README.md",
     "LICENSE",
@@ -182,6 +182,7 @@ source = ["nanobot"]
 omit = ["tests/*", "**/tests/*"]
 
 [tool.coverage.report]
+fail_under = 75
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

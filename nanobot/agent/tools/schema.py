@@ -222,11 +222,18 @@ def tool_parameters_schema(
     *,
     required: list[str] | None = None,
     description: str = "",
+    additional_properties: bool | dict[str, Any] | None = False,
     **properties: Any,
 ) -> dict[str, Any]:
-    """Build root tool parameters ``{"type": "object", "properties": ...}`` for :meth:`Tool.parameters`."""
+    """Build root tool parameters ``{"type": "object", "properties": ...}`` for :meth:`Tool.parameters`.
+
+    Built-in tools default to strict parameter objects so misspelled tool-call
+    arguments are reported before execution instead of being silently ignored.
+    Pass ``additional_properties=None`` to omit the JSON Schema keyword.
+    """
     return ObjectSchema(
         required=required,
         description=description,
+        additional_properties=additional_properties,
         **properties,
     ).to_json_schema()

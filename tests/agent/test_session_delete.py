@@ -58,11 +58,11 @@ def test_read_session_file_missing(tmp_path: Path) -> None:
     assert sm.read_session_file("nope:none") is None
 
 
-def test_safe_key_matches_internal_path(tmp_path: Path) -> None:
+def test_storage_key_matches_internal_path(tmp_path: Path) -> None:
     sm = SessionManager(tmp_path)
     key = "telegram:abc/def"
     expected = sm._get_session_path(key).name
-    assert SessionManager.safe_key(key) + ".jsonl" == expected
+    assert SessionManager._storage_key(key) + ".jsonl" == expected
 
 
 def _write_legacy_session(legacy_dir: Path, key: str, roles: list[str]) -> Path:

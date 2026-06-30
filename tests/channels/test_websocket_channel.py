@@ -96,6 +96,27 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
     )
 
 
+@pytest.mark.asyncio
+async def test_stop_treats_cancelled_server_task_as_shutdown() -> None:
+    channel = _ch(MessageBus())
+    channel._running = True
+    channel._stop_event = asyncio.Event()
+
+    async def _server_task() -> None:
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_server_task())
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    channel._server_task = task
+
+    await channel.stop()
+
+    assert channel._server_task is None
+    assert task.cancelled()
+
+
 @pytest.fixture()
 def bus() -> MagicMock:
     b = MagicMock()
@@ -115,7 +136,7 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
 async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Response:
     """Run GET in a thread to avoid blocking the asyncio loop shared with websockets."""
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -1767,7 +1788,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_providers["exa"]["credential"] == "api_key"
         assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
-        assert search_providers["keenable"]["credential"] == "api_key"
+        assert search_providers["keenable"]["credential"] == "optional_api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
         assert body["image_generation"]["provider"] == "openrouter"

@@ -35,10 +35,15 @@ def format_tool_hints(tool_calls: list, max_length: int = 40) -> str:
 
     formatted = []
     for tc in tool_calls:
-        fmt = _TOOL_FORMATS.get(tc.name)
+        name = getattr(tc, "name", None)
+        if not isinstance(name, str) or not name:
+            # Degenerate/malformed tool call (e.g. a model emits name=None);
+            # skip it instead of raising AttributeError on the whole turn.
+            continue
+        fmt = _TOOL_FORMATS.get(name)
         if fmt:
             formatted.append(_fmt_known(tc, fmt, max_length))
-        elif tc.name.startswith("mcp_"):
+        elif name.startswith("mcp_"):
             formatted.append(_fmt_mcp(tc, max_length))
         else:
             formatted.append(_fmt_fallback(tc, max_length))

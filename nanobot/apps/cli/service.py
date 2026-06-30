@@ -407,6 +407,19 @@ class CliAppManager:
     def _cache_path(self, source: str) -> Path:
         return self.data_dir / f"{source}_registry_cache.json"
 
+    def _cached_registry(self, cache_path: Path) -> tuple[dict[str, Any] | None, float]:
+        cached = _read_json(cache_path)
+        if not cached:
+            return None, 0.0
+        data = cached.get("data")
+        if not isinstance(data, dict):
+            return None, 0.0
+        try:
+            cached_at = float(cached.get("_cached_at", 0))
+        except (TypeError, ValueError):
+            cached_at = 0.0
+        return data, cached_at
+
     def _load_installed(self) -> dict[str, Any]:
         data = _read_json(self.installed_path) or {}
         apps = data.get("apps") if isinstance(data.get("apps"), dict) else data
@@ -426,39 +439,90 @@ class CliAppManager:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        cached = _read_json(cache_path)
+        data, cached_at = self._cached_registry(cache_path)
         if (
             not force_refresh
-            and cached
-            and _now() - float(cached.get("_cached_at", 0)) < self.runtime.catalog_ttl_seconds
+            and data is not None
+            and _now() - cached_at < self.runtime.catalog_ttl_seconds
         ):
-            data = cached.get("data")
-            if isinstance(data, dict):
-                return data
+            return data
 
         try:
             response = httpx.get(url, timeout=15.0, follow_redirects=True)
             response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, dict):
+            fetched = response.json()
+            if not isinstance(fetched, dict):
                 raise ValueError("registry response must be an object")
         except Exception:
-            if cached and isinstance(cached.get("data"), dict):
-                return cached["data"]
+            if data is not None:
+                return data
             raise
 
-        _write_json(cache_path, {"_cached_at": _now(), "data": data})
-        return data
+        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        return fetched
 
-    def catalog(self, *, force_refresh: bool = False) -> tuple[list[dict[str, Any]], str | None]:
-        registries: list[tuple[str, str, dict[str, Any]]] = []
-        for source, url, raw_base, required in _CATALOG_SOURCES:
+    async def _fetch_registry_async(
+        self,
+        url: str,
+        cache_path: Path,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        data, cached_at = self._cached_registry(cache_path)
+        if (
+            not force_refresh
+            and data is not None
+            and _now() - cached_at < self.runtime.catalog_ttl_seconds
+        ):
+            return data
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                response = await client.get(url)
+            response.raise_for_status()
+            fetched = response.json()
+            if not isinstance(fetched, dict):
+                raise ValueError("registry response must be an object")
+        except Exception:
+            if data is not None:
+                return data
+            raise
+
+        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        return fetched
+
+    async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:
+        for source, url, _raw_base, required in _CATALOG_SOURCES:
             try:
-                registry = self._fetch_registry(
+                await self._fetch_registry_async(
                     url,
                     self._cache_path(source),
                     force_refresh=force_refresh,
                 )
+            except Exception:
+                if required:
+                    raise
+
+    def catalog(
+        self,
+        *,
+        force_refresh: bool = False,
+        cache_only: bool = False,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        registries: list[tuple[str, str, dict[str, Any]]] = []
+        for source, url, raw_base, required in _CATALOG_SOURCES:
+            try:
+                cache_path = self._cache_path(source)
+                if cache_only:
+                    registry, _ = self._cached_registry(cache_path)
+                    if registry is None:
+                        continue
+                else:
+                    registry = self._fetch_registry(
+                        url,
+                        cache_path,
+                        force_refresh=force_refresh,
+                    )
             except Exception:
                 if required:
                     raise
@@ -487,6 +551,15 @@ class CliAppManager:
                 else:
                     apps_by_name[key] = entry
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
+
+    def catalog_cache_fresh(self, *, include_optional: bool = False) -> bool:
+        for source, _url, _raw_base, required in _CATALOG_SOURCES:
+            if not required and not include_optional:
+                continue
+            data, cached_at = self._cached_registry(self._cache_path(source))
+            if data is None or _now() - cached_at >= self.runtime.catalog_ttl_seconds:
+                return False
+        return True
 
     def _manifest_source(self, app: dict[str, Any]) -> str:
         source = str(app.get("_source") or "harness")
@@ -674,8 +747,8 @@ class CliAppManager:
             },
         )
 
-    def payload(self, *, force_refresh: bool = False) -> dict[str, Any]:
-        apps, updated = self.catalog(force_refresh=force_refresh)
+    def payload(self, *, force_refresh: bool = False, cache_only: bool = False) -> dict[str, Any]:
+        apps, updated = self.catalog(force_refresh=force_refresh, cache_only=cache_only)
         installed = self._load_installed()
         rows = [self._app_payload(app, installed) for app in apps]
         rows.sort(key=lambda item: (str(item["category"]), str(item["display_name"]).lower()))
