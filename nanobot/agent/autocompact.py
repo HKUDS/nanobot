@@ -26,24 +26,13 @@ class AutoCompact:
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
 
-    @staticmethod
-    def _timestamp(ts: datetime | str | None) -> float | None:
-        if not ts:
-            return None
-        if isinstance(ts, str):
-            try:
-                ts = datetime.fromisoformat(ts)
-            except ValueError:
-                return None
-        return ts.timestamp()
-
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
-        ts_epoch = self._timestamp(ts)
-        if self._ttl <= 0 or ts_epoch is None:
+        if self._ttl <= 0 or not ts:
             return False
-        now_epoch = self._timestamp(now or datetime.now())
-        return now_epoch is not None and now_epoch - ts_epoch >= self._ttl * 60
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
+        return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
 
     def _has_compactable_idle_tail(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
@@ -52,7 +41,7 @@ class AutoCompact:
             return False
         probe = Session(
             key=session.key,
-            messages=tail.copy(),
+            messages=tail,
             created_at=session.created_at,
             updated_at=session.updated_at,
             metadata={},

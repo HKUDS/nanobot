@@ -284,8 +284,6 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 if not line.strip():
                     continue
                 item = json.loads(line)
-                if item.get("_type") == "metadata":
-                    continue
                 timestamp = _visible_message_timestamp(item)
                 if timestamp is not None:
                     visible_message_at = _latest_updated_at(visible_message_at, timestamp)
