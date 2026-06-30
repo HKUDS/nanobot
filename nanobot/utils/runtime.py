@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,10 @@ from loguru import logger
 from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
+
+# Limit identical tool calls in a turn to prevent infinite loops
+_MAX_REPEAT_TOOL_CALLS = 2
+_EXTERNAL_LOOKUP_TOOL_NAMES = frozenset({"web_fetch", "web_search"})
 
 # Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
@@ -125,6 +130,69 @@ def repeated_external_lookup_error(
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
     )
+
+
+def tool_call_signature(tool_name: str, arguments: Any) -> str | None:
+    """Stable signature for generic repeated tool calls we want to throttle."""
+    if tool_name in _EXTERNAL_LOOKUP_TOOL_NAMES:
+        return None
+
+    if not isinstance(arguments, dict):
+        return f"{tool_name}:none"
+
+    try:
+        args_json = json.dumps(arguments, sort_keys=True)
+    except Exception:
+        args_json = str(arguments)
+
+    return f"{tool_name}:{args_json}"
+
+
+def repeated_tool_call_error(
+    tool_name: str,
+    arguments: Any,
+    seen_counts: dict[str, int],
+) -> str | None:
+    """Block identical repeated tool calls after a small retry budget."""
+    signature = tool_call_signature(tool_name, arguments)
+    if signature is None:
+        return None
+
+    count = seen_counts.get(signature, 0)
+    if count < _MAX_REPEAT_TOOL_CALLS:
+        return None
+
+    logger.warning(
+        "Blocking identical repeated tool call {} on attempt {}",
+        signature[:160],
+        count + 1,
+    )
+    return (
+        "Error: repeated identical tool call blocked. "
+        "You have already called this tool with these exact arguments multiple times "
+        "and it failed. Doing it again will not change the result. "
+        "Use the results you already have, or try a meaningfully different approach."
+    )
+
+
+def record_tool_call_result(
+    tool_name: str,
+    arguments: Any,
+    status: str,
+    seen_counts: dict[str, int],
+) -> None:
+    """Record tool execution outcome to track repeated failures.
+
+    A successful execution clears all tracked failures, as a state change
+    implies previously failing tools might now succeed (e.g. polling).
+    """
+    if status != "error":
+        seen_counts.clear()
+        return
+
+    signature = tool_call_signature(tool_name, arguments)
+    if signature is not None:
+        seen_counts[signature] = seen_counts.get(signature, 0) + 1
 
 
 # Workspace-boundary violations are soft errors, with per-target throttling.
