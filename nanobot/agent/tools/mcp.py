@@ -170,7 +170,8 @@ def _redact_url(url: str) -> str:
     """Strip credentials and query/fragment before logging an MCP URL.
 
     Server URLs may embed secrets (``https://user:token@host/sse`` or a
-    ``?token=`` query); only scheme, host, port, and path are safe to log.
+    ``?token=`` query). Some deployments also put opaque tokens in the path, so
+    log only the origin and a path placeholder.
     """
     try:
         parts = urllib.parse.urlsplit(url)
@@ -178,7 +179,8 @@ def _redact_url(url: str) -> str:
         netloc = f"[{hostname}]" if ":" in hostname else hostname
         if parts.port:
             netloc = f"{netloc}:{parts.port}"
-        return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+        path = "/..." if parts.path and parts.path != "/" else parts.path
+        return urllib.parse.urlunsplit((parts.scheme, netloc, path, "", ""))
     except Exception:
         return "<redacted-url>"
 

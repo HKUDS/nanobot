@@ -1245,10 +1245,12 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("https://user:secret@host.example/sse", "https://host.example/sse"),
-        ("https://host.example:8443/mcp?token=abc#frag", "https://host.example:8443/mcp"),
-        ("https://user:secret@[::1]:8443/sse?token=abc", "https://[::1]:8443/sse"),
-        ("https://host.example/sse", "https://host.example/sse"),
+        ("https://user:secret@host.example/sse", "https://host.example/..."),
+        ("https://host.example:8443/mcp?token=abc#frag", "https://host.example:8443/..."),
+        ("https://user:secret@[::1]:8443/sse?token=abc", "https://[::1]:8443/..."),
+        ("https://host.example/sse", "https://host.example/..."),
+        ("https://host.example", "https://host.example"),
+        ("https://host.example/", "https://host.example/"),
     ],
 )
 def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
