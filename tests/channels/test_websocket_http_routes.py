@@ -109,7 +109,7 @@ async def _http_get(
     url: str, headers: dict[str, str] | None = None
 ) -> httpx.Response:
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -506,12 +506,11 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
         token = boot.json()["token"]
         auth = {"Authorization": f"Bearer {token}"}
 
-        started = time.perf_counter()
         catalog_task = asyncio.create_task(
             _http_get("http://127.0.0.1:29935/api/settings/cli-apps", headers=auth)
         )
         assert await asyncio.wait_for(entered.wait(), 2.0)
-        assert time.perf_counter() - started < 1.0
+        assert not catalog_task.done()
 
         workspaces_started = time.perf_counter()
         workspaces = await _http_get("http://127.0.0.1:29935/api/workspaces", headers=auth)

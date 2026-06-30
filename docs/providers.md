@@ -61,8 +61,11 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
+| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers and OpenAI Codex. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
+
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex`, including Codex OAuth token exchange/refresh and Codex Responses API requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 ## Common Provider Patterns
 
@@ -293,6 +296,8 @@ If you have more than one custom OpenAI-compatible endpoint, give each endpoint 
 
 Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Choose a name that does not conflict with a built-in provider name or alias, such as `openai`, `openai-codex`, `github-copilot`, or `lm-studio`. Do not set `apiType` on custom provider keys; `apiType` is only for `providers.openai`.
 
+If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
+
 This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
 
 ### Ollama
@@ -419,6 +424,32 @@ nanobot provider login github-copilot
 ```
 
 Then explicitly select the provider and model in a preset. OAuth providers are not valid automatic fallbacks.
+
+For OpenAI Codex, add `providers.openai_codex.proxy` only when Codex OAuth/token refresh or Codex API requests must use a proxy:
+
+```json
+{
+  "providers": {
+    "openai_codex": {
+      "proxy": "http://127.0.0.1:7890"
+    }
+  },
+  "modelPresets": {
+    "codex": {
+      "provider": "openai_codex",
+      "model": "gpt-5.1-codex",
+      "reasoningEffort": "high"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "codex"
+    }
+  }
+}
+```
+
+If you run the login command on a remote/headless machine and open the authorization URL in a local browser, paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted. See [`configuration.md#providers`](./configuration.md#providers) for the full OAuth provider notes.
 
 ## Provider Resolution
 

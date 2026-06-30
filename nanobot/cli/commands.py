@@ -154,6 +154,12 @@ def _install_gateway_shutdown_handlers(
     return restore
 
 
+def _advance_dream_cursor_if_behind(memory: Any) -> None:
+    latest = memory.get_latest_cursor()
+    if memory.get_last_dream_cursor() < latest:
+        memory.set_last_dream_cursor(latest)
+
+
 class SafeFileHistory(FileHistory):
     """FileHistory subclass that sanitizes surrogate characters on write.
 
@@ -1125,6 +1131,7 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
         console.print("[yellow]○[/yellow] Dream: disabled")
+        _advance_dream_cursor_if_behind(agent.context.memory)
 
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:
@@ -1781,6 +1788,11 @@ _PROVIDER_DISPLAY: dict[str, str] = {
     "github_copilot": "GitHub Copilot",
 }
 
+_OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "openai_codex": "openai-codex/gpt-5.4-mini",
+    "github_copilot": "github-copilot/gpt-5.4-mini",
+}
+
 
 def _register_login(name: str):
     """Register an OAuth login handler."""
@@ -1812,9 +1824,51 @@ def _resolve_oauth_provider(provider: str):
     return spec
 
 
+def _set_oauth_provider_as_main(
+    provider_name: str,
+    *,
+    model: str | None = None,
+    config_path: str | None = None,
+) -> None:
+    """Persist an OAuth provider as the active agent provider."""
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
+
+    config = load_config(resolved_config_path)
+    selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
+    config.agents.defaults.model_preset = None
+    config.agents.defaults.provider = provider_name
+    config.agents.defaults.model = selected_model
+    save_config(config, resolved_config_path)
+
+    saved_path = resolved_config_path or get_config_path()
+    console.print(
+        f"[green]✓ Set {provider_name.replace('_', '-')} as the main provider[/green]  "
+        f"[dim]{selected_model}[/dim]"
+    )
+    console.print(f"[dim]Saved: {saved_path}[/dim]")
+
+
 @provider_app.command("login")
 def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    set_main: bool = typer.Option(
+        False,
+        "--set-main",
+        "--main",
+        help="Set this OAuth provider as the active agent provider after login",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model to use when setting this provider as the active provider",
+    ),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -1826,6 +1880,8 @@ def provider_login(
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
+    if set_main or model:
+        _set_oauth_provider_as_main(spec.name, model=model, config_path=config)
 
 
 @provider_app.command("logout")
@@ -1849,14 +1905,23 @@ def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
 
+        from nanobot.config.loader import load_config, resolve_config_env_vars
+
+        proxy = None
+        try:
+            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from e
         token = None
         with suppress(Exception):
-            token = get_token()
+            token = get_token(proxy=proxy)
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
                 print_fn=lambda s: console.print(s),
                 prompt_fn=lambda s: typer.prompt(s),
+                proxy=proxy,
             )
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")

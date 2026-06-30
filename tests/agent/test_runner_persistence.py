@@ -6,15 +6,13 @@ import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -172,7 +170,7 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
 
 
 async def test_runner_keeps_going_when_tool_result_persistence_fails():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -195,7 +193,10 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
     tools.execute = AsyncMock(return_value="tool result")
 
     runner = AgentRunner(provider)
-    with patch("nanobot.agent.runner.maybe_persist_tool_result", side_effect=RuntimeError("disk full")):
+    with patch(
+        "nanobot.agent.context_governance.maybe_persist_tool_result",
+        side_effect=RuntimeError("disk full"),
+    ):
         result = await runner.run(AgentRunSpec(
             initial_messages=[{"role": "user", "content": "do task"}],
             tools=tools,

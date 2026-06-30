@@ -103,12 +103,12 @@ def _make_fake_compact(
             metadata={},
             last_consolidated=0,
         )
-        dropped, already_consolidated = probe.retain_recent_legal_suffix(
+        result = probe.retain_recent_legal_suffix(
             max_suffix,
             extend_to_user=True,
         )
         kept = probe.messages
-        archive_msgs = dropped[already_consolidated:]
+        archive_msgs = result.dropped[result.already_consolidated_count:]
 
         if not archive_msgs and not kept:
             session.updated_at = datetime.now()
@@ -223,7 +223,7 @@ class TestAgentLoopTTLParam:
         kwargs = session.get_history.call_args.kwargs
         assert isinstance(kwargs.get("max_tokens"), int)
         assert kwargs["max_tokens"] > 0
-        assert kwargs["include_timestamps"] is True
+        assert set(kwargs) == {"max_messages", "max_tokens", "extend_to_user"}
 
     @pytest.mark.asyncio
     async def test_session_file_cap_archives_and_trims_old_messages(self, tmp_path):

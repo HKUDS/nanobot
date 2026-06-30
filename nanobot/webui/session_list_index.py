@@ -232,7 +232,8 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
 
 
 def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
-    fallback_key = path.stem.replace("_", ":", 1)
+    storage_key = SessionManager._decode_storage_key(path.stem)
+    fallback_key = storage_key or path.stem.replace("_", ":", 1)
     try:
         with open(path, encoding="utf-8") as f:
             first_line = f.readline().strip()

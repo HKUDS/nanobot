@@ -240,6 +240,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
 > - **Custom OpenAI-compatible providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own OpenAI-compatible endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. This named-custom path uses the OpenAI-compatible request format only. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` with `provider: "anthropic"`.
+> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers and `openai_codex`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -632,20 +633,37 @@ nanobot agent -m "Reply with one short sentence."
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
-Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openai_codex` block is optional and is only needed for provider-specific settings such as a proxy.
 
 **1. Login:**
 ```bash
 nanobot provider login openai-codex
 ```
 
-**2. Set model** (merge into `~/.nanobot/config.json`):
+If the machine running nanobot cannot open a graphical browser, copy the printed URL into a real browser. For remote SSH login, open the URL locally, then paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted.
+
+**2. Optional proxy** (merge into `~/.nanobot/config.json` if Codex OAuth or Codex API traffic must use a proxy):
+
+```json
+{
+  "providers": {
+    "openai_codex": {
+      "proxy": "http://127.0.0.1:7890"
+    }
+  }
+}
+```
+
+The proxy applies to Codex OAuth token refresh, interactive token exchange, and Codex Responses API requests. It does not affect other providers; configure `proxy` separately on each supported provider that needs it.
+
+**3. Set model** (merge into `~/.nanobot/config.json`):
 ```json
 {
   "modelPresets": {
     "codex": {
       "provider": "openai_codex",
-      "model": "openai-codex/gpt-5.1-codex"
+      "model": "gpt-5.1-codex",
+      "reasoningEffort": "high"
     }
   },
   "agents": {
@@ -656,7 +674,9 @@ nanobot provider login openai-codex
 }
 ```
 
-**3. Chat:**
+Use `reasoningEffort` in the preset to send a Codex reasoning effort such as `"low"`, `"medium"`, `"high"`, or another value supported by the selected model. When `provider` is explicitly `openai_codex`, the model name does not need the `openai-codex/` prefix.
+
+**4. Chat:**
 ```bash
 nanobot agent -m "Hello!"
 
@@ -675,7 +695,17 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
-GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.github_copilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+
+For GitHub Enterprise / Copilot for Business, set the endpoint overrides you need before login:
+```bash
+export NANOBOT_GITHUB_COPILOT_CLIENT_ID="your-enterprise-client-id"
+export NANOBOT_GITHUB_DEVICE_CODE_URL="https://ghe.example/login/device/code"
+export NANOBOT_GITHUB_ACCESS_TOKEN_URL="https://ghe.example/login/oauth/access_token"
+export NANOBOT_GITHUB_USER_URL="https://api.ghe.example/user"
+export NANOBOT_COPILOT_TOKEN_URL="https://api.ghe.example/copilot_internal/v2/token"
+export NANOBOT_COPILOT_BASE_URL="https://copilot-api.ghe.example"
+```
 
 **1. Login:**
 ```bash
@@ -984,6 +1014,29 @@ Some OpenAI-compatible gateways expose request-body extensions such as vLLM guid
   }
 }
 ```
+
+If a custom OpenAI-compatible endpoint exposes a provider-specific thinking toggle, set `thinkingStyle` so nanobot can translate `reasoningEffort` into the right request body. Supported styles are `thinking_type` (`{"thinking":{"type":"enabled"}}`), `enable_thinking` (`{"enable_thinking": true}`), and `reasoning_split` (`{"reasoning_split": true}`):
+
+```json
+{
+  "providers": {
+    "companyProxy": {
+      "apiKey": "${COMPANY_PROXY_API_KEY}",
+      "apiBase": "https://api.your-provider.com/v1",
+      "thinkingStyle": "enable_thinking"
+    }
+  },
+  "modelPresets": {
+    "company": {
+      "provider": "companyProxy",
+      "model": "served-model-name",
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
+
+Leave `thinkingStyle` unset unless the endpoint explicitly documents one of those wire formats. `extraBody` is still applied last, so advanced users can override the generated value.
 
 </details>
 
@@ -1482,6 +1535,8 @@ Global settings that apply to all channels. Configure under the `channels` secti
 }
 ```
 
+Telegram `richMessages` defaults to `false`. Enable it only to opt in to Bot API 10.1 `sendRichMessage` rendering; leave it disabled for Telegram Web clients that show unsupported-message errors for rich messages.
+
 ### Retry Behavior
 
 Retry is intentionally simple.
@@ -1827,9 +1882,9 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 `enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`).
 
-- Omit `enabledTools`, or set it to `["*"]`, to register all tools.
-- Set `enabledTools` to `[]` to register no tools from that server.
-- Set `enabledTools` to a non-empty list of names to register only that subset.
+- Omit `enabledTools`, or set it to `["*"]`, to register all capabilities (tools, resources, and prompts).
+- Set `enabledTools` to `[]` to register no tools from that server. Resources and prompts are also skipped, since they have no per-name filter.
+- Set `enabledTools` to a non-empty list of names to register only those tools — resources and prompts are not registered.
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
@@ -1938,7 +1993,9 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
 }
 ```
 
-If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and delivers useful results to the most recently active chat target. If the file has no active tasks, the heartbeat is skipped silently.
+If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and sends only useful/actionable results to the most recently active chat target. If the file has no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
+
+This is intentionally different from user-created cron jobs. A cron job created with the `cron` tool runs as a scheduled turn in its origin chat/session and normally delivers the result back to that channel. Use `HEARTBEAT.md` for recurring background checks that should not notify the user on every run.
 
 Use `nanobot heartbeat trigger --dry-run` when editing `HEARTBEAT.md`: it runs only the Phase 1 static and LLM decision checks and prints the extracted task summary. Use `nanobot heartbeat trigger` to execute one heartbeat immediately from the terminal. Manual triggers and gateway timer ticks share a workspace lock, so two heartbeat runs cannot overlap.
 
@@ -1949,6 +2006,7 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
 | `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
+| `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
 
 
 ## Subagent Concurrency
@@ -1965,9 +2023,22 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 }
 ```
 
+Subagents also stop immediately when one of their tools returns an execution error. That default keeps failures visible to the parent agent. If your subagent workflows use tools that can fail transiently and should be retried or worked around by the model, disable hard-stop behavior:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "failOnToolError": false
+    }
+  }
+}
+```
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
+| `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
 
 ## Auto Compact
