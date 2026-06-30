@@ -243,7 +243,7 @@ class MatrixChannel(BaseChannel):
         )
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
-        self._stream_bufs: dict[str, _StreamBuf] = {}
+        self._stream_bufs: dict[str | tuple[str, str], _StreamBuf] = {}
         self._started_at_ms: int = 0
         self._media_download_semaphore = asyncio.Semaphore(
             max(1, int(self.config.max_concurrent_media_downloads))
@@ -531,9 +531,13 @@ class MatrixChannel(BaseChannel):
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         meta = metadata or {}
         relates_to = self._build_thread_relates_to(metadata)
+        stream_id = meta.get("_stream_id")
+        stream_key: str | tuple[str, str] = (
+            (chat_id, stream_id) if isinstance(stream_id, str) and stream_id else chat_id
+        )
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.pop(stream_key, None)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -547,10 +551,10 @@ class MatrixChannel(BaseChannel):
             await self._send_room_content(chat_id, content)
             return
 
-        buf = self._stream_bufs.get(chat_id)
+        buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _StreamBuf()
-            self._stream_bufs[chat_id] = buf
+            self._stream_bufs[stream_key] = buf
         buf.text += delta
 
         if not buf.text.strip():
