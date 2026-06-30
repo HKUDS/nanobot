@@ -368,6 +368,16 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class WebUIConfig(Base):
+    """WebUI display configuration."""
+
+    hidden_settings_sections: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("hiddenSettingsSections", "hidden_settings_sections"),
+        serialization_alias="hiddenSettingsSections",
+    )  # Settings section keys to hide from the UI (e.g. ["advanced", "runtime", "models"])
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -382,6 +392,7 @@ class Config(BaseSettings):
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
     )
+    webui: WebUIConfig = Field(default_factory=WebUIConfig)
 
     def __init__(self, **values: Any) -> None:
         if not type(self).__pydantic_complete__:
