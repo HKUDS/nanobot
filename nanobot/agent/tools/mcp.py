@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import time
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
@@ -45,6 +46,8 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+_mcp_last_accessed: dict[str, float] = {}
+_mcp_watchdog_tasks: dict[str, asyncio.Task] = {}
 
 
 def _is_malformed_mcp_progress_notification(message: Any) -> bool:
@@ -390,6 +393,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         retried_transient = False
         refreshed_session = False
         while True:
+            _mcp_last_accessed[self._server_name] = time.time()
             try:
                 result = await asyncio.wait_for(
                     self._session.call_tool(self._original_name, arguments=kwargs),
@@ -539,6 +543,7 @@ class MCPResourceWrapper(_MCPWrapperBase):
         retried_transient = False
         refreshed_session = False
         while True:
+            _mcp_last_accessed[self._server_name] = time.time()
             try:
                 result = await asyncio.wait_for(
                     self._session.read_resource(self._uri),
@@ -655,6 +660,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
         retried_transient = False
         refreshed_session = False
         while True:
+            _mcp_last_accessed[self._server_name] = time.time()
             try:
                 result = await asyncio.wait_for(
                     self._session.get_prompt(self._prompt_name, arguments=kwargs),
@@ -1057,6 +1063,16 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         state._mcp_connected = bool(state._mcp_stacks)
+        for name in connected:
+            _mcp_last_accessed[name] = time.time()
+            cfg = getattr(state, "_mcp_servers", {}).get(name)
+            idle_timeout = getattr(cfg, "idle_timeout", 0) if cfg else 0
+            if idle_timeout > 0:
+                if name in _mcp_watchdog_tasks:
+                    _mcp_watchdog_tasks[name].cancel()
+                _mcp_watchdog_tasks[name] = asyncio.create_task(
+                    _mcp_idle_watchdog(state, name, idle_timeout)
+                )
         if connected:
             logger.info("MCP connected servers: {}", sorted(connected))
         else:
@@ -1300,7 +1316,26 @@ def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: st
     return removed
 
 
+async def _mcp_idle_watchdog(state: Any, name: str, timeout: int) -> None:
+    try:
+        while True:
+            await asyncio.sleep(5.0)
+            if name not in getattr(state, "_mcp_stacks", {}):
+                break
+            last_used = _mcp_last_accessed.get(name, 0)
+            if last_used and (time.time() - last_used) > timeout:
+                logger.info("MCP server '{}' idled for {}s, closing...", name, timeout)
+                await _close_server(state, name)
+                break
+    except asyncio.CancelledError:
+        pass
+
+
 async def _close_server(state: Any, server_name: str) -> None:
+    if server_name in _mcp_watchdog_tasks:
+        _mcp_watchdog_tasks[server_name].cancel()
+        _mcp_watchdog_tasks.pop(server_name, None)
+    _mcp_last_accessed.pop(server_name, None)
     stack = state._mcp_stacks.pop(server_name, None)
     if stack is None:
         return
