@@ -445,9 +445,9 @@ class WebSearchTool(Tool):
             items = [{"title": answer_text or "Olostep answer", "url": "", "content": "\n".join(source_lines)}]
             return _format_results(query, items, n)
         except Olostep_BaseError as e:
-            return f"Olostep search error: {type(e).__name__}: {e}"
+            return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
         except Exception as e:
-            return f"Olostep search error: {type(e).__name__}: {e}"
+            return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
 
     async def _search_brave(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("BRAVE_API_KEY", "")
