@@ -425,6 +425,13 @@ export class NanobotClient {
     for (const handler of this.statusHandlers) handler(status);
   }
 
+  private clearRunStatusesForReconnect(): void {
+    if (this.runStartedAtByChatId.size === 0) return;
+    const chatIds = [...this.runStartedAtByChatId.keys()];
+    this.runStartedAtByChatId.clear();
+    for (const chatId of chatIds) this.emitRunStatus(chatId, null);
+  }
+
   private handleOpen(): void {
     this.setStatus("open");
     this.reconnectAttempts = 0;
@@ -629,6 +636,7 @@ export class NanobotClient {
   }
 
   private scheduleReconnect(): void {
+    this.clearRunStatusesForReconnect();
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
     // Exponential backoff: 0.5s, 1s, 2s, 4s, capped.

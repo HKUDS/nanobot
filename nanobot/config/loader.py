@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pydantic
+from loguru import logger
 from pydantic import BaseModel
 
 from nanobot.config.schema import Config, _resolve_tool_config_refs
@@ -152,6 +153,23 @@ def _env_replace(match: re.Match[str]) -> str:
 
 def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
+    agents = data.get("agents", {})
+    defaults = agents.get("defaults", {}) if isinstance(agents, dict) else {}
+    if isinstance(defaults, dict):
+        had_legacy_max_messages = (
+            "maxMessages" in defaults or "max_messages" in defaults
+        )
+        defaults.pop("maxMessages", None)
+        defaults.pop("max_messages", None)
+        if had_legacy_max_messages:
+            # TODO(next version): Remove this legacy cleanup branch; the schema
+            # will silently ignore this field once the warning grace period ends.
+            logger.warning(
+                "agents.defaults.maxMessages/max_messages is legacy and ignored; "
+                "replay max messages is now an internal safety cap. Remove it from "
+                "config. This compatibility warning will be removed in the next version."
+            )
+
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools = data.get("tools", {})
     exec_cfg = tools.get("exec", {})

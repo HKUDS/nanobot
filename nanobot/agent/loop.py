@@ -57,7 +57,11 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import (
+    Session,
+    SessionManager,
+    replay_max_messages_for_context,
+)
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
@@ -201,7 +205,6 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
-        max_messages: int = 120,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -215,6 +218,7 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        restart_mode: str = "auto",
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -224,6 +228,7 @@ class AgentLoop:
         self.runtime_events = runtime_events or RuntimeEventBus()
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
+        self.restart_mode = restart_mode
         self.provider = provider
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
@@ -292,7 +297,7 @@ class AgentLoop:
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
-        self._max_messages = max_messages if max_messages > 0 else 120
+        self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -390,10 +395,10 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
-            max_messages=defaults.max_messages,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
+            restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             **extra,
@@ -421,6 +426,7 @@ class AgentLoop:
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
+        self._sync_replay_max_messages()
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
             self._runtime_model_publisher(
@@ -433,6 +439,9 @@ class AgentLoop:
                 model_preset if model_preset is not None else self.model_preset,
             )
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
+
+    def _sync_replay_max_messages(self) -> None:
+        self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
 
     def _refresh_provider_snapshot(self) -> None:
         if self._provider_snapshot_loader is None:

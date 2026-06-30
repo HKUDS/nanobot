@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronSchedule
+from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 
 
 def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
@@ -39,6 +40,29 @@ def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
         service._running = False
     assert store_path.exists()
     return service, store_path
+
+
+def _corrupt_store(tmp_path: Path) -> Path:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text("{not valid json", encoding="utf-8")
+    return store_path
+
+
+def _assert_single_corrupt_backup(store_path: Path) -> None:
+    assert not store_path.exists()
+    backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "{not valid json"
+
+
+def _system_job(job_id: str = "dream") -> CronJob:
+    return CronJob(
+        id=job_id,
+        name="Dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    )
 
 
 def test_save_store_is_atomic(tmp_path: Path) -> None:
@@ -146,6 +170,126 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
     assert result is snapshot
     assert len(result.jobs) == 1
     assert result.jobs[0].name == "Daily Loving Message"
+
+
+@pytest.mark.parametrize(
+    ("api_name", "call"),
+    [
+        ("list_jobs", lambda service: service.list_jobs()),
+        ("get_job", lambda service: service.get_job("missing")),
+        ("status", lambda service: service.status()),
+        ("remove_job", lambda service: service.remove_job("missing")),
+        ("enable_job", lambda service: service.enable_job("missing", enabled=False)),
+        ("update_job", lambda service: service.update_job("missing", name="new name")),
+        ("register_system_job", lambda service: service.register_system_job(_system_job())),
+    ],
+)
+def test_public_apis_raise_clear_error_for_unavailable_corrupt_store(
+    tmp_path: Path,
+    api_name: str,
+    call: Callable[[CronService], object],
+) -> None:
+    """Public APIs should report the corrupt store explicitly instead of
+    leaking ``AttributeError`` when the first load cannot produce a store."""
+    store_path = _corrupt_store(tmp_path)
+    service = CronService(store_path)
+
+    with pytest.raises(RuntimeError, match="corrupt.*restore jobs.json") as exc_info:
+        call(service)
+
+    assert api_name
+    assert str(store_path) in str(exc_info.value)
+    _assert_single_corrupt_backup(store_path)
+
+
+@pytest.mark.asyncio
+async def test_run_job_raises_clear_error_and_restores_running_state_for_corrupt_store(
+    tmp_path: Path,
+) -> None:
+    store_path = _corrupt_store(tmp_path)
+    service = CronService(store_path)
+
+    with pytest.raises(RuntimeError, match="corrupt.*restore jobs.json"):
+        await service.run_job("missing")
+
+    assert service._running is False
+    _assert_single_corrupt_backup(store_path)
+
+
+@pytest.mark.asyncio
+async def test_run_job_preserves_running_state_when_corrupt_store_unavailable(
+    tmp_path: Path,
+) -> None:
+    store_path = _corrupt_store(tmp_path)
+    service = CronService(store_path)
+    service._running = True
+    service._arm_timer = lambda: None
+
+    with pytest.raises(RuntimeError, match="corrupt.*restore jobs.json"):
+        await service.run_job("missing")
+
+    assert service._running is True
+    service.stop()
+
+
+def test_running_add_job_raises_clear_error_for_unavailable_corrupt_store(
+    tmp_path: Path,
+) -> None:
+    store_path = _corrupt_store(tmp_path)
+    service = CronService(store_path)
+    service._running = True
+
+    with pytest.raises(RuntimeError, match="corrupt.*restore jobs.json"):
+        service.add_job(
+            name="running add",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            message="hello",
+            session_key="websocket:chat-1",
+            origin_channel="websocket",
+            origin_chat_id="chat-1",
+        )
+
+    _assert_single_corrupt_backup(store_path)
+
+
+def test_stopped_add_job_still_appends_action_without_loading_corrupt_store(
+    tmp_path: Path,
+) -> None:
+    """The stopped-service add path is an action-log write and must not start
+    requiring a readable store."""
+    store_path = _corrupt_store(tmp_path)
+    service = CronService(store_path)
+
+    job = service.add_job(
+        name="offline add",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        session_key="websocket:chat-1",
+        origin_channel="websocket",
+        origin_chat_id="chat-1",
+    )
+
+    assert job.name == "offline add"
+    assert store_path.exists()
+    assert store_path.read_text(encoding="utf-8") == "{not valid json"
+    assert list(store_path.parent.glob("jobs.json.corrupt-*")) == []
+    actions = (store_path.parent / "action.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(actions) == 1
+    assert json.loads(actions[0])["action"] == "add"
+
+
+def test_public_api_uses_in_memory_snapshot_when_disk_becomes_corrupt(
+    tmp_path: Path,
+) -> None:
+    service, store_path = _seeded_store(tmp_path)
+    service._load_store()
+    assert service._store is not None
+    store_path.write_text("{not valid json", encoding="utf-8")
+
+    jobs = service.list_jobs(include_disabled=True)
+
+    assert len(jobs) == 1
+    assert jobs[0].name == "Daily Loving Message"
 
 
 def test_full_round_trip_survives_repeated_save_load(tmp_path: Path) -> None:
