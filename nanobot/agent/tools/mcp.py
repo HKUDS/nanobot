@@ -14,7 +14,7 @@ from weakref import WeakKeyDictionary
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
@@ -442,7 +442,10 @@ class MCPToolWrapper(_MCPWrapperBase):
                 return f"(MCP tool call failed: {type(exc).__name__})"
             else:
                 # Success — extract text and persist any image content as artifacts.
-                return self._render_call_result(result.content, kwargs)
+                rendered = self._render_call_result(result.content, kwargs)
+                if getattr(result, "isError", False):
+                    return ToolResult.error(rendered)
+                return rendered
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
 
