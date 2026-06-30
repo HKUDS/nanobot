@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import AliasChoices, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from nanobot.config_base import Base
@@ -56,7 +56,10 @@ class DreamConfig(Base):
 
     enabled: bool = True  # Register the periodic Dream consolidation job on startup
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
-    cron: str | None = Field(default=None, exclude=True)  # Legacy cron expression override
+    cron: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )  # Legacy cron expression override
     model_override: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
@@ -100,7 +103,7 @@ class ModelPresetConfig(Base):
     model: str
     provider: str = "auto"
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    context_window_tokens: int = 200_000
     temperature: float = 0.1
     reasoning_effort: str | None = None
 
@@ -123,12 +126,13 @@ class AgentDefaults(Base):
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    context_window_tokens: int = 200_000
     context_block_limit: int | None = None
     temperature: float = 0.1
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
+    fail_on_tool_error: bool = True
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
@@ -150,10 +154,6 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
-    max_messages: int = Field(
-        default=120,
-        ge=0,
-    )  # Max messages to replay from session history (0 = use default 120, respects token budget)
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
@@ -179,6 +179,30 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
+    proxy: str | None = None  # OpenAI-compatible/Codex HTTP proxy URL
+    thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+
+    # Valid values mirror the keys of _THINKING_STYLE_MAP in
+    # nanobot/providers/openai_compat_provider.py. Kept duplicated here to
+    # avoid an import cycle (schema.py must not import from providers/).
+    _VALID_THINKING_STYLES: ClassVar[tuple[str, ...]] = (
+        "thinking_type",
+        "enable_thinking",
+        "reasoning_split",
+    )
+
+    @field_validator("thinking_style")
+    @classmethod
+    def _validate_thinking_style(cls, v: str | None) -> str | None:
+        if not v:  # None or "" -> no injection, valid (backwards compatible)
+            return v
+        if v not in cls._VALID_THINKING_STYLES:
+            raise ValueError(
+                f"Invalid thinking_style {v!r}. "
+                f"Must be one of: {', '.join(repr(s) for s in cls._VALID_THINKING_STYLES)} "
+                f"(or empty/omitted)."
+            )
+        return v
 
 
 class BedrockProviderConfig(ProviderConfig):
@@ -217,6 +241,7 @@ class ProvidersConfig(Base):
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    kimi_coding: ProviderConfig = Field(default_factory=ProviderConfig)  # Kimi Coding Plan (Anthropic Messages API)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -235,6 +260,8 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
+    opencode_zen: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (curated coding models)
+    opencode_go: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Go (low-cost coding models)
 
     @model_validator(mode="after")
     def convert_extra_providers(self):
@@ -287,6 +314,7 @@ class GatewayConfig(Base):
 
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
+    restart_mode: Literal["auto", "exec", "spawn", "exit"] = "auto"
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
@@ -301,7 +329,7 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all capabilities (tools, resources, prompts); any restriction = only listed tools, no resources/prompts
 
 
 def _lazy_default(module_path: str, class_name: str) -> Any:

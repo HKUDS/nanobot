@@ -58,7 +58,11 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import (
+    Session,
+    SessionManager,
+    replay_max_messages_for_context,
+)
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
@@ -75,7 +79,6 @@ if TYPE_CHECKING:
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
-
 
 class TurnState(Enum):
     RESTORE = auto()
@@ -129,6 +132,8 @@ class TurnContext:
     pending_summary: str | None = None
 
     ephemeral: bool = False
+    run_extra_hooks_for_ephemeral: bool = False
+    hooks: list[AgentHook] = field(default_factory=list)
     tools: ToolRegistry | None = None
     provider_override: LLMProvider | None = None
     model_override: str | None = None
@@ -193,6 +198,7 @@ class AgentLoop:
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
+        fail_on_tool_error: bool | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
@@ -203,7 +209,6 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
-        max_messages: int = 120,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -217,6 +222,7 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        restart_mode: str = "auto",
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -226,6 +232,7 @@ class AgentLoop:
         self.runtime_events = runtime_events or RuntimeEventBus()
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
+        self.restart_mode = restart_mode
         self.provider = provider
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
@@ -290,10 +297,11 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
+            fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
-        self._max_messages = max_messages if max_messages > 0 else 120
+        self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -380,6 +388,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
+            fail_on_tool_error=defaults.fail_on_tool_error,
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -390,10 +399,10 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
-            max_messages=defaults.max_messages,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
+            restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             **extra,
@@ -421,6 +430,7 @@ class AgentLoop:
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
+        self._sync_replay_max_messages()
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
             self._runtime_model_publisher(
@@ -433,6 +443,9 @@ class AgentLoop:
                 model_preset if model_preset is not None else self.model_preset,
             )
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
+
+    def _sync_replay_max_messages(self) -> None:
+        self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
 
     def _refresh_provider_snapshot(self) -> None:
         if self._provider_snapshot_loader is None:
@@ -748,6 +761,8 @@ class AgentLoop:
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
+        run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
         provider_override: LLMProvider | None = None,
         model_override: str | None = None,
@@ -781,9 +796,10 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
+        run_hooks = [*self._extra_hooks, *(hooks or [])]
         hook: AgentHook = loop_hook
-        if not ephemeral and self._extra_hooks:
-            hook = CompositeHook([loop_hook] + self._extra_hooks)
+        if run_hooks and (not ephemeral or run_extra_hooks_for_ephemeral):
+            hook = CompositeHook([loop_hook, *run_hooks])
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -931,89 +947,93 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
-        logger.info("Agent loop started")
+        try:
+            await self._connect_mcp()
+            logger.info("Agent loop started")
 
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-            except asyncio.TimeoutError:
-                self.auto_compact.check_expired(
-                    self._schedule_background,
-                    active_session_keys=self._pending_queues.keys(),
-                )
-                continue
-            except asyncio.CancelledError:
-                # Preserve real task cancellation so shutdown can complete cleanly.
-                # Only ignore non-task CancelledError signals that may leak from integrations.
-                if not self._running or asyncio.current_task().cancelling():
-                    raise
-                continue
-            except Exception as e:
-                logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
+            while self._running:
+                try:
+                    msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    self.auto_compact.check_expired(
+                        self._schedule_background,
+                        active_session_keys=self._pending_queues.keys(),
+                    )
+                    continue
+                except asyncio.CancelledError:
+                    # Preserve real task cancellation so shutdown can complete cleanly.
+                    # Only ignore non-task CancelledError signals that may leak from integrations.
+                    if not self._running or asyncio.current_task().cancelling():
+                        raise
+                    continue
+                except Exception as e:
+                    logger.warning("Error consuming inbound message: {}, continuing...", e)
+                    continue
 
-            raw = msg.content.strip()
-            effective_key = self._effective_session_key(msg)
-            if await agent_context.handle_runtime_control(self, msg, self.tools):
-                continue
-            if self.commands.is_priority(raw):
-                await self._dispatch_command_inline(
-                    msg, effective_key, raw,
-                    self.commands.dispatch_priority,
-                )
-                continue
-            if self._cron_turns.defer_if_active(
-                msg,
-                session_key=effective_key,
-                active_session_keys=self._pending_queues.keys(),
-            ):
-                logger.info(
-                    "Deferred cron turn for active session {}",
-                    effective_key,
-                )
-                continue
-            # If this session already has an active pending queue (i.e. a task
-            # is processing this session), route the message there for mid-turn
-            # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                # Non-priority commands must not be queued for injection;
-                # dispatch them directly (same pattern as priority commands).
-                if self.commands.is_dispatchable_command(raw):
+                raw = msg.content.strip()
+                effective_key = self._effective_session_key(msg)
+                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                    continue
+                if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
-                        self.commands.dispatch,
+                        self.commands.dispatch_priority,
                     )
                     continue
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                try:
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
+                if self._cron_turns.defer_if_active(
+                    msg,
+                    session_key=effective_key,
+                    active_session_keys=self._pending_queues.keys(),
+                ):
                     logger.info(
-                        "Routed follow-up message to pending queue for session {}",
+                        "Deferred cron turn for active session {}",
                         effective_key,
                     )
                     continue
-            # Compute the effective session key before dispatching
-            # This ensures /stop command can find tasks correctly when unified session is enabled
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
-            )
+                # If this session already has an active pending queue (i.e. a task
+                # is processing this session), route the message there for mid-turn
+                # injection instead of creating a competing task.
+                if effective_key in self._pending_queues:
+                    # Non-priority commands must not be queued for injection;
+                    # dispatch them directly (same pattern as priority commands).
+                    if self.commands.is_dispatchable_command(raw):
+                        await self._dispatch_command_inline(
+                            msg, effective_key, raw,
+                            self.commands.dispatch,
+                        )
+                        continue
+                    pending_msg = msg
+                    if effective_key != msg.session_key:
+                        pending_msg = dataclasses.replace(
+                            msg,
+                            session_key_override=effective_key,
+                        )
+                    try:
+                        self._pending_queues[effective_key].put_nowait(pending_msg)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Pending queue full for session {}, falling back to queued task",
+                            effective_key,
+                        )
+                    else:
+                        logger.info(
+                            "Routed follow-up message to pending queue for session {}",
+                            effective_key,
+                        )
+                        continue
+                # Compute the effective session key before dispatching
+                # This ensures /stop command can find tasks correctly when unified session is enabled
+                task = asyncio.create_task(self._dispatch(msg))
+                self._active_tasks.setdefault(effective_key, []).append(task)
+                task.add_done_callback(
+                    lambda t, k=effective_key: self._active_tasks.get(k, [])
+                    and self._active_tasks[k].remove(t)
+                    if t in self._active_tasks.get(k, [])
+                    else None
+                )
+        finally:
+            # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
+            await self.close_mcp()
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
@@ -1245,7 +1265,6 @@ class AgentLoop:
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
-            "include_timestamps": True,
             "extend_to_user": is_subagent,
         }
         history = session.get_history(**_hist_kwargs)
@@ -1312,6 +1331,8 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
+        run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
         provider_override: LLMProvider | None = None,
         model_override: str | None = None,
@@ -1347,6 +1368,8 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
+            run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            hooks=list(hooks or []),
             tools=tools,
             provider_override=provider_override,
             model_override=model_override,
@@ -1529,7 +1552,6 @@ class AgentLoop:
                 provider=ctx.provider_override,
                 context_window_tokens=ctx.context_window_tokens_override,
             ),
-            "include_timestamps": True,
             "extend_to_user": False,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
@@ -1579,6 +1601,8 @@ class AgentLoop:
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
+            run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
+            hooks=ctx.hooks,
             tools=ctx.tools,
             provider_override=ctx.provider_override,
             model_override=ctx.model_override,
@@ -1891,11 +1915,14 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str = "user",
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
+        _run_extra_hooks_for_ephemeral: bool = False,
+        hooks: list[AgentHook] | None = None,
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
     ) -> OutboundMessage | None:
@@ -1905,7 +1932,7 @@ class AgentLoop:
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id,
+            channel=channel, sender_id=sender_id, chat_id=chat_id,
             content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
@@ -1919,6 +1946,10 @@ class AgentLoop:
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
                 }
+                if _run_extra_hooks_for_ephemeral:
+                    kwargs["run_extra_hooks_for_ephemeral"] = True
+                if hooks is not None:
+                    kwargs["hooks"] = hooks
                 if tools is not None:
                     kwargs["tools"] = tools
                 return await self._process_message(

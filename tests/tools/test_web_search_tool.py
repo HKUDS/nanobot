@@ -131,12 +131,11 @@ async def test_tavily_search(monkeypatch):
     assert "https://openclaw.io" in result
 
 
-def test_keenable_without_api_key_is_treated_as_duckduckgo(monkeypatch):
-    # The REST API requires a key; without one we fall back to DuckDuckGo.
+def test_keenable_without_api_key_is_concurrency_safe(monkeypatch):
     monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
     tool = _tool(provider="keenable", api_key="")
-    assert tool.exclusive is True
-    assert tool.concurrency_safe is False
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
 
 
 @pytest.mark.asyncio
@@ -159,20 +158,21 @@ async def test_keenable_search(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_keenable_fallback_to_duckduckgo_when_no_key(monkeypatch):
-    class MockDDGS:
-        def __init__(self, **kw):
-            pass
+async def test_keenable_without_api_key_uses_public_endpoint(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.keenable.ai/v1/search/public"
+        assert "X-API-Key" not in kw["headers"]
+        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        return _response(json={
+            "results": [{"title": "Public", "url": "https://keenable.ai/pub", "description": "ok"}]
+        })
 
-        def text(self, query, max_results=5):
-            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
-
-    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
     monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
-
     tool = _tool(provider="keenable", api_key="")
     result = await tool.execute(query="keenable", count=1)
-    assert "DuckDuckGo fallback" in result
+    assert "Public" in result
+    assert "https://keenable.ai/pub" in result
 
 
 @pytest.mark.asyncio
@@ -363,6 +363,31 @@ async def test_duckduckgo_search(monkeypatch):
     tool = _tool(provider="duckduckgo")
     result = await tool.execute(query="hello")
     assert "DDG Result" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_search_passes_proxy(monkeypatch):
+    """DDGS client must receive the configured proxy so search works behind a proxy."""
+    captured: dict = {}
+    proxy_url = "http://proxy.example:8080"
+
+    class ProxyCaptorDDGS:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def text(self, query, max_results=5):
+            return [{"title": "Result", "href": "https://example.com", "body": "OK"}]
+
+    monkeypatch.setattr("ddgs.DDGS", ProxyCaptorDDGS)
+
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="duckduckgo"),
+        proxy=proxy_url,
+    )
+    result = await tool.execute(query="test")
+    assert captured["proxy"] == proxy_url
+    assert captured["timeout"] == 10
+    assert "Result" in result
 
 
 @pytest.mark.asyncio

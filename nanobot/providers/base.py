@@ -54,6 +54,18 @@ class ToolCallRequest:
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
 
+    def has_valid_name(self) -> bool:
+        """Whether this call carries a usable (non-empty string) tool name.
+
+        ToolCallRequest.name is typed ``str`` but not enforced at runtime: a
+        model/gateway can emit a degenerate call with ``name=None`` or ``""``.
+        Such a call cannot be executed and, if persisted and replayed, makes
+        upstream APIs reject the whole request (e.g. Anthropic-style
+        ``messages.content.N.tool_use.name: Input should be a valid string``),
+        which permanently wedges the session.
+        """
+        return isinstance(self.name, str) and bool(self.name)
+
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
         arguments = (
