@@ -499,6 +499,32 @@ class WhatsAppChannel(BaseChannel):
                 self._self_jids.add(jid)
                 self._self_jids.add(_bare_jid(jid))
 
+    async def _send_read_receipt(
+        self, client: Any, info: Any, source: Any, message_id: str
+    ) -> None:
+        """Send a read receipt (blue double-check) for an incoming message.
+
+        Best-effort: any failure is logged at debug level and swallowed so it
+        never blocks message processing.
+        """
+        if not message_id:
+            return
+        try:
+            from neonize.utils.enum import ReceiptType
+
+            chat = _safe_attr(source, "Chat")
+            sender = _safe_attr(source, "Sender")
+            if chat is None or sender is None:
+                return
+            await client.mark_read(
+                message_id,
+                chat=chat,
+                sender=sender,
+                receipt=ReceiptType.READ,
+            )
+        except Exception as exc:  # noqa: BLE001 - read receipt is best-effort
+            self.logger.debug("Failed to send WhatsApp read receipt: {}", exc)
+
     async def _handle_neonize_message(self, client: Any, event: Any) -> None:
         info = _safe_attr(event, "Info")
         message = _safe_attr(event, "Message")
@@ -531,6 +557,9 @@ class WhatsAppChannel(BaseChannel):
             self._processed_message_ids[message_id] = None
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
+
+        # Mark the incoming message as read (blue double-check). Best-effort.
+        await self._send_read_receipt(client, info, source, message_id)
 
         participant_jid = _normalize_jid(_safe_attr(source, "Sender"))
         sender_alt_jid = _normalize_jid(_safe_attr(source, "SenderAlt"))
