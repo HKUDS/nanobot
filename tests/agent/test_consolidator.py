@@ -11,6 +11,7 @@ from nanobot.agent.memory import (
 )
 from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
+from nanobot.utils.helpers import load_bundled_template
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -93,6 +94,46 @@ class TestConsolidatorSummarize:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["session_key"] == "telegram:chat-1"
 
+    async def test_archive_includes_current_memory_for_duplicate_checks(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+    ):
+        store.write_memory("# Memory\n- User already uses project Apollo.")
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="(nothing)",
+            finish_reason="stop",
+        )
+
+        await consolidator.archive([{"role": "user", "content": "Apollo is still active"}])
+
+        archive_input = mock_provider.chat_with_retry.await_args.kwargs["messages"][1]["content"]
+        assert "Current long-term memory excerpt" in archive_input
+        assert "User already uses project Apollo" in archive_input
+        assert "Conversation chunk to archive" in archive_input
+        assert "Apollo is still active" in archive_input
+
+    async def test_archive_omits_default_memory_template(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+    ):
+        template = load_bundled_template("memory/MEMORY.md")
+        assert template is not None
+        store.write_memory(template)
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="(nothing)",
+            finish_reason="stop",
+        )
+
+        await consolidator.archive([{"role": "user", "content": "new fact"}])
+
+        archive_input = mock_provider.chat_with_retry.await_args.kwargs["messages"][1]["content"]
+        assert "Current long-term memory excerpt" not in archive_input
+        assert "new fact" in archive_input
+
     async def test_summarize_raw_dumps_on_llm_failure(self, consolidator, mock_provider, store):
         """On LLM failure, raw-dump messages to HISTORY.md."""
         mock_provider.chat_with_retry.side_effect = Exception("API error")
@@ -130,7 +171,9 @@ class TestConsolidatorPromptContract:
         for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
             assert mark in prompt
         assert "check context below" not in prompt.lower()
-        assert "Do not mark something [skip] merely because it might already exist" in prompt
+        assert "Current long-term memory excerpt" in prompt
+        assert "agent-inferred" in prompt
+        assert "Preserve the narrowest true scope" in prompt
 
 
 class TestConsolidatorArchiveErrorHandling:

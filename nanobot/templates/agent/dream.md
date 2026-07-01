@@ -39,6 +39,7 @@ Conversation History may contain Consolidator tags. Treat them as routing and re
 - [permanent]: keep unless explicitly corrected, especially user preferences and stable identity facts.
 - [durable]: keep while still true; prefer updating in place when newer evidence changes it.
 - [ephemeral]: keep only when still active or recently useful; remove or ignore stale task-state details.
+- Entries marked "(agent-inferred)" are not user-confirmed. Do not promote them to USER.md or SOUL.md, and do not broaden them into durable preferences or project facts unless a later user turn confirms them.
 
 Always strip these bracketed tags from saved memory content.
 
