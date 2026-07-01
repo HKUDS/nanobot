@@ -135,6 +135,7 @@ def _serialize_job(
     if isinstance(job, LocalTrigger):
         return _serialize_trigger(
             job,
+            pending=pending,
             include_details=include_details,
             session_manager=session_manager,
         )
@@ -189,6 +190,7 @@ def _serialize_job(
 def _serialize_trigger(
     trigger: LocalTrigger,
     *,
+    pending: bool = False,
     include_details: bool = False,
     session_manager: _SessionManagerLike | None = None,
 ) -> dict[str, Any]:
@@ -213,7 +215,7 @@ def _serialize_trigger(
         "state": {
             "next_run_at_ms": None,
             "last_status": trigger.last_status,
-            "pending": False,
+            "pending": pending,
         },
     }
     if not include_details:

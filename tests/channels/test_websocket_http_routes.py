@@ -49,6 +49,7 @@ def _make_handler(
     cron_service: CronService | None = None,
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
+    local_trigger_pending_ids: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -65,6 +66,7 @@ def _make_handler(
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
+        local_trigger_pending_ids=local_trigger_pending_ids,
     )
 
 
@@ -79,6 +81,7 @@ def _ch(
     cron_service: CronService | None = None,
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
+    local_trigger_pending_ids: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -99,6 +102,7 @@ def _ch(
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
+        local_trigger_pending_ids=local_trigger_pending_ids,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -341,6 +345,9 @@ async def test_session_automations_route_lists_local_triggers(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
         local_trigger_store=trigger_store,
+        local_trigger_pending_ids=lambda key: (
+            {trigger.id} if key == "websocket:abc" else set()
+        ),
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
@@ -363,6 +370,7 @@ async def test_session_automations_route_lists_local_triggers(
         assert job["schedule"]["kind"] == "local"
         assert job["payload"]["kind"] == "local_trigger"
         assert job["payload"]["command"] == f'nanobot trigger {trigger.id} "message"'
+        assert job["state"]["pending"] is True
     finally:
         await channel.stop()
         await server_task
@@ -1146,6 +1154,9 @@ async def test_webui_automations_route_manages_local_triggers(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
         local_trigger_store=trigger_store,
+        local_trigger_pending_ids=lambda key: (
+            {trigger.id} if key == "websocket:abc" else set()
+        ),
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
@@ -1159,6 +1170,7 @@ async def test_webui_automations_route_manages_local_triggers(
         assert listed.status_code == 200
         by_id = {job["id"]: job for job in listed.json()["jobs"]}
         assert by_id[trigger.id]["kind"] == "local_trigger"
+        assert by_id[trigger.id]["state"]["pending"] is True
         assert by_id[trigger.id]["trigger"]["command"] == f'nanobot trigger {trigger.id} "message"'
 
         disabled = await _http_get(

@@ -157,6 +157,7 @@ class GatewayHTTPHandler:
         cron_service: CronService | None = None,
         local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+        local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -172,6 +173,7 @@ class GatewayHTTPHandler:
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
+        self.local_trigger_pending_ids = local_trigger_pending_ids
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -487,9 +489,7 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        pending_job_ids: set[str] = set()
-        if self.cron_pending_job_ids is not None:
-            pending_job_ids = self.cron_pending_job_ids(decoded_key)
+        pending_job_ids = self._pending_automation_ids_for_session(decoded_key)
         return _http_json_response(
             session_automations_payload(
                 self.cron_service,
@@ -561,15 +561,37 @@ class GatewayHTTPHandler:
                 pending.update(self.cron_pending_job_ids(session_key))
         return pending
 
+    def _pending_local_trigger_ids_for_all(self) -> set[str]:
+        if self.local_trigger_store is None or self.local_trigger_pending_ids is None:
+            return set()
+        pending: set[str] = set()
+        for trigger in self.local_trigger_store.list_triggers(include_disabled=True):
+            session_key = trigger.session_key
+            if not session_key and trigger.channel and trigger.chat_id:
+                session_key = f"{trigger.channel}:{trigger.chat_id}"
+            if session_key:
+                pending.update(self.local_trigger_pending_ids(session_key))
+        return pending
+
+    def _pending_automation_ids_for_session(self, session_key: str) -> set[str]:
+        pending: set[str] = set()
+        if self.cron_pending_job_ids is not None:
+            pending.update(self.cron_pending_job_ids(session_key))
+        if self.local_trigger_pending_ids is not None:
+            pending.update(self.local_trigger_pending_ids(session_key))
+        return pending
+
     def _handle_webui_automations(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
+        pending_job_ids = self._pending_cron_job_ids_for_all()
+        pending_job_ids.update(self._pending_local_trigger_ids_for_all())
         return _http_json_response(
             all_automations_payload(
                 self.cron_service,
                 local_trigger_store=self.local_trigger_store,
                 session_manager=self.session_manager,
-                pending_job_ids=self._pending_cron_job_ids_for_all(),
+                pending_job_ids=pending_job_ids,
             )
         )
 
