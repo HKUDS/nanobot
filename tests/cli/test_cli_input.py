@@ -118,6 +118,28 @@ async def test_raw_lf_enter_still_submits_like_wsl_terminals():
     assert result == "hello"
 
 
+@pytest.mark.asyncio
+async def test_xterm_modifyotherkeys_shift_enter_inserts_newline():
+    """"\\x1b[27;2;13~" (the older xterm modifyOtherKeys/rxvt encoding of
+    Shift+Enter) is registered by prompt_toolkit *by default* as plain
+    Enter/submit, so a `setdefault()`-based override would silently no-op
+    against it. This must actually insert a newline like the kitty CSI-u
+    encoding does, which only a real PromptSession/parser can confirm.
+    """
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("foo\x1b[27;2;13~bar\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "foo\nbar"
+
+
 def test_thinking_spinner_pause_stops_and_restarts():
     """Pause should stop the active spinner and restart it afterward."""
     spinner = MagicMock()

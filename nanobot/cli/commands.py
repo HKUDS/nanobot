@@ -308,11 +308,19 @@ def _build_cli_key_bindings() -> KeyBindings:
     # the case prompt_toolkit itself calls out) send for a plain Enter
     # keypress. Aliasing to ControlJ made Enter stop submitting there, since
     # our handler shadowed prompt_toolkit's own "treat \n as \r" fallback.
+    #
+    # "\x1b[27;2;13~" (the older xterm modifyOtherKeys / rxvt encoding of
+    # Shift+Enter) is already registered by prompt_toolkit by default -- as
+    # Keys.ControlM, i.e. plain Enter/submit. A plain setdefault() would be a
+    # no-op against that existing entry, silently leaving this Shift+Enter
+    # variant behaving like a submit instead of inserting a newline. Assign
+    # directly to override it, since inserting a newline is the whole point
+    # of a Shift+Enter binding here.
     with suppress(Exception):
         from prompt_toolkit.input import ansi_escape_sequences as _aes
 
         for _seq in ("\x1b[13;2u", "\x1b[27;2;13~"):
-            _aes.ANSI_SEQUENCES.setdefault(_seq, Keys.ControlF3)
+            _aes.ANSI_SEQUENCES[_seq] = Keys.ControlF3
 
     kb = KeyBindings()
 
