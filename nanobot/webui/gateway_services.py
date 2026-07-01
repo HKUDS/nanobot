@@ -28,6 +28,7 @@ class GatewayServices:
     cron_service: Any | None
     local_trigger_store: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
+    local_trigger_pending_ids: Callable[[str], set[str]] | None
 
 
 def build_gateway_services(
@@ -45,6 +46,7 @@ def build_gateway_services(
     cron_service: Any | None = None,
     local_trigger_store: Any | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+    local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -74,6 +76,7 @@ def build_gateway_services(
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
+        local_trigger_pending_ids=local_trigger_pending_ids,
         log=logger,
     )
     return GatewayServices(
@@ -86,4 +89,5 @@ def build_gateway_services(
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
+        local_trigger_pending_ids=local_trigger_pending_ids,
     )
