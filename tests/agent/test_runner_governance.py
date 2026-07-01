@@ -787,6 +787,40 @@ def test_compact_duplicate_tool_results_preserves_cross_turn_snapshots():
     assert result[5]["content"] == content
 
 
+def test_compact_duplicate_tool_results_preserves_same_turn_different_content():
+    first = "pytest failed: test_a\n" * 80
+    second = "pytest passed\n" * 80
+    messages = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "first",
+                "type": "function",
+                "function": {"name": "exec", "arguments": '{"cmd":"pytest -q"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "first", "name": "exec", "content": first},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "second",
+                "type": "function",
+                "function": {"name": "exec", "arguments": '{"cmd":"pytest -q"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "second", "name": "exec", "content": second},
+    ]
+
+    result = ContextGovernor().compact_duplicate_tool_results(messages)
+
+    assert result is messages
+    assert result[2]["content"] == first
+    assert result[4]["content"] == second
+
+
 def test_compact_duplicate_tool_results_skips_different_arguments():
     content = "search output\n" * 80
     messages = [
@@ -819,7 +853,7 @@ def test_compact_duplicate_tool_results_skips_different_arguments():
 
 
 def test_compact_stale_error_tool_results_after_newer_user_turns():
-    error = "Error: RuntimeError: boom"
+    error = "Error: RuntimeError: boom\n" + ("traceback line\n" * 80)
     messages = [
         {"role": "system", "content": "sys"},
         {"role": "assistant", "content": "", "tool_calls": [{"id": "bad"}]},
@@ -838,6 +872,42 @@ def test_compact_stale_error_tool_results_after_newer_user_turns():
     assert result is not messages
     assert messages[2]["content"] == error
     assert result[2]["content"] == "[exec result omitted from context]"
+
+
+def test_compact_stale_error_tool_results_keeps_short_errors():
+    error = "Error: Permission denied"
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "bad"}]},
+        {"role": "tool", "tool_call_id": "bad", "name": "exec", "content": error},
+        {"role": "user", "content": "turn 1"},
+        {"role": "user", "content": "turn 2"},
+        {"role": "user", "content": "turn 3"},
+        {"role": "user", "content": "turn 4"},
+    ]
+
+    result = ContextGovernor().compact_stale_error_tool_results(messages)
+
+    assert result is messages
+    assert result[2]["content"] == error
+
+
+def test_compact_stale_error_tool_results_ignores_subagent_user_announcements():
+    error = "Error: RuntimeError: boom\n" + ("traceback line\n" * 80)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "bad"}]},
+        {"role": "tool", "tool_call_id": "bad", "name": "exec", "content": error},
+        {"role": "user", "content": "[Subagent 'research' completed successfully]\n\nResult:\nok"},
+        {"role": "user", "content": "turn 1"},
+        {"role": "user", "content": "turn 2"},
+        {"role": "user", "content": "turn 3"},
+    ]
+
+    result = ContextGovernor().compact_stale_error_tool_results(messages)
+
+    assert result is messages
+    assert result[2]["content"] == error
 
 
 def test_compact_subagent_announcements_trims_large_result_only():

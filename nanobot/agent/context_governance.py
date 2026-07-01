@@ -7,6 +7,7 @@ mutate an existing session history list in place.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -344,11 +345,11 @@ class ContextGovernor:
         """Compact older duplicate compactable tool results in the model copy.
 
         The raw session history remains intact. Only exact repeats of the same
-        tool name and normalized arguments are compacted, and the newest result
-        stays visible as the recovery path for the model.
+        tool name, normalized arguments, user turn, and content are compacted,
+        and the newest result stays visible as the recovery path for the model.
         """
         tool_signatures = self._tool_call_signatures(messages)
-        seen: dict[tuple[str, str, int], list[int]] = {}
+        seen: dict[tuple[str, str, int, str], list[int]] = {}
         for idx, msg in enumerate(messages):
             if not self._is_compactable_tool_result(msg):
                 continue
@@ -356,7 +357,8 @@ class ContextGovernor:
             signature = tool_signatures.get(call_id)
             if signature is None:
                 continue
-            seen.setdefault(signature, []).append(idx)
+            content = str(msg.get("content") or "")
+            seen.setdefault((*signature, self._content_digest(content)), []).append(idx)
 
         compact_indexes = {idx for indexes in seen.values() for idx in indexes[:-1]}
         if not compact_indexes:
@@ -374,11 +376,13 @@ class ContextGovernor:
         for idx in range(len(messages) - 1, -1, -1):
             msg = messages[idx]
             if msg.get("role") == "user":
+                if self._is_subagent_announcement(msg.get("content")):
+                    continue
                 turns_after += 1
                 continue
             if turns_after < STALE_ERROR_USER_TURNS:
                 continue
-            if not self._is_compactable_tool_result(msg, min_chars=0):
+            if not self._is_compactable_tool_result(msg):
                 continue
             content = msg.get("content")
             if isinstance(content, str) and content.lstrip().startswith("Error:"):
@@ -458,6 +462,10 @@ class ContextGovernor:
             return str(arguments)
 
     @staticmethod
+    def _content_digest(content: str) -> str:
+        return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+
+    @staticmethod
     def _effective_tool_result_chars(config: ContextGovernanceConfig) -> int:
         limit = config.max_tool_result_chars
         budget = ContextGovernor.input_budget(config)
@@ -472,8 +480,7 @@ class ContextGovernor:
     @staticmethod
     def _compact_subagent_announcement(content: str) -> str:
         normalized = content.replace("\r\n", "\n")
-        stripped = normalized.lstrip()
-        if not stripped.startswith("[Subagent"):
+        if not ContextGovernor._is_subagent_announcement(normalized):
             return content
         lower = normalized.lower()
         result_marker = "\nresult:\n"
@@ -503,6 +510,10 @@ class ContextGovernor:
         compacted_result += "\n\n[Subagent result truncated for context replay.]"
         suffix = f"\n\n{instruction}" if instruction else ""
         return f"{prefix}{compacted_result}{suffix}"
+
+    @staticmethod
+    def _is_subagent_announcement(content: Any) -> bool:
+        return isinstance(content, str) and content.lstrip().startswith("[Subagent")
 
     def _legal_history_tail(
         self,
