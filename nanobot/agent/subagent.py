@@ -118,6 +118,22 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._direct_result_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
+
+    def set_direct_result_queue(
+        self,
+        session_key: str,
+        queue: asyncio.Queue[InboundMessage],
+    ) -> None:
+        self._direct_result_queues[session_key] = queue
+
+    def clear_direct_result_queue(
+        self,
+        session_key: str,
+        queue: asyncio.Queue[InboundMessage],
+    ) -> None:
+        if self._direct_result_queues.get(session_key) is queue:
+            self._direct_result_queues.pop(session_key, None)
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -335,6 +351,10 @@ class SubagentManager:
             metadata=metadata,
         )
 
+        if queue := self._direct_result_queues.get(override):
+            await queue.put(msg)
+            logger.debug("Subagent [{}] queued result directly for {}", task_id, override)
+            return
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 

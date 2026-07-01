@@ -1852,13 +1852,17 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        pending: asyncio.Queue[InboundMessage] = asyncio.Queue(maxsize=20)
         try:
             async with lock:
+                self._pending_queues[session_key] = pending
+                self.subagents.set_direct_result_queue(session_key, pending)
                 kwargs: dict[str, Any] = {
                     "session_key": session_key,
                     "on_progress": on_progress,
                     "on_stream": on_stream,
                     "on_stream_end": on_stream_end,
+                    "pending_queue": pending,
                     "ephemeral": ephemeral,
                 }
                 if _run_extra_hooks_for_ephemeral:
@@ -1872,5 +1876,13 @@ class AgentLoop:
                     **kwargs,
                 )
         finally:
+            self.subagents.clear_direct_result_queue(session_key, pending)
+            if self._pending_queues.get(session_key) is pending:
+                self._pending_queues.pop(session_key, None)
+            while True:
+                try:
+                    await self.bus.publish_inbound(pending.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
             self._runtime_events().clear_turn(session_key)

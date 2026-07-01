@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import AgentDefaults
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -482,3 +483,49 @@ async def test_drain_pending_timeout(tmp_path):
         await hang_task
     except asyncio.CancelledError:
         pass
+
+
+@pytest.mark.asyncio
+async def test_process_direct_routes_subagent_results_to_pending_queue(tmp_path):
+    """Single-message CLI mode should consume subagent announcements mid-turn."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=MagicMock(),
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop._connect_mcp = AsyncMock()  # type: ignore[method-assign]
+
+    async def fake_process_message(msg, **kwargs):
+        pending_queue = kwargs["pending_queue"]
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="other",
+            sender_id="u",
+            chat_id="room",
+            content="unrelated",
+        ))
+        await loop.subagents._announce_result(
+            "sub-1",
+            "label",
+            "task",
+            "subagent result",
+            {"channel": "cli", "chat_id": "direct", "session_key": "cli:direct"},
+            "ok",
+        )
+        routed = await asyncio.wait_for(pending_queue.get(), timeout=1)
+        assert "subagent result" in routed.content
+        assert routed.metadata["subagent_task_id"] == "sub-1"
+        return OutboundMessage(channel="cli", chat_id="direct", content="done")
+
+    loop._process_message = fake_process_message  # type: ignore[method-assign]
+
+    response = await loop.process_direct("start", session_key="cli:direct")
+
+    assert response is not None
+    assert response.content == "done"
+    unrelated = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=1)
+    assert unrelated.content == "unrelated"
