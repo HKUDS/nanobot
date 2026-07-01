@@ -294,7 +294,7 @@ If you have more than one custom OpenAI-compatible endpoint, give each endpoint 
 }
 ```
 
-Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Choose a name that does not conflict with a built-in provider name or alias, such as `openai`, `openai-codex`, `github-copilot`, or `lm-studio`. Do not set `apiType` on custom provider keys; `apiType` is only for `providers.openai`.
+Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Choose a name that does not conflict with a built-in provider name or alias, such as `openai`, `openai-codex`, `anthropic-oauth`, `github-copilot`, or `lm-studio`. Do not set `apiType` on custom provider keys; `apiType` is only for `providers.openai`.
 
 If your custom endpoint documents a nonstandard thinking toggle, set `providers.<name>.thinkingStyle` to `thinking_type`, `enable_thinking`, or `reasoning_split`; nanobot then maps `reasoningEffort` onto that provider-specific request body. Leave it unset for ordinary OpenAI-compatible endpoints.
 
@@ -420,6 +420,7 @@ Some providers do not use API keys in `config.json`.
 
 ```bash
 nanobot provider login openai-codex
+nanobot provider login anthropic-oauth
 nanobot provider login github-copilot
 ```
 
@@ -450,6 +451,8 @@ For OpenAI Codex, add `providers.openai_codex.proxy` only when Codex OAuth/token
 ```
 
 If you run the login command on a remote/headless machine and open the authorization URL in a local browser, paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted. See [`configuration.md#providers`](./configuration.md#providers) for the full OAuth provider notes.
+
+For Anthropic OAuth, first run `claude setup-token` with Claude Code and paste the generated token into `nanobot provider login anthropic-oauth`, or set `CLAUDE_CODE_OAUTH_TOKEN` in the environment that starts nanobot. nanobot does not read Claude Code's private login credential files.
 
 ## Provider Resolution
 

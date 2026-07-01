@@ -74,7 +74,7 @@ The active model should normally come from a named `modelPresets` entry selected
 
 1. If the active preset provider or implicit default provider is not `"auto"`, nanobot uses that provider.
 2. If provider is `"auto"`, nanobot tries to infer the provider from the model name, configured API keys, local provider base URLs, or gateway providers.
-3. OAuth providers such as OpenAI Codex and GitHub Copilot require explicit login and explicit provider/model selection inside the active preset.
+3. OAuth providers such as OpenAI Codex, Anthropic OAuth, and GitHub Copilot require explicit login and explicit provider/model selection inside the active preset.
 
 Pin the provider inside the preset when setting up for the first time. It is easier to debug:
 

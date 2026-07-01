@@ -278,6 +278,27 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
             "login_supported": True,
         }
 
+    if spec.name == "anthropic_oauth":
+        try:
+            from nanobot.providers.anthropic_provider import get_anthropic_oauth_login_status
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = get_anthropic_oauth_login_status()
+        expires_at = getattr(token, "expires", None) if token else None
+        return {
+            "configured": bool(token and getattr(token, "access", None)),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": expires_at,
+            "login_supported": False,
+        }
+
     return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
 
 
@@ -1179,6 +1200,12 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
         except ImportError:
             raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
         token_path = get_storage().get_token_path()
+    elif spec.name == "anthropic_oauth":
+        try:
+            from nanobot.providers.anthropic_provider import get_anthropic_oauth_storage
+        except ImportError:
+            raise WebUISettingsError("Anthropic OAuth support is unavailable", status=500) from None
+        token_path = get_anthropic_oauth_storage().get_token_path()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
 

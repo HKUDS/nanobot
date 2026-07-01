@@ -134,7 +134,7 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Provider cannot be inferred | Pin `modelPresets.<name>.provider` in the active preset instead of using `"auto"`. For legacy direct configs, pin `agents.defaults.provider`. |
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
-| OAuth provider fails | Run `nanobot provider login openai-codex` or `nanobot provider login github-copilot`, then select the provider explicitly. |
+| OAuth provider fails | Run `nanobot provider login openai-codex`, `nanobot provider login anthropic-oauth`, or `nanobot provider login github-copilot`, then select the provider explicitly. For Anthropic OAuth, generate the token first with `claude setup-token` or set `CLAUDE_CODE_OAUTH_TOKEN`. |
 
 ## Langfuse Problems
 
