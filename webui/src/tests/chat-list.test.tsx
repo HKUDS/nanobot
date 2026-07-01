@@ -56,6 +56,31 @@ describe("ChatList", () => {
     expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
   });
 
+  it("offers markdown export from each chat action menu", async () => {
+    const onExportMarkdown = vi.fn();
+
+    render(
+      <ChatList
+        sessions={[session({ chatId: "export", title: "Export me" })]}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onExportMarkdown={onExportMarkdown}
+      />,
+    );
+
+    fireEvent.pointerDown(
+      screen.getByLabelText("Chat actions for Export me"),
+      { button: 0 },
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export markdown" }));
+
+    expect(onExportMarkdown).toHaveBeenCalledWith("websocket:export", "Export me");
+  });
+
   it("groups WebUI chats by workspace project while preserving in-project sorting and activity", () => {
     const sessions = [
       session({

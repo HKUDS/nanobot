@@ -663,6 +663,7 @@
     "renameProjectDescription": "Choose a local sidebar name for this project.",
     "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
+    "exportMarkdown": "Export markdown",
     "archive": "Archive",
     "unarchive": "Unarchive",
     "showArchived": "Show archived",
