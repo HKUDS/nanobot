@@ -88,11 +88,34 @@ def test_cli_key_bindings_enter_submits_and_alt_enter_newlines():
     alt_enter.call(MagicMock(current_buffer=buf))
     buf.insert_text.assert_called_once_with("\n")
 
-    # ControlJ (mapped Shift+Enter on CSI-u terminals) -> newline
-    ctrl_j = bound[(Keys.ControlJ.value,)]
+    # ControlF3 (synthetic carrier for the Shift+Enter CSI-u sequence) -> newline.
+    # Not ControlJ: that's also the literal LF byte some terminals (e.g. WSL)
+    # send for a plain Enter keypress, so binding it would break submit there.
+    shift_enter = bound[(Keys.ControlF3.value,)]
     buf = MagicMock()
-    ctrl_j.call(MagicMock(current_buffer=buf))
+    shift_enter.call(MagicMock(current_buffer=buf))
     buf.insert_text.assert_called_once_with("\n")
+
+
+@pytest.mark.asyncio
+async def test_raw_lf_enter_still_submits_like_wsl_terminals():
+    """A raw LF byte (\\x0a) is what some terminals -- e.g. WSL -- send for a
+    plain Enter keypress. It must submit the buffer, not insert a newline;
+    a mock buffer can't catch a key binding shadowing prompt_toolkit's own
+    default \\n-as-\\r handling, so this drives a real PromptSession/parser.
+    """
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("hello\x0aworld\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "hello"
 
 
 def test_thinking_spinner_pause_stops_and_restarts():

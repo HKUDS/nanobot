@@ -301,14 +301,18 @@ def _build_cli_key_bindings() -> KeyBindings:
                        which case Alt+Enter is the fallback.
     """
     # prompt_toolkit has no symbolic Keys.ShiftEnter and @kb.add() rejects raw
-    # escape strings, so register the CSI-u Shift+Enter sequences against a
-    # spare key symbol (ControlJ) and bind that. Terminals that never emit
-    # these sequences simply won't trigger the binding.
+    # escape strings, so register the CSI-u Shift+Enter sequences against
+    # Keys.ControlF3 -- an enum member prompt_toolkit declares but never wires
+    # to a default ANSI sequence or key binding, unlike e.g. Keys.ControlJ,
+    # which is also the literal LF byte ("\x0a") that some terminals (WSL is
+    # the case prompt_toolkit itself calls out) send for a plain Enter
+    # keypress. Aliasing to ControlJ made Enter stop submitting there, since
+    # our handler shadowed prompt_toolkit's own "treat \n as \r" fallback.
     with suppress(Exception):
         from prompt_toolkit.input import ansi_escape_sequences as _aes
 
         for _seq in ("\x1b[13;2u", "\x1b[27;2;13~"):
-            _aes.ANSI_SEQUENCES.setdefault(_seq, Keys.ControlJ)
+            _aes.ANSI_SEQUENCES.setdefault(_seq, Keys.ControlF3)
 
     kb = KeyBindings()
 
@@ -320,7 +324,7 @@ def _build_cli_key_bindings() -> KeyBindings:
     def _(event):
         event.current_buffer.insert_text("\n")
 
-    @kb.add(Keys.ControlJ)  # Shift+Enter on CSI-u capable terminals
+    @kb.add(Keys.ControlF3)  # Shift+Enter on CSI-u capable terminals
     def _(event):
         event.current_buffer.insert_text("\n")
 
