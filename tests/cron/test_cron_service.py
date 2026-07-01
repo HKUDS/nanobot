@@ -687,6 +687,36 @@ async def test_external_update_preserves_run_history_records(tmp_path):
     fresh._save_store()
 
 
+def test_stale_instance_remove_preserves_external_add(tmp_path) -> None:
+    """A stopped instance must not save a stale snapshot over another instance's job."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    schedule = CronSchedule(kind="every", every_ms=60_000)
+    service_a = CronService(store_path)
+    service_b = CronService(store_path)
+
+    first = service_a.add_job(
+        name="first",
+        schedule=schedule,
+        message="first",
+        **_bound_chat("first"),
+    )
+
+    # Prime service_b with a view that does not include later external changes.
+    assert [job.name for job in service_b.list_jobs(include_disabled=True)] == ["first"]
+
+    service_a.add_job(
+        name="second",
+        schedule=schedule,
+        message="second",
+        **_bound_chat("second"),
+    )
+
+    assert service_b.remove_job(first.id) == "removed"
+
+    reloaded = CronService(store_path)
+    assert [job.name for job in reloaded.list_jobs(include_disabled=True)] == ["second"]
+
+
 # ── timer race regression tests ──
 
 
