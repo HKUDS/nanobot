@@ -234,6 +234,8 @@ class ExecTool(Tool):
             "inspection and apply_patch/write_file/edit_file for file changes "
             "instead of cat, shell find/grep, echo, or sed. "
             "Use -y or --yes flags to avoid interactive prompts. "
+            "On Windows, use PowerShell syntax by default; pass shell='cmd' "
+            "only for cmd-specific commands. "
             "For long-running or interactive commands, pass yield_time_ms; "
             "if the command keeps running, exec returns a session_id that can "
             "be polled or written to with write_stdin. Output is truncated at "
