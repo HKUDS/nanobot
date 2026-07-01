@@ -44,6 +44,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { showTurnCompleteNotification } from "@/lib/notifications";
 import {
   createRuntimeHost,
   getHostApi,
@@ -1242,8 +1243,31 @@ function Shell({
     });
   }, [client, onModelNameChange]);
 
+  const notifyTurnCompleted = useCallback((chatId: string) => {
+    if (
+      document.visibilityState === "visible"
+      && document.hasFocus()
+      && view === "chat"
+      && activeChatIdRef.current === chatId
+    ) {
+      return;
+    }
+    const session = sessions.find((candidate) => candidate.chatId === chatId);
+    const chatTitle = session
+      ? displayTitle(session, sidebarState.title_overrides, t("chat.newChat"))
+      : t("app.brand");
+    showTurnCompleteNotification({
+      chatId,
+      title: t("notifications.turnComplete.title", { defaultValue: "Nanobot finished" }),
+      body: t("notifications.turnComplete.body", {
+        defaultValue: "{{title}} is ready for your reply.",
+        title: chatTitle,
+      }),
+    });
+  }, [sessions, sidebarState.title_overrides, t, view]);
+
   useEffect(() => {
-    return client.onRunStatus((chatId, startedAt) => {
+    return client.onRunStatus((chatId, startedAt, completed) => {
       if (startedAt != null) {
         const nextRunning = new Set(runningChatIdsRef.current);
         nextRunning.add(chatId);
@@ -1258,7 +1282,9 @@ function Shell({
         return;
       }
 
-      if (!runningChatIdsRef.current.has(chatId)) return;
+      const wasRunning = runningChatIdsRef.current.has(chatId);
+      if (!wasRunning && !completed) return;
+      if (completed) notifyTurnCompleted(chatId);
       const nextRunning = new Set(runningChatIdsRef.current);
       nextRunning.delete(chatId);
       runningChatIdsRef.current = nextRunning;
@@ -1273,7 +1299,7 @@ function Shell({
         return next;
       });
     });
-  }, [client]);
+  }, [client, notifyTurnCompleted]);
 
   useEffect(() => {
     return client.onStatus((status) => {

@@ -235,7 +235,13 @@ describe("NanobotClient", () => {
       chat_id: "chat-strip",
     });
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
-    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", null, true);
+
+    lastSocket().fakeMessage({
+      event: "turn_end",
+      chat_id: "chat-missed-running",
+    });
+    expect(handler).toHaveBeenLastCalledWith("chat-missed-running", null, true);
   });
 
   it("notifies run status subscribers and replays running chats", () => {
@@ -265,8 +271,8 @@ describe("NanobotClient", () => {
       chat_id: "chat-status",
       status: "idle",
     });
-    expect(handler).toHaveBeenCalledWith("chat-status", null);
-    expect(lateHandler).toHaveBeenCalledWith("chat-status", null);
+    expect(handler).toHaveBeenCalledWith("chat-status", null, true);
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", null, true);
   });
 
   it("records goal_state per chat_id without an onChat subscriber", () => {

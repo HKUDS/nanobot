@@ -72,7 +72,7 @@ type SessionUpdateHandler = (
   scope?: SessionUpdateScope,
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
-type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
+type RunStatusHandler = (chatId: string, startedAt: number | null, completed?: boolean) => void;
 
 /** Structured errors surfaced to the UI.
  *
@@ -229,10 +229,8 @@ export class NanobotClient {
 
   private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
     if (ev.event === "turn_end") {
-      if (this.runStartedAtByChatId.has(chatId)) {
-        this.runStartedAtByChatId.delete(chatId);
-        this.emitRunStatus(chatId, null);
-      }
+      this.runStartedAtByChatId.delete(chatId);
+      this.emitRunStatus(chatId, null, true);
       return;
     }
     if (ev.event !== "goal_status") return;
@@ -242,7 +240,7 @@ export class NanobotClient {
       if (previous !== ev.started_at) this.emitRunStatus(chatId, ev.started_at);
     } else if (this.runStartedAtByChatId.has(chatId)) {
       this.runStartedAtByChatId.delete(chatId);
-      this.emitRunStatus(chatId, null);
+      this.emitRunStatus(chatId, null, true);
     }
   }
 
@@ -545,9 +543,10 @@ export class NanobotClient {
     }
   }
 
-  private emitRunStatus(chatId: string, startedAt: number | null): void {
+  private emitRunStatus(chatId: string, startedAt: number | null, completed = false): void {
     for (const handler of this.runStatusHandlers) {
-      handler(chatId, startedAt);
+      if (completed) handler(chatId, startedAt, true);
+      else handler(chatId, startedAt);
     }
   }
 
