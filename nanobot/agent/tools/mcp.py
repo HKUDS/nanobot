@@ -856,9 +856,14 @@ async def connect_mcp_servers(
                         timeout=httpx.Timeout(30.0, connect=10.0),
                     )
                 )
-                read, write, _ = await server_stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
+                _http_gen = streamable_http_client(cfg.url, http_client=http_client)
+                read, write, _ = await server_stack.enter_async_context(_http_gen)
+                # Stash the underlying async generator so _close_server can
+                # force-close it if stack.aclose() raises due to cross-task
+                # cancel scope (#4302).  streamable_http_client() returns an
+                # _AsyncGeneratorContextManager which has no aclose(); the
+                # real async generator lives at .gen.
+                server_stack._mcp_http_gen = _http_gen.gen  # type: ignore[attr-defined]
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                 await server_stack.aclose()
@@ -1330,3 +1335,14 @@ async def _close_server(state: Any, server_name: str) -> None:
         await stack.aclose()
     except (RuntimeError, BaseExceptionGroup):
         logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+        # The MCP SDK's streamable_http_client uses anyio task groups whose
+        # cancel scopes can only be exited from the task that entered them.
+        # When _close_server runs from a different task (e.g. tool retry vs
+        # initial connect), aclose() raises but leaves the generator alive
+        # with an active cancel scope that later cancels unrelated tasks and
+        # crashes the gateway (#4302).  Force-close the generator now, while
+        # the event loop is still healthy, so the GC never tries to finalize it.
+        http_gen = getattr(stack, "_mcp_http_gen", None)
+        if http_gen is not None:
+            with suppress(Exception):
+                await http_gen.aclose()
