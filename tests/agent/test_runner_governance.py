@@ -163,11 +163,18 @@ def test_snip_history_reserves_budget_for_tool_definitions(monkeypatch):
         context_block_limit=500,
     )
 
+    # Track calls so the emergency pass sees an in-budget estimate.
+    _call_count = 0
+
     def _estimate(_provider, _model, estimate_messages, estimate_tools):
+        nonlocal _call_count
+        _call_count += 1
         if estimate_messages == messages:
             return 1000, None
-        assert estimate_messages == [{"role": "system", "content": "system"}]
-        assert estimate_tools == tools.get_definitions.return_value
+        if _call_count == 2:
+            assert estimate_messages == [{"role": "system", "content": "system"}]
+            assert estimate_tools == tools.get_definitions.return_value
+        # Call 3 is the emergency pass check with the trimmed result
         return 350, None
 
     monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", _estimate)
@@ -877,6 +884,155 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
         assert non_system[0]["role"] in ("user", "tool"), (
             f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Emergency tool result truncation (last-resort pass in snip_history)
+# ---------------------------------------------------------------------------
+
+
+def test_emergency_truncation_truncates_when_tool_results_exceed_budget(monkeypatch):
+    """When tool results from the current iteration alone exceed the budget
+    even after the normal "drop oldest" trim, the emergency pass shortens
+    their content proportionally."""
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "query"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "tc_1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "tc_1", "name": "web_search", "content": "A" * 8000},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "tc_2", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "tc_2", "name": "web_search", "content": "B" * 8000},
+    ]
+
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=500,
+    )
+
+    def _estimate(_provider, _model, estimate_messages, _tools):
+        # Always report above budget so snip + emergency both activate.
+        return 800, None
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain", _estimate,
+    )
+    token_sizes = {
+        "system": 50, "query": 100, "A" * 8000: 400, "B" * 8000: 400,
+    }
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_message_tokens",
+        lambda msg: token_sizes.get(str(msg.get("content")), 40),
+    )
+
+    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+
+    # Tool messages must still be present (not dropped).
+    tool_msgs = [m for m in trimmed if m.get("role") == "tool"]
+    assert len(tool_msgs) == 2
+    # Their content must have been shortened.
+    for tm in tool_msgs:
+        assert len(tm["content"]) < 8000
+
+
+def test_emergency_truncation_not_triggered_when_within_budget(monkeypatch):
+    """The emergency pass must be a no-op when the trimmed result already fits."""
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi there"},
+    ]
+
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=500,
+    )
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_a, **_kw: (100, None),
+    )
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_message_tokens",
+        lambda msg: 40,
+    )
+
+    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+
+    # Should be unchanged (no truncation needed).
+    assert len(trimmed) == len(messages)
+    assert trimmed[-1]["content"] == "hi there"
+
+
+def test_emergency_truncation_skips_non_string_content(monkeypatch):
+    """Tool results with non-string content (list, None) are skipped, not crashed on."""
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "query"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "tc_1", "type": "function", "function": {"name": "read", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "tc_1", "name": "read", "content": [
+            {"type": "text", "text": "block content"}
+        ]},
+    ]
+
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=50,
+    )
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_a, **_kw: (200, None),
+    )
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_message_tokens",
+        lambda msg: 50,
+    )
+
+    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+
+    # Non-string tool result must survive unmodified.
+    tool_msgs = [m for m in trimmed if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert isinstance(tool_msgs[0]["content"], list)
 
 
 # ---------------------------------------------------------------------------

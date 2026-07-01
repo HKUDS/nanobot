@@ -19,6 +19,7 @@ from nanobot.utils.helpers import (
     find_legal_message_start,
     maybe_persist_tool_result,
     truncate_text,
+    truncate_text_to_tokens,
 )
 from nanobot.utils.runtime import ensure_nonempty_tool_result
 
@@ -422,7 +423,74 @@ class ContextGovernor:
             kept_tokens += msg_tokens
         kept.reverse()
 
-        return system_messages + self._legal_history_tail(kept, non_system)
+        result = system_messages + self._legal_history_tail(kept, non_system)
+
+        # Emergency pass: if still over budget after dropping old history,
+        # truncate inflight tool result contents proportionally.
+        post_estimate, _ = estimate_prompt_tokens_chain(
+            config.provider, config.model, result, tools,
+        )
+        if post_estimate > budget:
+            result = self._emergency_truncate_tool_results(
+                config, result, budget, tools,
+            )
+
+        return result
+
+    def _emergency_truncate_tool_results(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        budget: int,
+        tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Truncate tool result contents when ``snip_history`` alone cannot fit the budget.
+
+        Unlike the normal "drop oldest" strategy, this pass shortens the *content*
+        of in-flight tool results proportionally so the assistant→tool message
+        structure stays intact. It only fires when the existing history trim was
+        insufficient (e.g. tool results from the current iteration alone exceed
+        the context window).
+        """
+        tool_indices = [
+            i for i, m in enumerate(messages)
+            if m.get("role") == "tool" and isinstance(m.get("content"), str)
+        ]
+        if not tool_indices:
+            return messages
+
+        total_estimate, _ = estimate_prompt_tokens_chain(
+            config.provider, config.model, messages, tools,
+        )
+        overflow = max(0, total_estimate - budget)
+        if overflow <= 0:
+            return messages
+
+        tool_total_tokens = sum(
+            estimate_message_tokens(messages[i]) for i in tool_indices
+        )
+        if tool_total_tokens <= 0:
+            return messages
+
+        updated = [dict(m) for m in messages]
+        for i in tool_indices:
+            msg_tokens = estimate_message_tokens(updated[i])
+            reduction = int(overflow * msg_tokens / tool_total_tokens)
+            if reduction <= 0:
+                continue
+            content = updated[i]["content"]
+            target_tokens = max(1, msg_tokens - reduction)
+            updated[i]["content"] = truncate_text_to_tokens(content, target_tokens)
+            logger.warning(
+                "Emergency tool result truncation for {}: {}→{}t "
+                "(budget {}t, overflow {}t, session {})",
+                updated[i].get("name", "?"),
+                msg_tokens, target_tokens,
+                budget, overflow,
+                config.session_key or "default",
+            )
+
+        return updated
 
     @staticmethod
     def _summary_for(message: dict[str, Any]) -> str:

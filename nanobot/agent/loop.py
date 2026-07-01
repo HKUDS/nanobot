@@ -251,6 +251,22 @@ class AgentLoop:
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
         )
+
+        max_completion = getattr(getattr(provider, "generation", None), "max_tokens", None)
+        if (
+            self.context_window_tokens
+            and max_completion
+            and isinstance(max_completion, int)
+            and self.context_window_tokens <= max_completion
+        ):
+            logger.warning(
+                "contextWindowTokens ({}) <= maxTokens ({}). "
+                "No room left for message history. "
+                "Consider setting contextWindowTokens >= 2 × maxTokens.",
+                self.context_window_tokens,
+                max_completion,
+            )
+
         self.provider_retry_mode = provider_retry_mode
         self.tool_hint_max_length = (
             tool_hint_max_length if tool_hint_max_length is not None
