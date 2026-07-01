@@ -1,5 +1,6 @@
 """Tests for the lightweight Consolidator — append-only to HISTORY.md."""
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -173,6 +174,155 @@ class TestConsolidatorArchiveErrorHandling:
         assert "[RAW]" not in entries[0]["content"]
 
 
+class TestEagerConsolidation:
+    async def test_disabled_eager_consolidation_is_noop(self, consolidator):
+        session = Session(key="cli:test")
+        for i in range(2):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        consolidator.archive.assert_not_awaited()
+        assert session.last_eager_consolidated == 0
+
+    async def test_eager_consolidation_archives_without_trimming_session(self, consolidator):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 3
+        consolidator.eager_min_interval_s = 0
+        consolidator.eager_max_batch = 20
+        session = Session(key="cli:test")
+        for i in range(2):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        archived = consolidator.archive.await_args.args[0]
+        assert [m["content"] for m in archived] == ["u0", "a0", "u1", "a1"]
+        assert len(session.messages) == 4
+        assert session.last_consolidated == 0
+        assert session.last_eager_consolidated == 4
+        assert "_last_summary" not in session.metadata
+        assert "_last_eager_consolidated_at" in session.metadata
+        consolidator.sessions.save.assert_called_with(session)
+
+    async def test_eager_consolidation_starts_after_existing_consolidated_cursor(
+        self,
+        consolidator,
+    ):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 2
+        consolidator.eager_min_interval_s = 0
+        session = Session(key="cli:test")
+        for i in range(3):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        session.last_consolidated = 2
+        session.last_eager_consolidated = 0
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        archived = consolidator.archive.await_args.args[0]
+        assert [m["content"] for m in archived] == ["u1", "a1", "u2", "a2"]
+        assert session.last_consolidated == 2
+        assert session.last_eager_consolidated == 6
+
+    async def test_eager_consolidation_respects_min_messages(
+        self,
+        consolidator,
+    ):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 3
+        consolidator.eager_min_interval_s = 0
+        session = Session(key="cli:test")
+        session.add_message("user", "u0")
+        session.add_message("assistant", "a0")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        consolidator.archive.assert_not_awaited()
+
+    async def test_eager_consolidation_respects_interval(
+        self,
+        consolidator,
+    ):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 3
+        consolidator.eager_min_interval_s = 120
+        session = Session(key="cli:test")
+        session.add_message("user", "u0")
+        session.add_message("assistant", "a0")
+        session.add_message("user", "u1")
+        session.metadata["_last_eager_consolidated_at"] = datetime.now().isoformat()
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        consolidator.archive.assert_not_awaited()
+
+    async def test_eager_consolidation_fallback_does_not_split_tool_sequence(
+        self,
+        consolidator,
+    ):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 2
+        consolidator.eager_min_interval_s = 0
+        consolidator.eager_max_batch = 3
+        session = Session(key="cli:test")
+        session.add_message("user", "u0")
+        session.add_message("assistant", "a0")
+        session.messages.extend(_tool_round("call-1"))
+        session.add_message("assistant", "final")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        archived = consolidator.archive.await_args.args[0]
+        assert [m["content"] for m in archived] == ["u0", "a0"]
+        assert session.last_eager_consolidated == 2
+
+    async def test_eager_consolidation_advances_after_raw_archive_fallback(
+        self,
+        consolidator,
+    ):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 2
+        consolidator.eager_min_interval_s = 0
+        session = Session(key="cli:test")
+        session.add_message("user", "u0")
+        session.add_message("assistant", "a0")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value=None)
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        consolidator.archive.assert_awaited_once()
+        assert session.last_eager_consolidated == 2
+
+    async def test_eager_consolidation_skips_internal_sessions(self, consolidator):
+        consolidator.eager_consolidation = True
+        consolidator.eager_min_messages = 1
+        session = Session(key="dream:20260618")
+        session.add_message("user", "dream input")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_eager_consolidate(session)
+
+        consolidator.archive.assert_not_awaited()
+
+
 class TestConsolidatorTokenBudget:
     async def test_prompt_below_threshold_does_not_consolidate(self, consolidator):
         """No consolidation when tokens are within budget."""
@@ -229,8 +379,35 @@ class TestConsolidatorTokenBudget:
         assert archived_chunk[0]["content"] == "u0"
         assert archived_chunk[-1]["content"] == "a6"
         assert session.last_consolidated == 14
+        assert session.last_eager_consolidated == 14
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
         consolidator.sessions.save.assert_called()
+
+    async def test_replay_window_overflow_skips_eager_archived_prefix(
+        self,
+        consolidator,
+    ):
+        consolidator._SAFETY_BUFFER = 0
+        session = Session(key="test:replay-overflow-eager")
+        for i in range(10):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        session.last_eager_consolidated = 4
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="old conversation summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=6,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert archived_chunk[0]["content"] == "u2"
+        assert "u0" not in [m["content"] for m in archived_chunk]
+        assert session.last_consolidated == 14
+        assert session.last_eager_consolidated == 14
 
     async def test_replay_window_overflow_extends_to_long_recent_user_turn(
         self,
@@ -257,6 +434,7 @@ class TestConsolidatorTokenBudget:
         archived_chunk = consolidator.archive.await_args.args[0]
         assert [m["content"] for m in archived_chunk] == ["old", "old answer"]
         assert session.last_consolidated == 2
+        assert session.last_eager_consolidated == 2
 
         history = session.get_history(max_messages=4, extend_to_user=True)
         assert len(history) > 4
@@ -291,6 +469,7 @@ class TestConsolidatorTokenBudget:
         assert archived_chunk[2]["content"] == "long older turn"
         assert archived_chunk[-1]["content"] == "older final"
         assert session.last_consolidated == len(session.messages) - 2
+        assert session.last_eager_consolidated == len(session.messages) - 2
 
         history = session.get_history(max_messages=6, extend_to_user=True)
         assert [m["content"] for m in history] == ["new question", "new answer"]
@@ -322,6 +501,30 @@ class TestConsolidatorTokenBudget:
         # pick_consolidation_boundary returns (50, tokens) — user turn at idx 50
         assert archived_chunk[0]["content"] == "m0"
         assert session.last_consolidated > 0
+
+    async def test_token_consolidation_skips_eager_archived_prefix(self, consolidator):
+        consolidator._SAFETY_BUFFER = 0
+        session = Session(key="test:eager-prefix")
+        for i in range(4):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        session.last_consolidated = 0
+        session.last_eager_consolidated = 2
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken"), (1200, "tiktoken"), (400, "tiktoken")]
+        )
+        consolidator.archive = AsyncMock(return_value="summary")
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        archived_contents = [m["content"] for m in archived_chunk]
+        assert archived_contents[0] == "u1"
+        assert "u0" not in archived_contents
+        assert "a0" not in archived_contents
+        assert session.last_consolidated == 6
+        assert session.last_eager_consolidated == 6
 
     async def test_raw_archive_fallback_advances_last_consolidated(self, consolidator):
         """When archive() falls back to raw-archive (LLM failed), the cursor
@@ -443,6 +646,7 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:test")
         assert len(reloaded.messages) <= 8
         assert reloaded.last_consolidated == 0
+        assert reloaded.last_eager_consolidated == len(reloaded.messages)
         meta = reloaded.metadata.get("_last_summary")
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
@@ -580,6 +784,7 @@ class TestCompactIdleSession:
         # Session should still be truncated
         reloaded = sessions.get_or_create("cli:fail")
         assert len(reloaded.messages) <= 4
+        assert reloaded.last_eager_consolidated == 0
 
     @pytest.mark.asyncio
     async def test_respects_last_consolidated(self, real_consolidator, mock_provider):

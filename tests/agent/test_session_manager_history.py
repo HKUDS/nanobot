@@ -147,11 +147,13 @@ def test_retain_recent_legal_suffix_adjusts_last_consolidated():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 7
+    session.last_eager_consolidated = 8
 
     session.retain_recent_legal_suffix(4)
 
     assert len(session.messages) == 4
     assert session.last_consolidated == 1
+    assert session.last_eager_consolidated == 2
 
 
 def test_retain_recent_legal_suffix_zero_clears_session():
@@ -159,11 +161,13 @@ def test_retain_recent_legal_suffix_zero_clears_session():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 5
+    session.last_eager_consolidated = 7
 
     session.retain_recent_legal_suffix(0)
 
     assert session.messages == []
     assert session.last_consolidated == 0
+    assert session.last_eager_consolidated == 0
 
 
 def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
@@ -491,6 +495,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
         {"role": "assistant", "content": "answer2"},
     ]
     source.last_consolidated = 4
+    source.last_eager_consolidated = 4
     source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
     manager.save(source)
 
@@ -503,6 +508,7 @@ def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefi
     assert forked is not None
     assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
     assert forked.last_consolidated == 0
+    assert forked.last_eager_consolidated == 2
     assert "_last_summary" not in forked.metadata
 
 

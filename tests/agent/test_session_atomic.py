@@ -23,10 +23,23 @@ class TestAtomicSave:
         meta = json.loads(lines[0])
         assert meta["_type"] == "metadata"
         assert meta["key"] == "test:1"
+        assert meta["last_eager_consolidated"] == 0
 
         msg1 = json.loads(lines[1])
         assert msg1["role"] == "user"
         assert msg1["content"] == "hello"
+
+    def test_save_persists_last_eager_consolidated(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        session = Session(key="test:eager")
+        session.add_message("user", "hello")
+        session.last_eager_consolidated = 1
+
+        mgr.save(session)
+
+        path = mgr._get_session_path("test:eager")
+        meta = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+        assert meta["last_eager_consolidated"] == 1
 
     def test_no_tmp_file_left_after_successful_save(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)
@@ -208,6 +221,53 @@ class TestRepairCorruptFile:
         # offset 5 exceeds the single loaded message; reset to avoid hiding history (#4066)
         assert session.last_consolidated == 0
         assert isinstance(session.created_at, datetime)
+
+    def test_legacy_metadata_sets_eager_cursor_to_last_consolidated(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        path = mgr._get_session_path("test:legacy-eager")
+
+        self._write_corrupt_jsonl(path, [
+            json.dumps({
+                "_type": "metadata",
+                "key": "test:legacy-eager",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "metadata": {},
+                "last_consolidated": 1,
+            }),
+            json.dumps({"role": "user", "content": "old"}),
+            json.dumps({"role": "assistant", "content": "reply"}),
+        ])
+
+        session = mgr._load("test:legacy-eager")
+
+        assert session is not None
+        assert session.last_consolidated == 1
+        assert session.last_eager_consolidated == 1
+
+    def test_corrupt_eager_cursor_falls_back_to_last_consolidated(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        path = mgr._get_session_path("test:bad-eager")
+
+        self._write_corrupt_jsonl(path, [
+            json.dumps({
+                "_type": "metadata",
+                "key": "test:bad-eager",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "metadata": {},
+                "last_consolidated": 1,
+                "last_eager_consolidated": 99,
+            }),
+            json.dumps({"role": "user", "content": "old"}),
+            json.dumps({"role": "assistant", "content": "reply"}),
+        ])
+
+        session = mgr._load("test:bad-eager")
+
+        assert session is not None
+        assert session.last_consolidated == 1
+        assert session.last_eager_consolidated == 1
 
     def test_read_session_file_repairs_corrupt_jsonl(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)

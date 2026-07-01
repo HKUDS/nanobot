@@ -64,6 +64,10 @@ class DreamConfig(Base):
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
     )  # Override model for Dream sessions (pending implementation)
+    eager_consolidation: bool = False  # Proactively archive completed turns into history.jsonl after responses
+    eager_min_messages: int = Field(default=3, ge=1)  # Minimum new messages before eager consolidation runs
+    eager_min_interval_s: int = Field(default=120, ge=0)  # Per-session throttle for eager consolidation
+    eager_max_batch: int = Field(default=20, ge=1)  # Maximum messages summarized by one eager pass
     max_batch_size: int = Field(default=20, ge=1)  # Deprecated: no longer used
     max_iterations: int = Field(default=15, ge=1)  # Deprecated: no longer used
     annotate_line_ages: bool = True  # Deprecated: no longer used
