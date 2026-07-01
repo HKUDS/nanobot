@@ -1,4 +1,4 @@
-"""Coordination for scheduled cron turns."""
+"""Coordination for local trigger turns."""
 
 from __future__ import annotations
 
@@ -7,15 +7,11 @@ import dataclasses
 from collections.abc import Awaitable, Callable, Iterable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.cron.session_turns import (
-    cron_run_id,
-    cron_trigger,
-    defer_cron_until_session_idle,
-)
+from nanobot.triggers.local_session_turns import local_trigger, local_trigger_delivery_id
 
 
-class CronTurnCoordinator:
-    """Manage scheduled cron turns without mixing them into live injections."""
+class LocalTriggerTurnCoordinator:
+    """Manage local trigger turns without mixing them into live injections."""
 
     def __init__(
         self,
@@ -29,20 +25,20 @@ class CronTurnCoordinator:
         self._is_running = is_running
         self.deferred_queues: dict[str, list[InboundMessage]] = {}
         self._waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
-        self._pending_messages_by_run_id: dict[str, InboundMessage] = {}
+        self._pending_messages_by_delivery_id: dict[str, InboundMessage] = {}
 
     async def submit(self, msg: InboundMessage) -> OutboundMessage | None:
-        """Submit a scheduled cron turn and wait for its session response."""
-        run_id = cron_run_id(msg.metadata)
-        if not run_id:
-            raise ValueError("cron turn metadata must include a run_id")
-        if run_id in self._waiters:
-            raise RuntimeError(f"cron run {run_id!r} is already pending")
+        """Submit a local trigger turn and wait for its session response."""
+        delivery_id = local_trigger_delivery_id(msg.metadata)
+        if not delivery_id:
+            raise ValueError("local trigger turn metadata must include a delivery_id")
+        if delivery_id in self._waiters:
+            raise RuntimeError(f"local trigger delivery {delivery_id!r} is already pending")
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[OutboundMessage | None] = loop.create_future()
-        self._waiters[run_id] = future
-        self._pending_messages_by_run_id[run_id] = msg
+        self._waiters[delivery_id] = future
+        self._pending_messages_by_delivery_id[delivery_id] = msg
         try:
             if self._is_running():
                 await self._publish_inbound(msg)
@@ -50,8 +46,8 @@ class CronTurnCoordinator:
                 await self._dispatch(msg)
             return await future
         finally:
-            self._waiters.pop(run_id, None)
-            self._pending_messages_by_run_id.pop(run_id, None)
+            self._waiters.pop(delivery_id, None)
+            self._pending_messages_by_delivery_id.pop(delivery_id, None)
 
     def should_defer(
         self,
@@ -60,10 +56,7 @@ class CronTurnCoordinator:
         session_key: str,
         active_session_keys: Iterable[str],
     ) -> bool:
-        return (
-            defer_cron_until_session_idle(msg.metadata)
-            and session_key in active_session_keys
-        )
+        return local_trigger(msg.metadata) is not None and session_key in active_session_keys
 
     def defer_if_active(
         self,
@@ -72,7 +65,7 @@ class CronTurnCoordinator:
         session_key: str,
         active_session_keys: Iterable[str],
     ) -> bool:
-        """Defer a cron turn when its target session is already active."""
+        """Defer a local trigger turn when its target session is already active."""
         if not self.should_defer(
             msg,
             session_key=session_key,
@@ -95,10 +88,10 @@ class CronTurnCoordinator:
         response: OutboundMessage | None = None,
         error: BaseException | None = None,
     ) -> None:
-        run_id = cron_run_id(msg.metadata)
-        if not run_id:
+        delivery_id = local_trigger_delivery_id(msg.metadata)
+        if not delivery_id:
             return
-        future = self._waiters.get(run_id)
+        future = self._waiters.get(delivery_id)
         if future is None or future.done():
             return
         if error is not None:
@@ -109,20 +102,20 @@ class CronTurnCoordinator:
     def defer(self, session_key: str, msg: InboundMessage) -> None:
         self.deferred_queues.setdefault(session_key, []).append(msg)
 
-    def pending_job_ids_for_session(self, session_key: str) -> set[str]:
-        """Return cron jobs that are waiting for or running in *session_key*."""
-        job_ids: set[str] = set()
+    def pending_trigger_ids_for_session(self, session_key: str) -> set[str]:
+        """Return local triggers waiting for or running in *session_key*."""
+        trigger_ids: set[str] = set()
         for msg in self.deferred_queues.get(session_key, []):
-            job_id = _cron_job_id(msg)
-            if job_id:
-                job_ids.add(job_id)
-        for msg in self._pending_messages_by_run_id.values():
+            trigger_id = _local_trigger_id(msg)
+            if trigger_id:
+                trigger_ids.add(trigger_id)
+        for msg in self._pending_messages_by_delivery_id.values():
             if msg.session_key != session_key:
                 continue
-            job_id = _cron_job_id(msg)
-            if job_id:
-                job_ids.add(job_id)
-        return job_ids
+            trigger_id = _local_trigger_id(msg)
+            if trigger_id:
+                trigger_ids.add(trigger_id)
+        return trigger_ids
 
     async def publish_next_deferred(self, session_key: str) -> bool:
         queue = self.deferred_queues.get(session_key)
@@ -135,9 +128,9 @@ class CronTurnCoordinator:
         return True
 
 
-def _cron_job_id(msg: InboundMessage) -> str | None:
-    trigger = cron_trigger(msg.metadata)
+def _local_trigger_id(msg: InboundMessage) -> str | None:
+    trigger = local_trigger(msg.metadata)
     if not trigger:
         return None
-    value = trigger.get("job_id")
+    value = trigger.get("trigger_id")
     return value if isinstance(value, str) and value else None

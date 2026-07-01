@@ -41,6 +41,14 @@ def local_trigger(metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return automation_trigger(metadata, LOCAL_TRIGGER_AUTOMATION_SPEC)
 
 
+def local_trigger_delivery_id(metadata: Mapping[str, Any] | None) -> str | None:
+    trigger = local_trigger(metadata)
+    if not trigger:
+        return None
+    value = trigger.get("delivery_id")
+    return value if isinstance(value, str) and value else None
+
+
 def local_trigger_history_overrides(
     metadata: Mapping[str, Any] | None,
 ) -> tuple[str | None, dict[str, Any]]:

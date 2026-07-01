@@ -1287,7 +1287,11 @@ def _run_gateway(
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
                 asyncio.create_task(
-                    run_local_trigger_queue(store=trigger_store, bus=bus),
+                    run_local_trigger_queue(
+                        store=trigger_store,
+                        bus=bus,
+                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                    ),
                     name="nanobot-local-triggers",
                 ),
             ]

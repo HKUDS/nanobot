@@ -129,6 +129,105 @@ async def test_local_trigger_queue_publishes_bound_inbound_message(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
+    tmp_path: Path,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="CI review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    store.enqueue(trigger.id, "Review failed CI")
+    submitted: list[InboundMessage] = []
+    release = asyncio.Event()
+
+    async def _submit_turn(msg: InboundMessage):
+        submitted.append(msg)
+        await release.wait()
+        return None
+
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=_submit_turn,
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        for _ in range(100):
+            if submitted:
+                break
+            await asyncio.sleep(0.01)
+
+        assert len(submitted) == 1
+        assert list(store.processing_dir.glob("*.json"))
+        stored = store.get(trigger.id)
+        assert stored is not None
+        assert stored.last_status is None
+
+        release.set()
+        for _ in range(100):
+            stored = store.get(trigger.id)
+            if stored and stored.last_status == "ok":
+                break
+            await asyncio.sleep(0.01)
+
+        assert not list(store.processing_dir.glob("*.json"))
+        stored = store.get(trigger.id)
+        assert stored is not None
+        assert stored.last_status == "ok"
+        assert store.claim_deliveries() == []
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_local_trigger_queue_requeues_when_submitted_turn_is_interrupted(
+    tmp_path: Path,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="CI review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    store.enqueue(trigger.id, "Review failed CI")
+    started = asyncio.Event()
+
+    async def _submit_turn(_msg: InboundMessage):
+        started.set()
+        await asyncio.Future()
+
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=_submit_turn,
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+        reclaimed = store.claim_deliveries()
+        assert len(reclaimed) == 1
+        assert reclaimed[0].trigger_id == trigger.id
+        assert reclaimed[0].attempts == 1
+        assert reclaimed[0].last_error == "CancelledError"
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_local_trigger_queue_recovers_processing_delivery_on_start(
     tmp_path: Path,
 ) -> None:

@@ -148,8 +148,9 @@ schedule. Create one from the target chat with `/trigger <name>`, then call
 `nanobot trigger <id> "<message>"` when a local script or external service wants
 nanobot to respond in that session. Webhook servers, third-party auth, and
 event-to-message formatting stay outside nanobot. Trigger deliveries are stored
-in the workspace until the gateway consumes them and are requeued on gateway
-restart if processing was interrupted. Delivery is at-least-once, so external
+in the workspace until the linked agent turn finishes successfully. If the
+target session is busy, the trigger waits until that session is idle instead of
+being injected into the active turn. Delivery is at-least-once, so external
 systems should tolerate repeated trigger messages.
 
 ## Where to Go Next

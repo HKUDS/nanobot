@@ -136,11 +136,13 @@ Keep `nanobot gateway` running so the message can be delivered to the linked
 chat/session.
 
 The command writes to a workspace-local durable queue. If `nanobot gateway` is
-not running yet, the message waits in that workspace. If the gateway exits after
-claiming a delivery but before completing it, the next gateway start requeues
-that delivery. The queue is at-least-once, not exactly-once, so the same message
-can be delivered again after an interrupted process. Run one gateway consumer
-per workspace; this local queue is not a distributed multi-consumer queue.
+not running yet, the message waits in that workspace. If the target session is
+already running a turn, the trigger waits for that session to become idle. If the
+gateway exits after claiming a delivery but before the linked turn completes,
+the next gateway start requeues that delivery. The queue is at-least-once, not
+exactly-once, so the same message can be delivered again after an interrupted
+process. Run one gateway consumer per workspace; this local queue is not a
+distributed multi-consumer queue.
 
 Use stdin when another local process generates the message:
 
