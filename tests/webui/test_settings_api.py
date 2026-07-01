@@ -10,6 +10,7 @@ from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
+    _model_catalog_kind,
     _oauth_provider_status,
     create_model_configuration,
     provider_models_payload,
@@ -963,7 +964,14 @@ def test_provider_models_payload_requires_gateway_key(
     payload = provider_models_payload({"provider": ["openrouter"]})
 
     assert payload["status"] == "not_configured"
+    assert payload["catalog_kind"] == "catalog"
     assert payload["models"] == []
+
+
+def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
+    assert _model_catalog_kind(find_by_name("skywork")) == "official"
+    assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
+    assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(
