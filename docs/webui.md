@@ -137,7 +137,9 @@ restarts and are requeued if the process exits before the linked turn completes.
 If the linked session is already running a turn, the local trigger waits until
 that session is idle instead of being injected into the active turn. This is an
 at-least-once local queue, so repeated delivery is possible after an interrupted
-process.
+process. A delivered trigger is recorded as an automation turn in the linked
+session; if the agent receives it but the turn fails, Automations marks the run
+failed instead of retrying indefinitely.
 
 For recurring background checks that should stay quiet unless there is something
 useful to report, use the protected heartbeat job by editing `HEARTBEAT.md`

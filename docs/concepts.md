@@ -150,8 +150,10 @@ nanobot to respond in that session. Webhook servers, third-party auth, and
 event-to-message formatting stay outside nanobot. Trigger deliveries are stored
 in the workspace until the linked agent turn finishes successfully. If the
 target session is busy, the trigger waits until that session is idle instead of
-being injected into the active turn. Delivery is at-least-once, so external
-systems should tolerate repeated trigger messages.
+being injected into the active turn. The message is recorded as an automation
+turn in that session. Delivery is at-least-once, so external systems should
+tolerate repeated trigger messages; a delivery that reaches the agent but fails
+is marked failed rather than retried forever.
 
 ## Where to Go Next
 

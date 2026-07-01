@@ -14,6 +14,9 @@ LOCAL_TRIGGER_META = "_local_trigger"
 
 
 def _local_trigger_history_text(trigger: Mapping[str, Any]) -> str:
+    persist_content = trigger.get("persist_content")
+    if isinstance(persist_content, str) and persist_content.strip():
+        return persist_content
     name = trigger.get("trigger_name")
     trigger_id = trigger.get("trigger_id")
     label = name if isinstance(name, str) and name.strip() else trigger_id

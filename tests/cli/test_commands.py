@@ -2044,6 +2044,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     class _FakeAgentLoop:
         @classmethod
         def from_config(cls, config, bus=None, **extra):
+            seen["agent_from_config_kwargs"] = extra
             return cls(**extra)
 
         def __init__(self, *args, **kwargs) -> None:
@@ -2093,8 +2094,11 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     cli_commands._run_gateway(config, health_server_enabled=False)
 
     agent = seen["agent"]
+    agent_kwargs = seen["agent_from_config_kwargs"]
     kwargs = seen["local_trigger_queue_kwargs"]
-    assert kwargs["bus"] is bus
+    assert "local_trigger_store" in agent_kwargs
+    assert kwargs["store"] is agent_kwargs["local_trigger_store"]
+    assert "bus" not in kwargs
     assert kwargs["submit_turn"] is agent.submit_local_trigger_turn
 
 

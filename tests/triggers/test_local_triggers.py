@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage
 from nanobot.triggers.local_runner import run_local_trigger_queue
 from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
@@ -77,7 +78,7 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_local_trigger_queue_publishes_bound_inbound_message(tmp_path: Path) -> None:
+async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(
         name="PR review",
@@ -87,18 +88,18 @@ async def test_local_trigger_queue_publishes_bound_inbound_message(tmp_path: Pat
         origin_metadata={"webui": True, WEBUI_TURN_METADATA_KEY: "old-turn"},
     )
     store.enqueue(trigger.id, "Review PR #4502")
-    published: list[InboundMessage] = []
+    submitted: list[InboundMessage] = []
 
-    class _Bus:
-        async def publish_inbound(self, msg: InboundMessage) -> None:
-            published.append(msg)
+    async def _submit_turn(msg: InboundMessage):
+        submitted.append(msg)
+        return None
 
     task = asyncio.create_task(
-        run_local_trigger_queue(store=store, bus=_Bus(), poll_interval_s=0.01)
+        run_local_trigger_queue(store=store, submit_turn=_submit_turn, poll_interval_s=0.01)
     )
     try:
         for _ in range(100):
-            if published:
+            if submitted:
                 break
             await asyncio.sleep(0.01)
     finally:
@@ -106,8 +107,8 @@ async def test_local_trigger_queue_publishes_bound_inbound_message(tmp_path: Pat
         with suppress(asyncio.CancelledError):
             await task
 
-    assert len(published) == 1
-    msg = published[0]
+    assert len(submitted) == 1
+    msg = submitted[0]
     assert msg.channel == "websocket"
     assert msg.chat_id == "chat-1"
     assert msg.sender_id == "trigger"
@@ -120,6 +121,10 @@ async def test_local_trigger_queue_publishes_bound_inbound_message(tmp_path: Pat
         "label": "PR review",
     }
     assert msg.metadata["_local_trigger"]["trigger_id"] == trigger.id
+    assert (
+        msg.metadata["_local_trigger"]["persist_content"]
+        == "Local trigger received: PR review\n\nReview PR #4502"
+    )
 
     stored = store.get(trigger.id)
     assert stored is not None
@@ -228,6 +233,52 @@ async def test_local_trigger_queue_requeues_when_submitted_turn_is_interrupted(
 
 
 @pytest.mark.asyncio
+async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
+    tmp_path: Path,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="CI review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    store.enqueue(trigger.id, "Review failed CI")
+    started = asyncio.Event()
+
+    async def _submit_turn(_msg: InboundMessage):
+        started.set()
+        raise AutomationTurnError("model failed")
+
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=_submit_turn,
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        for _ in range(100):
+            stored = store.get(trigger.id)
+            if stored and stored.last_status == "error":
+                break
+            await asyncio.sleep(0.01)
+
+        stored = store.get(trigger.id)
+        assert stored is not None
+        assert stored.last_status == "error"
+        assert stored.last_error == "model failed"
+        assert store.claim_deliveries() == []
+        assert not list(store.processing_dir.glob("*.json"))
+        assert not list(store.failed_dir.glob("*.json"))
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_local_trigger_queue_recovers_processing_delivery_on_start(
     tmp_path: Path,
 ) -> None:
@@ -240,19 +291,19 @@ async def test_local_trigger_queue_recovers_processing_delivery_on_start(
     )
     store.enqueue(trigger.id, "Review PR #4591")
     assert len(store.claim_deliveries()) == 1
-    published: list[InboundMessage] = []
+    submitted: list[InboundMessage] = []
 
-    class _Bus:
-        async def publish_inbound(self, msg: InboundMessage) -> None:
-            published.append(msg)
+    async def _submit_turn(msg: InboundMessage):
+        submitted.append(msg)
+        return None
 
     restarted = LocalTriggerStore(tmp_path)
     task = asyncio.create_task(
-        run_local_trigger_queue(store=restarted, bus=_Bus(), poll_interval_s=0.01)
+        run_local_trigger_queue(store=restarted, submit_turn=_submit_turn, poll_interval_s=0.01)
     )
     try:
         for _ in range(100):
-            if published:
+            if submitted:
                 break
             await asyncio.sleep(0.01)
     finally:
@@ -260,7 +311,7 @@ async def test_local_trigger_queue_recovers_processing_delivery_on_start(
         with suppress(asyncio.CancelledError):
             await task
 
-    assert len(published) == 1
-    assert published[0].content == "Review PR #4591"
-    assert published[0].metadata["_local_trigger"]["trigger_id"] == trigger.id
+    assert len(submitted) == 1
+    assert submitted[0].content == "Review PR #4591"
+    assert submitted[0].metadata["_local_trigger"]["trigger_id"] == trigger.id
     assert restarted.claim_deliveries() == []

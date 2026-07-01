@@ -940,14 +940,13 @@ def _run_gateway(
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
+        local_trigger_store=trigger_store,
     )
     WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
-    agent.local_trigger_store = trigger_store
-
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -1294,7 +1293,6 @@ def _run_gateway(
                 asyncio.create_task(
                     run_local_trigger_queue(
                         store=trigger_store,
-                        bus=bus,
                         submit_turn=getattr(agent, "submit_local_trigger_turn", None),
                     ),
                     name="nanobot-local-triggers",

@@ -78,17 +78,18 @@ nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 Replace `"Review PR #4502"` with the message you want nanobot to receive. The
 trigger is bound to the session where it was created, so the message goes back
 to that same chat. Keep `nanobot gateway` running so trigger messages can be
-delivered. The trigger message starts an automation turn; it is not shown in
-the chat as a normal user message. If that session is already running a turn,
-the trigger waits until the session is idle instead of being injected into the
-active turn.
+delivered. The trigger message starts an automation turn recorded in that
+session with the message you passed to the CLI; it is not treated as a normal
+user message. If that session is already running a turn, the trigger waits
+until the session is idle instead of being injected into the active turn.
 
 Trigger deliveries are stored in the workspace until their linked agent turn
 finishes successfully. If the gateway exits after claiming a delivery but before
 the turn completes, the next gateway start requeues that delivery. This is an
 at-least-once local queue: a delivery may run more than once if the process
 exits at the wrong time, so external scripts should make repeated trigger
-messages safe.
+messages safe. If the delivery reaches the agent and the agent turn fails, the
+delivery is marked failed in Automations instead of retrying forever.
 
 For longer or generated content, omit the message argument and pipe stdin:
 
