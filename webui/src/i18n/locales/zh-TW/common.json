@@ -125,6 +125,10 @@
       "maxResults": "最大結果數",
       "timeout": "逾時",
       "jinaReader": "Jina 閱讀器",
+      "fetchProvider": "抓取供應商",
+      "fetchApiKey": "Tavily Extract API Key",
+      "fetchBaseUrl": "Tavily Extract 基礎 URL",
+      "fetchTimeout": "抓取逾時",
       "imageGeneration": "圖片生成",
       "imageProvider": "圖片供應商",
       "imageProviderStatus": "供應商狀態",
@@ -169,6 +173,10 @@
       "maxResults": "每次 web_search 呼叫返回的結果數。",
       "timeout": "搜尋供應商請求逾時前的秒數。",
       "jinaReader": "可用時為 web_fetch 使用 Jina Reader。",
+      "fetchProvider": "web_fetch 讀取網頁內容時使用的供應商。",
+      "fetchApiKey": "web_fetch 使用 Tavily Extract 時的 API Key。留空則使用 gateway 環境變數 TAVILY_API_KEY。",
+      "fetchBaseUrl": "可選，用於覆寫 Tavily 相容 Extract 端點。",
+      "fetchTimeout": "web_fetch 供應商請求逾時前的秒數。",
       "imageGeneration": "配置圖片供應商後，在聊天中開放 generate_image。",
       "imageProvider": "選擇 generate_image 使用的註冊供應商。",
       "imageProviderStatus": "圖片生成會重用「供應商」中的憑證。",
@@ -198,6 +206,15 @@
       "transcriptionProviderStatus": "API Key 仍保存在 providers 裡，不寫進 transcription 設定。",
       "transcriptionModel": "除非提供商需要自訂模型 ID，否則保持解析後的預設值即可。",
       "transcriptionLanguage": "可選 ISO-639 語言提示，例如 en、zh、ja 或 ko。"
+    },
+    "placeholders": {
+      "fetchProvider": "選擇抓取供應商"
+    },
+    "fetchProviders": {
+      "auto": "自動",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "本機 readability"
     },
     "values": {
       "light": "淺色",

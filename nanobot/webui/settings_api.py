@@ -792,7 +792,11 @@ def settings_payload(
                 "timeout": search_config.timeout,
             },
             "fetch": {
-                "use_jina_reader": config.tools.web.fetch.use_jina_reader,
+                "enable": config.tools.web.fetch.enable,
+                "provider": config.tools.web.fetch.provider,
+                "api_key_hint": _mask_secret_hint(config.tools.web.fetch.api_key),
+                "base_url": config.tools.web.fetch.base_url or None,
+                "timeout": config.tools.web.fetch.timeout,
             },
         },
         "image_generation": {
@@ -1240,10 +1244,11 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
             changed = True
 
     def set_fetch_value(attr: str, value: object) -> None:
-        nonlocal changed
+        nonlocal changed, restart_required
         if getattr(web_config.fetch, attr) != value:
             setattr(web_config.fetch, attr, value)
             changed = True
+            restart_required = True
 
     if search_config.provider != provider_name:
         search_config.provider = provider_name
@@ -1294,15 +1299,53 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("timeout must be between 1 and 120")
         set_search_value("timeout", parsed_timeout)
 
-    use_jina_reader = _query_first_alias(query, "use_jina_reader", "useJinaReader")
-    if use_jina_reader is not None:
-        normalized = use_jina_reader.strip().lower()
+    fetch_enable = _query_first_alias(query, "fetch_enable", "fetchEnable")
+    if fetch_enable is not None:
+        normalized = fetch_enable.strip().lower()
         if normalized not in {"1", "0", "true", "false", "yes", "no"}:
-            raise WebUISettingsError("use_jina_reader must be boolean")
-        previous_jina_reader = web_config.fetch.use_jina_reader
-        set_fetch_value("use_jina_reader", normalized in {"1", "true", "yes"})
-        if web_config.fetch.use_jina_reader != previous_jina_reader:
+            raise WebUISettingsError("fetch_enable must be boolean")
+        previous = web_config.fetch.enable
+        set_fetch_value("enable", normalized in {"1", "true", "yes"})
+        if web_config.fetch.enable != previous:
             restart_required = True
+
+    fetch_provider = _query_first_alias(query, "fetch_provider", "fetchProvider")
+    if fetch_provider is not None:
+        normalized_provider = fetch_provider.strip().lower()
+        if normalized_provider not in {"auto", "tavily", "jina", "readability"}:
+            raise WebUISettingsError("unknown web fetch provider")
+        previous = web_config.fetch.provider
+        set_fetch_value("provider", normalized_provider)
+        if web_config.fetch.provider != previous:
+            restart_required = True
+    else:
+        use_jina_reader = _query_first_alias(query, "use_jina_reader", "useJinaReader")
+        if use_jina_reader is not None:
+            normalized = use_jina_reader.strip().lower()
+            if normalized not in {"1", "0", "true", "false", "yes", "no"}:
+                raise WebUISettingsError("use_jina_reader must be boolean")
+            set_fetch_value(
+                "provider",
+                "auto" if normalized in {"1", "true", "yes"} else "readability",
+            )
+
+    fetch_api_key = _query_first_alias(query, "fetch_api_key", "fetchApiKey")
+    if fetch_api_key is not None:
+        set_fetch_value("api_key", fetch_api_key.strip())
+
+    fetch_base_url = _query_first_alias(query, "fetch_base_url", "fetchBaseUrl")
+    if fetch_base_url is not None:
+        set_fetch_value("base_url", fetch_base_url.strip())
+
+    fetch_timeout = _query_first_alias(query, "fetch_timeout", "fetchTimeout")
+    if fetch_timeout is not None:
+        try:
+            parsed_fetch_timeout = int(fetch_timeout)
+        except ValueError:
+            raise WebUISettingsError("fetch_timeout must be an integer") from None
+        if parsed_fetch_timeout < 1 or parsed_fetch_timeout > 120:
+            raise WebUISettingsError("fetch_timeout must be between 1 and 120")
+        set_fetch_value("timeout", parsed_fetch_timeout)
 
     if changed:
         save_config(config)

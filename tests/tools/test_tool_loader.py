@@ -298,6 +298,17 @@ def test_web_fetch_tool_create():
     assert isinstance(tool, WebFetchTool)
 
 
+def test_web_fetch_tool_enabled_uses_fetch_toggle():
+    from nanobot.agent.tools.web import WebFetchTool
+    mock_config = MagicMock()
+    mock_config.web.enable = True
+    mock_config.web.fetch.enable = True
+    ctx = ToolContext(config=mock_config, workspace="/tmp")
+    assert WebFetchTool.enabled(ctx) is True
+    mock_config.web.fetch.enable = False
+    assert WebFetchTool.enabled(ctx) is False
+
+
 def test_image_gen_tool_config_cls():
     from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
     assert ImageGenerationTool.config_key == "image_generation"

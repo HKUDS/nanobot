@@ -125,6 +125,10 @@
       "maxResults": "Resultados máximos",
       "timeout": "Tiempo de espera",
       "jinaReader": "Lector Jina",
+      "fetchProvider": "Proveedor de fetch",
+      "fetchApiKey": "Clave API de Tavily Extract",
+      "fetchBaseUrl": "URL base de Tavily Extract",
+      "fetchTimeout": "Tiempo de espera de fetch",
       "imageGeneration": "Generación de imágenes",
       "imageProvider": "Proveedor de imágenes",
       "imageProviderStatus": "Estado del proveedor",
@@ -169,6 +173,10 @@
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
       "jinaReader": "Usa Jina Reader para web_fetch cuando esté disponible.",
+      "fetchProvider": "Proveedor usado por web_fetch para leer contenido de páginas.",
+      "fetchApiKey": "Usada por web_fetch para Tavily Extract. Déjala vacía para usar TAVILY_API_KEY del entorno del gateway.",
+      "fetchBaseUrl": "Sobrescritura opcional para endpoints Extract compatibles con Tavily.",
+      "fetchTimeout": "Segundos antes de que expire una solicitud del proveedor web_fetch.",
       "imageGeneration": "Expone generate_image en chats cuando hay un proveedor de imagen configurado.",
       "imageProvider": "Elige el proveedor registrado usado por generate_image.",
       "imageProviderStatus": "La generación de imágenes reutiliza credenciales de Proveedores.",
@@ -198,6 +206,15 @@
       "transcriptionProviderStatus": "Las claves API permanecen en proveedores, no en la configuracion de transcripcion.",
       "transcriptionModel": "Dejalo como el valor predeterminado resuelto salvo que el proveedor necesite un id de modelo personalizado.",
       "transcriptionLanguage": "Pista ISO-639 opcional, como en, zh, ja o ko."
+    },
+    "placeholders": {
+      "fetchProvider": "Seleccionar proveedor de fetch"
+    },
+    "fetchProviders": {
+      "auto": "Auto",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "Readability local"
     },
     "values": {
       "light": "Claro",
