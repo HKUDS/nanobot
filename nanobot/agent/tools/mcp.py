@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import urllib.parse
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from typing import Any, Mapping
@@ -874,18 +875,72 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
+            wrapped_to_raw: dict[str, list[str]] = defaultdict(list)
+            for tool_def in tools.tools:
+                wrapped_to_raw[_sanitize_name(f"mcp_{name}_{tool_def.name}")].append(tool_def.name)
+            available_wrapped_names = list(wrapped_to_raw)
+            ambiguous_wrapped_names = {
+                wrapped_name: raw_names
+                for wrapped_name, raw_names in wrapped_to_raw.items()
+                if len(raw_names) > 1
+            }
+            if ambiguous_wrapped_names:
+                logger.warning(
+                    "MCP server '{}': ambiguous sanitized tool names detected; wrapped-name "
+                    "enabledTools entries will not match these tools: {}",
+                    name,
+                    "; ".join(
+                        f"{wrapped_name} -> {', '.join(raw_names)}"
+                        for wrapped_name, raw_names in sorted(ambiguous_wrapped_names.items())
+                    ),
+                )
+            ambiguous_allowed_raw_names = {
+                wrapped_name: [raw_name for raw_name in raw_names if raw_name in enabled_tools]
+                for wrapped_name, raw_names in ambiguous_wrapped_names.items()
+            }
+            ambiguous_allowed_raw_names = {
+                wrapped_name: raw_names
+                for wrapped_name, raw_names in ambiguous_allowed_raw_names.items()
+                if len(raw_names) > 1
+            }
+            if ambiguous_allowed_raw_names:
+                logger.warning(
+                    "MCP server '{}': enabledTools lists multiple raw MCP names that all "
+                    "sanitize to the same wrapped name; skipping ambiguous entries: {}",
+                    name,
+                    "; ".join(
+                        f"{wrapped_name} -> {', '.join(raw_names)}"
+                        for wrapped_name, raw_names in sorted(ambiguous_allowed_raw_names.items())
+                    ),
+                )
+
             for tool_def in tools.tools:
                 wrapped_name = _sanitize_name(f"mcp_{name}_{tool_def.name}")
-                if (
-                    not allow_all_tools
-                    and tool_def.name not in enabled_tools
-                    and wrapped_name not in enabled_tools
-                ):
+                raw_name_allowed = (
+                    tool_def.name in enabled_tools
+                    and wrapped_name not in ambiguous_allowed_raw_names
+                )
+                stable_wrapped_name = f"mcp_{name}_{tool_def.name}"
+                wrapped_name_allowed = (
+                    wrapped_name in enabled_tools
+                    and wrapped_name == stable_wrapped_name
+                    and wrapped_name not in ambiguous_wrapped_names
+                )
+                if not allow_all_tools and not raw_name_allowed and not wrapped_name_allowed:
                     logger.debug(
                         "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
                         wrapped_name,
                         name,
+                    )
+                    continue
+                if allow_all_tools and wrapped_name in ambiguous_wrapped_names:
+                    logger.warning(
+                        "MCP: skipping ambiguous tool '{}' from server '{}' because raw MCP names "
+                        "{} all sanitize to '{}'",
+                        tool_def.name,
+                        name,
+                        ", ".join(ambiguous_wrapped_names[wrapped_name]),
+                        wrapped_name,
                     )
                     continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
@@ -893,9 +948,9 @@ async def connect_mcp_servers(
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
                 if enabled_tools:
-                    if tool_def.name in enabled_tools:
+                    if raw_name_allowed:
                         matched_enabled_tools.add(tool_def.name)
-                    if wrapped_name in enabled_tools:
+                    if wrapped_name_allowed:
                         matched_enabled_tools.add(wrapped_name)
 
             if enabled_tools and not allow_all_tools:
