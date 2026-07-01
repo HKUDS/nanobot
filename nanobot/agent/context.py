@@ -29,7 +29,7 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) -> list[str]:
     """Return model-visible runtime annotations for turn-attached capabilities."""
-    return [
+    lines = [
         *cli_app_utils.runtime_lines(msg, workspace, skip=skip),
         *mcp_tools.runtime_lines(
             msg,
@@ -38,6 +38,11 @@ def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) 
             skip=skip,
         ),
     ]
+    if not skip and getattr(state, "subagents", None) is not None:
+        session_key = getattr(msg, "session_key", None)
+        if session_key:
+            lines.extend(state.subagents.runtime_status_lines(session_key))
+    return lines
 
 
 async def connect_mcp(state: Any, tools: ToolRegistry) -> None:

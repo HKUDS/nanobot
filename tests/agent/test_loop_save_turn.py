@@ -14,8 +14,10 @@ from nanobot.providers.base import LLMResponse
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.turn_continuation import (
+    INTERNAL_CONTINUATION_KIND_META,
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
+    SUBAGENT_RESULT_CONTINUATION_KIND,
 )
 from nanobot.session.webui_turns import (
     TITLE_GENERATION_MAX_TOKENS,
@@ -862,6 +864,100 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
     turn_end = [m for m in second_outbound if m.metadata.get("_turn_end")]
     assert len(turn_end) == 1
     assert isinstance(turn_end[0].metadata.get("latency_ms"), int)
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_lists_ready_subagent_result(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    await loop.subagents._announce_result(
+        "sub-ready",
+        "research",
+        "look up the answer",
+        "worker answer",
+        {"channel": "cli", "chat_id": "test", "session_key": "cli:test"},
+        "ok",
+    )
+
+    seen: dict[str, list[dict]] = {}
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        seen["initial_messages"] = initial_messages
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "completed",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="continue")
+    )
+
+    rendered = "\n".join(str(msg.get("content", "")) for msg in seen["initial_messages"])
+    assert "Subagent tasks:" in rendered
+    assert "sub-ready: completed, result ready" in rendered
+    assert "worker answer" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_subagent_result_continuation_delivers_result_without_user_history(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    await loop.subagents._announce_result(
+        "sub-deliver",
+        "worker",
+        "calculate the answer",
+        "the worker result",
+        {"channel": "cli", "chat_id": "test", "session_key": "cli:test"},
+        "ok",
+    )
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+
+    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
+    assert queued.metadata[INTERNAL_CONTINUATION_KIND_META] == SUBAGENT_RESULT_CONTINUATION_KIND
+    assert "the worker result" not in queued.content
+
+    seen: dict[str, list[dict]] = {}
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        seen["initial_messages"] = initial_messages
+        return (
+            "reported",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "reported"}],
+            "completed",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    response = await loop._process_message(queued, pending_queue=asyncio.Queue())
+
+    assert response is not None
+    assert response.content == "reported"
+    rendered = "\n".join(str(msg.get("content", "")) for msg in seen["initial_messages"])
+    assert "the worker result" in rendered
+
+    read = await loop.subagents.wait_for_result(
+        "cli:test",
+        task_id="sub-deliver",
+        timeout_seconds=0,
+    )
+    assert read.state == "consumed"
+
+    session = loop.sessions.get_or_create("cli:test")
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [{"role": "assistant", "content": "reported"}]
 
 
 @pytest.mark.asyncio

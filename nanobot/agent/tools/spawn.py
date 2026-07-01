@@ -63,7 +63,8 @@ class SpawnTool(Tool, ContextAware):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done. "
+            "The subagent writes its result to a mailbox; use poll_subagents "
+            "or wait_subagents to retrieve it explicitly. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
@@ -81,8 +82,8 @@ class SpawnTool(Tool, ContextAware):
         if running >= limit:
             return (
                 f"Cannot spawn subagent: concurrency limit reached "
-                f"({running}/{limit} running). Wait for a running subagent "
-                f"to complete before spawning a new one."
+                f"({running}/{limit} running). Use wait_subagents or cancel_subagent "
+                f"before spawning a new one."
             )
         return await self._manager.spawn(
             task=task,
