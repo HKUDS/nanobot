@@ -604,6 +604,31 @@ async def test_connect_mcp_servers_enabled_tools_raw_name_can_select_collision_u
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_rejects_multiple_colliding_raw_names(
+    fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo.read", "demo/read"])
+    registry = ToolRegistry()
+    warnings: list[str] = []
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["demo.read", "demo/read"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == []
+    assert any("enabledTools lists multiple raw MCP names" in warning for warning in warnings)
+    assert any("enabledTools entries not found: demo.read, demo/read" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
