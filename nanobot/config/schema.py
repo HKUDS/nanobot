@@ -161,13 +161,51 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("consolidationRatio"),
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
+    max_delegation_depth: int = Field(
+        default=3,
+        ge=0,
+        validation_alias=AliasChoices("maxDelegationDepth"),
+        serialization_alias="maxDelegationDepth",
+    )  # Max chained peer delegations (A→B→C…) before refusing, to bound cross-delegation loops
     dream: DreamConfig = Field(default_factory=DreamConfig)
+
+
+class PeerAgentConfig(Base):
+    """A named peer agent in the A2A roster (see #4179).
+
+    Each peer can assume a distinct role via its own system prompt and model,
+    while reusing the shared subagent execution + message-bus infrastructure.
+    """
+
+    name: str  # Unique identifier the agent uses to address this peer in ``delegate``
+    role: str = ""  # Short description surfaced to the LLM for delegation routing
+    system_prompt: str | None = None  # Overrides the default subagent prompt for this peer
+    model: str | None = None  # Optional per-peer model override (falls back to the shared model)
 
 
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    peers: list[PeerAgentConfig] = Field(default_factory=list)  # A2A peer roster (#4179)
+
+    @model_validator(mode="after")
+    def _check_unique_peer_names(self) -> AgentsConfig:
+        """Reject duplicate peer names so the roster can't silently drop a peer.
+
+        Peers are keyed by name downstream (``{p.name: p for p in peers}``), so a
+        duplicate would otherwise be deduplicated last-wins and the agent could
+        delegate to a peer that was overwritten.
+        """
+        seen: set[str] = set()
+        dupes: set[str] = set()
+        for peer in self.peers:
+            (dupes if peer.name in seen else seen).add(peer.name)
+        if dupes:
+            raise ValueError(
+                f"duplicate peer name(s) in agents.peers: {', '.join(sorted(dupes))}"
+            )
+        return self
 
 
 class ProviderConfig(Base):
