@@ -526,7 +526,9 @@ class OpenAICompatProvider(LLMProvider):
     @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:
         """Coerce block/list content into plain text for strict string-only APIs."""
-        if content is None or isinstance(content, str):
+        if content is None or content == "(empty)":
+            return " "
+        if isinstance(content, str):
             return content
         text = OpenAICompatProvider._extract_text_content(content)
         if isinstance(text, str) and text:
@@ -535,14 +537,14 @@ class OpenAICompatProvider(LLMProvider):
             dumped = json.dumps(content, ensure_ascii=False)
         except Exception:
             dumped = str(content)
-        return dumped or "(empty)"
+        return dumped or " "
 
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
-        force_string_content = bool(self._spec and self._spec.name == "deepseek")
+        force_string_content = bool(self._spec and self._spec.preserve_content_with_tool_calls)
         normalize_tool_ids = self._should_normalize_tool_call_ids()
         strip_reasoning = bool(
             self._spec
@@ -614,16 +616,14 @@ class OpenAICompatProvider(LLMProvider):
                         tc_clean["function"] = function_clean
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
-                if clean.get("role") == "assistant":
+                if clean.get("role") == "assistant" and not force_string_content:
                     # Some OpenAI-compatible gateways reject assistant messages
                     # that mix non-empty content with tool_calls.
+                    # Preserve content for providers that support it (DeepSeek).
                     clean["content"] = None
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_tool_result_id(clean["tool_call_id"])
-            if (
-                force_string_content
-                and not (clean.get("role") == "assistant" and clean.get("tool_calls"))
-            ):
+            if force_string_content:
                 clean["content"] = self._coerce_content_to_string(clean.get("content"))
         return self._enforce_role_alternation(sanitized)
 
