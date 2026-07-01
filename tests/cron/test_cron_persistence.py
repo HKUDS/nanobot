@@ -8,6 +8,7 @@ jobs.json + don't silently overwrite corrupt store``.
 
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 from typing import Callable
@@ -105,6 +106,34 @@ def test_save_store_failure_does_not_corrupt_existing_file(
         service._save_store()
 
     assert store_path.read_bytes() == original
+
+
+def test_atomic_write_ignores_unsupported_directory_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """vboxsf-like filesystems can open directories but reject directory fsync."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    dir_fd = 987654
+
+    def fake_open(path: str, flags: int) -> int:
+        assert Path(path) == store_path.parent
+        return dir_fd
+
+    def fake_fsync(fd: int) -> None:
+        if fd == dir_fd:
+            raise OSError(errno.EINVAL, "Invalid argument")
+
+    def fake_close(fd: int) -> None:
+        assert fd == dir_fd
+
+    monkeypatch.setattr("os.open", fake_open)
+    monkeypatch.setattr("os.fsync", fake_fsync)
+    monkeypatch.setattr("os.close", fake_close)
+
+    CronService._atomic_write(store_path, '{"version": 1, "jobs": []}')
+
+    assert store_path.read_text(encoding="utf-8") == '{"version": 1, "jobs": []}'
+    assert list(store_path.parent.glob("*.tmp")) == []
 
 
 def test_load_jobs_preserves_corrupt_store_and_returns_none(
