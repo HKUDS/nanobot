@@ -1485,6 +1485,17 @@ def agent(
                                 )
                             continue
                         if isinstance(event, StreamedResponseEvent):
+                            if msg.content and renderer and not renderer.streamed:
+                                await renderer.close()
+                                print_kwargs: dict[str, Any] = {}
+                                if renderer.header_printed:
+                                    print_kwargs["show_header"] = False
+                                _print_agent_response(
+                                    msg.content,
+                                    render_markdown=markdown,
+                                    metadata=msg.metadata,
+                                    **print_kwargs,
+                                )
                             turn_done.set()
                             continue
 
