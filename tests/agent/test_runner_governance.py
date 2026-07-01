@@ -821,6 +821,63 @@ def test_compact_duplicate_tool_results_preserves_same_turn_different_content():
     assert result[4]["content"] == second
 
 
+def test_prepare_for_model_compacts_large_duplicates_before_persisting(tmp_path, monkeypatch):
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    content = "identical output\n" * 400
+    messages = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "old",
+                "type": "function",
+                "function": {"name": "exec", "arguments": '{"cmd":"pytest -q"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "old", "name": "exec", "content": content},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "new",
+                "type": "function",
+                "function": {"name": "exec", "arguments": '{"cmd":"pytest -q"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "new", "name": "exec", "content": content},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=4_000,
+        workspace=tmp_path,
+        session_key="cli:test",
+    )
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_args, **_kwargs: (0, "test"),
+    )
+
+    result = ContextGovernor().prepare_for_model(
+        _governance_config(provider, tools, spec),
+        messages,
+        set(),
+    )
+
+    assert result[2]["content"] == "[exec result omitted from context]"
+    assert result[4]["content"].startswith("[tool output persisted]")
+    assert "new.txt" in result[4]["content"]
+    assert "old.txt" not in result[2]["content"]
+    assert messages[2]["content"] == content
+    assert messages[4]["content"] == content
+
+
 def test_compact_duplicate_tool_results_skips_different_arguments():
     content = "search output\n" * 80
     messages = [
@@ -928,6 +985,27 @@ def test_compact_subagent_announcements_trims_large_result_only():
     assert "Task: inspect the project" in compacted
     assert "[Subagent result truncated for context replay.]" in compacted
     assert "Summarize this naturally for the user" in compacted
+    assert len(compacted) < len(content)
+
+
+def test_compact_subagent_announcements_uses_final_instruction_marker():
+    quoted_marker = "A fixture says: Summarize this naturally but this is result text.\n"
+    long_result = quoted_marker + ("x" * (SUBAGENT_RESULT_MAX_CHARS + 500))
+    content = (
+        "[Subagent 'research' completed successfully]\n\n"
+        "Task: inspect the project\n\n"
+        f"Result:\n{long_result}\n\n"
+        "Summarize this naturally for the user. Keep the conclusion."
+    )
+    messages = [{"role": "user", "content": content}]
+
+    result = ContextGovernor().compact_subagent_announcements(messages)
+
+    assert result is not messages
+    compacted = result[0]["content"]
+    assert quoted_marker.rstrip() in compacted
+    assert "[Subagent result truncated for context replay.]" in compacted
+    assert "Summarize this naturally for the user. Keep the conclusion." in compacted
     assert len(compacted) < len(content)
 
 

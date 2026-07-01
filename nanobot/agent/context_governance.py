@@ -70,9 +70,9 @@ class ContextGovernor:
         updated = self.drop_orphan_tool_results(messages)
         updated = self.backfill_missing_tool_results(updated)
         updated = self.compact_subagent_announcements(updated)
-        updated = self.apply_tool_result_budget(config, updated)
         updated = self.compact_duplicate_tool_results(updated)
         updated = self.compact_stale_error_tool_results(updated)
+        updated = self.apply_tool_result_budget(config, updated)
         updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
         updated = self.snip_history(config, updated)
         updated = self.drop_orphan_tool_results(updated)
@@ -493,14 +493,14 @@ class ContextGovernor:
 
         result_start = result_idx + len(result_marker)
         after_result = normalized[result_start:].lstrip()
-        instruction_marker = "summarize this naturally"
-        instruction_idx = after_result.lower().find(instruction_marker)
+        instruction_marker = "\n\nsummarize this naturally"
+        instruction_idx = after_result.lower().rfind(instruction_marker)
         if instruction_idx == -1:
             result_text = after_result.rstrip()
             instruction = ""
         else:
             result_text = after_result[:instruction_idx].rstrip()
-            instruction = after_result[instruction_idx:].lstrip()
+            instruction = after_result[instruction_idx + 2:].lstrip()
 
         if len(result_text) <= SUBAGENT_RESULT_MAX_CHARS:
             return content
