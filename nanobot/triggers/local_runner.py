@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -19,11 +20,14 @@ from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN
 async def run_local_trigger_queue(
     *,
     store: LocalTriggerStore,
-    bus: MessageBus,
+    bus: MessageBus | None = None,
+    submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None = None,
     poll_interval_s: float = 0.5,
     batch_size: int = 20,
 ) -> None:
     """Poll local trigger deliveries and publish them as normal inbound messages."""
+    if bus is None and submit_turn is None:
+        raise ValueError("run_local_trigger_queue requires bus or submit_turn")
     logger.info("Local trigger queue started")
     recovered = store.recover_processing_deliveries()
     if recovered:
@@ -39,7 +43,12 @@ async def run_local_trigger_queue(
 
         for delivery in deliveries:
             try:
-                await _publish_delivery(store, bus, delivery)
+                await _deliver_delivery(
+                    store,
+                    delivery,
+                    bus=bus,
+                    submit_turn=submit_turn,
+                )
                 store.complete_delivery(delivery)
             except asyncio.CancelledError as exc:
                 store.retry_delivery(delivery, str(exc) or exc.__class__.__name__)
@@ -79,10 +88,12 @@ class _TerminalDeliveryError(RuntimeError):
     pass
 
 
-async def _publish_delivery(
+async def _deliver_delivery(
     store: LocalTriggerStore,
-    bus: MessageBus,
     delivery: TriggerDelivery,
+    *,
+    bus: MessageBus | None,
+    submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None,
 ) -> None:
     trigger = store.get(delivery.trigger_id)
     if trigger is None:
@@ -90,16 +101,20 @@ async def _publish_delivery(
     if not trigger.enabled:
         raise _TerminalDeliveryError("trigger is disabled")
 
-    await bus.publish_inbound(
-        InboundMessage(
-            channel=trigger.channel,
-            sender_id=trigger.sender_id,
-            chat_id=trigger.chat_id,
-            content=delivery.content,
-            metadata=_delivery_metadata(trigger, delivery),
-            session_key_override=trigger.session_key,
-        )
+    msg = InboundMessage(
+        channel=trigger.channel,
+        sender_id=trigger.sender_id,
+        chat_id=trigger.chat_id,
+        content=delivery.content,
+        metadata=_delivery_metadata(trigger, delivery),
+        session_key_override=trigger.session_key,
     )
+    if submit_turn is not None:
+        await submit_turn(msg)
+    else:
+        if bus is None:
+            raise RuntimeError("bus unavailable for local trigger delivery")
+        await bus.publish_inbound(msg)
     store.record_delivery(
         trigger.id,
         status="ok",

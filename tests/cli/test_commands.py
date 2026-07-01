@@ -1986,6 +1986,118 @@ def test_gateway_bound_cron_runs_as_session_turn(
     assert msg.metadata["thread_id"] == "om_root123"
 
 
+def test_gateway_local_trigger_queue_submits_agent_turns(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    config.agents.defaults.dream.enabled = False
+    config.gateway.heartbeat.enabled = False
+    bus = MagicMock()
+    seen: dict[str, object] = {}
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: bus,
+        session_manager=lambda _workspace: _FakeSessionManager(),
+        cron_service=lambda _store_path: _FakeCronService(),
+    )
+
+    class _FakeMemory:
+        def get_latest_cursor(self) -> int:
+            return 0
+
+        def get_last_dream_cursor(self) -> int:
+            return 0
+
+        def set_last_dream_cursor(self, _cursor: int) -> None:
+            return None
+
+    class _FakeContext:
+        memory = _FakeMemory()
+
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
+        def list_sessions(self) -> list[dict[str, object]]:
+            return []
+
+    class _FakeCronService:
+        def __init__(self) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = _fake_provider()
+            self.tools = {}
+            self.context = _FakeContext()
+            self.sessions = kwargs["session_manager"]
+            self.submit_local_trigger_turn = AsyncMock()
+            seen["agent"] = self
+
+        def _schedule_background(self, _coro) -> None:
+            return None
+
+        async def run(self) -> None:
+            await asyncio.Event().wait()
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        enabled_channels: list[str] = []
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def start_all(self) -> None:
+            await asyncio.Event().wait()
+
+        async def stop_all(self) -> None:
+            return None
+
+    async def _fake_run_local_trigger_queue(**kwargs):
+        seen["local_trigger_queue_kwargs"] = kwargs
+        raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr(
+        "nanobot.triggers.local_runner.run_local_trigger_queue",
+        _fake_run_local_trigger_queue,
+    )
+
+    cli_commands._run_gateway(config, health_server_enabled=False)
+
+    agent = seen["agent"]
+    kwargs = seen["local_trigger_queue_kwargs"]
+    assert kwargs["bus"] is bus
+    assert kwargs["submit_turn"] is agent.submit_local_trigger_turn
+
+
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
