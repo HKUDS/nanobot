@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import nullcontext
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -26,7 +25,7 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     mock_prompt_session.prompt_async.return_value = "hello world"
 
     result = await commands._read_interactive_input_async()
-    
+
     assert result == "hello world"
     mock_prompt_session.prompt_async.assert_called_once()
     args, _ = mock_prompt_session.prompt_async.call_args
@@ -46,20 +45,54 @@ def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
     commands._PROMPT_SESSION = None
-    
+
     with patch("nanobot.cli.commands.PromptSession") as MockSession, \
          patch("nanobot.cli.commands.FileHistory") as MockHistory, \
          patch("pathlib.Path.home") as mock_home:
-        
+
         mock_home.return_value = MagicMock()
-        
+
         commands._init_prompt_session()
-        
+
         assert commands._PROMPT_SESSION is not None
         MockSession.assert_called_once()
         _, kwargs = MockSession.call_args
-        assert kwargs["multiline"] is False
+        # Buffer is multiline-capable so Shift+Enter / Alt+Enter can insert
+        # newlines; Enter-to-submit is restored via custom key bindings.
+        assert kwargs["multiline"] is True
         assert kwargs["enable_open_in_editor"] is False
+        assert kwargs.get("key_bindings") is not None
+
+
+def test_cli_key_bindings_enter_submits_and_alt_enter_newlines():
+    """Enter submits the buffer; Alt+Enter and Shift+Enter insert a newline."""
+    from prompt_toolkit.keys import Keys
+
+    kb = commands._build_cli_key_bindings()
+
+    def _keys(binding):
+        return tuple(getattr(k, "value", k) for k in binding.keys)
+
+    bound = {_keys(b): b for b in kb.bindings}
+
+    # Enter -> submit
+    enter = bound[(Keys.Enter.value,)]
+    buf = MagicMock()
+    enter.call(MagicMock(current_buffer=buf))
+    buf.validate_and_handle.assert_called_once()
+    buf.insert_text.assert_not_called()
+
+    # Alt+Enter (escape, enter) -> newline
+    alt_enter = bound[(Keys.Escape.value, Keys.Enter.value)]
+    buf = MagicMock()
+    alt_enter.call(MagicMock(current_buffer=buf))
+    buf.insert_text.assert_called_once_with("\n")
+
+    # ControlJ (mapped Shift+Enter on CSI-u terminals) -> newline
+    ctrl_j = bound[(Keys.ControlJ.value,)]
+    buf = MagicMock()
+    ctrl_j.call(MagicMock(current_buffer=buf))
+    buf.insert_text.assert_called_once_with("\n")
 
 
 def test_thinking_spinner_pause_stops_and_restarts():

@@ -42,6 +42,8 @@ from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
 from prompt_toolkit.application import run_in_terminal  # noqa: E402
 from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
 from prompt_toolkit.history import FileHistory  # noqa: E402
+from prompt_toolkit.key_binding import KeyBindings  # noqa: E402
+from prompt_toolkit.keys import Keys  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
@@ -282,6 +284,49 @@ def _restore_terminal() -> None:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
 
 
+def _build_cli_key_bindings() -> KeyBindings:
+    """Key bindings for the interactive prompt.
+
+    Behaviour:
+      * Enter       -> submit the current input (keeps the familiar
+                       single-line Enter-to-send feel even though the buffer
+                       is multiline-capable).
+      * Alt+Enter   -> insert a newline. Universally supported across
+                       terminal emulators, so this is the reliable way to
+                       compose multi-line input.
+      * Shift+Enter -> insert a newline *if* the terminal sends a dedicated
+                       sequence for it (kitty / iTerm2 with the CSI-u /
+                       fixterms keyboard protocol). Plain terminals collapse
+                       Shift+Enter into Enter and cannot be distinguished, in
+                       which case Alt+Enter is the fallback.
+    """
+    # prompt_toolkit has no symbolic Keys.ShiftEnter and @kb.add() rejects raw
+    # escape strings, so register the CSI-u Shift+Enter sequences against a
+    # spare key symbol (ControlJ) and bind that. Terminals that never emit
+    # these sequences simply won't trigger the binding.
+    with suppress(Exception):
+        from prompt_toolkit.input import ansi_escape_sequences as _aes
+
+        for _seq in ("\x1b[13;2u", "\x1b[27;2;13~"):
+            _aes.ANSI_SEQUENCES.setdefault(_seq, Keys.ControlJ)
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _(event):
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("escape", "enter")  # Alt+Enter / Meta+Enter
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    @kb.add(Keys.ControlJ)  # Shift+Enter on CSI-u capable terminals
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    return kb
+
+
 def _init_prompt_session() -> None:
     """Create the prompt_toolkit session with persistent file history."""
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
@@ -300,7 +345,11 @@ def _init_prompt_session() -> None:
     _PROMPT_SESSION = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
-        multiline=False,  # Enter submits (single line mode)
+        # Multiline-capable buffer; Enter still submits via the custom key
+        # bindings, while Shift+Enter (supported terminals) or Alt+Enter adds
+        # a newline.
+        multiline=True,
+        key_bindings=_build_cli_key_bindings(),
     )
 
 
