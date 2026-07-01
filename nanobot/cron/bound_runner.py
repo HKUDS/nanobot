@@ -23,6 +23,9 @@ class BoundCronAgent(Protocol):
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         ...
 
+    def delete_session(self, session_key: str) -> bool:
+        ...
+
 
 class CronRunRecorder(Protocol):
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
@@ -77,6 +80,8 @@ async def run_bound_cron_job(
     )
     prompt_ref = _cron_prompt_ref(prompt)
     run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
+    # Isolate each cron run's session so later runs don't see stale context.
+    session_key = f"{session_key}:{run_id}"
     channel, chat_id, metadata = _bound_session_delivery_context(
         job,
         turn_seed=f"cron:{job.id}",
@@ -134,6 +139,8 @@ async def run_bound_cron_job(
                 "error": error_text,
             },
         )
+        # Clean up the per-run session even on error to avoid session leaks.
+        agent.delete_session(session_key)
         raise
     finally:
         if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -148,4 +155,6 @@ async def run_bound_cron_job(
             "response": response,
         },
     )
+    # Clean up the per-run session so cron sessions don't accumulate unbounded.
+    agent.delete_session(session_key)
     return response
