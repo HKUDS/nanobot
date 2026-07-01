@@ -377,6 +377,33 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         ),
         note="MVP config starts read-only by default.",
     ),
+    McpPreset(
+        name="globalping",
+        display_name="Globalping",
+        category="network",
+        description="Run ping, traceroute, DNS, MTR, and HTTP tests from thousands of probes worldwide through Globalping's hosted MCP server.",
+        docs_url="https://github.com/jsdelivr/globalping-mcp-server",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="globalping.io",
+        brand_color="#111827",
+        requires="Network access",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            url="https://mcp.globalping.dev/mcp",
+            tool_timeout=45,
+        ),
+        fields=(
+            McpPresetField(
+                name="globalping_token",
+                label="Globalping API token",
+                target=("header", "Authorization"),
+                placeholder="Bearer <your-token>",
+                required=False,
+            ),
+        ),
+        note="Works anonymously without a token; paste a token as `Bearer <token>` in the API token field for higher rate limits.",
+    ),
 )
 
 
