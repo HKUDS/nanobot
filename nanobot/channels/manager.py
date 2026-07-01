@@ -68,8 +68,10 @@ class ChannelManager:
         *,
         session_manager: "SessionManager | None" = None,
         cron_service: Any | None = None,
+        local_trigger_store: Any | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+        webui_local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
@@ -78,8 +80,10 @@ class ChannelManager:
         self.bus = bus
         self._session_manager = session_manager
         self._cron_service = cron_service
+        self._local_trigger_store = local_trigger_store
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
+        self._webui_local_trigger_pending_ids = webui_local_trigger_pending_ids
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
@@ -139,7 +143,9 @@ class ChannelManager:
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
                         cron_service=self._cron_service,
+                        local_trigger_store=self._local_trigger_store,
                         cron_pending_job_ids=self._webui_cron_pending_job_ids,
+                        local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
                         logger=logger,
                     )
                     kwargs["gateway"] = gateway

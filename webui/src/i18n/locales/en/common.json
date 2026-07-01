@@ -493,6 +493,7 @@
       "emptyHint": "Create one from where it should run so nanobot keeps the right context.",
       "oneShot": "One-time",
       "systemTask": "System-managed automation",
+      "localTrigger": "Local trigger",
       "labels": {
         "schedule": "Schedule",
         "next": "Next",
@@ -551,11 +552,13 @@
         "weekdaysAt": "Weekdays at {{time}}",
         "hourlyAt": "Hourly at :{{minute}}",
         "hourlyWindow": "Hourly {{start}}-{{end}} at :{{minute}}",
+        "local": "Local trigger",
         "custom": "Custom schedule"
       },
       "next": {
         "paused": "Paused",
         "pending": "Running now",
+        "local": "Waiting for trigger",
         "none": "No next run"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "Every {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Local trigger",
       "unknown": "Custom schedule"
     },
     "next": {
       "label": "Next: {{time}}",
       "disabled": "Paused",
+      "local": "Waiting for trigger",
       "none": "No next run"
     }
   },
@@ -791,12 +796,14 @@
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Local trigger",
         "unknown": "Custom schedule"
       },
       "next": {
         "label": "{{time}}",
         "pending": "Runs shortly",
         "disabled": "Paused",
+        "local": "Waiting for trigger",
         "none": "No next run"
       }
     },
@@ -917,6 +924,10 @@
           "goal": {
             "title": "Long-running goal",
             "description": "Tell the agent to treat this as a sustained multi-step goal."
+          },
+          "trigger": {
+            "title": "Create local trigger",
+            "description": "Create a CLI trigger bound to this chat session."
           },
           "help": {
             "title": "Show help",

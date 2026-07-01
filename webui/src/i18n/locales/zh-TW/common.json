@@ -493,6 +493,7 @@
       "emptyHint": "請從它應該執行的來源處建立，這樣 nanobot 才能保留正確上下文。",
       "oneShot": "一次性",
       "systemTask": "系統管理的自動任務",
+      "localTrigger": "本機觸發器",
       "labels": {
         "schedule": "排程",
         "next": "下次",
@@ -551,11 +552,13 @@
         "weekdaysAt": "工作日 {{time}}",
         "hourlyAt": "每小時第 {{minute}} 分鐘",
         "hourlyWindow": "{{start}}-{{end}} 點每小時第 {{minute}} 分鐘",
+        "local": "本機觸發器",
         "custom": "自訂排程"
       },
       "next": {
         "paused": "已暫停",
         "pending": "正在執行",
+        "local": "等待觸發",
         "none": "沒有下次執行"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "本機觸發器",
       "unknown": "自訂計畫"
     },
     "next": {
       "label": "下次：{{time}}",
       "disabled": "已暫停",
+      "local": "等待觸發",
       "none": "沒有下次執行"
     }
   },
@@ -791,12 +796,14 @@
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "本機觸發器",
         "unknown": "自訂計畫"
       },
       "next": {
         "label": "下次 {{time}}",
         "pending": "即將執行",
         "disabled": "已暫停",
+        "local": "等待觸發",
         "none": "沒有下次執行"
       }
     },
@@ -907,6 +914,10 @@
           "goal": {
             "title": "長期目標",
             "description": "請助理把這則請求當成需要多步驟持續推進的目標。"
+          },
+          "trigger": {
+            "title": "建立本機觸發器",
+            "description": "建立綁定到目前聊天工作階段的 CLI 觸發器。"
           },
           "help": {
             "title": "查看說明",

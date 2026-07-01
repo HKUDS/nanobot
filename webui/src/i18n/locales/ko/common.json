@@ -493,6 +493,7 @@
       "emptyHint": "실행될 위치에서 만들면 nanobot이 올바른 컨텍스트를 유지합니다.",
       "oneShot": "일회성",
       "systemTask": "시스템 관리 자동화",
+      "localTrigger": "로컬 트리거",
       "labels": {
         "schedule": "일정",
         "next": "다음",
@@ -551,11 +552,13 @@
         "weekdaysAt": "평일 {{time}}",
         "hourlyAt": "매시간 :{{minute}}",
         "hourlyWindow": "{{start}}-{{end}} 사이 매시간 :{{minute}}",
+        "local": "로컬 트리거",
         "custom": "사용자 지정 일정"
       },
       "next": {
         "paused": "일시 중지",
         "pending": "실행 중",
+        "local": "트리거 대기 중",
         "none": "다음 실행 없음"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "{{duration}}마다",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "로컬 트리거",
       "unknown": "사용자 지정 일정"
     },
     "next": {
       "label": "다음: {{time}}",
       "disabled": "일시 중지됨",
+      "local": "트리거 대기 중",
       "none": "다음 실행 없음"
     }
   },
@@ -791,12 +796,14 @@
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "로컬 트리거",
         "unknown": "사용자 지정 일정"
       },
       "next": {
         "label": "다음 {{time}}",
         "pending": "곧 실행됨",
         "disabled": "일시 중지됨",
+        "local": "트리거 대기 중",
         "none": "다음 실행 없음"
       }
     },
@@ -907,6 +914,10 @@
           "goal": {
             "title": "장기 목표",
             "description": "에이전트에게 지속적인 다단계 목표로 처리하도록 지시합니다."
+          },
+          "trigger": {
+            "title": "로컬 트리거 만들기",
+            "description": "이 채팅 세션에 연결된 CLI 트리거를 만듭니다."
           },
           "help": {
             "title": "도움말 보기",

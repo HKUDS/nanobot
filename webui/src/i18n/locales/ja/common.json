@@ -493,6 +493,7 @@
       "emptyHint": "実行元から作成すると、nanobot が正しいコンテキストを保持できます。",
       "oneShot": "一回限り",
       "systemTask": "システム管理の自動タスク",
+      "localTrigger": "ローカルトリガー",
       "labels": {
         "schedule": "スケジュール",
         "next": "次回",
@@ -551,11 +552,13 @@
         "weekdaysAt": "平日 {{time}}",
         "hourlyAt": "毎時 :{{minute}}",
         "hourlyWindow": "{{start}}-{{end}} の毎時 :{{minute}}",
+        "local": "ローカルトリガー",
         "custom": "カスタムスケジュール"
       },
       "next": {
         "paused": "一時停止",
         "pending": "実行中",
+        "local": "トリガー待ち",
         "none": "次回実行なし"
       },
       "message": {
@@ -692,11 +695,13 @@
       "every": "{{duration}} ごと",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "ローカルトリガー",
       "unknown": "カスタムスケジュール"
     },
     "next": {
       "label": "次回: {{time}}",
       "disabled": "一時停止中",
+      "local": "トリガー待ち",
       "none": "次回実行なし"
     }
   },
@@ -791,12 +796,14 @@
         "every": "{{duration}}ごと",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "ローカルトリガー",
         "unknown": "カスタムスケジュール"
       },
       "next": {
         "label": "次回 {{time}}",
         "pending": "まもなく実行",
         "disabled": "一時停止",
+        "local": "トリガー待ち",
         "none": "次回実行なし"
       }
     },
@@ -907,6 +914,10 @@
           "goal": {
             "title": "長期目標",
             "description": "持続的な複数ステップの目標として扱うようエージェントに伝えます。"
+          },
+          "trigger": {
+            "title": "ローカルトリガーを作成",
+            "description": "このチャットセッションに紐づく CLI トリガーを作成します。"
           },
           "help": {
             "title": "ヘルプを表示",

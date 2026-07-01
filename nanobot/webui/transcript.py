@@ -17,7 +17,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
-from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.automation_turns import is_automation_history_message, is_automation_kind
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
@@ -598,9 +598,12 @@ def normalize_webui_turn_id(value: Any) -> str:
 
 def webui_message_source(metadata: dict[str, Any] | None) -> dict[str, str] | None:
     raw = (metadata or {}).get(WEBUI_MESSAGE_SOURCE_METADATA_KEY)
-    if not isinstance(raw, dict) or raw.get("kind") != "cron":
+    if not isinstance(raw, dict):
         return None
-    source: dict[str, str] = {"kind": "cron"}
+    kind = raw.get("kind")
+    if not is_automation_kind(kind):
+        return None
+    source: dict[str, str] = {"kind": kind}
     label = raw.get("label")
     if isinstance(label, str) and label.strip():
         source["label"] = label.strip()
@@ -779,6 +782,8 @@ def write_session_messages_as_transcript(
     target_chat_id = _chat_id_from_session_key(target_key)
     rows: list[dict[str, Any]] = []
     for msg in messages:
+        if is_automation_history_message(msg):
+            continue
         role = msg.get("role")
         content = msg.get("content")
         text = content if isinstance(content, str) else ""
@@ -855,7 +860,7 @@ def _session_user_event(
 ) -> dict[str, Any] | None:
     if message.get("role") != "user":
         return None
-    if message.get(CRON_HISTORY_META) is True:
+    if is_automation_history_message(message):
         return None
     content = message.get("content")
     text = content if isinstance(content, str) else ""
@@ -1271,9 +1276,12 @@ def replay_transcript_to_ui_messages(
 
     def _source_fields(rec: dict[str, Any]) -> dict[str, Any]:
         source = rec.get("source")
-        if not isinstance(source, dict) or source.get("kind") != "cron":
+        if not isinstance(source, dict):
             return {}
-        out: dict[str, Any] = {"source": {"kind": "cron"}}
+        kind = source.get("kind")
+        if not is_automation_kind(kind):
+            return {}
+        out: dict[str, Any] = {"source": {"kind": kind}}
         label = source.get("label")
         if isinstance(label, str) and label.strip():
             out["source"]["label"] = label.strip()

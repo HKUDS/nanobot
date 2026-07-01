@@ -18,6 +18,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMResponse
+from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.turn_continuation import (
@@ -33,6 +34,7 @@ from nanobot.session.webui_turns import (
     clean_generated_title,
     maybe_generate_webui_title,
 )
+from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -101,12 +103,76 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert persisted is True
     message = session.messages[-1]
     assert message["content"] == "Scheduled cron job triggered: Daily check"
+    assert message[AUTOMATION_HISTORY_META] == {
+        "kind": "cron",
+        "cron_job_id": "job-1",
+        "cron_job_name": "Daily check",
+        "cron_run_id": "job-1:1",
+        "cron_prompt_ref": prompt_ref,
+    }
     assert message[CRON_HISTORY_META] is True
     assert CRON_TRIGGER_META not in message
     assert message["cron_job_id"] == "job-1"
     assert message["cron_job_name"] == "Daily check"
     assert message["cron_run_id"] == "job-1:1"
     assert message["cron_prompt_ref"] == prompt_ref
+
+
+def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:auto")
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="websocket",
+            sender_id="trigger",
+            chat_id="auto",
+            content="Review PR #4502",
+            metadata={
+                LOCAL_TRIGGER_META: {
+                    "trigger_id": "trg_123",
+                    "trigger_name": "PR review",
+                    "delivery_id": "tdel_456",
+                    "created_at_ms": 1_700_000_000_000,
+                    "persist_content": "Local trigger received: PR review\n\nReview PR #4502",
+                }
+            },
+        ),
+        session,
+    )
+
+    assert persisted is True
+    message = session.messages[-1]
+    assert message["content"] == "Local trigger received: PR review\n\nReview PR #4502"
+    assert message[AUTOMATION_HISTORY_META] == {
+        "kind": "local_trigger",
+        "trigger_id": "trg_123",
+        "trigger_name": "PR review",
+        "trigger_delivery_id": "tdel_456",
+    }
+    assert LOCAL_TRIGGER_META not in message
+    assert message["trigger_id"] == "trg_123"
+    assert message["trigger_name"] == "PR review"
+    assert message["trigger_delivery_id"] == "tdel_456"
+
+
+@pytest.mark.asyncio
+async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat-1",
+            content="/new@nanobot_bot",
+        )
+    )
+
+    assert response is not None
+    assert response.content == "New session started."
+    session = loop.sessions.get_or_create("websocket:chat-1")
+    assert session.messages == []
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:

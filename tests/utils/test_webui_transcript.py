@@ -473,6 +473,42 @@ def test_replay_reused_turn_id_after_turn_end_starts_new_turn(tmp_path, monkeypa
     assert msgs[2]["source"] == {"kind": "cron", "label": "drink water"}
 
 
+def test_replay_preserves_local_trigger_source_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-local-trigger-source"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "t-local-trigger-source",
+            "text": "PR #4502 review started.",
+            "source": {"kind": "local_trigger", "label": "PR review"},
+        },
+    )
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert msgs[0]["source"] == {"kind": "local_trigger", "label": "PR review"}
+
+
+def test_replay_preserves_legacy_trigger_source_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-trigger-source"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "t-trigger-source",
+            "text": "PR #4502 review started.",
+            "source": {"kind": "trigger", "label": "PR review"},
+        },
+    )
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert msgs[0]["source"] == {"kind": "trigger", "label": "PR review"}
+
+
 def test_build_response_restores_session_users_for_legacy_transcript(
     tmp_path,
     monkeypatch,

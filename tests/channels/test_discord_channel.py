@@ -919,6 +919,31 @@ async def test_slash_model_forwards_optional_preset() -> None:
 
 
 @pytest.mark.asyncio
+async def test_slash_trigger_forwards_required_name() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction()
+    interaction.command.qualified_name = "trigger"
+
+    trigger_cmd = client.tree.get_command("trigger")
+    assert trigger_cmd is not None
+    await trigger_cmd.callback(interaction, name="PR review")
+
+    assert interaction.response.messages == [
+        {"content": "Processing /trigger PR review...", "ephemeral": True}
+    ]
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/trigger PR review"
+    assert handled[0]["metadata"]["is_slash_command"] is True
+
+
+@pytest.mark.asyncio
 async def test_slash_help_returns_ephemeral_help_text() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     handled: list[dict] = []
