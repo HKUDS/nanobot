@@ -2015,11 +2015,17 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 {
   "agents": {
     "defaults": {
-      "maxConcurrentSubagents": 2
+      "maxConcurrentSubagents": 2,
+      "subagentResultMode": "aggregated"
     }
   }
 }
 ```
+
+By default, each subagent result is announced as soon as it finishes. Set
+`subagentResultMode` to `aggregated` when a session can spawn several concurrent
+subagents and you want nanobot to wait until all subagents in that session finish,
+then inject one combined report.
 
 Subagents also stop immediately when one of their tools returns an execution error. That default keeps failures visible to the parent agent. If your subagent workflows use tools that can fail transiently and should be retried or worked around by the model, disable hard-stop behavior:
 
@@ -2036,6 +2042,7 @@ Subagents also stop immediately when one of their tools returns an execution err
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
+| `agents.defaults.subagentResultMode` | `realtime` | `realtime` announces each subagent result immediately. `aggregated` waits for all subagents in the same session to finish, then announces one combined result. |
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
 

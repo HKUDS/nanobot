@@ -237,6 +237,26 @@ def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
     assert loop.subagents.max_iterations == 42
 
 
+def test_agent_loop_passes_subagent_result_mode_to_subagents(tmp_path):
+    """AgentLoop should share the configured subagent result mode with spawned subagents."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        subagent_result_mode="aggregated",
+    )
+
+    assert loop.subagents.result_mode == "aggregated"
+
+
 @pytest.mark.asyncio
 async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     """Runtime max_iterations changes should be reflected before tool execution."""
