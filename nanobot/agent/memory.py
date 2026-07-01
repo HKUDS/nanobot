@@ -22,7 +22,6 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     find_legal_message_start,
-    recent_message_start_index,
     strip_think,
     truncate_text,
     truncate_text_to_tokens,
@@ -701,8 +700,20 @@ class Consolidator:
         for idx in range(start, len(session.messages)):
             message = session.messages[idx]
             if idx > start and message.get("role") == "user":
-                last_boundary = (idx, removed_tokens)
-                if removed_tokens >= tokens_to_remove:
+                boundary_idx = idx
+                boundary_tokens = removed_tokens
+                previous = session.messages[idx - 1]
+                if previous.get("_channel_delivery"):
+                    boundary_idx = idx - 1
+                    boundary_tokens = max(
+                        0,
+                        removed_tokens - estimate_message_tokens(previous),
+                    )
+                if boundary_idx <= start:
+                    removed_tokens += estimate_message_tokens(message)
+                    continue
+                last_boundary = (boundary_idx, boundary_tokens)
+                if boundary_tokens >= tokens_to_remove:
                     return last_boundary
             removed_tokens += estimate_message_tokens(message)
 
@@ -730,27 +741,25 @@ class Consolidator:
             return None
 
         tail_messages = [message for _idx, message in tail]
-        start_idx = recent_message_start_index(
+        visible_messages = Session.recent_replay_messages(
             tail_messages,
             replay_max_messages,
             extend_to_user=True,
         )
-        sliced = tail[start_idx:]
-        for i, (_idx, message) in enumerate(sliced):
-            if message.get("role") == "user":
-                start = i
-                if i > 0 and sliced[i - 1][1].get("_channel_delivery"):
-                    start = i - 1
-                sliced = sliced[start:]
-                break
 
-        legal_start = find_legal_message_start([message for _idx, message in sliced])
+        legal_start = find_legal_message_start(visible_messages)
         if legal_start:
-            sliced = sliced[legal_start:]
-        if not sliced:
+            visible_messages = visible_messages[legal_start:]
+        if not visible_messages:
             return len(session.messages)
 
-        first_visible_idx = sliced[0][0]
+        first_visible = visible_messages[0]
+        # ``recent_replay_messages`` returns references into ``tail_messages``;
+        # this identity lookup intentionally maps that visible boundary back
+        # to the original session index without relying on duplicate content.
+        first_visible_idx = next(
+            idx for idx, message in tail if message is first_visible
+        )
         if first_visible_idx <= session.last_consolidated:
             return None
         return first_visible_idx

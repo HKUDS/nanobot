@@ -327,6 +327,67 @@ def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content()
     ]
 
 
+def test_get_history_keeps_channel_delivery_before_windowed_user_reply():
+    session = Session(key="test:delivery-window")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "older task"},
+            {"role": "assistant", "content": "older answer"},
+            {
+                "role": "assistant",
+                "content": "Option 1: small fix\nOption 2: full repair",
+                "_channel_delivery": True,
+            },
+            {"role": "user", "content": "Option 2"},
+            {"role": "assistant", "content": "I'll proceed with the full repair."},
+        ]
+    )
+
+    history = session.get_history(max_messages=2)
+
+    assert [m["content"] for m in history] == [
+        "Option 1: small fix\nOption 2: full repair",
+        "Option 2",
+        "I'll proceed with the full repair.",
+    ]
+
+
+def test_get_history_keeps_channel_delivery_before_token_windowed_user_reply(monkeypatch):
+    session = Session(key="test:delivery-token-window")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "older task"},
+            {"role": "assistant", "content": "older answer"},
+            {
+                "role": "assistant",
+                "content": "Option 1: small fix\nOption 2: full repair",
+                "_channel_delivery": True,
+            },
+            {"role": "user", "content": "Option 2"},
+            {"role": "assistant", "content": "I'll proceed with the full repair."},
+        ]
+    )
+    token_map = {
+        "older task": 100,
+        "older answer": 100,
+        "Option 1: small fix\nOption 2: full repair": 100,
+        "Option 2": 20,
+        "I'll proceed with the full repair.": 20,
+    }
+    monkeypatch.setattr(
+        "nanobot.session.manager.estimate_message_tokens",
+        lambda message: token_map.get(message.get("content"), 0),
+    )
+
+    history = session.get_history(max_messages=500, max_tokens=40)
+
+    assert [m["content"] for m in history] == [
+        "Option 1: small fix\nOption 2: full repair",
+        "Option 2",
+        "I'll proceed with the full repair.",
+    ]
+
+
 def test_get_history_does_not_inject_tool_result_timestamps():
     session = Session(key="test:tool-timestamps")
     session.messages.append({"role": "user", "content": "run tool"})
