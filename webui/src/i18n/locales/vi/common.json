@@ -904,6 +904,10 @@
             "title": "Khôi phục bộ nhớ",
             "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
           },
+          "dream_prompt": {
+            "title": "Bộ nhớ Dream",
+            "description": "Cho Dream biết cách sắp xếp bộ nhớ của workspace này."
+          },
           "goal": {
             "title": "Mục tiêu dài hạn",
             "description": "Yêu cầu agent xử lý đây là mục tiêu nhiều bước kéo dài."

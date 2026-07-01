@@ -904,6 +904,10 @@
             "title": "Pulihkan memori",
             "description": "Kembalikan memori ke snapshot Dream sebelumnya."
           },
+          "dream_prompt": {
+            "title": "Memori Dream",
+            "description": "Atur cara Dream menyusun memori workspace ini."
+          },
           "goal": {
             "title": "Tujuan jangka panjang",
             "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."

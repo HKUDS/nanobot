@@ -100,6 +100,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "undo-2",
     ),
     BuiltinCommandSpec(
+        "/dream-prompt",
+        "Dream memory",
+        "Tell Dream how to organize this workspace's memory.",
+        "file-text",
+        "[init]",
+    ),
+    BuiltinCommandSpec(
         "/skill",
         "List skills",
         "List all enabled skills available to the agent.",
@@ -401,6 +408,49 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
+    """Show or set up the workspace Dream memory instructions."""
+    store = ctx.loop.context.memory
+    path = store.dream_prompt_file
+    args = ctx.args.strip().lower()
+
+    if args == "init":
+        if path.exists():
+            content = (
+                f"Dream memory instructions already exist at `{path}`.\n\n"
+                "Edit that file, or delete/empty it to return to nanobot's default."
+            )
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(store.default_dream_prompt() + "\n", encoding="utf-8")
+            content = (
+                f"Created Dream memory instructions at `{path}`.\n\n"
+                "Edit that file to teach Dream how to organize memory. "
+                "Delete or empty it to return to nanobot's default."
+            )
+    elif args:
+        content = "Usage: /dream-prompt [init]"
+    elif store.has_dream_prompt_override():
+        content = (
+            "Dream memory instructions: custom for this workspace\n\n"
+            f"- Path: `{path}`\n"
+            "- Delete or empty this file to return to nanobot's default."
+        )
+    else:
+        content = (
+            "Dream memory instructions: nanobot default\n\n"
+            f"- Editable file: `{path}`\n"
+            "- Run `/dream-prompt init` to create an editable copy."
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 def _format_dream_no_input_message() -> str:
     return "\n".join([
         "Dream has no conversation history to process yet.",
@@ -415,6 +465,7 @@ def _format_dream_no_input_message() -> str:
         "- Enable `agents.defaults.idleCompactAfterMinutes` so completed chats become Dream input automatically.",
         "- Compact the current chat into memory once that manual action is available.",
         "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
+        "- Use `/dream-prompt` to see or change how Dream organizes memory.",
     ])
 
 
@@ -501,7 +552,10 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
 
     if not git.is_initialized():
         if store.get_last_dream_cursor() == 0:
-            msg = "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle."
+            msg = (
+                "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle.\n\n"
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
+            )
         else:
             msg = "Dream history is not available because memory versioning is not initialized."
         return OutboundMessage(
@@ -532,7 +586,10 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff)
         else:
-            content = "Dream memory has no saved versions yet."
+            content = (
+                "Dream memory has no saved versions yet.\n\n"
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
+            )
 
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
@@ -757,6 +814,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/dream-prompt", cmd_dream_prompt)
+    router.prefix("/dream-prompt ", cmd_dream_prompt)
     router.exact("/skill", cmd_skill)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
