@@ -728,6 +728,7 @@ class ExecTool(Tool):
                 elif ch == "&" and not (
                     (i > 0 and command[i - 1] in "<>") or command.startswith("&>", i)
                 ):
+                    current.append(ch)
                     operator_len = 1
                 elif ch in {";", "|"}:
                     operator_len = 1

@@ -76,6 +76,15 @@ def test_guard_allow_patterns_block_single_ampersand_chained_segment():
     assert "allowlist" in result.lower()
 
 
+def test_guard_allow_patterns_preserve_trailing_background_operator():
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted"])
+
+    result = tool._guard_command("echo allowlisted &", "/tmp")
+
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
 def test_guard_allow_patterns_keep_fd_redirection_ampersand():
     tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s+2>&1"])
 
