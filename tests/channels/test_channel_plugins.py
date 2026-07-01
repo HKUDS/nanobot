@@ -10,8 +10,10 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    ProgressEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
+    StreamEndEvent,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -771,6 +773,134 @@ async def test_send_with_retry_calls_send_delta():
     await mgr._send_with_retry(mgr.channels["streaming"], msg)
 
     assert send_delta_called is True
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_supports_legacy_stream_delta_signature():
+    """External plugins with the old send_delta signature should keep working."""
+    calls: list[tuple[str, str, dict]] = []
+
+    class _LegacyStreamingChannel(BaseChannel):
+        name = "legacy_streaming"
+        display_name = "Legacy Streaming"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+        async def send_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+        ) -> None:
+            calls.append((chat_id, delta, dict(metadata or {})))
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"legacy_streaming": _LegacyStreamingChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    await mgr._send_with_retry(
+        mgr.channels["legacy_streaming"],
+        outbound_message_for_event(
+            channel="legacy_streaming",
+            chat_id="123",
+            event=StreamDeltaEvent(content="hello", stream_id="s1"),
+        ),
+    )
+    await mgr._send_with_retry(
+        mgr.channels["legacy_streaming"],
+        outbound_message_for_event(
+            channel="legacy_streaming",
+            chat_id="123",
+            event=StreamEndEvent(content="", stream_id="s1", resuming=True),
+        ),
+    )
+
+    assert calls == [
+        ("123", "hello", {"_stream_id": "s1", "_stream_delta": True}),
+        ("123", "", {"_stream_id": "s1", "_stream_end": True}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_supports_legacy_reasoning_signature():
+    """External plugins with the old reasoning hook signature should keep working."""
+    deltas: list[tuple[str, str, dict]] = []
+    ends: list[tuple[str, dict]] = []
+
+    class _LegacyReasoningChannel(BaseChannel):
+        name = "legacy_reasoning"
+        display_name = "Legacy Reasoning"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+        async def send_reasoning_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+        ) -> None:
+            deltas.append((chat_id, delta, dict(metadata or {})))
+
+        async def send_reasoning_end(
+            self,
+            chat_id: str,
+            metadata: dict | None = None,
+        ) -> None:
+            ends.append((chat_id, dict(metadata or {})))
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"legacy_reasoning": _LegacyReasoningChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    await mgr._send_with_retry(
+        mgr.channels["legacy_reasoning"],
+        outbound_message_for_event(
+            channel="legacy_reasoning",
+            chat_id="123",
+            event=ProgressEvent(content="thinking", reasoning_delta=True, stream_id="r1"),
+        ),
+    )
+    await mgr._send_with_retry(
+        mgr.channels["legacy_reasoning"],
+        outbound_message_for_event(
+            channel="legacy_reasoning",
+            chat_id="123",
+            event=ProgressEvent(reasoning_end=True, stream_id="r1"),
+        ),
+    )
+
+    assert deltas == [
+        ("123", "thinking", {"_reasoning_delta": True, "_stream_id": "r1"}),
+    ]
+    assert ends == [
+        ("123", {"_reasoning_end": True, "_stream_id": "r1"}),
+    ]
 
 
 @pytest.mark.asyncio
