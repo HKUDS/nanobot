@@ -140,6 +140,29 @@ async def test_xterm_modifyotherkeys_shift_enter_inserts_newline():
     assert result == "foo\nbar"
 
 
+@pytest.mark.asyncio
+async def test_alt_enter_inserts_newline_on_lf_terminals():
+    """On LF-as-Enter terminals (WSL), Alt+Enter arrives as ESC + LF
+    ("\\x1b\\x0a" = Escape + ControlJ) rather than the ESC + CR that the
+    "escape","enter" binding matches. Without a dedicated ESC + ControlJ
+    binding the Escape is swallowed and the bare LF submits, so the documented
+    Alt+Enter newline fallback breaks on exactly the terminal path plain Enter
+    is preserved for. Drive a real PromptSession to prove it inserts a newline.
+    """
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("foo\x1b\x0abar\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "foo\nbar"
+
+
 def test_thinking_spinner_pause_stops_and_restarts():
     """Pause should stop the active spinner and restart it afterward."""
     spinner = MagicMock()
