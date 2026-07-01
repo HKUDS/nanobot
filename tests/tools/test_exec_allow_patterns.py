@@ -67,6 +67,23 @@ def test_guard_allow_patterns_block_non_matching_chained_segment():
     assert "allowlist" in result.lower()
 
 
+def test_guard_allow_patterns_block_single_ampersand_chained_segment():
+    """A backgrounded command is also a top-level shell segment."""
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted.*"])
+
+    result = tool._guard_command("echo allowlisted & touch /tmp/evil", "/tmp")
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
+def test_guard_allow_patterns_keep_fd_redirection_ampersand():
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s+2>&1"])
+
+    result = tool._guard_command("echo allowlisted 2>&1", "/tmp")
+
+    assert result is None
+
+
 def test_deny_patterns_search_original_command_with_quoted_hash():
     """Deny checks must still inspect text after a quoted hash."""
     tool = ExecTool(deny_patterns=[r"\brm\s+-rf\s+/"])

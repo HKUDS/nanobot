@@ -725,6 +725,11 @@ class ExecTool(Tool):
             if paren_depth == 0:
                 if command.startswith(("&&", "||"), i):
                     operator_len = 2
+                elif ch == "&":
+                    prev_ch = command[i - 1] if i > 0 else ""
+                    next_ch = command[i + 1] if i + 1 < len(command) else ""
+                    if prev_ch not in {"<", ">"} and next_ch != ">":
+                        operator_len = 1
                 elif ch in {";", "|"}:
                     operator_len = 1
 
