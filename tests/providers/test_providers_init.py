@@ -27,6 +27,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
         "LLMProvider",
         "LLMResponse",
         "AnthropicProvider",
+        "AnthropicOAuthProvider",
         "OpenAICompatProvider",
         "OpenAICodexProvider",
         "GitHubCopilotProvider",

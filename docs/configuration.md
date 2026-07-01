@@ -283,6 +283,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `nvidia` | LLM (NVIDIA NIM) | [build.nvidia.com](https://build.nvidia.com/) |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
+| `anthropic_oauth` | LLM (Claude, OAuth) | `claude setup-token`, then `nanobot provider login anthropic-oauth` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
@@ -688,6 +689,51 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+
+<details>
+<summary><b>Anthropic OAuth (Claude Pro/Max/Team/Enterprise)</b></summary>
+
+Anthropic OAuth uses a Claude Code subscription token instead of an Anthropic Console API key. Generate a token with Claude Code, then either set it as `CLAUDE_CODE_OAUTH_TOKEN` or store it in nanobot's OAuth storage. No `providers.anthropicOauth` block is needed in `config.json`.
+
+**1. Generate a token with Claude Code:**
+```bash
+claude setup-token
+```
+
+**2. Configure nanobot:**
+```bash
+# Option A: store the token in nanobot's local OAuth storage
+nanobot provider login anthropic-oauth
+
+# Option B: provide it as an environment variable instead
+export CLAUDE_CODE_OAUTH_TOKEN="oauth_..."
+```
+
+**3. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "modelPresets": {
+    "claude-oauth": {
+      "provider": "anthropic_oauth",
+      "model": "anthropic-oauth/claude-sonnet-4-20250514",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "claude-oauth"
+    }
+  }
+}
+```
+
+`claude setup-token` prints a long-lived token for scripts and CI; it does not save the token automatically. nanobot intentionally does not read Claude Code's private `~/.claude` credential files because their format is not a public third-party API.
+
+> Docker users: pass `CLAUDE_CODE_OAUTH_TOKEN` into the container, or use `docker run -it` for `nanobot provider login anthropic-oauth`.
 
 </details>
 

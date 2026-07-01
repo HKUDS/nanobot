@@ -35,7 +35,7 @@ class ProviderSpec:
     model_catalog: str = "auto"  # WebUI model-list source
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
+    # "openai_compat" | "anthropic" | "anthropic_oauth" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars / request headers supplied by the provider integration.
@@ -352,6 +352,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
         is_oauth=True,
+    ),
+    # Anthropic OAuth: Claude Code Pro/Max/Team/Enterprise token
+    ProviderSpec(
+        name="anthropic_oauth",
+        keywords=("anthropic-oauth", "anthropic_oauth", "claude-code-oauth"),
+        env_key="CLAUDE_CODE_OAUTH_TOKEN",
+        display_name="Anthropic OAuth",
+        backend="anthropic_oauth",
+        is_oauth=True,
+        supports_prompt_caching=True,
     ),
     # GitHub Copilot: OAuth-based
     ProviderSpec(
