@@ -20,6 +20,11 @@ def configured_model_presets(config: Any) -> dict[str, ModelPresetConfig]:
     return {**config.model_presets, "default": config.resolve_default_preset()}
 
 
+def configured_spawn_presets(config: Any) -> dict[str, ModelPresetConfig]:
+    presets = configured_model_presets(config)
+    return {name: presets[name] for name in config.agents.defaults.spawn_presets if name in presets}
+
+
 def make_preset_snapshot_loader(
     config: Any,
     provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
