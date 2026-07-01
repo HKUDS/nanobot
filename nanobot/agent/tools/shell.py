@@ -9,7 +9,7 @@ import shutil
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from loguru import logger
@@ -471,9 +471,9 @@ class ExecTool(Tool):
             # Default to PowerShell so single-line and multi-line commands
             # share the same shell semantics.  cmd.exe is reachable via the
             # explicit shell="cmd" parameter (see _resolve_shell).
-            default_program = shutil.which("powershell") or "powershell"
+            default_program = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
             program = shell_program or default_program
-            program_name = Path(program).name.lower()
+            program_name = PureWindowsPath(program).name.lower()
             if program_name in ("cmd", "cmd.exe"):
                 return await asyncio.create_subprocess_shell(
                     command,
@@ -484,7 +484,7 @@ class ExecTool(Tool):
                     env=env,
                 )
             return await asyncio.create_subprocess_exec(
-                program, "-NoProfile", "-Command", command,
+                program, "-NoProfile", "-NonInteractive", "-Command", command,
                 stdin=stdin,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
