@@ -9,7 +9,7 @@ import shutil
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from loguru import logger
@@ -89,7 +89,15 @@ class _PreparedCommand:
             maximum=600,
         ),
         shell=StringSchema(
-            "Optional shell binary to launch. On Unix, supports sh, bash, or zsh.",
+            (
+                "Override the Windows shell only when needed. Omit to use "
+                "PowerShell by default (pwsh when available, else powershell). "
+                "Pass 'cmd' only for cmd.exe syntax or cmd built-ins."
+                if _IS_WINDOWS
+                else "Override the Unix shell only when needed. Omit to use "
+                "bash by default. Pass 'sh' for POSIX sh or 'zsh' for "
+                "zsh-specific syntax."
+            ),
             nullable=True,
         ),
         login=BooleanSchema(
@@ -227,6 +235,13 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
+        platform_note = (
+            "On Windows, use PowerShell syntax by default; pass shell='cmd' "
+            "only for cmd-specific commands. "
+            if _IS_WINDOWS
+            else "On Unix, commands run through bash by default; pass shell='sh' "
+            "or shell='zsh' when needed. "
+        )
         return (
             "Execute a shell command and return its output. "
             "Use this for tests, builds, package commands, git commands, and "
@@ -234,6 +249,7 @@ class ExecTool(Tool):
             "inspection and apply_patch/write_file/edit_file for file changes "
             "instead of cat, shell find/grep, echo, or sed. "
             "Use -y or --yes flags to avoid interactive prompts. "
+            f"{platform_note}"
             "For long-running or interactive commands, pass yield_time_ms; "
             "if the command keeps running, exec returns a session_id that can "
             "be polled or written to with write_stdin. Output is truncated at "
@@ -468,17 +484,23 @@ class ExecTool(Tool):
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
-            if "\n" in command:
+            # Default to PowerShell so single-line and multi-line commands
+            # share the same shell semantics.  cmd.exe is reachable via the
+            # explicit shell="cmd" parameter (see _resolve_shell).
+            default_program = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+            program = shell_program or default_program
+            program_name = PureWindowsPath(program).name.lower()
+            if program_name in ("cmd", "cmd.exe"):
                 return await asyncio.create_subprocess_exec(
-                    "powershell", "-NoProfile", "-Command", command,
+                    program, "/c", command,
                     stdin=stdin,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
                     env=env,
                 )
-            return await asyncio.create_subprocess_shell(
-                command,
+            return await asyncio.create_subprocess_exec(
+                program, "-NoProfile", "-NonInteractive", "-Command", command,
                 stdin=stdin,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -504,10 +526,33 @@ class ExecTool(Tool):
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:
         if not shell:
             return None, None
-        if _IS_WINDOWS:
-            return None, ToolResult.error("Error: shell parameter is not supported on Windows")
         if "\0" in shell or "\n" in shell or "\r" in shell:
             return None, ToolResult.error("Error: shell contains invalid characters")
+        if _IS_WINDOWS:
+            win_allowed = {"powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"}
+            path = Path(shell).expanduser()
+            if path.is_absolute():
+                name = path.name.lower()
+                if name not in win_allowed:
+                    return None, ToolResult.error(
+                        f"Error: unsupported shell {shell!r}. "
+                        "Allowed: powershell, pwsh, cmd"
+                    )
+                if not path.is_file():
+                    return None, ToolResult.error(f"Error: shell is not found: {shell}")
+                return str(path), None
+            if "/" in shell or "\\" in shell:
+                return None, ToolResult.error("Error: shell must be a shell name or absolute path")
+            if shell.lower() not in win_allowed:
+                return None, ToolResult.error(
+                    f"Error: unsupported shell {shell!r}. "
+                    "Allowed: powershell, pwsh, cmd"
+                )
+            if shell.lower() in ("cmd", "cmd.exe"):
+                resolved = os.environ.get("COMSPEC") or shutil.which("cmd") or "cmd"
+                return resolved, None
+            resolved = shutil.which(shell) or shell
+            return resolved, None
         allowed = {"sh", "bash", "zsh"}
         path = Path(shell).expanduser()
         if path.is_absolute():

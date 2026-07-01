@@ -6,6 +6,7 @@ platform-specific binaries (all subprocess calls are mocked).
 """
 
 import asyncio
+import shutil
 import sys
 from unittest.mock import AsyncMock, patch
 
@@ -116,32 +117,38 @@ class TestSpawnUnix:
 class TestSpawnWindows:
 
     @pytest.mark.asyncio
-    async def test_single_line_uses_shell(self):
+    async def test_single_line_uses_powershell(self):
+        """Single-line commands on Windows now route through PowerShell."""
         env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
         ):
-            mock_shell.return_value = AsyncMock()
+            mock_exec.return_value = AsyncMock()
             await ExecTool._spawn("dir", r"C:\work", env)
 
-        args = mock_shell.call_args[0]
-        assert "dir" in args
+        args = mock_exec.call_args[0]
+        assert any(shell in args[0].lower() for shell in ("pwsh", "powershell"))
+        assert "-NoProfile" in args
+        assert "-NonInteractive" in args
+        assert "-Command" in args
+        assert "dir" in args[-1]
 
-        kwargs = mock_shell.call_args[1]
+        kwargs = mock_exec.call_args[1]
         assert kwargs["stdin"] == asyncio.subprocess.DEVNULL
 
     @pytest.mark.asyncio
     async def test_single_line_passes_cwd_and_env(self):
+        """PowerShell should receive cwd and env from the caller."""
         env = {"PATH": "/usr/bin"}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
         ):
-            mock_shell.return_value = AsyncMock()
+            mock_exec.return_value = AsyncMock()
             await ExecTool._spawn("echo hi", r"C:\work", env)
 
-        kwargs = mock_shell.call_args[1]
+        kwargs = mock_exec.call_args[1]
         assert kwargs["cwd"] == r"C:\work"
         assert kwargs["env"] == env
 
@@ -156,8 +163,9 @@ class TestSpawnWindows:
             await ExecTool._spawn('python -c "print(1)\nprint(2)"', r"C:\work", env)
 
         args = mock_exec.call_args[0]
-        assert args[0] == "powershell"
+        assert any(shell in args[0].lower() for shell in ("pwsh", "powershell"))
         assert "-NoProfile" in args
+        assert "-NonInteractive" in args
         assert "-Command" in args
         assert "print(1)" in args[-1]
         assert "print(2)" in args[-1]
@@ -165,6 +173,47 @@ class TestSpawnWindows:
         kwargs = mock_exec.call_args[1]
         assert kwargs["cwd"] == r"C:\work"
         assert kwargs["env"] == env
+
+    @pytest.mark.asyncio
+    async def test_explicit_cmd_shell_uses_cmd_c(self):
+        """Explicit shell='cmd' should launch the resolved cmd.exe with /c."""
+        env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn(
+                "dir", r"C:\work", env,
+                shell_program=r"C:\Windows\system32\cmd.exe",
+            )
+
+        args = mock_exec.call_args[0]
+        assert args[:3] == (r"C:\Windows\system32\cmd.exe", "/c", "dir")
+        kwargs = mock_exec.call_args[1]
+        assert kwargs["cwd"] == r"C:\work"
+
+    @pytest.mark.asyncio
+    async def test_prefers_pwsh_when_available(self):
+        env = {"PATH": ""}
+
+        def fake_which(command):
+            if command == "pwsh":
+                return r"C:\Program Files\PowerShell\7\pwsh.exe"
+            if command == "powershell":
+                return r"C:\Windows\system32\WindowsPowerShell\v1.0\powershell.exe"
+            return None
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("nanobot.agent.tools.shell.shutil.which", side_effect=fake_which),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn("dir", r"C:\work", env)
+
+        args = mock_exec.call_args[0]
+        assert "pwsh" in args[0].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +537,7 @@ class TestExtractAbsolutePaths:
 # ---------------------------------------------------------------------------
 
 class TestWindowsMultilineExec:
-    """Verify multi-line commands on Windows route through PowerShell."""
+    """Verify commands on Windows route through PowerShell (now the default)."""
 
     @pytest.mark.asyncio
     async def test_multiline_python_uses_powershell(self):
@@ -509,7 +558,7 @@ class TestWindowsMultilineExec:
         assert "2" in result
         assert "Exit code: 0" in result
         args = mock_exec.call_args[0]
-        assert args[0] == "powershell"
+        assert any(shell in args[0].lower() for shell in ("pwsh", "powershell"))
 
     @pytest.mark.asyncio
     async def test_multiline_node_uses_powershell(self):
@@ -528,10 +577,11 @@ class TestWindowsMultilineExec:
 
         assert "1" in result
         args = mock_exec.call_args[0]
-        assert args[0] == "powershell"
+        assert any(shell in args[0].lower() for shell in ("pwsh", "powershell"))
 
     @pytest.mark.asyncio
-    async def test_single_line_uses_shell(self):
+    async def test_single_line_uses_powershell(self):
+        """Single-line commands also route through PowerShell now."""
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"1\n", b"")
         mock_proc.returncode = 0
@@ -563,3 +613,77 @@ class TestWindowsMultilineExec:
 
         assert "1" in result
         mock_spawn.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _resolve_shell — Windows support
+# ---------------------------------------------------------------------------
+
+class TestResolveShellWindows:
+    """shell parameter is now accepted on Windows."""
+
+    @pytest.mark.asyncio
+    async def test_shell_powershell_accepted(self):
+        """shell='powershell' should resolve and route through PowerShell."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"hello\n", b"")
+        mock_proc.returncode = 0
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            mock_exec.return_value = mock_proc
+            tool = ExecTool()
+            result = await tool.execute(command="echo hello", shell="powershell")
+
+        assert "hello" in result
+        args = mock_exec.call_args[0]
+        assert "powershell" in args[0].lower()
+        assert "-NonInteractive" in args
+
+    @pytest.mark.asyncio
+    async def test_shell_cmd_accepted(self):
+        """shell='cmd' should use the resolved cmd.exe with /c."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"hello\n", b"")
+        mock_proc.returncode = 0
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            mock_exec.return_value = mock_proc
+            tool = ExecTool()
+            result = await tool.execute(command="echo hello", shell="cmd")
+
+        assert "hello" in result
+        args = mock_exec.call_args[0]
+        assert args[1:3] == ("/c", "echo hello")
+
+    @pytest.mark.asyncio
+    async def test_shell_bash_rejected_on_windows(self):
+        """shell='bash' should still be rejected on Windows."""
+        with patch("nanobot.agent.tools.shell._IS_WINDOWS", True):
+            tool = ExecTool()
+            result = await tool.execute(command="echo hello", shell="bash")
+
+        assert "Error: unsupported shell" in result
+        assert "Allowed: powershell, pwsh, cmd" in result
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" or shutil.which("pwsh") is None,
+    reason="requires Windows with PowerShell 7",
+)
+class TestWindowsRealExec:
+
+    @pytest.mark.asyncio
+    async def test_single_line_and_separator_uses_pwsh(self):
+        result = await ExecTool(timeout=10).execute(command="echo before && echo after")
+
+        assert "before" in result
+        assert "after" in result
+        assert "Exit code: 0" in result
