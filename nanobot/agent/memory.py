@@ -505,6 +505,102 @@ class MemoryStore:
         prompt = f"{template}\n\n## Conversation History\n{history_text}"
         return (prompt, batch[-1]["cursor"])
 
+
+class _DreamSkillWriteGuard:
+    """Wrapper that blocks Dream from creating duplicate skill directories.
+
+    When Dream tries to write ``skills/<name>/SKILL.md`` and a similar skill
+    already exists, the guard returns an error directing Dream to edit the
+    existing skill instead.
+    """
+
+    def __init__(self, inner: Any, skills_dir: Path) -> None:
+        self._inner = inner
+        self._skills_dir = skills_dir
+
+    # --- delegate Tool interface to inner ----------------------------------
+    @property
+    def name(self) -> str:
+        return self._inner.name
+
+    @property
+    def description(self) -> str:
+        return self._inner.description
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return self._inner.parameters
+
+    @property
+    def read_only(self) -> bool:
+        return self._inner.read_only
+
+    @property
+    def concurrency_safe(self) -> bool:
+        return self._inner.concurrency_safe
+
+    @property
+    def exclusive(self) -> bool:
+        return self._inner.exclusive
+
+    _scopes = {"core", "subagent", "memory"}
+
+    async def execute(self, **kwargs: Any) -> str:
+        path: str | None = kwargs.get("path")
+        if path and self._is_skill_creation(path):
+            conflict = self._check_conflict(path)
+            if conflict:
+                return (
+                    f"Error: A similar skill '{conflict}' already exists at "
+                    f"skills/{conflict}/SKILL.md. Do NOT create a new skill. "
+                    f"Instead, read the existing skill with read_file and merge "
+                    f"your changes into it using edit_file or apply_patch."
+                )
+        return await self._inner.execute(**kwargs)
+
+    def _is_skill_creation(self, path: str) -> bool:
+        """True if *path* targets a SKILL.md inside a skills/ subdirectory."""
+        parts = Path(path).parts
+        return (
+            len(parts) >= 3
+            and parts[0] == "skills"
+            and parts[-1] == "SKILL.md"
+        )
+
+    def _check_conflict(self, path: str) -> str | None:
+        new_name = Path(path).parts[1]
+        existing = _DreamSkillWriteGuard._existing_skill_names(self._skills_dir)
+        return _DreamSkillWriteGuard._skill_name_conflicts(new_name, existing)
+
+    @staticmethod
+    def _existing_skill_names(skills_dir: Path) -> list[str]:
+        """Return lowercase names of existing workspace skills."""
+        if not skills_dir.is_dir():
+            return []
+        return [
+            d.name.lower()
+            for d in skills_dir.iterdir()
+            if d.is_dir() and (d / "SKILL.md").is_file()
+        ]
+
+    @staticmethod
+    def _skill_name_conflicts(new_name: str, existing: list[str]) -> str | None:
+        """Return the existing skill name if *new_name* would duplicate one."""
+        low = new_name.lower()
+        for name in existing:
+            if low == name:
+                return name
+            # prefix/suffix: "deploy" matches "deploy-workflow"
+            if low.startswith(name + "-") or name.startswith(low + "-"):
+                return name
+            # word overlap: "web-deploy" matches "deploy-staging"
+            new_words = set(low.replace("_", "-").split("-"))
+            old_words = set(name.replace("_", "-").split("-"))
+            shared = new_words & old_words - {"skill", "tool", "util", "helper"}
+            if len(shared) >= 2:
+                return name
+        return None
+
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -540,11 +636,17 @@ class MemoryStore:
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
-        tools.register(WriteFileTool(
+
+        # Wrap WriteFileTool with a dedup guard so Dream merges into existing
+        # skills instead of creating redundant siblings.
+        inner_write = WriteFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
             file_states=file_states,
-        ))
+        )
+        guard = _DreamSkillWriteGuard(inner_write, skills_dir)
+        tools.register(guard)
+
         return tools
 
     @staticmethod
