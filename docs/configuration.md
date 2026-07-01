@@ -2038,6 +2038,11 @@ Subagents also stop immediately when one of their tools returns an execution err
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
+The `spawn` tool also accepts an optional `model` parameter for a single
+subagent run. When omitted, the subagent inherits the current agent model. When
+provided, only that subagent uses the requested model; the parent agent's active
+model is not changed.
+
 
 ## Auto Compact
 

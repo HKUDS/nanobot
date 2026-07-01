@@ -18,6 +18,10 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        model=StringSchema(
+            "Optional model identifier for this subagent run. "
+            "When omitted, the subagent inherits the current agent model."
+        ),
         temperature=NumberSchema(
             description=(
                 "Optional sampling temperature for the subagent "
@@ -73,6 +77,7 @@ class SpawnTool(Tool, ContextAware):
         task: str,
         label: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -84,13 +89,17 @@ class SpawnTool(Tool, ContextAware):
                 f"({running}/{limit} running). Wait for a running subagent "
                 f"to complete before spawning a new one."
             )
-        return await self._manager.spawn(
-            task=task,
-            label=label,
-            origin_channel=self._origin_channel.get(),
-            origin_chat_id=self._origin_chat_id.get(),
-            session_key=self._session_key.get(),
-            origin_message_id=self._origin_message_id.get(),
-            temperature=temperature,
-            workspace_scope=current_workspace_scope(),
-        )
+        spawn_kwargs: dict[str, Any] = {
+            "task": task,
+            "label": label,
+            "origin_channel": self._origin_channel.get(),
+            "origin_chat_id": self._origin_chat_id.get(),
+            "session_key": self._session_key.get(),
+            "origin_message_id": self._origin_message_id.get(),
+            "temperature": temperature,
+            "workspace_scope": current_workspace_scope(),
+        }
+        if isinstance(model, str) and model.strip():
+            spawn_kwargs["model"] = model
+
+        return await self._manager.spawn(**spawn_kwargs)
