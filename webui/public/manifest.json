@@ -1,0 +1,33 @@
+{
+  "name": "nanobot",
+  "short_name": "nanobot",
+  "description": "nanobot AI assistant",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#161618",
+  "theme_color": "#161618",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/brand/nanobot_apple_touch.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/nanobot_icon_192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/nanobot_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/nanobot_icon_maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
