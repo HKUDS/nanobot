@@ -18,6 +18,7 @@ from loguru import logger
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, CompositeHook
@@ -225,6 +226,7 @@ class AgentLoop:
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
+        local_trigger_store: Any | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -272,6 +274,7 @@ class AgentLoop:
         ):
             self._image_generation_provider_configs["openrouter"] = image_generation_provider_config
         self.cron_service = cron_service
+        self.local_trigger_store = local_trigger_store
         self.restrict_to_workspace = restrict_to_workspace
         self.workspace_scopes = WorkspaceScopeResolver(
             default_workspace=workspace,
@@ -316,15 +319,22 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
+        self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
             dispatch=self._dispatch,
             is_running=lambda: self._running,
+            deferred_queues=self._deferred_automation_turns,
         )
         self._local_trigger_turns = LocalTriggerTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
             dispatch=self._dispatch,
             is_running=lambda: self._running,
+            deferred_queues=self._deferred_automation_turns,
+        )
+        self._automation_turn_coordinators = (
+            ("cron", self._cron_turns),
+            ("local trigger", self._local_trigger_turns),
         )
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
@@ -605,9 +615,11 @@ class AgentLoop:
         return self._local_trigger_turns.pending_trigger_ids_for_session(session_key)
 
     async def _publish_next_deferred_automation_turn(self, session_key: str) -> None:
-        if await self._cron_turns.publish_next_deferred(session_key):
-            return
-        await self._local_trigger_turns.publish_next_deferred(session_key)
+        await publish_next_deferred_turn(
+            deferred_queues=self._deferred_automation_turns,
+            publish_inbound=self.bus.publish_inbound,
+            session_key=session_key,
+        )
 
     def _persist_user_message_early(
         self,
@@ -938,25 +950,21 @@ class AgentLoop:
                         self.commands.dispatch_priority,
                     )
                     continue
-                if self._cron_turns.defer_if_active(
-                    msg,
-                    session_key=effective_key,
-                    active_session_keys=self._pending_queues.keys(),
-                ):
-                    logger.info(
-                        "Deferred cron turn for active session {}",
-                        effective_key,
-                    )
-                    continue
-                if self._local_trigger_turns.defer_if_active(
-                    msg,
-                    session_key=effective_key,
-                    active_session_keys=self._pending_queues.keys(),
-                ):
-                    logger.info(
-                        "Deferred local trigger turn for active session {}",
-                        effective_key,
-                    )
+                deferred = False
+                for label, coordinator in self._automation_turn_coordinators:
+                    if coordinator.defer_if_active(
+                        msg,
+                        session_key=effective_key,
+                        active_session_keys=self._pending_queues.keys(),
+                    ):
+                        logger.info(
+                            "Deferred {} turn for active session {}",
+                            label,
+                            effective_key,
+                        )
+                        deferred = True
+                        break
+                if deferred:
                     continue
                 # If this session already has an active pending queue (i.e. a task
                 # is processing this session), route the message there for mid-turn
@@ -1079,17 +1087,11 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
-                    self._cron_turns.complete(msg, response=response)
-                    self._local_trigger_turns.complete(msg, response=response)
+                    for _, coordinator in self._automation_turn_coordinators:
+                        coordinator.complete(msg, response=response)
                 except asyncio.CancelledError:
-                    self._cron_turns.complete(
-                        msg,
-                        error=asyncio.CancelledError(),
-                    )
-                    self._local_trigger_turns.complete(
-                        msg,
-                        error=asyncio.CancelledError(),
-                    )
+                    for _, coordinator in self._automation_turn_coordinators:
+                        coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
@@ -1128,8 +1130,8 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
-                    self._cron_turns.complete(msg, error=exc)
-                    self._local_trigger_turns.complete(msg, error=exc)
+                    for _, coordinator in self._automation_turn_coordinators:
+                        coordinator.complete(msg, error=exc)
                 finally:
                     # Drain any messages still in the pending queue and re-publish
                     # them to the bus so they are processed as fresh inbound messages
@@ -1481,7 +1483,7 @@ class AgentLoop:
             # message.  Mark messages with _command so get_history can filter
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.
-            if raw.lower() != "/new":
+            if cmd_ctx.raw.lower() != "/new":
                 ctx.user_persisted_early = self._persist_user_message_early(
                     ctx.msg, ctx.session, _command=True
                 )

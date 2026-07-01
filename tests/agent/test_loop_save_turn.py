@@ -134,6 +134,7 @@ def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path
                     "trigger_name": "PR review",
                     "delivery_id": "tdel_456",
                     "created_at_ms": 1_700_000_000_000,
+                    "persist_content": "Local trigger received: PR review\n\nReview PR #4502",
                 }
             },
         ),
@@ -142,8 +143,7 @@ def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path
 
     assert persisted is True
     message = session.messages[-1]
-    assert message["content"] == "Local trigger received: PR review"
-    assert "Review PR #4502" not in message["content"]
+    assert message["content"] == "Local trigger received: PR review\n\nReview PR #4502"
     assert message[AUTOMATION_HISTORY_META] == {
         "kind": "local_trigger",
         "trigger_id": "trg_123",
@@ -154,6 +154,25 @@ def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path
     assert message["trigger_id"] == "trg_123"
     assert message["trigger_name"] == "PR review"
     assert message["trigger_delivery_id"] == "tdel_456"
+
+
+@pytest.mark.asyncio
+async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat-1",
+            content="/new@nanobot_bot",
+        )
+    )
+
+    assert response is not None
+    assert response.content == "New session started."
+    session = loop.sessions.get_or_create("websocket:chat-1")
+    assert session.messages == []
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:

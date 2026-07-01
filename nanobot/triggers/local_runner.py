@@ -9,8 +9,8 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
@@ -20,14 +20,13 @@ from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN
 async def run_local_trigger_queue(
     *,
     store: LocalTriggerStore,
-    bus: MessageBus | None = None,
     submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None = None,
     poll_interval_s: float = 0.5,
     batch_size: int = 20,
 ) -> None:
-    """Poll local trigger deliveries and publish them as normal inbound messages."""
-    if bus is None and submit_turn is None:
-        raise ValueError("run_local_trigger_queue requires bus or submit_turn")
+    """Poll local trigger deliveries and submit them as session turns."""
+    if submit_turn is None:
+        raise ValueError("run_local_trigger_queue requires submit_turn")
     logger.info("Local trigger queue started")
     recovered = store.recover_processing_deliveries()
     if recovered:
@@ -46,7 +45,6 @@ async def run_local_trigger_queue(
                 await _deliver_delivery(
                     store,
                     delivery,
-                    bus=bus,
                     submit_turn=submit_turn,
                 )
                 store.complete_delivery(delivery)
@@ -66,6 +64,21 @@ async def run_local_trigger_queue(
                     delivery.id,
                     delivery.trigger_id,
                     exc,
+                )
+            except AutomationTurnError as exc:
+                error = str(exc) or exc.__class__.__name__
+                store.record_delivery(
+                    delivery.trigger_id,
+                    status="error",
+                    error=error,
+                    run_at_ms=delivery.created_at_ms,
+                )
+                store.complete_delivery(delivery)
+                logger.warning(
+                    "Trigger: delivery {} for {} reached the agent but failed: {}",
+                    delivery.id,
+                    delivery.trigger_id,
+                    error,
                 )
             except Exception as exc:
                 error = str(exc) or exc.__class__.__name__
@@ -92,8 +105,7 @@ async def _deliver_delivery(
     store: LocalTriggerStore,
     delivery: TriggerDelivery,
     *,
-    bus: MessageBus | None,
-    submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None,
+    submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]],
 ) -> None:
     trigger = store.get(delivery.trigger_id)
     if trigger is None:
@@ -109,12 +121,7 @@ async def _deliver_delivery(
         metadata=_delivery_metadata(trigger, delivery),
         session_key_override=trigger.session_key,
     )
-    if submit_turn is not None:
-        await submit_turn(msg)
-    else:
-        if bus is None:
-            raise RuntimeError("bus unavailable for local trigger delivery")
-        await bus.publish_inbound(msg)
+    await submit_turn(msg)
     store.record_delivery(
         trigger.id,
         status="ok",
@@ -129,6 +136,7 @@ def _delivery_metadata(trigger: LocalTrigger, delivery: TriggerDelivery) -> dict
         "trigger_name": trigger.name,
         "delivery_id": delivery.id,
         "created_at_ms": delivery.created_at_ms,
+        "persist_content": _history_content(trigger, delivery),
     }
     if trigger.channel == "websocket":
         metadata.pop(WEBUI_TURN_METADATA_KEY, None)
@@ -138,3 +146,8 @@ def _delivery_metadata(trigger: LocalTrigger, delivery: TriggerDelivery) -> dict
             source["label"] = trigger.name
         metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] = source
     return metadata
+
+
+def _history_content(trigger: LocalTrigger, delivery: TriggerDelivery) -> str:
+    label = trigger.name.strip() if trigger.name else trigger.id
+    return f"Local trigger received: {label}\n\n{delivery.content}"
