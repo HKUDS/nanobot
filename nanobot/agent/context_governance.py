@@ -348,7 +348,7 @@ class ContextGovernor:
         stays visible as the recovery path for the model.
         """
         tool_signatures = self._tool_call_signatures(messages)
-        seen: dict[tuple[str, str], list[int]] = {}
+        seen: dict[tuple[str, str, int], list[int]] = {}
         for idx, msg in enumerate(messages):
             if not self._is_compactable_tool_result(msg):
                 continue
@@ -420,9 +420,13 @@ class ContextGovernor:
     def _tool_call_signatures(
         cls,
         messages: list[dict[str, Any]],
-    ) -> dict[str, tuple[str, str]]:
-        signatures: dict[str, tuple[str, str]] = {}
+    ) -> dict[str, tuple[str, str, int]]:
+        signatures: dict[str, tuple[str, str, int]] = {}
+        user_turn = 0
         for msg in messages:
+            if msg.get("role") == "user":
+                user_turn += 1
+                continue
             if msg.get("role") != "assistant":
                 continue
             for tool_call in msg.get("tool_calls") or []:
@@ -437,6 +441,7 @@ class ContextGovernor:
                 signatures[str(tool_call["id"])] = (
                     name,
                     cls._normalize_tool_arguments(func.get("arguments")),
+                    user_turn,
                 )
         return signatures
 

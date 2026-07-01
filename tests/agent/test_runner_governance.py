@@ -719,7 +719,7 @@ def test_microcompact_skips_non_compactable_tools(monkeypatch):
     assert result is messages  # no compactable tools found
 
 
-def test_compact_duplicate_tool_results_preserves_newest_result():
+def test_compact_duplicate_tool_results_preserves_newest_result_in_same_turn():
     content = "duplicate output\n" * 80
     messages = [
         {"role": "system", "content": "sys"},
@@ -733,7 +733,6 @@ def test_compact_duplicate_tool_results_preserves_newest_result():
             }],
         },
         {"role": "tool", "tool_call_id": "old", "name": "grep", "content": content},
-        {"role": "user", "content": "try again"},
         {
             "role": "assistant",
             "content": "",
@@ -751,6 +750,40 @@ def test_compact_duplicate_tool_results_preserves_newest_result():
     assert result is not messages
     assert messages[2]["content"] == content
     assert result[2]["content"] == "[grep result omitted from context]"
+    assert result[4]["content"] == content
+
+
+def test_compact_duplicate_tool_results_preserves_cross_turn_snapshots():
+    content = "duplicate output\n" * 80
+    messages = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "old",
+                "type": "function",
+                "function": {"name": "grep", "arguments": '{"pattern":"x","path":"."}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "old", "name": "grep", "content": content},
+        {"role": "user", "content": "try again after changing files"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "new",
+                "type": "function",
+                "function": {"name": "grep", "arguments": '{"path":".","pattern":"x"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "new", "name": "grep", "content": content},
+    ]
+
+    result = ContextGovernor().compact_duplicate_tool_results(messages)
+
+    assert result is messages
+    assert result[2]["content"] == content
     assert result[5]["content"] == content
 
 
