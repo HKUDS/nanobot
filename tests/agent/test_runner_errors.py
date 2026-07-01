@@ -104,6 +104,48 @@ async def test_llm_arrearage_error_surfaces_clear_message():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("finish_reason", "expected_stop_reason"),
+    [
+        ("refusal", "completed"),
+        ("content_filter", "completed"),
+        ("error", "error"),
+    ],
+)
+async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
+    finish_reason: str,
+    expected_stop_reason: str,
+):
+    """Provider/gateway-injected tool calls under terminal block reasons must not run."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="Request blocked by provider policy.",
+        finish_reason=finish_reason,
+        tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={"command": "echo nope"})],
+        usage={},
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="should not run")
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "run a command"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    tools.execute.assert_not_awaited()
+    assert result.stop_reason == expected_stop_reason
+    assert result.tools_used == []
+    assert result.final_content == "Request blocked by provider policy."
+    assert not any(msg.get("role") == "tool" for msg in result.messages)
+
+
+@pytest.mark.asyncio
 async def test_runner_tool_error_sets_final_content():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
