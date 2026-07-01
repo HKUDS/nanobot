@@ -62,7 +62,7 @@ dependencies = [
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
-    "boto3>=1.43.0",
+    "packaging>=24.0",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +71,9 @@ api = [
 ]
 azure = [
     "azure-identity>=1.19.0,<2.0.0",
+]
+bedrock = [
+    "boto3>=1.43.0",
 ]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
@@ -86,6 +89,7 @@ msteams = [
 
 matrix = [
     "matrix-nio[e2e]>=0.25.2; sys_platform != 'win32'",
+    "matrix-nio>=0.25.2; sys_platform == 'win32'",
     "aiohttp>=3.9.0,<4.0.0",
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",

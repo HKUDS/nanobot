@@ -45,10 +45,12 @@ from prompt_toolkit.history import FileHistory  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
+from rich.markup import escape  # noqa: E402
 from rich.table import Table  # noqa: E402
 from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
+from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
@@ -676,6 +678,61 @@ def _onboard_plugins(config_path: Path) -> None:
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+_load_pyproject = feature_support.load_pyproject
+_optional_dependency_groups_from_metadata = feature_support.optional_dependency_groups_from_metadata
+_optional_dependency_groups = feature_support.optional_dependency_groups
+_install_args_for_extra = feature_support.install_args_for_extra
+_extra_installed = feature_support.extra_installed
+_command_text = feature_support.command_text
+_missing_pip = feature_support.missing_pip
+
+
+def _run_install_command(argv: list[str]):
+    return feature_support.run_install_command(argv)
+
+
+def _install_extra(extra: str, deps: list[str] | None) -> bool:
+    _, label = _install_args_for_extra(extra, deps)
+    console.print(f"Installing [cyan]{escape(label)}[/cyan]")
+    result = feature_support.install_extra(extra, deps, runner=_run_install_command)
+    if result.ok:
+        return True
+    console.print(f"[red]Failed:[/red] {escape(_command_text(result.failed_cmd or result.pip_cmd))}")
+    if result.output:
+        console.print(result.output, markup=False)
+    console.print(f"[dim]Manual command: {escape(_command_text(result.pip_cmd))}[/dim]")
+    return False
+
+
+_read_config_data = feature_support.read_config_data
+_write_config_data = feature_support.write_config_data
+_enable_channel_config = feature_support.enable_channel_config
+_channel_enabled = feature_support.channel_enabled
+
+
+def _print_enable_options(
+    extras: dict[str, list[str] | None],
+    builtin_channels: set[str],
+    plugin_channels: dict[str, Any],
+    config: Config,
+) -> None:
+    table = Table(title="Available Features")
+    table.add_column("Name", style="cyan")
+    table.add_column("Type")
+    table.add_column("Enabled")
+
+    for item in sorted(builtin_channels | set(plugin_channels) | set(extras)):
+        is_channel = item in builtin_channels or item in plugin_channels
+        enabled = _channel_enabled(config, item) if is_channel else _extra_installed(item, extras[item])
+        table.add_row(
+            item,
+            "channel" if is_channel else "feature",
+            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
+        )
+
+    console.print(table)
 
 
 def _model_display(config: Config) -> tuple[str, str]:
@@ -1657,42 +1714,73 @@ def channels_login(
 # Plugin Commands
 # ============================================================================
 
-plugins_app = typer.Typer(help="Manage channel plugins")
+plugins_app = typer.Typer(help="Manage optional nanobot features")
 app.add_typer(plugins_app, name="plugins")
 
 
 @plugins_app.command("list")
-def plugins_list():
-    """List all discovered channels (built-in and plugins)."""
-    from nanobot.channels.registry import discover_all, discover_channel_names
-    from nanobot.config.loader import load_config
+def plugins_list(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """List optional nanobot features."""
+    from nanobot.channels.registry import discover_channel_names, discover_plugins
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
-    builtin_names = set(discover_channel_names())
-    all_channels = discover_all()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
 
-    table = Table(title="Channel Plugins")
-    table.add_column("Name", style="cyan")
-    table.add_column("Source", style="magenta")
-    table.add_column("Enabled")
+    _print_enable_options(
+        _optional_dependency_groups(),
+        set(discover_channel_names()),
+        discover_plugins(),
+        load_config(resolved_config_path),
+    )
 
-    for name in sorted(all_channels):
-        cls = all_channels[name]
-        source = "builtin" if name in builtin_names else "plugin"
-        section = getattr(config.channels, name, None)
-        if section is None:
-            enabled = False
-        elif isinstance(section, dict):
-            enabled = section.get("enabled", False)
-        else:
-            enabled = getattr(section, "enabled", False)
-        table.add_row(
-            cls.display_name,
-            source,
-            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
-        )
 
-    console.print(table)
+@plugins_app.command("enable")
+def plugins_enable(
+    name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, pdf)"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Enable a nanobot feature."""
+    from nanobot.channels.registry import (
+        discover_channel_names,
+        discover_plugins,
+        load_channel_class,
+    )
+    from nanobot.config.loader import get_config_path, set_config_path
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+    resolved_config_path = resolved_config_path or get_config_path()
+
+    extras = _optional_dependency_groups()
+    builtin_channels = set(discover_channel_names())
+    plugin_channels = discover_plugins()
+    known = builtin_channels | set(plugin_channels) | set(extras)
+    if name not in known:
+        available = ", ".join(sorted(known))
+        console.print(f"[red]Unknown feature: {name}[/red]  Available: {available}")
+        raise typer.Exit(1)
+
+    if name in extras and not _extra_installed(name, extras[name]) and not _install_extra(name, extras[name]):
+        raise typer.Exit(1)
+
+    if name in builtin_channels:
+        try:
+            channel_cls = load_channel_class(name)
+        except Exception as exc:
+            console.print(f"[red]Channel '{name}' is not importable after enable:[/red] {exc}")
+            raise typer.Exit(1)
+        _enable_channel_config(resolved_config_path, name, channel_cls.default_config())
+        console.print(f"[green]Enabled[/green] channel '{name}' in {resolved_config_path}")
+    elif name in plugin_channels:
+        _enable_channel_config(resolved_config_path, name, plugin_channels[name].default_config())
+        console.print(f"[green]Enabled[/green] channel '{name}' in {resolved_config_path}")
+    else:
+        console.print(f"[green]Enabled[/green] feature '{name}'")
 
 
 # ============================================================================

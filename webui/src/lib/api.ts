@@ -6,6 +6,7 @@ import type {
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  NanobotFeaturesPayload,
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
@@ -355,6 +356,31 @@ export async function fetchInstalledCliApps(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchNanobotFeatures(
+  token: string,
+  base: string = "",
+): Promise<NanobotFeaturesPayload> {
+  return request<NanobotFeaturesPayload>(
+    `${base}/api/settings/nanobot-features`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function enableNanobotFeature(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<NanobotFeaturesPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<NanobotFeaturesPayload>(
+    `${base}/api/settings/nanobot-features/enable?${query}`,
+    token,
   );
 }
 

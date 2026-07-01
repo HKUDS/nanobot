@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
+import sys
+import tomllib
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -501,6 +507,262 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert seen["config_path"] == config_path.resolve()
+
+
+def test_plugins_list_shows_available_features(monkeypatch):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+
+    runner = CliRunner()
+    config = Config.model_validate({"channels": {"weixin": {"enabled": True}}})
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: config)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.cli.commands._optional_dependency_groups",
+        lambda: {"weixin": ["qrcode[pil]>=8.0"], "bedrock": ["boto3>=1.43.0"]},
+    )
+
+    result = runner.invoke(app, ["plugins", "list"])
+
+    assert result.exit_code == 0
+    assert "Available Features" in result.stdout
+    assert "weixin" in result.stdout
+    assert "bedrock" in result.stdout
+    assert "channel" in result.stdout
+    assert "feature" in result.stdout
+    assert " - " not in result.stdout
+
+
+def test_plugins_enable_channel_installs_extra_and_writes_config(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    class _WeixinChannel(_FakePlugin):
+        name = "weixin"
+        display_name = "Weixin"
+
+        @classmethod
+        def default_config(cls):
+            return {"enabled": False, "token": "", "allowFrom": []}
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"weixin": {"enabled": False, "token": "keep"}}}),
+        encoding="utf-8",
+    )
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    runner = CliRunner()
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _WeixinChannel)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._optional_dependency_groups",
+        lambda: {"weixin": ["qrcode[pil]>=8.0", "pycryptodome>=3.20.0"]},
+    )
+    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
+
+    result = runner.invoke(app, ["plugins", "enable", "weixin", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert commands == [
+        [sys.executable, "-m", "pip", "install", "qrcode[pil]>=8.0", "pycryptodome>=3.20.0"]
+    ]
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["weixin"]["enabled"] is True
+    assert data["channels"]["weixin"]["token"] == "keep"
+    assert data["channels"]["weixin"]["allowFrom"] == []
+
+
+def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    runner = CliRunner()
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.cli.commands._optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
+
+    result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert commands == [[sys.executable, "-m", "pip", "install", "boto3>=1.43.0"]]
+    assert not config_path.exists()
+
+
+def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    runner = CliRunner()
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.cli.commands._optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: True)
+    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
+
+    result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert commands == []
+    assert not config_path.exists()
+
+
+def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
+    from nanobot.cli import commands as cli_commands
+
+    calls: list[list[str]] = []
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="No module named pip")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli_commands, "_run_install_command", _run)
+    monkeypatch.setattr("nanobot.optional_features.shutil.which", lambda _name: None)
+
+    assert cli_commands._install_extra("weixin", None) is True
+    assert calls == [
+        [cli_commands.sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
+        [cli_commands.sys.executable, "-m", "ensurepip", "--upgrade"],
+        [cli_commands.sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
+    ]
+
+
+def test_run_install_command_returns_failure_on_timeout(monkeypatch):
+    from nanobot import optional_features
+
+    def _run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["pip"], 300, output="partial", stderr=b"still running")
+
+    monkeypatch.setattr(optional_features.subprocess, "run", _run)
+
+    result = optional_features.run_install_command(["pip"])
+
+    assert result.returncode == 124
+    assert result.stdout == "partial"
+    assert result.stderr == "still running\nTimed out after 300s"
+
+
+def test_optional_dependency_metadata_for_enable():
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    deps = data["project"]["optional-dependencies"]
+
+    assert "boto3>=1.43.0" not in data["project"]["dependencies"]
+    assert deps["bedrock"] == ["boto3>=1.43.0"]
+    assert any(
+        dep.startswith("matrix-nio>=0.25.2") and "sys_platform == 'win32'" in dep
+        for dep in deps["matrix"]
+    )
+
+
+def test_optional_dependency_groups_falls_back_to_package_metadata(monkeypatch):
+    from nanobot import optional_features
+
+    class _Metadata:
+        def get_all(self, key: str):
+            assert key == "Provides-Extra"
+            return ["bedrock", "dev"]
+
+    monkeypatch.setattr(optional_features, "load_pyproject", lambda _path: {})
+    monkeypatch.setattr("importlib.metadata.metadata", lambda _name: _Metadata())
+    monkeypatch.setattr(
+        "importlib.metadata.requires",
+        lambda _name: [
+            "packaging>=24.0",
+            "boto3>=1.43.0; extra == 'bedrock'",
+            "pytest>=8.0; extra == 'dev'",
+        ],
+    )
+
+    deps = optional_features.optional_dependency_groups()
+
+    assert deps == {"bedrock": ["boto3>=1.43.0; extra == 'bedrock'"]}
+    assert optional_features.install_args_for_extra("bedrock", deps["bedrock"]) == (
+        ["nanobot-ai[bedrock]"],
+        '"nanobot-ai[bedrock]"',
+    )
+
+
+def test_requirement_installed_validates_requested_extras(monkeypatch):
+    from nanobot import optional_features
+
+    class _Metadata:
+        def __init__(self, extras: list[str] | None = None) -> None:
+            self._extras = extras or []
+
+        def get_all(self, key: str):
+            assert key == "Provides-Extra"
+            return self._extras
+
+    class _Distribution:
+        def __init__(
+            self,
+            version: str,
+            *,
+            requires: list[str] | None = None,
+            extras: list[str] | None = None,
+        ) -> None:
+            self.version = version
+            self.requires = requires or []
+            self.metadata = _Metadata(extras)
+
+    installed: dict[str, _Distribution] = {
+        "qrcode": _Distribution(
+            "8.2",
+            requires=["pillow>=9.1; extra == 'pil'"],
+            extras=["pil"],
+        ),
+    }
+
+    def _distribution(name: str) -> _Distribution:
+        normalized = name.lower()
+        if normalized not in installed:
+            raise PackageNotFoundError(name)
+        return installed[normalized]
+
+    monkeypatch.setattr(optional_features, "distribution", _distribution)
+
+    assert optional_features.requirement_installed("qrcode>=8.0") is True
+    assert optional_features.requirement_installed("qrcode[pil]>=8.0") is False
+
+    installed["pillow"] = _Distribution("10.0")
+
+    assert optional_features.requirement_installed("qrcode[pil]>=8.0") is True
 
 
 @pytest.mark.asyncio

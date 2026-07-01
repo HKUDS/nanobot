@@ -459,17 +459,31 @@
     },
     "apps": {
       "description": "添加 nanobot 可在聊天中使用的 App CLI 和 MCP 服务。",
+      "descriptionWithNanobot": "启用 nanobot 能力、本地应用适配器和已连接的工具服务。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "渠道",
+      "featureLabel": "能力",
       "filterAll": "全部",
+      "filterNanobot": "Nanobot",
       "filterCli": "CLI 应用",
       "filterMcp": "MCP 服务",
       "enabledSummary": "已启用 {{count}} 个",
       "caption": "{{cli}} 个 CLI · {{mcp}} 个 MCP",
+      "captionWithNanobot": "{{nanobot}} 个 Nanobot · {{cli}} 个 CLI · {{mcp}} 个 MCP",
       "searchPlaceholder": "搜索应用",
       "featured": "精选",
       "loading": "正在加载应用...",
-      "empty": "没有匹配的应用。"
+      "empty": "没有匹配的应用。",
+      "restartRequired": "重启 nanobot 以应用更新后的应用和能力。"
+    },
+    "nanobotFeatures": {
+      "enabled": "已启用",
+      "enable": "启用",
+      "ready": "就绪",
+      "missingDependency": "安装所需支持",
+      "channelDisabled": "渠道已禁用",
+      "notEnabled": "未启用"
     },
     "automations": {
       "filters": {

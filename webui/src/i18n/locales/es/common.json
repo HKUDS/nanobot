@@ -459,17 +459,31 @@
     },
     "apps": {
       "description": "Agrega CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
+      "descriptionWithNanobot": "Activa capacidades de nanobot, adaptadores locales de apps y servidores de herramientas conectados.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Canal",
+      "featureLabel": "Función",
       "filterAll": "Todo",
+      "filterNanobot": "Nanobot",
       "filterCli": "Apps CLI",
       "filterMcp": "Servicios MCP",
       "enabledSummary": "{{count}} activados",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "captionWithNanobot": "{{nanobot}} Nanobot · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Buscar apps",
       "featured": "Destacadas",
       "loading": "Cargando apps...",
-      "empty": "Ninguna app coincide con este filtro."
+      "empty": "Ninguna app coincide con este filtro.",
+      "restartRequired": "Reinicia nanobot para aplicar apps y funciones actualizadas."
+    },
+    "nanobotFeatures": {
+      "enabled": "Activado",
+      "enable": "Activar",
+      "ready": "Listo",
+      "missingDependency": "Instala el soporte requerido",
+      "channelDisabled": "El canal está desactivado",
+      "notEnabled": "No activado"
     },
     "automations": {
       "filters": {

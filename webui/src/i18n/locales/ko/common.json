@@ -459,17 +459,31 @@
     },
     "apps": {
       "description": "nanobot이 채팅에서 사용할 수 있는 App CLI와 MCP 서비스를 추가합니다.",
+      "descriptionWithNanobot": "nanobot 기능, 로컬 앱 어댑터, 연결된 도구 서버를 활성화합니다.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "채널",
+      "featureLabel": "기능",
       "filterAll": "전체",
+      "filterNanobot": "Nanobot",
       "filterCli": "CLI 앱",
       "filterMcp": "MCP 서비스",
       "enabledSummary": "{{count}}개 활성화됨",
       "caption": "CLI {{cli}}개 · MCP {{mcp}}개",
+      "captionWithNanobot": "Nanobot {{nanobot}}개 · CLI {{cli}}개 · MCP {{mcp}}개",
       "searchPlaceholder": "앱 검색",
       "featured": "추천",
       "loading": "앱을 불러오는 중...",
-      "empty": "일치하는 앱이 없습니다."
+      "empty": "일치하는 앱이 없습니다.",
+      "restartRequired": "업데이트된 앱과 기능을 적용하려면 nanobot을 다시 시작하세요."
+    },
+    "nanobotFeatures": {
+      "enabled": "활성화됨",
+      "enable": "활성화",
+      "ready": "준비됨",
+      "missingDependency": "필요한 지원 설치",
+      "channelDisabled": "채널이 비활성화됨",
+      "notEnabled": "비활성화됨"
     },
     "automations": {
       "filters": {

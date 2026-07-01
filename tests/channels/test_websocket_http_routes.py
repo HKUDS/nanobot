@@ -482,6 +482,68 @@ async def test_cli_apps_routes_require_token_and_return_payload(
 
 
 @pytest.mark.asyncio
+async def test_nanobot_feature_routes_require_token_and_enable(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.base import BaseChannel
+    class _MatrixChannel(BaseChannel):
+        name = "matrix"
+        display_name = "Matrix"
+
+        @classmethod
+        def default_config(cls) -> dict[str, Any]:
+            return {"enabled": False, "allowFrom": []}
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {"matrix": []})
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29916)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29916/api/settings/nanobot-features")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29916/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        catalog = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features",
+            headers=auth,
+        )
+        assert catalog.status_code == 200
+        assert catalog.json()["features"][0]["name"] == "matrix"
+
+        enabled = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features/enable?name=matrix",
+            headers=auth,
+        )
+        assert enabled.status_code == 200
+        body = enabled.json()
+        assert body["last_action"]["message"] == "Enabled channel 'matrix'"
+        assert body["restart_required_sections"] == ["runtime"]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     bus: MagicMock,
     tmp_path: Path,
