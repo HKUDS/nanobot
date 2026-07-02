@@ -427,7 +427,7 @@ class ContextGovernor:
     @staticmethod
     def _summary_for(message: dict[str, Any]) -> str:
         name = message.get("name", "tool")
-        return f"[{name} result omitted from context]"
+        return f"[Prior {name} result compacted to fit context; the tool call already completed.]"
 
     def _legal_history_tail(
         self,
