@@ -75,6 +75,33 @@ class TestMemoryStoreBasicIO:
         assert skill_file.read_text(encoding="utf-8") == "# Weather\n\nUser-owned skill.\n"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "frontmatter",
+        [
+            "description: |\n  dream_managed: true\n",
+            "metadata:\n  dream_managed: true\n",
+        ],
+    )
+    async def test_dream_write_tools_ignore_nested_or_block_ownership_markers(
+        self,
+        store,
+        frontmatter,
+    ):
+        skill_file = store.workspace / "skills" / "weather" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        original = f"---\n{frontmatter}---\n# Weather\n\nUser-owned skill.\n"
+        skill_file.write_text(original, encoding="utf-8")
+        tools = store.build_dream_tools()
+
+        write_result = await tools.get("write_file").execute(
+            path="skills/weather/SKILL.md",
+            content="---\ndream_managed: true\n---\n# Weather\n\nOverwritten.\n",
+        )
+
+        assert "unmarked user skill" in write_result
+        assert skill_file.read_text(encoding="utf-8") == original
+
+    @pytest.mark.asyncio
     async def test_dream_write_tools_allow_marked_skill(self, store):
         skill_file = store.workspace / "skills" / "weather" / "SKILL.md"
         skill_file.parent.mkdir(parents=True)

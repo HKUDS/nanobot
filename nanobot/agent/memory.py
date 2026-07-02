@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
+import yaml
 from loguru import logger
 
 from nanobot.session.manager import Session
@@ -584,14 +585,14 @@ class MemoryStore:
         lines = text.splitlines()
         if not lines or lines[0].strip() != "---":
             return False
-        for line in lines[1:]:
-            stripped = line.strip()
-            if stripped == "---":
-                return False
-            key, sep, value = stripped.partition(":")
-            if sep and key.strip() == "dream_managed" and value.strip().lower() == "true":
-                return True
-        return False
+        end_index = next((idx for idx, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
+        if end_index is None:
+            return False
+        try:
+            frontmatter = yaml.safe_load("\n".join(lines[1:end_index]))
+        except yaml.YAMLError:
+            return False
+        return isinstance(frontmatter, dict) and frontmatter.get("dream_managed") is True
 
     @staticmethod
     def dream_run_completed(resp: object | None) -> bool:
