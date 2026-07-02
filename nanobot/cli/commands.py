@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import ipaddress
 import os
 import select
 import signal
@@ -851,6 +852,13 @@ def serve(
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
     api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
+    try:
+        is_loopback_host = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_loopback_host = host == "localhost"
+    allow_unauthenticated = bool(
+        api_cfg.allow_unauthenticated_local and is_loopback_host
+    )
     if host in {"0.0.0.0", "::"}:
         if not api_key:
             console.print(
@@ -862,11 +870,22 @@ def serve(
             "[yellow]API is bound to all interfaces "
             "(authentication required).[/yellow]"
         )
+    elif not api_key and not allow_unauthenticated:
+        console.print(
+            "[red]Error: api.api_key is not set. Set api.api_key or set "
+            "api.allow_unauthenticated_local=true for an explicitly local-only unauthenticated API.[/red]"
+        )
+        raise typer.Exit(1)
+    elif allow_unauthenticated:
+        console.print(
+            "[yellow]API authentication is disabled for this local-only bind because "
+            "api.allow_unauthenticated_local=true.[/yellow]"
+        )
     console.print()
 
     api_app = create_app(
         agent_loop, model_name=model_name, request_timeout=timeout,
-        api_key=api_key,
+        api_key=api_key, allow_unauthenticated=allow_unauthenticated,
     )
 
     async def on_startup(_app):

@@ -44,7 +44,12 @@ def mock_agent():
 
 @pytest.fixture
 def app(mock_agent):
-    return create_app(mock_agent, model_name="test-model", request_timeout=10.0)
+    return create_app(
+        mock_agent,
+        model_name="test-model",
+        request_timeout=10.0,
+        allow_unauthenticated=True,
+    )
 
 
 @pytest_asyncio.fixture
@@ -125,6 +130,31 @@ async def test_api_key_protects_api_routes_but_not_health(aiohttp_client, mock_a
     assert ok.status == 200
     assert (await missing.json())["error"]["message"].startswith("Missing Authorization")
     assert (await wrong.json())["error"]["message"] == "Invalid API key"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_missing_api_key_denies_api_routes_by_default(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+
+    health = await client.get("/health")
+    models = await client.get("/v1/models")
+
+    assert health.status == 200
+    assert models.status == 401
+    assert "API key is required" in (await models.json())["error"]["message"]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_explicit_unauthenticated_mode_allows_api_routes(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="test-model", allow_unauthenticated=True)
+    client = await aiohttp_client(app)
+
+    resp = await client.get("/v1/models")
+
+    assert resp.status == 200
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -220,7 +250,7 @@ async def test_single_user_message_must_have_user_role() -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_successful_request_uses_fixed_api_session(aiohttp_client, mock_agent) -> None:
-    app = create_app(mock_agent, model_name="test-model")
+    app = create_app(mock_agent, model_name="test-model", allow_unauthenticated=True)
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
@@ -254,7 +284,7 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     agent.close_mcp = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
 
     r1 = await client.post(
@@ -292,7 +322,7 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     agent.close_mcp = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
 
     async def send(msg: str):
@@ -338,7 +368,7 @@ async def test_health_endpoint(aiohttp_client, app) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_multimodal_content_extracts_text(aiohttp_client, mock_agent) -> None:
-    app = create_app(mock_agent, model_name="m")
+    app = create_app(mock_agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
@@ -366,7 +396,7 @@ async def test_multimodal_content_extracts_text(aiohttp_client, mock_agent) -> N
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_multimodal_remote_image_url_returns_400(aiohttp_client, mock_agent) -> None:
-    app = create_app(mock_agent, model_name="m")
+    app = create_app(mock_agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
@@ -407,7 +437,7 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     agent.close_mcp = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
@@ -434,7 +464,7 @@ async def test_empty_response_retry_does_not_duplicate_user_turn(aiohttp_client)
     agent.close_mcp = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
@@ -463,7 +493,7 @@ async def test_empty_response_falls_back(aiohttp_client) -> None:
     agent.close_mcp = AsyncMock()
     agent._last_usage = {}
 
-    app = create_app(agent, model_name="m")
+    app = create_app(agent, model_name="m", allow_unauthenticated=True)
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",

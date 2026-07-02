@@ -397,6 +397,7 @@ def create_app(
     model_name: str = "nanobot",
     request_timeout: float = 120.0,
     api_key: str = "",
+    allow_unauthenticated: bool = False,
 ) -> web.Application:
     """Create the aiohttp application.
 
@@ -405,6 +406,7 @@ def create_app(
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
         api_key: Optional API key for Bearer-token authentication.
+        allow_unauthenticated: Explicitly allow unauthenticated /v1 requests.
     """
     app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
     app["agent_loop"] = agent_loop
@@ -414,11 +416,13 @@ def create_app(
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler) -> web.StreamResponse:
-        if not api_key:
+        if allow_unauthenticated:
             return await handler(request)
         # Allow unauthenticated health checks.
         if request.path == "/health":
             return await handler(request)
+        if not api_key:
+            return _error_json(401, "API key is required. Configure api.api_key or explicitly enable local unauthenticated mode.")
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return _error_json(401, "Missing Authorization header. Use: Bearer <api_key>")

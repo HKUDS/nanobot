@@ -42,3 +42,12 @@ def test_api_config_allows_wildcard_host_with_key() -> None:
 
     assert config.host == "0.0.0.0"
     assert config.api_key == "secret"
+
+
+def test_api_config_local_unauthenticated_mode_defaults_to_disabled() -> None:
+    assert ApiConfig().allow_unauthenticated_local is False
+
+
+def test_api_config_wildcard_rejects_unauthenticated_local_exemption() -> None:
+    with pytest.raises(ValueError, match="api_key is not set"):
+        ApiConfig(host="0.0.0.0", allow_unauthenticated_local=True)

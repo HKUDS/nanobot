@@ -308,6 +308,7 @@ class ApiConfig(Base):
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
     api_key: str = Field(default="", repr=False)
+    allow_unauthenticated_local: bool = False
 
     @model_validator(mode="after")
     def wildcard_host_requires_auth(self) -> "ApiConfig":
