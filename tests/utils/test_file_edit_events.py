@@ -176,6 +176,7 @@ def test_streaming_write_file_tracker_emits_live_line_counts(tmp_path: Path) -> 
     assert events[0] == {
         "version": 1,
         "call_id": "call-live",
+        "progress_id": "call-live",
         "tool": "write_file",
         "path": "notes.md",
         "absolute_path": (tmp_path / "notes.md").resolve().as_posix(),
@@ -268,6 +269,7 @@ def test_streaming_write_file_tracker_emits_pending_before_path(tmp_path: Path) 
     assert events[0] == {
         "version": 1,
         "call_id": "call-live",
+        "progress_id": "call-live",
         "tool": "write_file",
         "path": "",
         "phase": "start",
@@ -372,6 +374,7 @@ def test_streaming_edit_file_tracker_emits_live_line_counts(tmp_path: Path) -> N
     assert events[0] == {
         "version": 1,
         "call_id": "call-edit",
+        "progress_id": "call-edit",
         "tool": "edit_file",
         "path": "notes.md",
         "absolute_path": (tmp_path / "notes.md").resolve().as_posix(),
@@ -388,7 +391,7 @@ def test_streaming_edit_file_tracker_emits_live_line_counts(tmp_path: Path) -> N
     assert events[-1]["deleted"] == 2
 
 
-def test_streaming_tracker_applies_canonical_call_id_to_final_tool(tmp_path: Path) -> None:
+def test_streaming_tracker_exposes_progress_id_without_mutating_final_tool(tmp_path: Path) -> None:
     events: list[dict] = []
 
     async def emit(batch: list[dict]) -> None:
@@ -406,8 +409,9 @@ def test_streaming_tracker_applies_canonical_call_id_to_final_tool(tmp_path: Pat
             name="write_file",
             arguments={"path": "matched.md", "content": "one\n"},
         )
+        assert tracker.progress_id_for(final) == "idx:0"
         tracker.apply_final_call_ids([final])
-        assert final.id == "idx:0"
+        assert final.id == "provider-final-id"
 
     asyncio.run(run())
 
@@ -442,7 +446,8 @@ def test_streaming_tracker_does_not_remap_non_file_edit_final_tool(tmp_path: Pat
         )
         tracker.apply_final_call_ids([read_final, write_final])
         assert read_final.id == "read-unique"
-        assert write_final.id == "idx:1"
+        assert write_final.id == "write-final"
+        assert tracker.progress_id_for(write_final) == "idx:1"
 
     asyncio.run(run())
 

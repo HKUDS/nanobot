@@ -704,6 +704,61 @@ describe("useNanobotStream", () => {
     }]);
   });
 
+  it("upgrades streamed file_edit placeholders by progress_id", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-edit-progress-id", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-file-edit-progress-id", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-progress-id",
+        edits: [{
+          call_id: "idx:0",
+          progress_id: "idx:0",
+          tool: "write_file",
+          path: "",
+          phase: "start",
+          added: 1,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+          pending: true,
+        }],
+      });
+      fake.emit("chat-file-edit-progress-id", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-progress-id",
+        edits: [{
+          call_id: "provider-final-id",
+          progress_id: "idx:0",
+          tool: "write_file",
+          path: "foo.txt",
+          phase: "end",
+          added: 12,
+          deleted: 0,
+          approximate: false,
+          status: "done",
+        }],
+      });
+    });
+
+    const fileEditMessages = result.current.messages.filter((message) => message.fileEdits?.length);
+    expect(fileEditMessages).toHaveLength(1);
+    expect(fileEditMessages[0].fileEdits).toEqual([{
+      call_id: "provider-final-id",
+      progress_id: "idx:0",
+      tool: "write_file",
+      path: "foo.txt",
+      phase: "end",
+      added: 12,
+      deleted: 0,
+      approximate: false,
+      status: "done",
+    }]);
+  });
+
   it("merges file_edit updates after interleaved progress events", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-file-edit-progress", EMPTY_MESSAGES), {

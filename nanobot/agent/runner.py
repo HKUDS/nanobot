@@ -461,6 +461,7 @@ class AgentRunner:
                     response.tool_calls,
                     external_lookup_counts,
                     workspace_violation_counts,
+                    response.file_edit_progress_ids,
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(
@@ -861,7 +862,10 @@ class AgentRunner:
             if live_file_edits is not None:
                 await live_file_edits.flush()
                 if response.should_execute_tools:
-                    live_file_edits.apply_final_call_ids(response.tool_calls)
+                    response.file_edit_progress_ids = [
+                        live_file_edits.progress_id_for(tool_call)
+                        for tool_call in response.tool_calls
+                    ]
                 await live_file_edits.error_unmatched(
                     response.tool_calls if response.should_execute_tools else [],
                     "Tool call did not complete.",
@@ -1131,14 +1135,21 @@ class AgentRunner:
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
+        file_edit_progress_ids: list[str | None] | None = None,
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
+        progress_id_by_call = {
+            id(tool_call): file_edit_progress_ids[idx]
+            for idx, tool_call in enumerate(tool_calls)
+            if file_edit_progress_ids and idx < len(file_edit_progress_ids)
+        }
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
                     self._run_tool(
                         spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        progress_id_by_call.get(id(tool_call)),
                     )
                     for tool_call in batch
                 ))
@@ -1148,6 +1159,7 @@ class AgentRunner:
                 for tool_call in batch:
                     result = await self._run_tool(
                         spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        progress_id_by_call.get(id(tool_call)),
                     )
                     tool_results.append(result)
                     batch_results.append(result)
@@ -1168,6 +1180,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
+        file_edit_progress_id: str | None = None,
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
@@ -1221,6 +1234,7 @@ class AgentRunner:
                 tool=tool,
                 workspace=spec.workspace,
                 params=params if isinstance(params, dict) else None,
+                progress_id=file_edit_progress_id,
             )
             if progress_callback is not None
             else None

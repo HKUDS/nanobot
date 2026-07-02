@@ -213,6 +213,7 @@ export interface ToolProgressEvent {
 export interface UIFileEdit {
   version?: number;
   call_id: string;
+  progress_id?: string;
   tool: string;
   path: string;
   absolute_path?: string;
