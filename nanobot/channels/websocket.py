@@ -70,7 +70,7 @@ class WebSocketConfig(Base):
       shared filesystem or an HTTP file server to access these files.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8765
     unix_socket_path: str = ""

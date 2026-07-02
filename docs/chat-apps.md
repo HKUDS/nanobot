@@ -59,6 +59,12 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 <details>
 <summary><b>Telegram</b></summary>
 
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable telegram
+```
+
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
 - Send `/newbot`, follow prompts
@@ -120,6 +126,14 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 <summary><b>Mochat (Claw IM)</b></summary>
 
 Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
+
+**Install the optional realtime dependency**
+
+```bash
+nanobot plugins enable mochat
+```
+
+Without this extra, Mochat still works through HTTP polling.
 
 **1. Ask nanobot to set up Mochat for you**
 
@@ -365,6 +379,7 @@ Uses **WebSocket** long connection — no public IP required.
 **Quick setup: QR login**
 
 ```bash
+nanobot plugins enable feishu
 nanobot channels login feishu
 # Use --force to create/sign in with a new bot
 ```
@@ -435,6 +450,12 @@ nanobot gateway
 
 Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
 
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable qq
+```
+
 **1. Register & create bot**
 - Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
 - Create a new bot application
@@ -487,6 +508,12 @@ Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **
 - Copy the forward websocket server's token
 - (Optional) In the webui, follow "系统配置" -> "登陆配置" -> "快速登录QQ" to automatically login after restarts
 
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable napcat
+```
+
 **2. Configure**
 
 ```json
@@ -523,6 +550,12 @@ Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **
 <summary><b>DingTalk (钉钉)</b></summary>
 
 Uses **Stream Mode** — no public IP required.
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable dingtalk
+```
 
 **1. Create a DingTalk bot**
 - Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
@@ -565,6 +598,12 @@ nanobot gateway
 <summary><b>Slack</b></summary>
 
 Uses **Socket Mode** — no public URL required.
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable slack
+```
 
 **1. Create a Slack app**
 - Go to [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"

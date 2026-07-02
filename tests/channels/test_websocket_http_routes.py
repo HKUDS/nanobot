@@ -508,7 +508,7 @@ async def test_nanobot_feature_routes_require_token_and_enable(
 
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix", "websocket"])
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
     monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {"matrix": []})
@@ -528,7 +528,10 @@ async def test_nanobot_feature_routes_require_token_and_enable(
             headers=auth,
         )
         assert catalog.status_code == 200
-        assert catalog.json()["features"][0]["name"] == "matrix"
+        features = {feature["name"]: feature for feature in catalog.json()["features"]}
+        assert features["matrix"]["status"] == "not_enabled"
+        assert features["websocket"]["enabled"] is True
+        assert features["websocket"]["ready"] is True
 
         enabled = await _http_get(
             "http://127.0.0.1:29916/api/settings/nanobot-features/enable?name=matrix",
@@ -538,6 +541,25 @@ async def test_nanobot_feature_routes_require_token_and_enable(
         body = enabled.json()
         assert body["last_action"]["message"] == "Enabled channel 'matrix'"
         assert body["restart_required_sections"] == ["runtime"]
+
+        protected = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=websocket",
+            headers=auth,
+        )
+        assert protected.status_code == 400
+        assert protected.text == "Channel 'websocket' cannot be disabled"
+
+        disabled = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=matrix",
+            headers=auth,
+        )
+        assert disabled.status_code == 200
+        body = disabled.json()
+        assert body["last_action"]["message"] == "Disabled channel 'matrix'"
+        assert body["restart_required_sections"] == ["runtime"]
+        assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
+            "enabled"
+        ] is False
     finally:
         await channel.stop()
         await server_task

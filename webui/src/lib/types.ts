@@ -633,6 +633,7 @@ export interface NanobotFeatureInfo {
 export interface NanobotFeaturesPayload {
   features: NanobotFeatureInfo[];
   enabled_count: number;
+  requires_restart?: boolean;
   last_action?: {
     ok: boolean;
     message: string;

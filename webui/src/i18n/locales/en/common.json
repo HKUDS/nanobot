@@ -480,6 +480,7 @@
     "nanobotFeatures": {
       "enabled": "Enabled",
       "enable": "Enable",
+      "disable": "Disable",
       "ready": "Ready",
       "missingDependency": "Install required support",
       "channelDisabled": "Channel is disabled",

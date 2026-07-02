@@ -64,6 +64,7 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.apps",
   "settings.apps.descriptionWithNanobot",
   "settings.apps.restartRequired",
+  "settings.nanobotFeatures.disable",
   "settings.nanobotFeatures.ready",
   "settings.nanobotFeatures.missingDependency",
   "settings.nanobotFeatures.channelDisabled",

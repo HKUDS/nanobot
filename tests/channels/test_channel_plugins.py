@@ -213,6 +213,20 @@ def test_discover_all_builtin_shadows_plugin():
     assert result["telegram"] is not _FakeTelegram
 
 
+def test_discover_all_builtin_name_shadows_plugin_when_dependency_missing():
+    from nanobot.channels.registry import discover_all
+
+    ep = _make_entry_point("telegram", _FakeTelegram)
+    with (
+        patch("nanobot.channels.registry.discover_channel_names", return_value=["telegram"]),
+        patch("nanobot.channels.registry.load_channel_class", side_effect=ImportError("missing")),
+        patch(_EP_TARGET, return_value=[ep]),
+    ):
+        result = discover_all()
+
+    assert "telegram" not in result
+
+
 # ---------------------------------------------------------------------------
 # Manager _init_channels with dict config (plugin scenario)
 # ---------------------------------------------------------------------------
@@ -242,6 +256,54 @@ async def test_manager_loads_plugin_from_dict_config():
 
     assert "fakeplugin" in mgr.channels
     assert isinstance(mgr.channels["fakeplugin"], _FakePlugin)
+
+
+def test_manager_loads_websocket_from_default_config():
+    from nanobot.channels.manager import ChannelManager
+
+    class _FakeWebSocket(_FakePlugin):
+        name = "websocket"
+        display_name = "WebSocket"
+
+        def __init__(self, config, bus, *, gateway):
+            super().__init__(config, bus)
+            self.gateway = gateway
+
+    seen_enabled: set[str] = set()
+
+    def _discover_enabled(enabled_names: set[str], _names=None):
+        seen_enabled.update(enabled_names)
+        return {"websocket": _FakeWebSocket} if "websocket" in enabled_names else {}
+
+    with (
+        patch("nanobot.channels.registry.discover_channel_names", return_value=["websocket"]),
+        patch("nanobot.channels.registry.discover_enabled", side_effect=_discover_enabled),
+    ):
+        mgr = ChannelManager(Config(), MessageBus(), webui_static_dist=False)
+
+    assert "websocket" in seen_enabled
+    assert mgr.channels["websocket"].config["enabled"] is True
+    assert mgr.channels["websocket"].config["host"] == "127.0.0.1"
+
+
+def test_manager_respects_explicitly_disabled_websocket_config():
+    from nanobot.channels.manager import ChannelManager
+
+    seen_enabled: set[str] = set()
+
+    def _discover_enabled(enabled_names: set[str], _names=None):
+        seen_enabled.update(enabled_names)
+        return {}
+
+    config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
+    with (
+        patch("nanobot.channels.registry.discover_channel_names", return_value=["websocket"]),
+        patch("nanobot.channels.registry.discover_enabled", side_effect=_discover_enabled),
+    ):
+        mgr = ChannelManager(config, MessageBus(), webui_static_dist=False)
+
+    assert "websocket" not in seen_enabled
+    assert "websocket" not in mgr.channels
 
 
 @pytest.mark.asyncio
@@ -681,9 +743,45 @@ def test_run_install_command_returns_failure_on_timeout(monkeypatch):
 def test_optional_dependency_metadata_for_enable():
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     deps = data["project"]["optional-dependencies"]
+    required = data["project"]["dependencies"]
 
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
     assert deps["bedrock"] == ["boto3>=1.43.0"]
+    for dep_name in (
+        "aiohttp",
+        "dingtalk-stream",
+        "lark-oapi",
+        "msgpack",
+        "openpyxl",
+        "pypdf",
+        "python-telegram-bot",
+        "python-docx",
+        "python-pptx",
+        "python-socketio",
+        "qq-botpy",
+        "slack-sdk",
+        "slackify-markdown",
+    ):
+        assert not any(dep.startswith(dep_name) for dep in required)
+    assert deps["dingtalk"] == ["dingtalk-stream>=0.24.0,<1.0.0"]
+    assert deps["documents"] == [
+        "pypdf>=5.0.0,<6.0.0",
+        "python-docx>=1.1.0,<2.0.0",
+        "openpyxl>=3.1.0,<4.0.0",
+        "python-pptx>=1.0.0,<2.0.0",
+    ]
+    assert deps["feishu"] == ["lark-oapi>=1.5.0,<2.0.0"]
+    assert deps["mochat"] == [
+        "python-socketio>=5.16.0,<6.0.0",
+        "msgpack>=1.1.0,<2.0.0",
+    ]
+    assert deps["napcat"] == ["aiohttp>=3.9.0,<4.0.0"]
+    assert deps["qq"] == ["aiohttp>=3.9.0,<4.0.0", "qq-botpy>=1.2.0,<2.0.0"]
+    assert deps["slack"] == [
+        "slack-sdk>=3.39.0,<4.0.0",
+        "slackify-markdown>=0.2.0,<1.0.0",
+    ]
+    assert any(dep.startswith("python-telegram-bot") for dep in deps["telegram"])
     assert any(
         dep.startswith("matrix-nio>=0.25.2") and "sys_platform == 'win32'" in dep
         for dep in deps["matrix"]
@@ -792,19 +890,19 @@ async def test_manager_skips_disabled_plugin():
 
 def test_builtin_channel_default_config():
     """Built-in channels expose default_config() returning a dict with 'enabled': False."""
-    from nanobot.channels.telegram import TelegramChannel
-    cfg = TelegramChannel.default_config()
+    from nanobot.channels.dingtalk import DingTalkChannel
+    cfg = DingTalkChannel.default_config()
     assert isinstance(cfg, dict)
     assert cfg["enabled"] is False
-    assert "token" in cfg
+    assert "clientId" in cfg
 
 
 def test_builtin_channel_init_from_dict():
     """Built-in channels accept a raw dict and convert to Pydantic internally."""
-    from nanobot.channels.telegram import TelegramChannel
+    from nanobot.channels.dingtalk import DingTalkChannel
     bus = MessageBus()
-    ch = TelegramChannel({"enabled": False, "token": "test-tok", "allowFrom": ["*"]}, bus)
-    assert ch.config.token == "test-tok"
+    ch = DingTalkChannel({"enabled": False, "clientId": "test-id", "allowFrom": ["*"]}, bus)
+    assert ch.config.client_id == "test-id"
     assert ch.config.allow_from == ["*"]
 
 

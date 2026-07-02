@@ -33,6 +33,7 @@ class InstallResult:
 
 
 _INSTALL_TIMEOUT_SECONDS = 300
+_DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -260,13 +261,25 @@ def enable_channel_config(config_path: Path, channel_name: str, defaults: dict[s
     write_config_data(config_path, data)
 
 
+def disable_channel_config(config_path: Path, channel_name: str) -> None:
+    data = read_config_data(config_path)
+    channels = data.setdefault("channels", {})
+    existing = channels.get(channel_name, {})
+    if not isinstance(existing, dict):
+        existing = {}
+    existing["enabled"] = False
+    channels[channel_name] = existing
+    write_config_data(config_path, data)
+
+
 def channel_enabled(config: Config, name: str) -> bool:
     section = getattr(config.channels, name, None)
+    default_enabled = name in _DEFAULT_ENABLED_CHANNELS
     if section is None:
-        return False
+        return default_enabled
     if isinstance(section, dict):
-        return bool(section.get("enabled", False))
-    return bool(getattr(section, "enabled", False))
+        return bool(section.get("enabled", default_enabled))
+    return bool(getattr(section, "enabled", default_enabled))
 
 
 def optional_features_payload(
@@ -359,4 +372,34 @@ def enable_optional_feature(
 
     payload = optional_features_payload(last_action={"ok": True, "message": message, "enabled": True})
     payload["requires_restart"] = bool(name in builtin_channels or name in plugin_channels or name in extras)
+    return payload
+
+
+def disable_optional_feature(
+    name: str,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    from nanobot.channels.registry import discover_channel_names, discover_plugins
+    from nanobot.config.loader import get_config_path
+
+    config_path = config_path or get_config_path()
+    extras = optional_dependency_groups()
+    builtin_channels = set(discover_channel_names())
+    plugin_channels = discover_plugins()
+    known_channels = builtin_channels | set(plugin_channels)
+    known = known_channels | set(extras)
+    if name not in known:
+        available = ", ".join(sorted(known))
+        raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
+    if name not in known_channels:
+        raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
+    if name == "websocket":
+        raise OptionalFeatureError("Channel 'websocket' cannot be disabled", status=400)
+
+    disable_channel_config(config_path, name)
+    payload = optional_features_payload(
+        last_action={"ok": True, "message": f"Disabled channel '{name}'", "enabled": False}
+    )
+    payload["requires_restart"] = True
     return payload

@@ -480,6 +480,7 @@
     "nanobotFeatures": {
       "enabled": "有効",
       "enable": "有効化",
+      "disable": "無効化",
       "ready": "準備完了",
       "missingDependency": "必要なサポートをインストール",
       "channelDisabled": "チャンネルは無効",

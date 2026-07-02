@@ -82,6 +82,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
   createModelConfiguration,
+  disableNanobotFeature,
   enableNanobotFeature,
   fetchAutomations,
   fetchSettings,
@@ -1361,16 +1362,21 @@ export function SettingsView({
     }
   };
 
-  const handleNanobotFeatureEnable = async (name: string) => {
-    const key = `enable:${name}`;
+  const handleNanobotFeatureAction = async (action: "enable" | "disable", name: string) => {
+    const key = `${action}:${name}`;
     setNanobotFeatureAction(key);
     setNanobotFeaturesMessage(null);
     setNanobotFeaturesError(null);
     try {
-      const payload = await enableNanobotFeature(token, name);
+      const payload = action === "enable"
+        ? await enableNanobotFeature(token, name)
+        : await disableNanobotFeature(token, name);
       setNanobotFeatures(payload);
       setNanobotFeaturesMessage(payload.last_action?.message ?? null);
-      if (payload.features.some((feature) => feature.name === name && feature.requires_restart)) {
+      if (
+        payload.requires_restart ||
+        payload.features.some((feature) => feature.name === name && feature.requires_restart)
+      ) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
     } catch (err) {
@@ -1679,7 +1685,7 @@ export function SettingsView({
             onQueryChange={setAppsQuery}
             onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
-            onNanobotEnable={handleNanobotFeatureEnable}
+            onNanobotAction={handleNanobotFeatureAction}
             onMcpAction={handleMcpPresetAction}
             onDismissStatus={() => {
               setCliAppsMessage(null);
@@ -4905,7 +4911,7 @@ function AppsCatalogSettings({
   onQueryChange,
   onFilterChange,
   onCliAction,
-  onNanobotEnable,
+  onNanobotAction,
   onMcpAction,
   onDismissStatus,
   onBackToChat,
@@ -4944,7 +4950,7 @@ function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-  onNanobotEnable: (name: string) => void;
+  onNanobotAction: (action: "enable" | "disable", name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
@@ -5110,7 +5116,7 @@ function AppsCatalogSettings({
                   key={item.id}
                   feature={item.feature}
                   actionKey={nanobotActionKey}
-                  onEnable={onNanobotEnable}
+                  onAction={onNanobotAction}
                 />
               ) : item.kind === "cli" ? (
                 <CliAppsCatalogRow
@@ -5161,15 +5167,16 @@ function AppsCatalogSettings({
 function NanobotFeatureCatalogRow({
   feature,
   actionKey,
-  onEnable,
+  onAction,
 }: {
   feature: NanobotFeatureInfo;
   actionKey: string | null;
-  onEnable: (name: string) => void;
+  onAction: (action: "enable" | "disable", name: string) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const enableBusy = actionKey === `enable:${feature.name}`;
+  const disableBusy = actionKey === `disable:${feature.name}`;
   const description = nanobotFeatureStatusLabel(feature, tx);
 
   return (
@@ -5191,7 +5198,16 @@ function NanobotFeatureCatalogRow({
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {feature.ready ? (
+        {feature.ready && feature.type === "channel" && feature.name !== "websocket" ? (
+          <AppsActionButton
+            ariaLabel={tx("settings.nanobotFeatures.disable", "Disable")}
+            busy={disableBusy}
+            tone="danger"
+            onClick={() => onAction("disable", feature.name)}
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : feature.ready ? (
           <AppsActionButton
             ariaLabel={tx("settings.nanobotFeatures.enabled", "Enabled")}
             disabled
@@ -5203,7 +5219,7 @@ function NanobotFeatureCatalogRow({
           <AppsActionButton
             ariaLabel={tx("settings.nanobotFeatures.enable", "Enable")}
             busy={enableBusy}
-            onClick={() => onEnable(feature.name)}
+            onClick={() => onAction("enable", feature.name)}
           >
             <Plus className="h-4 w-4" aria-hidden />
           </AppsActionButton>

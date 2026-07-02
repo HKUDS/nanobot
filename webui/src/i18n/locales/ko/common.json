@@ -480,6 +480,7 @@
     "nanobotFeatures": {
       "enabled": "활성화됨",
       "enable": "활성화",
+      "disable": "비활성화",
       "ready": "준비됨",
       "missingDependency": "필요한 지원 설치",
       "channelDisabled": "채널이 비활성화됨",

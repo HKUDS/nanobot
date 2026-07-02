@@ -40,6 +40,24 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "show_reasoning": "showReasoning",
 }
 
+_DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
+
+
+def _default_channel_config(name: str) -> dict[str, Any] | None:
+    if name != "websocket":
+        return None
+    from nanobot.channels.websocket import WebSocketChannel
+
+    return WebSocketChannel.default_config()
+
+
+def _channel_config_enabled(name: str, section: Any) -> bool:
+    default_enabled = name in _DEFAULT_ENABLED_CHANNELS
+    if isinstance(section, dict):
+        return bool(section.get("enabled", default_enabled))
+    return bool(getattr(section, "enabled", default_enabled))
+
+
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
@@ -90,21 +108,28 @@ class ChannelManager:
         candidate_names = set(names)
         extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
         candidate_names.update(extra.keys())
+        default_sections: dict[str, Any] = {}
+
+        def section_for(name: str) -> Any:
+            section = getattr(self.config.channels, name, None)
+            if section is not None or name not in _DEFAULT_ENABLED_CHANNELS:
+                return section
+            if name not in default_sections:
+                default = _default_channel_config(name)
+                if default is not None:
+                    default_sections[name] = default
+            return default_sections.get(name)
 
         enabled_names: set[str] = set()
         for name in candidate_names:
-            section = getattr(self.config.channels, name, None)
+            section = section_for(name)
             if section is None:
                 continue
-            if (
-                section.get("enabled", False)
-                if isinstance(section, dict)
-                else getattr(section, "enabled", False)
-            ):
+            if _channel_config_enabled(name, section):
                 enabled_names.add(name)
 
         for name, cls in discover_enabled(enabled_names, _names=names).items():
-            section = getattr(self.config.channels, name, None)
+            section = section_for(name)
             if section is None:
                 continue
             try:

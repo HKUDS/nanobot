@@ -15,14 +15,14 @@ First confirm your provider and model can answer:
 nanobot agent -m "Hello!"
 ```
 
-Then merge the WebSocket channel into your existing `~/.nanobot/config.json`.
-Set `tokenIssueSecret` to the password you will enter in the WebUI login form:
+The local WebSocket channel is enabled by default because it serves the bundled
+WebUI. To require a browser login password, merge `tokenIssueSecret` into your
+existing `~/.nanobot/config.json`:
 
 ```json
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "tokenIssueSecret": "your-webui-password",
       "websocketRequiresToken": true
     }
@@ -155,7 +155,6 @@ channel to all interfaces and set a token or token issue secret:
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
       "tokenIssueSecret": "your-secret-here"
@@ -174,7 +173,7 @@ form.
 If the page does not open, check these in order:
 
 1. `nanobot agent -m "Hello!"` works in the same Python environment.
-2. The WebSocket channel is enabled in `~/.nanobot/config.json`.
+2. `~/.nanobot/config.json` does not explicitly set `channels.websocket.enabled` to `false`.
 3. `nanobot gateway` is still running.
 4. You are opening port `8765`, not the gateway health port.
 5. LAN access uses `host: "0.0.0.0"` and a token or token issue secret.

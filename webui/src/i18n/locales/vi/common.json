@@ -480,6 +480,7 @@
     "nanobotFeatures": {
       "enabled": "Đã bật",
       "enable": "Bật",
+      "disable": "Tắt",
       "ready": "Sẵn sàng",
       "missingDependency": "Cài đặt hỗ trợ cần thiết",
       "channelDisabled": "Kênh đang tắt",

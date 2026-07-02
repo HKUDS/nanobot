@@ -181,11 +181,11 @@ For the first setup, choose `[Q] Quick Start`. It configures the recommended loc
 4. Paste your API key if the wizard asks for one.
 5. Paste the provider base URL if the wizard asks for one.
 6. Paste a model ID that provider can run.
-7. Confirm that Quick Start should enable the WebSocket channel for the local WebUI.
+7. Confirm that Quick Start should configure the local WebUI.
 8. Set the WebUI password when prompted.
 9. Review the Quick Start summary. The wizard saves and exits when Quick Start finishes.
 
-The recommended path enables `channels.websocket` for the local WebUI, requires a WebUI password, and writes default AI settings. You do not need to choose a separate chat app for the first run.
+The recommended path configures the local WebUI, requires a WebUI password, and writes default AI settings. You do not need to choose a separate chat app for the first run.
 
 If you already know that you need custom headers, provider-specific request fields, a chat app, or tools, choose `Advanced Settings` instead. [`provider-cookbook.md`](./provider-cookbook.md) has copyable examples for several common provider setups. After you change advanced settings, a save option appears in the main menu. Choose `[S] Save and Exit`.
 
@@ -225,7 +225,6 @@ Merge them into one object:
   },
   "channels": {
     "websocket": {
-      "enabled": true,
       "tokenIssueSecret": "your-webui-password",
       "websocketRequiresToken": true
     }
@@ -288,7 +287,6 @@ If this is a brand-new install and you have not configured anything else yet, re
   },
   "channels": {
     "websocket": {
-      "enabled": true,
       "tokenIssueSecret": "your-webui-password",
       "websocketRequiresToken": true
     }

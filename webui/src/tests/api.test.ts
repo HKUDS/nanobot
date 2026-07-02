@@ -22,6 +22,7 @@ import {
   listSlashCommands,
   loginProviderOAuth,
   logoutProviderOAuth,
+  disableNanobotFeature,
   enableNanobotFeature,
   runAutomationAction,
   runCliAppAction,
@@ -443,7 +444,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("reads and enables nanobot optional features", async () => {
+  it("reads and toggles nanobot optional features", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -463,6 +464,14 @@ describe("webui API helpers", () => {
     await enableNanobotFeature("tok", "matrix");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/nanobot-features/enable?name=matrix",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await disableNanobotFeature("tok", "matrix");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/disable?name=matrix",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

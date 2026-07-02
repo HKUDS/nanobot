@@ -277,7 +277,7 @@ def test_ssl_context_requires_both_cert_and_key_files() -> None:
 
 def test_default_config_includes_safe_bind_and_streaming() -> None:
     defaults = WebSocketChannel.default_config()
-    assert defaults["enabled"] is False
+    assert defaults["enabled"] is True
     assert defaults["host"] == "127.0.0.1"
     assert defaults["streaming"] is True
     assert defaults["allowFrom"] == ["*"]

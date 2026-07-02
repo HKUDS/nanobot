@@ -123,6 +123,8 @@ class WebUISettingsRouter:
             return await self._handle_settings_nanobot_features(request)
         if path == "/api/settings/nanobot-features/enable":
             return await self._handle_settings_nanobot_features_action(request, "enable")
+        if path == "/api/settings/nanobot-features/disable":
+            return await self._handle_settings_nanobot_features_action(request, "disable")
         if path == "/api/settings/mcp-presets":
             return await self._handle_settings_mcp_presets(request)
         if path == "/api/settings/version-check":

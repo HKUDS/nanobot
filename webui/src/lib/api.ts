@@ -384,6 +384,19 @@ export async function enableNanobotFeature(
   );
 }
 
+export async function disableNanobotFeature(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<NanobotFeaturesPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<NanobotFeaturesPayload>(
+    `${base}/api/settings/nanobot-features/disable?${query}`,
+    token,
+  );
+}
+
 export async function runCliAppAction(
   token: string,
   action: "install" | "update" | "uninstall" | "test",

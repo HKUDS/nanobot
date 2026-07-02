@@ -75,7 +75,7 @@ def discover_enabled(
             logger.debug("Skipping built-in channel '{}': {}", modname, e)
 
     external = discover_plugins(None if _include_all_external else enabled_names)
-    shadowed = set(external) & set(result)
+    shadowed = set(external) & set(names)
     if shadowed:
         logger.warning("Plugin(s) shadowed by built-in channels (ignored): {}", shadowed)
     if _include_all_external:

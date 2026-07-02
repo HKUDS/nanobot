@@ -60,7 +60,8 @@ class _MockChannel(BaseChannel):
 
 @pytest.fixture
 def manager() -> ChannelManager:
-    mgr = ChannelManager(Config(), MessageBus())
+    config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
+    mgr = ChannelManager(config, MessageBus())
     mgr.channels["mock"] = _MockChannel({}, mgr.bus)
     return mgr
 

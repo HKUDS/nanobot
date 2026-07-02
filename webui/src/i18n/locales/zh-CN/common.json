@@ -480,6 +480,7 @@
     "nanobotFeatures": {
       "enabled": "已启用",
       "enable": "启用",
+      "disable": "禁用",
       "ready": "就绪",
       "missingDependency": "安装所需支持",
       "channelDisabled": "渠道已禁用",

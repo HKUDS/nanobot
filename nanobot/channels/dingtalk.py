@@ -205,7 +205,7 @@ class DingTalkChannel(BaseChannel):
         try:
             if not DINGTALK_AVAILABLE:
                 self.logger.error(
-                    "Stream SDK not installed. Run: pip install dingtalk-stream"
+                    "Stream SDK not installed. Run: nanobot plugins enable dingtalk"
                 )
                 return
 

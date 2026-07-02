@@ -5,6 +5,7 @@ from typing import Any
 
 from nanobot.optional_features import (
     OptionalFeatureError,
+    disable_optional_feature,
     enable_optional_feature,
     optional_features_payload,
 )
@@ -27,4 +28,6 @@ def nanobot_features_action(action: str, query: QueryParams) -> dict[str, Any]:
         raise OptionalFeatureError("missing feature name")
     if action == "enable":
         return enable_optional_feature(name)
+    if action == "disable":
+        return disable_optional_feature(name)
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)
