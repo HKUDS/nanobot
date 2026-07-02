@@ -414,11 +414,11 @@ def create_app(
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler) -> web.StreamResponse:
-        if not api_key:
-            return await handler(request)
         # Allow unauthenticated health checks.
         if request.path == "/health":
             return await handler(request)
+        if not api_key:
+            return _error_json(401, "API key is not configured")
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return _error_json(401, "Missing Authorization header. Use: Bearer <api_key>")
