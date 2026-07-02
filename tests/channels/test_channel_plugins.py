@@ -725,6 +725,28 @@ def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
     ]
 
 
+def test_install_extra_logs_command_and_output(monkeypatch):
+    from nanobot import optional_features
+
+    records: list[str] = []
+
+    class _Logger:
+        def info(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout="install ok", stderr="")
+
+    monkeypatch.setattr(optional_features, "logger", _Logger())
+
+    result = optional_features.install_extra("weixin", ["qrcode[pil]>=8.0"], runner=_run)
+
+    assert result.ok is True
+    assert any("Installing optional feature 'weixin':" in record for record in records)
+    assert any("Optional feature 'weixin' install exited with code 0" in record for record in records)
+    assert any("install ok" in record for record in records)
+
+
 def test_run_install_command_returns_failure_on_timeout(monkeypatch):
     from nanobot import optional_features
 

@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -34,6 +35,7 @@ class InstallResult:
 
 _INSTALL_TIMEOUT_SECONDS = 300
 _DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
+_LOG_OUTPUT_LIMIT = 4000
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -177,6 +179,13 @@ def command_text(argv: list[str]) -> str:
     return subprocess.list2cmdline([str(part) for part in argv])
 
 
+def _log_completed_command(label: str, proc: subprocess.CompletedProcess[str]) -> None:
+    logger.info("{} exited with code {}", label, proc.returncode)
+    output = (proc.stderr or proc.stdout or "").strip()
+    if output:
+        logger.info("{} output:\n{}", label, output[:_LOG_OUTPUT_LIMIT])
+
+
 def missing_pip(proc: subprocess.CompletedProcess[str]) -> bool:
     return "no module named pip" in f"{proc.stdout}\n{proc.stderr}".lower()
 
@@ -192,7 +201,9 @@ def install_extra(
     install_args, label = install_args_for_extra(extra, deps)
     pip_cmd = [sys.executable, "-m", "pip", "install", *install_args]
 
+    logger.info("Installing optional feature '{}': {}", extra, command_text(pip_cmd))
     proc = runner(pip_cmd)
+    _log_completed_command(f"Optional feature '{extra}' install", proc)
     if proc.returncode == 0:
         importlib.invalidate_caches()
         return InstallResult(True, label, pip_cmd)
@@ -201,9 +212,13 @@ def install_extra(
     failed_proc = proc
     if missing_pip(proc):
         ensure_cmd = [sys.executable, "-m", "ensurepip", "--upgrade"]
+        logger.info("pip missing while installing '{}'; running {}", extra, command_text(ensure_cmd))
         ensure_proc = runner(ensure_cmd)
+        _log_completed_command(f"Optional feature '{extra}' ensurepip", ensure_proc)
         if ensure_proc.returncode == 0:
+            logger.info("Retrying optional feature '{}': {}", extra, command_text(pip_cmd))
             proc = runner(pip_cmd)
+            _log_completed_command(f"Optional feature '{extra}' install retry", proc)
             if proc.returncode == 0:
                 importlib.invalidate_caches()
                 return InstallResult(True, label, pip_cmd)
@@ -215,7 +230,9 @@ def install_extra(
 
         if uv := shutil.which("uv"):
             uv_cmd = [uv, "pip", "install", "--python", sys.executable, *install_args]
+            logger.info("Retrying optional feature '{}' with uv: {}", extra, command_text(uv_cmd))
             proc = runner(uv_cmd)
+            _log_completed_command(f"Optional feature '{extra}' uv install", proc)
             if proc.returncode == 0:
                 importlib.invalidate_caches()
                 return InstallResult(True, label, pip_cmd)
