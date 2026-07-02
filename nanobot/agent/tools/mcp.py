@@ -158,7 +158,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     port = parsed.port
     if not port:
         port = 443 if parsed.scheme == "https" else 80
-    ok, _, resolved_ips = resolve_url_target(url)
+    ok, _, resolved_ips = resolve_url_target(url, allow_loopback=True)
     if not ok:
         return False
     try:
@@ -196,7 +196,7 @@ def _redact_url(url: str) -> str:
 
 async def _validate_mcp_request_url(request: httpx.Request) -> None:
     """Validate each outgoing MCP HTTP request, including redirect targets."""
-    ok, error = validate_url_target(str(request.url))
+    ok, error = validate_url_target(str(request.url), allow_loopback=True)
     if not ok:
         raise httpx.RequestError(
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
@@ -846,7 +846,7 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
-                        transport=PinnedDNSAsyncTransport(),
+                        transport=PinnedDNSAsyncTransport(allow_loopback=True),
                     )
 
                 read, write = await server_stack.enter_async_context(
@@ -864,7 +864,7 @@ async def connect_mcp_servers(
                         event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
                         timeout=httpx.Timeout(30.0, connect=10.0),
-                        transport=PinnedDNSAsyncTransport(),
+                        transport=PinnedDNSAsyncTransport(allow_loopback=True),
                     )
                 )
                 read, write, _ = await server_stack.enter_async_context(

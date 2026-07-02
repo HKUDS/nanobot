@@ -659,8 +659,8 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
 @pytest.mark.parametrize(
     "config",
     [
-        MCPServerConfig(url="http://127.0.0.1:9/sse"),
-        MCPServerConfig(type="streamableHttp", url="http://127.0.0.1:9/mcp"),
+        MCPServerConfig(url="http://169.254.169.254/sse"),
+        MCPServerConfig(type="streamableHttp", url="http://169.254.169.254/mcp"),
     ],
 )
 async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
@@ -709,7 +709,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     sent_urls: list[str] = []
     used_transports: list[str] = []
 
-    def _validate(url: str) -> tuple[bool, str]:
+    def _validate(url: str, **_kwargs: object) -> tuple[bool, str]:
         checked_urls.append(url)
         if url == "http://127.0.0.1/private":
             return False, "loopback blocked"
@@ -751,7 +751,11 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
-    monkeypatch.setattr(mcp_mod, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(_handler))
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda **_kwargs: httpx.MockTransport(_handler),
+    )
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
     monkeypatch.setattr(

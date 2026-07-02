@@ -149,12 +149,13 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
 class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
     """HTTPX transport that pins each request to the IPs validated for its URL."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_loopback: bool = False) -> None:
+        self._allow_loopback = allow_loopback
         self._inner = httpx.AsyncHTTPTransport()
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        ok, error, resolved_ips = resolve_url_target(url)
+        ok, error, resolved_ips = resolve_url_target(url, allow_loopback=self._allow_loopback)
         if not ok:
             raise httpx.RequestError(error, request=request)
         with pin_resolved_url_dns(url, resolved_ips):
