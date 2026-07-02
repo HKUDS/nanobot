@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
+from nanobot.agent.memory_wiki import MemoryWikiStore
 from nanobot.session.manager import Session
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
@@ -60,12 +61,14 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self.wiki = MemoryWikiStore(self.memory_dir / "wiki")
+        self._last_dream_history_text = ""
         self._corruption_logged = False  # rate-limit invalid cursor warning
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
+            "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor", "memory/wiki/**",
         ])
         self._maybe_migrate_legacy_history()
 
@@ -229,9 +232,21 @@ class MemoryStore:
 
     # -- context injection (used by context.py) ------------------------------
 
-    def get_memory_context(self) -> str:
-        long_term = self.read_memory()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
+    def get_memory_context(
+        self,
+        query: str | None = None,
+        *,
+        include_long_term: bool = True,
+    ) -> str:
+        parts: list[str] = []
+        wiki_context = self.wiki.get_context(query=query)
+        if wiki_context:
+            parts.append(f"## Derived Memory Wiki\n{wiki_context}")
+
+        long_term = self.read_memory() if include_long_term else ""
+        if long_term:
+            parts.append(f"## Long-term Memory\n{long_term}")
+        return "\n\n".join(parts)
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
@@ -495,9 +510,10 @@ class MemoryStore:
 
         batch = entries[:max_entries]
         history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
+            f"[history:cursor:{e['cursor']}] [{e['timestamp']}] {truncate_text(e['content'], 500)}"
             for e in batch
         )
+        self._last_dream_history_text = history_text
         skill_creator_path = str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md")
         template = render_template(
             "agent/dream.md", strip=True, skill_creator_path=skill_creator_path,
@@ -507,6 +523,7 @@ class MemoryStore:
 
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
+        from nanobot.agent.dream_writer import WriteMemoryConceptsTool
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.apply_patch import ApplyPatchTool
         from nanobot.agent.tools.file_state import FileStates
@@ -544,6 +561,10 @@ class MemoryStore:
             workspace=workspace,
             allowed_dir=skills_dir,
             file_states=file_states,
+        ))
+        tools.register(WriteMemoryConceptsTool(
+            self.wiki,
+            history_text=self._last_dream_history_text,
         ))
         return tools
 

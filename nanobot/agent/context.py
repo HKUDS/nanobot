@@ -72,6 +72,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        memory_query: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -83,8 +84,12 @@ class ContextBuilder:
 
         parts.append(render_template("agent/tool_contract.md"))
 
-        memory = self.memory.get_memory_context()
-        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
+        memory_is_template = self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md")
+        memory = self.memory.get_memory_context(
+            query=memory_query,
+            include_long_term=not memory_is_template,
+        )
+        if memory:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
@@ -242,6 +247,7 @@ class ContextBuilder:
                     include_memory_recent_history=include_memory_recent_history,
                     session_key=session_key,
                     unified_session=unified_session,
+                    memory_query=current_message,
                 ),
             },
             *history,
