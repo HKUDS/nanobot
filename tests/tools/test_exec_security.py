@@ -9,7 +9,11 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -395,3 +399,37 @@ def test_exec_blocks_outside_paths_from_subdirectory(tmp_path):
     )
     assert result is not None
     assert "path outside working dir" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+async def test_exec_restricted_blocks_workspace_symlink_escape(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("secret", encoding="utf-8")
+    (workspace / "link.txt").symlink_to(secret)
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
+    result = await tool.execute(command="cat link.txt")
+
+    assert "workspace symlink escapes" in result
+    assert "secret" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+async def test_exec_restricted_allows_workspace_internal_symlink(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "target.txt"
+    target.write_text("inside", encoding="utf-8")
+    (workspace / "link.txt").symlink_to(target)
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
+    result = await tool.execute(command="cat link.txt")
+
+    assert "inside" in result
+    assert "workspace symlink escapes" not in result

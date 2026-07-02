@@ -393,6 +393,14 @@ class ExecTool(Tool):
                     "Error: working_dir is outside the configured workspace"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
+            if not self.sandbox:
+                escaping_link = self._find_workspace_symlink_escape(resolved_root)
+                if escaping_link is not None:
+                    return ToolResult.error(
+                        "Error: restricted exec blocked because workspace symlink escapes "
+                        f"the configured workspace: {escaping_link}"
+                        + _WORKSPACE_BOUNDARY_NOTE
+                    )
 
         guard_error = self._guard_command(
             command,
@@ -435,6 +443,22 @@ class ExecTool(Tool):
             shell_program=shell_program,
             login=False if login is None else login,
         )
+
+    @staticmethod
+    def _find_workspace_symlink_escape(workspace_root: Path) -> Path | None:
+        for root, dirs, files in os.walk(workspace_root, followlinks=False):
+            root_path = Path(root)
+            for name in [*dirs, *files]:
+                candidate = root_path / name
+                try:
+                    if not candidate.is_symlink():
+                        continue
+                    target = candidate.resolve(strict=True)
+                except OSError:
+                    continue
+                if not is_path_within(target, workspace_root):
+                    return candidate
+        return None
 
     def _compose_path(self, current_path: str) -> str:
         parts = []
