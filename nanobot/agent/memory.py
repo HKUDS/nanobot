@@ -63,6 +63,7 @@ class MemoryStore:
         self._corruption_logged = False  # rate-limit invalid cursor warning
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
+        self._dream_prompt_oversize_logged = False
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
@@ -506,7 +507,17 @@ class MemoryStore:
         with suppress(OSError):
             text = self.dream_prompt_file.read_text(encoding="utf-8")
             if text.strip():
-                return text.rstrip()
+                text = text.rstrip()
+                if len(text) > _DREAM_PROMPT_MAX_CHARS:
+                    if not self._dream_prompt_oversize_logged:
+                        self._dream_prompt_oversize_logged = True
+                        logger.warning(
+                            "workspace Dream prompt exceeds {} chars ({}); truncating. "
+                            "Further occurrences suppressed.",
+                            _DREAM_PROMPT_MAX_CHARS, len(text),
+                        )
+                    return truncate_text(text, _DREAM_PROMPT_MAX_CHARS)
+                return text
         return self.default_dream_prompt()
 
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
@@ -657,6 +668,7 @@ class MemoryStore:
 # that catches any new caller that forgot to set its own cap.
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
+_DREAM_PROMPT_MAX_CHARS = 32_000      # workspace-local Dream prompt override
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 

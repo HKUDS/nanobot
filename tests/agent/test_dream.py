@@ -78,6 +78,20 @@ class TestBuildDreamPrompt:
         assert "## Conversation History" in prompt
         assert "keep this fact" in prompt
 
+    def test_workspace_dream_prompt_override_is_capped(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("x" * 40_000, encoding="utf-8")
+        store.append_history("keep this fact")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "x" * 40_000 not in prompt
+        assert "... (truncated)" in prompt
+        assert "## Conversation History" in prompt
+        assert "keep this fact" in prompt
+
     def test_empty_workspace_dream_prompt_uses_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
         store.dream_prompt_file.write_text("  \n", encoding="utf-8")
