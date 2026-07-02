@@ -1,5 +1,3 @@
-import os
-
 import pytest
 
 from nanobot.agent.tools.message import MessageTool
@@ -81,19 +79,23 @@ async def test_message_tool_marks_channel_delivery_only_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_tool_records_media_deliveries() -> None:
+async def test_message_tool_records_media_deliveries(tmp_path) -> None:
     sent: list[OutboundMessage] = []
 
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    generated = workspace / "generated.png"
+    generated.write_text("image", encoding="utf-8")
+    tool = MessageTool(send_callback=_send, workspace=workspace)
 
     await tool.execute(
         content="image",
         channel="websocket",
         chat_id="chat-1",
-        media=["/tmp/generated.png"],
+        media=[str(generated)],
     )
 
     assert sent[0].metadata == {"_record_channel_delivery": True}
@@ -162,6 +164,31 @@ async def test_message_tool_does_not_inherit_metadata_for_cross_target() -> None
     await tool.execute(content="channel reply", channel="slack", chat_id="C999")
 
     assert sent[0].metadata == {}
+
+
+@pytest.mark.asyncio
+async def test_message_tool_blocks_unauthorized_cross_target_send() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    def _authorize(channel: str, chat_id: str, default_channel: str, default_chat_id: str) -> str | None:
+        if channel == default_channel and chat_id == default_chat_id:
+            return None
+        return "blocked target"
+
+    tool = MessageTool(send_callback=_send, outbound_authorizer=_authorize)
+    from nanobot.agent.tools.context import RequestContext
+
+    tool.set_context(RequestContext(channel="telegram", chat_id="allowed", metadata={}))
+
+    same_target = await tool.execute(content="same")
+    cross_target = await tool.execute(content="cross", channel="telegram", chat_id="other")
+
+    assert same_target == "Message sent to telegram:allowed"
+    assert cross_target == "Error: outbound target is not authorized: blocked target"
+    assert [msg.content for msg in sent] == ["same"]
 
 
 @pytest.mark.asyncio
@@ -256,24 +283,27 @@ async def test_message_tool_allows_workspace_absolute_media_when_restricted(tmp_
 
 
 @pytest.mark.asyncio
-async def test_message_tool_passes_through_absolute_media_paths() -> None:
+async def test_message_tool_rejects_outside_absolute_media_paths_when_unrestricted(tmp_path) -> None:
     sent: list[OutboundMessage] = []
 
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "abs_image.png"
+    outside.write_text("image", encoding="utf-8")
+    tool = MessageTool(send_callback=_send, workspace=workspace)
 
-    abs_path = os.path.abspath(os.path.join(os.sep, "tmp", "abs_image.png"))
-
-    await tool.execute(
+    result = await tool.execute(
         content="see attached",
         channel="telegram",
         chat_id="1",
-        media=[abs_path],
+        media=[str(outside)],
     )
 
-    assert sent[0].media == [abs_path]
+    assert result.startswith("Error: media path is not allowed:")
+    assert sent == []
 
 
 @pytest.mark.asyncio
@@ -298,15 +328,20 @@ async def test_message_tool_passes_through_url_media_paths() -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_tool_resolves_mixed_media_paths() -> None:
+async def test_message_tool_resolves_mixed_media_paths(tmp_path, monkeypatch) -> None:
     sent: list[OutboundMessage] = []
 
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
-
-    abs_path = os.path.abspath(os.path.join(os.sep, "tmp", "absolute.png"))
+    workspace = tmp_path / "workspace"
+    media_root = tmp_path / "media"
+    workspace.mkdir()
+    media_root.mkdir()
+    media_path = media_root / "absolute.png"
+    media_path.write_text("image", encoding="utf-8")
+    monkeypatch.setattr("nanobot.agent.tools.message.get_media_dir", lambda: media_root)
+    tool = MessageTool(send_callback=_send, workspace=workspace)
 
     await tool.execute(
         content="see attached",
@@ -314,16 +349,16 @@ async def test_message_tool_resolves_mixed_media_paths() -> None:
         chat_id="1",
         media=[
             "output/relative.png",
-            abs_path,
+            str(media_path),
             "https://example.com/url.png",
             "http://example.com/http.png",
         ],
     )
 
-    expected_relative = str(get_workspace_path() / "output/relative.png")
+    expected_relative = str((workspace / "output/relative.png").resolve())
     assert sent[0].media == [
         expected_relative,
-        abs_path,
+        str(media_path.resolve()),
         "https://example.com/url.png",
         "http://example.com/http.png",
     ]
@@ -336,7 +371,7 @@ async def test_message_tool_tracks_turn_media_for_same_target(tmp_path) -> None:
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
+    tool = MessageTool(send_callback=_send, workspace=tmp_path)
     from nanobot.agent.tools.context import RequestContext
 
     tool.set_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={}))
@@ -353,7 +388,7 @@ async def test_message_tool_start_turn_clears_tracked_media(tmp_path) -> None:
     async def _send(msg: OutboundMessage) -> None:
         pass
 
-    tool = MessageTool(send_callback=_send)
+    tool = MessageTool(send_callback=_send, workspace=tmp_path)
     from nanobot.agent.tools.context import RequestContext
 
     tool.set_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={}))
@@ -370,7 +405,7 @@ async def test_message_tool_cross_target_does_not_track_turn_media(tmp_path) -> 
     async def _send(msg: OutboundMessage) -> None:
         pass
 
-    tool = MessageTool(send_callback=_send)
+    tool = MessageTool(send_callback=_send, workspace=tmp_path)
     from nanobot.agent.tools.context import RequestContext
 
     tool.set_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={}))
@@ -392,7 +427,7 @@ async def test_message_tool_rejects_wrong_explicit_ws_chat_id(tmp_path) -> None:
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
+    tool = MessageTool(send_callback=_send, workspace=tmp_path)
     from nanobot.agent.tools.context import RequestContext
 
     conv = "550e8400-e29b-41d4-a716-446655440000"
@@ -416,7 +451,7 @@ async def test_message_tool_allows_ws_explicit_when_matches_context(tmp_path) ->
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
+    tool = MessageTool(send_callback=_send, workspace=tmp_path)
     from nanobot.agent.tools.context import RequestContext
 
     conv = "550e8400-e29b-41d4-a716-446655440000"
@@ -441,7 +476,7 @@ async def test_message_tool_cli_context_may_target_other_ws_chat(tmp_path) -> No
     async def _send(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    tool = MessageTool(send_callback=_send)
+    tool = MessageTool(send_callback=_send, workspace=tmp_path)
     from nanobot.agent.tools.context import RequestContext
 
     target = "550e8400-e29b-41d4-a716-446655440000"

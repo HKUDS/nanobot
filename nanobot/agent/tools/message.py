@@ -11,8 +11,10 @@ from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
-from nanobot.config.paths import get_workspace_path
+from nanobot.config.paths import get_media_dir, get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
+
+OutboundAuthorizer = Callable[[str, str, str, str], str | None]
 
 
 @tool_parameters(
@@ -56,8 +58,10 @@ class MessageTool(Tool, ContextAware):
         default_message_id: str | None = None,
         workspace: str | Path | None = None,
         restrict_to_workspace: bool = False,
+        outbound_authorizer: OutboundAuthorizer | None = None,
     ):
         self._send_callback = send_callback
+        self._outbound_authorizer = outbound_authorizer
         self._workspace = (
             Path(workspace).expanduser() if workspace is not None else get_workspace_path()
         )
@@ -109,6 +113,10 @@ class MessageTool(Tool, ContextAware):
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
         self._send_callback = callback
+
+    def set_outbound_authorizer(self, authorizer: OutboundAuthorizer | None) -> None:
+        """Set the authorization hook for proactive/cross-target sends."""
+        self._outbound_authorizer = authorizer
 
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
@@ -162,7 +170,7 @@ class MessageTool(Tool, ContextAware):
         )
 
     def _resolve_media(self, media: list[str]) -> list[str]:
-        """Resolve local media attachments and enforce workspace restriction when enabled."""
+        """Resolve local media attachments and confine them to trusted roots."""
         resolved: list[str] = []
         access = current_tool_workspace(
             self._workspace,
@@ -172,11 +180,13 @@ class MessageTool(Tool, ContextAware):
         for p in media:
             if p.startswith(("http://", "https://")):
                 resolved.append(p)
-            elif not access.restrict_to_workspace:
-                path = Path(p).expanduser()
-                resolved.append(p if path.is_absolute() else str(workspace / path))
             else:
-                resolved.append(str(resolve_workspace_path(p, workspace, access.allowed_root)))
+                resolved.append(str(resolve_workspace_path(
+                    p,
+                    workspace,
+                    access.allowed_root or workspace,
+                    extra_allowed_dirs=[get_media_dir()],
+                )))
         return resolved
 
     async def execute(
@@ -233,6 +243,16 @@ class MessageTool(Tool, ContextAware):
 
         if not self._send_callback:
             return ToolResult.error("Error: Message sending not configured")
+
+        if self._outbound_authorizer is not None:
+            denial = self._outbound_authorizer(
+                str(channel),
+                str(chat_id),
+                str(default_channel),
+                str(default_chat_id),
+            )
+            if denial:
+                return ToolResult.error(f"Error: outbound target is not authorized: {denial}")
 
         if media:
             try:
