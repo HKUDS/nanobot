@@ -751,6 +751,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(_handler))
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
     monkeypatch.setattr(

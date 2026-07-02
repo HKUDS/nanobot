@@ -22,7 +22,12 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_MCP_RELOAD,
     InboundMessage,
 )
-from nanobot.security.network import validate_url_target
+from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
+    pin_resolved_url_dns,
+    resolve_url_target,
+    validate_url_target,
+)
 
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
@@ -153,11 +158,15 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     port = parsed.port
     if not port:
         port = 443 if parsed.scheme == "https" else 80
+    ok, _, resolved_ips = resolve_url_target(url)
+    if not ok:
+        return False
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=timeout,
-        )
+        with pin_resolved_url_dns(url, resolved_ips):
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=timeout,
+            )
         writer.close()
         with suppress(OSError, asyncio.TimeoutError):
             await asyncio.wait_for(writer.wait_closed(), timeout=0.2)
@@ -837,6 +846,7 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
+                        transport=PinnedDNSAsyncTransport(),
                     )
 
                 read, write = await server_stack.enter_async_context(
@@ -854,6 +864,7 @@ async def connect_mcp_servers(
                         event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
                         timeout=httpx.Timeout(30.0, connect=10.0),
+                        transport=PinnedDNSAsyncTransport(),
                     )
                 )
                 read, write, _ = await server_stack.enter_async_context(

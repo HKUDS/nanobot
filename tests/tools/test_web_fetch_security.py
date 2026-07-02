@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from nanobot.agent.tools import web as web_module
-from nanobot.agent.tools.web import WebFetchTool
+from nanobot.agent.tools.web import WebFetchTool, _get_with_safe_redirects
 from nanobot.config.schema import WebFetchConfig
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -95,6 +95,30 @@ async def test_web_fetch_result_contains_untrusted_flag():
     data = json.loads(result)
     assert data.get("untrusted") is True
     assert "[External content" in data.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_safe_redirect_request_pins_validated_dns(monkeypatch):
+    calls: list[str] = []
+
+    def _rebinding_resolver(hostname, port, family=0, type_=0):
+        calls.append(hostname)
+        ip = "93.184.216.34" if len(calls) == 1 else "169.254.169.254"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0))]
+
+    class FakeClient:
+        async def get(self, url, headers=None, follow_redirects=False):
+            infos = socket.getaddrinfo("attacker.example", 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            assert infos[0][4][0] == "93.184.216.34"
+            return httpx.Response(200, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver)
+
+    response, error = await _get_with_safe_redirects(FakeClient(), "https://attacker.example/")
+
+    assert error is None
+    assert response is not None
+    assert calls == ["attacker.example"]
 
 
 @pytest.mark.asyncio
