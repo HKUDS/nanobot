@@ -343,12 +343,20 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_anthropic_oauth_with_hyphen_prefix():
+    config = Config()
+    config.agents.defaults.model = "anthropic-oauth/claude-sonnet-4-20250514"
+
+    assert config.get_provider_name() == "anthropic_oauth"
+
+
 def test_config_dump_excludes_oauth_provider_blocks():
     config = Config()
 
     providers = config.model_dump(by_alias=True)["providers"]
 
     assert "openaiCodex" not in providers
+    assert "anthropicOauth" not in providers
     assert "githubCopilot" not in providers
 
 
@@ -404,6 +412,22 @@ def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkey
     assert "No local OAuth credentials found for GitHub Copilot" in result.stdout
 
 
+def test_provider_logout_anthropic_oauth_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "anthropic-oauth.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "anthropic-oauth"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from Anthropic OAuth" in result.stdout
+
+
 def test_provider_logout_rejects_unknown_provider():
     result = runner.invoke(app, ["provider", "logout", "not-a-real-provider"])
 
@@ -415,6 +439,7 @@ def test_provider_logout_paths_resolve_to_expected_files():
     from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
     from oauth_cli_kit.storage import FileTokenStorage
 
+    from nanobot.providers.anthropic_provider import get_anthropic_oauth_storage
     from nanobot.providers.github_copilot_provider import get_storage
 
     codex_storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
@@ -426,6 +451,11 @@ def test_provider_logout_paths_resolve_to_expected_files():
     gh_path = gh_storage.get_token_path()
     assert gh_path.name == "github-copilot.json"
     assert gh_path.parent.name == "auth"
+
+    anthropic_storage = get_anthropic_oauth_storage()
+    anthropic_path = anthropic_storage.get_token_path()
+    assert anthropic_path.name == "anthropic-oauth.json"
+    assert anthropic_path.parent.name == "auth"
 
 
 def test_provider_login_rejects_unknown_provider():
@@ -670,6 +700,8 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
     assert find_by_name("github-copilot") is not None
     assert find_by_name("github-copilot").name == "github_copilot"
+    assert find_by_name("anthropic-oauth") is not None
+    assert find_by_name("anthropic-oauth").name == "anthropic_oauth"
     assert find_by_name("longcat") is not None
     assert find_by_name("longcat").name == "longcat"
     assert find_by_name("atomic-chat") is not None
@@ -880,6 +912,33 @@ def test_provider_proxy_rejects_unsupported_backend():
 
     with pytest.raises(ValueError, match=r"providers\.anthropic\.proxy"):
         make_provider(config)
+
+
+def test_make_provider_uses_anthropic_oauth_backend(monkeypatch):
+    import sys
+
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic-oauth",
+                    "model": "anthropic-oauth/claude-sonnet-4-20250514",
+                }
+            }
+        }
+    )
+    async_anthropic = MagicMock()
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=async_anthropic))
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth_test-token")
+
+    provider = make_provider(config)
+
+    assert provider.__class__.__name__ == "AnthropicOAuthProvider"
+    async_anthropic.assert_called_once()
+    assert async_anthropic.call_args.kwargs["auth_token"] == "oauth_test-token"
+    assert async_anthropic.call_args.kwargs["default_headers"] == {
+        "anthropic-beta": "oauth-2025-04-20",
+    }
 
 
 def test_github_copilot_provider_strips_prefixed_model_name():

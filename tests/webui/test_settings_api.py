@@ -880,6 +880,19 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     assert captured == {"get_proxy": proxy, "login_proxy": proxy}
 
 
+def test_anthropic_oauth_status_uses_claude_code_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth_test-token")
+
+    status = _oauth_provider_status(find_by_name("anthropic_oauth"))
+
+    assert status["configured"] is True
+    assert status["account"] == "CLAUDE_CODE_OAUTH_TOKEN"
+    assert status["expires_at"] is not None
+    assert status["login_supported"] is False
+
+
 def test_provider_models_payload_fetches_openai_compatible_models(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

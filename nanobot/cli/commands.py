@@ -1841,11 +1841,13 @@ _LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
 
 _PROVIDER_DISPLAY: dict[str, str] = {
     "openai_codex": "OpenAI Codex",
+    "anthropic_oauth": "Anthropic OAuth",
     "github_copilot": "GitHub Copilot",
 }
 
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "openai_codex": "openai-codex/gpt-5.4-mini",
+    "anthropic_oauth": "anthropic-oauth/claude-sonnet-4-20250514",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
 
@@ -1911,7 +1913,7 @@ def _set_oauth_provider_as_main(
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'anthropic-oauth', 'github-copilot')"),
     set_main: bool = typer.Option(
         False,
         "--set-main",
@@ -1942,7 +1944,7 @@ def provider_login(
 
 @provider_app.command("logout")
 def provider_logout(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'anthropic-oauth', 'github-copilot')"),
 ):
     """Log out from an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -2013,6 +2015,37 @@ def _logout_github_copilot() -> None:
 
     storage = get_storage()
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["github_copilot"])
+
+
+@_register_login("anthropic_oauth")
+def _login_anthropic_oauth() -> None:
+    try:
+        from nanobot.providers.anthropic_provider import login_anthropic_oauth
+    except ImportError:
+        console.print("[red]Anthropic OAuth support is unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        console.print("[cyan]Run `claude setup-token`, then paste the generated token.[/cyan]\n")
+        token = login_anthropic_oauth(prompt_fn=lambda s: typer.prompt(s, hide_input=True))
+        account = token.account_id or "Anthropic OAuth"
+        console.print(f"[green]✓ Authenticated with Anthropic OAuth[/green]  [dim]{account}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Authentication error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@_register_logout("anthropic_oauth")
+def _logout_anthropic_oauth() -> None:
+    """Clear nanobot's local Anthropic OAuth token, leaving Claude Code credentials intact."""
+    try:
+        from nanobot.providers.anthropic_provider import get_anthropic_oauth_storage
+    except ImportError:
+        console.print("[red]Anthropic OAuth support is unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        raise typer.Exit(1)
+
+    storage = get_anthropic_oauth_storage()
+    _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["anthropic_oauth"])
 
 
 def _delete_oauth_files(token_path: Path, provider_label: str) -> None:

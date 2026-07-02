@@ -100,6 +100,10 @@ def _make_provider_core(
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
         provider = GitHubCopilotProvider(default_model=model)
+    elif backend == "anthropic_oauth":
+        from nanobot.providers.anthropic_provider import AnthropicOAuthProvider
+
+        provider = AnthropicOAuthProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
