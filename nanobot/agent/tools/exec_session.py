@@ -128,7 +128,15 @@ class _ExecSession:
     ) -> _SessionPoll:
         self.last_access = time.monotonic()
         if yield_time_ms > 0 and self.process.returncode is None:
-            await asyncio.sleep(min(yield_time_ms, MAX_YIELD_MS) / 1000)
+            wait_s = min(yield_time_ms, MAX_YIELD_MS) / 1000
+            remaining_s = self.deadline - time.monotonic()
+            if remaining_s <= 0:
+                wait_s = 0
+            else:
+                wait_s = min(wait_s, remaining_s)
+            if wait_s > 0:
+                with suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self.process.wait(), timeout=wait_s)
 
         if self.process.returncode is None and time.monotonic() >= self.deadline:
             self._timed_out = True
