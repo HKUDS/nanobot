@@ -397,13 +397,41 @@ class MemoryStore:
             or not self._is_internal_history_session(entry_session)
         ]
 
-    def compact_history(self) -> None:
-        """Drop oldest entries if the file exceeds *max_history_entries*."""
+    def compact_history(self, *, protect_after_cursor: int | None = None) -> None:
+        """Drop oldest entries while preserving unprocessed Dream history."""
         if self.max_history_entries <= 0:
             return
         entries = self._read_entries()
         if len(entries) <= self.max_history_entries:
             return
+        if protect_after_cursor is not None:
+            protected_indices = {
+                idx
+                for idx, entry in enumerate(entries)
+                if (cursor := self._valid_cursor(entry.get("cursor"))) is not None
+                and cursor > protect_after_cursor
+            }
+            if protected_indices:
+                keep_indices = set(protected_indices)
+                remaining = self.max_history_entries - len(protected_indices)
+                if remaining < 0:
+                    logger.warning(
+                        "History compaction kept {} unprocessed entries beyond cap {}",
+                        len(protected_indices),
+                        self.max_history_entries,
+                    )
+                else:
+                    for idx in range(len(entries) - 1, -1, -1):
+                        if idx in keep_indices:
+                            continue
+                        keep_indices.add(idx)
+                        remaining -= 1
+                        if remaining <= 0:
+                            break
+                self._write_entries([
+                    entry for idx, entry in enumerate(entries) if idx in keep_indices
+                ])
+                return
         kept = entries[-self.max_history_entries:]
         self._write_entries(kept)
 
