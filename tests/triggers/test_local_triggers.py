@@ -62,19 +62,20 @@ def test_trigger_store_allows_multiple_triggers_per_session(tmp_path: Path) -> N
     assert first.id != second.id
 
 
-def test_trigger_store_atomic_write_ignores_unsupported_directory_fsync(
+def test_trigger_store_atomic_writes_ignore_unsupported_directory_fsync(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Shared folders may allow opening directories but reject directory fsync."""
     store = LocalTriggerStore(tmp_path)
     real_open = os.open
+    real_close = os.close
     real_fsync = os.fsync
     directory_fds: set[int] = set()
 
     def fake_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
         fd = real_open(path, flags, *args, **kwargs)
-        if Path(path).name == "triggers":
+        if Path(path).name in {"triggers", "runs"}:
             directory_fds.add(fd)
         return fd
 
@@ -83,7 +84,12 @@ def test_trigger_store_atomic_write_ignores_unsupported_directory_fsync(
             raise OSError(errno.EINVAL, "Invalid argument")
         real_fsync(fd)
 
+    def fake_close(fd: int) -> None:
+        directory_fds.discard(fd)
+        real_close(fd)
+
     monkeypatch.setattr(os, "open", fake_open)
+    monkeypatch.setattr(os, "close", fake_close)
     monkeypatch.setattr(os, "fsync", fake_fsync)
 
     trigger = store.create(
@@ -94,6 +100,9 @@ def test_trigger_store_atomic_write_ignores_unsupported_directory_fsync(
     )
 
     assert store.get(trigger.id) is not None
+    delivery = store.enqueue(trigger.id, "queued from shared folder")
+    record = _read_run_record(store, delivery.id)
+    assert record["content"] == "queued from shared folder"
 
 
 def test_enqueue_rejects_disabled_trigger(tmp_path: Path) -> None:
@@ -136,6 +145,37 @@ def test_enqueue_writes_trigger_run_record(tmp_path: Path) -> None:
     assert record["content"] == "Review PR #4591"
     assert record["origin_metadata"] == {"webui": True}
     assert record["updated_at_ms"] > 0
+
+
+def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="Large audit",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    large_content = "content-" * 1000
+    large_response = "response-" * 1000
+
+    delivery = store.enqueue(trigger.id, large_content)
+    queued_record = _read_run_record(store, delivery.id)
+    assert queued_record["content"].startswith("content-")
+    assert queued_record["content"].endswith("\n... (truncated)")
+    assert len(queued_record["content"]) < len(large_content)
+
+    store.write_delivery_run_record(
+        delivery,
+        trigger=trigger,
+        status="ok",
+        response=large_response,
+    )
+
+    final_record = _read_run_record(store, delivery.id)
+    assert final_record["content"].endswith("\n... (truncated)")
+    assert final_record["response"].startswith("response-")
+    assert final_record["response"].endswith("\n... (truncated)")
+    assert len(final_record["response"]) < len(large_response)
 
 
 def test_delete_removes_delivery_files_for_trigger(tmp_path: Path) -> None:

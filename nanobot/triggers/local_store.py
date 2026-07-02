@@ -16,11 +16,13 @@ from filelock import FileLock
 from loguru import logger
 
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery, TriggerRunRecord
+from nanobot.utils.helpers import truncate_text
 from nanobot.utils.run_records import write_run_record as write_automation_run_record
 
 _TRIGGER_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _MAX_RUN_HISTORY = 20
 _MAX_DELIVERY_ATTEMPTS = 10
+_RUN_RECORD_TEXT_MAX_CHARS = 4000
 _PROCESSING_RECOVERY_ERROR = "delivery was recovered from interrupted processing"
 
 
@@ -292,9 +294,9 @@ class LocalTriggerStore:
         record = _delivery_run_record(delivery, trigger)
         record["status"] = status
         if error:
-            record["error"] = error
+            record["error"] = _run_record_text(error)
         if response is not None:
-            record["response"] = response
+            record["response"] = _run_record_text(response)
         return self.write_run_record(delivery.id, record)
 
     def _ensure_dirs(self) -> None:
@@ -448,12 +450,12 @@ def _delivery_run_record(
         "kind": "local_trigger",
         "trigger_id": delivery.trigger_id,
         "delivery_id": delivery.id,
-        "content": delivery.content,
+        "content": _run_record_text(delivery.content),
         "created_at_ms": delivery.created_at_ms,
         "attempts": delivery.attempts,
     }
     if delivery.last_error:
-        record["last_error"] = delivery.last_error
+        record["last_error"] = _run_record_text(delivery.last_error)
     if trigger is not None:
         record.update(
             {
@@ -466,3 +468,7 @@ def _delivery_run_record(
             }
         )
     return record
+
+
+def _run_record_text(value: str) -> str:
+    return truncate_text(value, _RUN_RECORD_TEXT_MAX_CHARS)
