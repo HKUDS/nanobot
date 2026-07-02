@@ -1060,8 +1060,23 @@ def test_optional_dependency_groups_falls_back_to_package_metadata(monkeypatch):
 
     assert deps == {"bedrock": ["boto3>=1.43.0; extra == 'bedrock'"]}
     assert optional_features.install_args_for_extra("bedrock", deps["bedrock"]) == (
-        ["nanobot-ai[bedrock]"],
-        '"nanobot-ai[bedrock]"',
+        ["boto3>=1.43.0"],
+        "bedrock support",
+    )
+
+
+def test_install_args_for_extra_resolves_metadata_markers_for_current_platform():
+    from nanobot import optional_features
+
+    current_platform = sys.platform
+    deps = [
+        f"current-platform-package>=1.0; sys_platform == '{current_platform}' and extra == 'matrix'",
+        "other-platform-package>=1.0; sys_platform == 'never' and extra == 'matrix'",
+    ]
+
+    assert optional_features.install_args_for_extra("matrix", deps) == (
+        ["current-platform-package>=1.0"],
+        "matrix support",
     )
 
 

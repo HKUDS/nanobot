@@ -93,12 +93,19 @@ def optional_dependency_groups() -> dict[str, list[str] | None]:
     return optional_dependency_groups_from_metadata()
 
 
-def has_extra_marker(raw: str) -> bool:
-    try:
-        marker = Requirement(raw).marker
-    except Exception:
-        return False
-    return marker is not None and "extra" in str(marker)
+def _install_requirements_for_extra(extra: str, deps: list[str]) -> list[str]:
+    install_args: list[str] = []
+    for raw in deps:
+        try:
+            req = Requirement(raw)
+        except Exception:
+            install_args.append(raw)
+            continue
+        if req.marker and not req.marker.evaluate({"extra": extra}):
+            continue
+        req.marker = None
+        install_args.append(str(req))
+    return install_args
 
 
 def package_index_url(preset: str) -> str:
@@ -117,8 +124,11 @@ def install_args_for_extra(
 ) -> tuple[list[str], str]:
     index_url = package_index_url(package_index)
     prefix = ["--index-url", index_url] if index_url else []
-    if deps and not any(has_extra_marker(dep) for dep in deps):
-        return [*prefix, *deps], f"{extra} support"
+    if deps:
+        install_args = _install_requirements_for_extra(extra, deps)
+        if install_args:
+            return [*prefix, *install_args], f"{extra} support"
+        return [], f"{extra} support"
     target = f"nanobot-ai[{extra}]"
     return [*prefix, target], f'"{target}"'
 
@@ -225,6 +235,9 @@ def install_extra(
 
     install_args, label = install_args_for_extra(extra, deps, package_index=package_index)
     pip_cmd = [sys.executable, "-m", "pip", "install", *install_args]
+    if not install_args:
+        logger.info("Optional feature '{}' has no installable dependencies for this platform", extra)
+        return InstallResult(True, label, pip_cmd)
 
     logger.info("Installing optional feature '{}': {}", extra, command_text(pip_cmd))
     proc = runner(pip_cmd)
