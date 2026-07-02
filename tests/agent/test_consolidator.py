@@ -476,6 +476,44 @@ class TestCompactIdleSession:
         assert "CORRECTED_FINAL_RESULT_alpha" in summarized
 
     @pytest.mark.asyncio
+    async def test_idle_compaction_summary_remains_pending_for_dream(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+    ):
+        """Idle compaction must not advance Dream's cursor.
+
+        Dream consumes summaries from history.jsonl using its own cursor, so a
+        compaction-created summary should stay pending until Dream processes it.
+        """
+        store.append_history("already processed by Dream")
+        store.set_last_dream_cursor(1)
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Dream-visible compaction summary.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:dream-cursor")
+        for i in range(12):
+            session.add_message("user", f"dream user {i}")
+            session.add_message("assistant", f"dream assistant {i}")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:dream-cursor",
+            max_suffix=4,
+        )
+
+        assert result == "Dream-visible compaction summary."
+        assert store.get_last_dream_cursor() == 1
+        prompt = store.build_dream_prompt(max_entries=10)
+        assert prompt is not None
+        dream_prompt, last_cursor = prompt
+        assert last_cursor == 2
+        assert "Dream-visible compaction summary." in dream_prompt
+        assert "already processed by Dream" not in dream_prompt
+
+    @pytest.mark.asyncio
     async def test_raw_dumps_only_dropped_messages_on_llm_failure(
         self, real_consolidator, mock_provider, store
     ):
