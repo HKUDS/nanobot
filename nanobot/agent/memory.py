@@ -33,6 +33,116 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
 
+DREAM_SKILL_MARKER = "managed_by: dream"
+
+
+def _resolve_dream_write_path(workspace: Path, path: str) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    return candidate.resolve(strict=False)
+
+
+def _is_within(path: Path, directory: Path) -> bool:
+    try:
+        path.relative_to(directory.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _dream_owned_skill_file(path: Path, skills_dir: Path) -> Path | None:
+    if not _is_within(path, skills_dir):
+        return None
+    try:
+        rel = path.relative_to(skills_dir.resolve(strict=False))
+    except ValueError:
+        return None
+    if len(rel.parts) < 2:
+        return None
+    return skills_dir / rel.parts[0] / "SKILL.md"
+
+
+def _has_dream_skill_marker(path: Path) -> bool:
+    with suppress(OSError, UnicodeDecodeError):
+        return DREAM_SKILL_MARKER in path.read_text(encoding="utf-8")
+    return False
+
+
+class _DreamWriteGuardTool:
+    def __init__(self, wrapped, *, workspace: Path, skills_dir: Path, editable_files: list[Path]):
+        self._wrapped = wrapped
+        self._workspace = workspace
+        self._skills_dir = skills_dir.resolve(strict=False)
+        self._editable_files = {p.resolve(strict=False) for p in editable_files}
+
+    @property
+    def name(self) -> str:
+        return self._wrapped.name
+
+    @property
+    def description(self) -> str:
+        return self._wrapped.description
+
+    @property
+    def parameters(self):
+        return self._wrapped.parameters
+
+    def cast_params(self, params):
+        return self._wrapped.cast_params(params)
+
+    def validate_params(self, params):
+        return self._wrapped.validate_params(params)
+
+    def to_schema(self):
+        return self._wrapped.to_schema()
+
+    def _check_path(self, path: str, new_content: str | None = None) -> str | None:
+        resolved = _resolve_dream_write_path(self._workspace, path)
+        if resolved in self._editable_files:
+            return None
+        skill_file = _dream_owned_skill_file(resolved, self._skills_dir)
+        if skill_file is None:
+            return None
+        if skill_file.exists():
+            if _has_dream_skill_marker(skill_file):
+                return None
+            return (
+                "Error: Dream may only modify skills marked as Dream-managed "
+                f"with `{DREAM_SKILL_MARKER}`."
+            )
+        if resolved.name == "SKILL.md" and new_content and DREAM_SKILL_MARKER in new_content:
+            return None
+        return (
+            "Error: Dream may only create new skills when SKILL.md includes "
+            f"the `{DREAM_SKILL_MARKER}` provenance marker."
+        )
+
+    async def execute(self, **kwargs):
+        checks: list[tuple[str, str | None]] = []
+        if self.name in {"write_file", "edit_file"}:
+            path = kwargs.get("path")
+            if isinstance(path, str):
+                content = kwargs.get("content") if self.name == "write_file" else None
+                if self.name == "edit_file" and kwargs.get("old_text") == "":
+                    content = kwargs.get("new_text")
+                checks.append((path, content if isinstance(content, str) else None))
+        elif self.name == "apply_patch":
+            edits = kwargs.get("edits")
+            if isinstance(edits, list):
+                for edit in edits:
+                    if not isinstance(edit, dict) or not isinstance(edit.get("path"), str):
+                        continue
+                    content = edit.get("new_text") if edit.get("action") == "add" else None
+                    checks.append((edit["path"], content if isinstance(content, str) else None))
+        for path, content in checks:
+            error = self._check_path(path, content)
+            if error:
+                from nanobot.agent.tools.base import ToolResult
+
+                return ToolResult.error(error)
+        return await self._wrapped.execute(**kwargs)
+
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
@@ -528,22 +638,37 @@ class MemoryStore:
             extra_read_allowed_dirs=extra_read,
             file_states=file_states,
         ))
-        tools.register(EditFileTool(
+        tools.register(_DreamWriteGuardTool(
+            EditFileTool(
+                workspace=workspace,
+                allowed_dir=skills_dir,
+                extra_write_allowed_files=editable_files,
+                file_states=file_states,
+            ),
             workspace=workspace,
-            allowed_dir=skills_dir,
-            extra_write_allowed_files=editable_files,
-            file_states=file_states,
+            skills_dir=skills_dir,
+            editable_files=editable_files,
         ))
-        tools.register(ApplyPatchTool(
+        tools.register(_DreamWriteGuardTool(
+            ApplyPatchTool(
+                workspace=workspace,
+                allowed_dir=skills_dir,
+                extra_write_allowed_files=editable_files,
+                file_states=file_states,
+            ),
             workspace=workspace,
-            allowed_dir=skills_dir,
-            extra_write_allowed_files=editable_files,
-            file_states=file_states,
+            skills_dir=skills_dir,
+            editable_files=editable_files,
         ))
-        tools.register(WriteFileTool(
+        tools.register(_DreamWriteGuardTool(
+            WriteFileTool(
+                workspace=workspace,
+                allowed_dir=skills_dir,
+                file_states=file_states,
+            ),
             workspace=workspace,
-            allowed_dir=skills_dir,
-            file_states=file_states,
+            skills_dir=skills_dir,
+            editable_files=editable_files,
         ))
         return tools
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import DREAM_SKILL_MARKER, MemoryStore
 from nanobot.providers.base import LLMResponse
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -171,12 +171,75 @@ class TestDreamTools:
             "write_file",
             {
                 "path": "skills/demo/SKILL.md",
-                "content": "---\nname: demo\ndescription: Demo skill.\n---\n\nUse when needed.\n",
+                "content": (
+                    "---\nname: demo\ndescription: Demo skill.\n"
+                    f"{DREAM_SKILL_MARKER}\n---\n\nUse when needed.\n"
+                ),
             },
         )
 
         assert "Successfully wrote" in result
         assert target.read_text(encoding="utf-8").startswith("---\nname: demo")
+
+    @pytest.mark.asyncio
+    async def test_dream_can_modify_marked_skill(self, store):
+        tools = store.build_dream_tools()
+        target = store.workspace / "skills" / "dreamed" / "SKILL.md"
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            "---\nname: dreamed\nmanaged_by: dream\n---\n\nOld guidance.\n",
+            encoding="utf-8",
+        )
+
+        result = await tools.execute(
+            "edit_file",
+            {
+                "path": "skills/dreamed/SKILL.md",
+                "old_text": "Old guidance.",
+                "new_text": "New guidance.",
+            },
+        )
+
+        assert "Successfully edited" in result
+        assert "New guidance." in target.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_cannot_modify_unmarked_user_skill(self, store):
+        tools = store.build_dream_tools()
+        target = store.workspace / "skills" / "user-owned" / "SKILL.md"
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            "---\nname: user-owned\n---\n\nUser guidance.\n",
+            encoding="utf-8",
+        )
+
+        result = await tools.execute(
+            "edit_file",
+            {
+                "path": "skills/user-owned/SKILL.md",
+                "old_text": "User guidance.",
+                "new_text": "Dream guidance.",
+            },
+        )
+
+        assert "Dream may only modify skills marked as Dream-managed" in result
+        assert "User guidance." in target.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_cannot_create_unmarked_skill(self, store):
+        tools = store.build_dream_tools()
+        target = store.workspace / "skills" / "unmarked" / "SKILL.md"
+
+        result = await tools.execute(
+            "write_file",
+            {
+                "path": "skills/unmarked/SKILL.md",
+                "content": "---\nname: unmarked\n---\n\nUse when needed.\n",
+            },
+        )
+
+        assert "provenance marker" in result
+        assert not target.exists()
 
     @pytest.mark.asyncio
     async def test_dream_tools_keep_internal_write_scope_under_full_access(self, store):
@@ -200,7 +263,7 @@ class TestDreamTools:
                         {
                             "path": "skills/scoped/SKILL.md",
                             "action": "add",
-                            "new_text": "---\nname: scoped\n---\n",
+                            "new_text": f"---\nname: scoped\n{DREAM_SKILL_MARKER}\n---\n",
                         }
                     ]
                 },
