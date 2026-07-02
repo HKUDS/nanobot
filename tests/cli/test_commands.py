@@ -2614,6 +2614,7 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     config.api.host = "127.0.0.2"
     config.api.port = 18900
     config.api.timeout = 45.0
+    config.api.api_key = "secret"
     override_workspace = tmp_path / "override-workspace"
     seen: dict[str, object] = {}
 
@@ -2629,7 +2630,7 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["host"] == "127.0.0.2"
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0
-    assert seen["api_key"] == ""
+    assert seen["api_key"] == "secret"
 
 
 def test_trigger_cli_queues_message_in_workspace(
@@ -2670,6 +2671,7 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     config.api.host = "127.0.0.2"
     config.api.port = 18900
     config.api.timeout = 45.0
+    config.api.api_key = "secret"
     seen: dict[str, object] = {}
 
     _patch_serve_runtime(monkeypatch, config, seen)
@@ -2693,7 +2695,21 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 18901
     assert seen["request_timeout"] == 46.0
-    assert seen["api_key"] == ""
+    assert seen["api_key"] == "secret"
+
+
+def test_serve_rejects_loopback_without_api_key(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file)])
+
+    assert result.exit_code == 1
+    assert "api_key is not set" in result.stdout
+    assert "api_app" not in seen
 
 
 def test_serve_passes_configured_api_key(monkeypatch, tmp_path: Path) -> None:

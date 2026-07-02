@@ -851,13 +851,13 @@ def serve(
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
     api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
+    if not api_key:
+        console.print(
+            "[red]Error: api_key is not set. "
+            "Set api.api_key in config to prevent unauthenticated API access.[/red]"
+        )
+        raise typer.Exit(1)
     if host in {"0.0.0.0", "::"}:
-        if not api_key:
-            console.print(
-                "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
-                "Set api.api_key in config to prevent unauthenticated access.[/red]"
-            )
-            raise typer.Exit(1)
         console.print(
             "[yellow]API is bound to all interfaces "
             "(authentication required).[/yellow]"
