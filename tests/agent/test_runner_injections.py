@@ -466,6 +466,68 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage={})
+        return LLMResponse(content="second answer", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    payload = (
+        "[Subagent 'x' completed successfully]\n\n"
+        "Task: t\n\n"
+        "Result:\nr\n\n"
+        "Summarize this naturally for the user."
+    )
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="c",
+        content="visible follow-up",
+    ))
+    await pending_queue.put(InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:c",
+        content=payload,
+        metadata={"injected_event": "subagent_result", "subagent_task_id": "sub-1"},
+    ))
+
+    final_content, _, all_msgs, _, had_injections = await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        channel="cli",
+        chat_id="c",
+        pending_queue=pending_queue,
+    )
+
+    assert final_content == "second answer"
+    assert had_injections is True
+    assert call_count["n"] == 2
+    injected_users = [message for message in all_msgs if message.get("role") == "user"][-2:]
+    assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
+    assert injected_users[1][HIDDEN_HISTORY_META] == {
+        "kind": "subagent_result",
+        "subagent_task_id": "sub-1",
+    }
+    assert injected_users[1]["injected_event"] == "subagent_result"
+
+
+@pytest.mark.asyncio
 async def test_runner_merges_multiple_injected_user_messages_without_losing_media():
     """Multiple injected follow-ups should not create lossy consecutive user messages."""
     from nanobot.agent.runner import AgentRunner, AgentRunSpec

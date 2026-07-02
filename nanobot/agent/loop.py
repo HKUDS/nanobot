@@ -62,6 +62,7 @@ from nanobot.session.goal_state import (
     runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from nanobot.session.manager import (
     Session,
@@ -795,7 +796,20 @@ class AgentLoop:
                     content, media = self._prepare_message_media(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
-                return {"role": "user", "content": user_content}
+                row: dict[str, Any] = {"role": "user", "content": user_content}
+                metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
+                if (
+                    pending_msg.sender_id == "subagent"
+                    and metadata.get("injected_event") == "subagent_result"
+                ):
+                    marker: dict[str, Any] = {"kind": "subagent_result"}
+                    task_id = metadata.get("subagent_task_id")
+                    if isinstance(task_id, str) and task_id:
+                        marker["subagent_task_id"] = task_id
+                        row["subagent_task_id"] = task_id
+                    row[HIDDEN_HISTORY_META] = marker
+                    row["injected_event"] = "subagent_result"
+                return row
 
             items: list[dict[str, Any]] = []
             while len(items) < limit:

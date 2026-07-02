@@ -31,8 +31,8 @@ from nanobot.bus.runtime_events import (
     TurnRunStatusChanged,
 )
 from nanobot.providers.base import LLMProvider
-from nanobot.session.automation_turns import is_automation_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -77,7 +77,7 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     for message in session.messages:
         if message.get("_command") is True:
             continue
-        if is_automation_history_message(message):
+        if is_hidden_history_message(message):
             continue
         role = message.get("role")
         content = message.get("content")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_fork_marker,
@@ -695,6 +696,47 @@ def test_backfill_does_not_misalign_when_session_only_has_transcript_tail(
         "old answer",
         "tail question",
         "tail answer",
+    ]
+
+
+def test_backfill_skips_internal_subagent_results(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-subagent"
+    for ev in (
+        {"event": "message", "chat_id": "t-subagent", "text": "summary one"},
+        {"event": "turn_end", "chat_id": "t-subagent"},
+        {"event": "message", "chat_id": "t-subagent", "text": "summary two"},
+        {"event": "turn_end", "chat_id": "t-subagent"},
+    ):
+        append_transcript_object(key, ev)
+
+    legacy_raw = (
+        "[Subagent 'legacy' completed successfully]\n\n"
+        "Task: t\n\n"
+        "Result:\nr\n\n"
+        "Summarize this naturally for the user."
+    )
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": legacy_raw},
+            {"role": "assistant", "content": "summary one"},
+            {
+                "role": "user",
+                "content": "marked result",
+                HIDDEN_HISTORY_META: {
+                    "kind": "subagent_result",
+                    "subagent_task_id": "sub-1",
+                },
+            },
+            {"role": "assistant", "content": "summary two"},
+        ],
+    )
+
+    assert out is not None
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("assistant", "summary one"),
+        ("assistant", "summary two"),
     ]
 
 

@@ -3021,3 +3021,49 @@ def test_handle_webui_thread_get_does_not_backfill_trigger_internal_prompt(
     body = json.loads(resp.body.decode())
     assert [message["role"] for message in body["messages"]] == ["assistant"]
     assert [message["content"] for message in body["messages"]] == ["PR #4502 已经开始 review。"]
+
+
+def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    workspace = tmp_path / "workspace"
+    sessions = SessionManager(workspace)
+    key = "websocket:c-subagent"
+    session = sessions.get_or_create(key)
+    session.add_message(
+        "user",
+        "internal subagent result",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result", "subagent_task_id": "sub-1"}},
+    )
+    session.add_message("assistant", "subagent summary")
+    sessions.save(session)
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "c-subagent", "text": "subagent summary"},
+    )
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=workspace),
+    )
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert [message["role"] for message in body["messages"]] == ["assistant"]
+    assert [message["content"] for message in body["messages"]] == ["subagent summary"]

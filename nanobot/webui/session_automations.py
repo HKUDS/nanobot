@@ -6,7 +6,7 @@ from collections.abc import Collection
 from typing import Any, Protocol
 
 from nanobot.cron.types import CronJob
-from nanobot.session.automation_turns import is_automation_history_message
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import _message_preview_text
 from nanobot.triggers.local_types import LocalTrigger
 
@@ -328,7 +328,7 @@ def _session_preview(messages: Any) -> str:
     for message in messages:
         if not isinstance(message, dict):
             continue
-        if is_automation_history_message(message):
+        if is_hidden_history_message(message):
             continue
         text = _message_preview_text(message)
         if not text:
