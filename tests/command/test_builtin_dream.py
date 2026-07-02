@@ -218,8 +218,8 @@ async def test_dream_prompt_reports_default_prompt(tmp_path) -> None:
     out = await cmd_dream_prompt(_make_dream_prompt_ctx(tmp_path))
 
     assert "Dream memory instructions: nanobot default" in out.content
-    assert "prompts" in out.content
-    assert "dream.md" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
     assert "/dream-prompt init" in out.content
 
 
@@ -231,6 +231,9 @@ async def test_dream_prompt_init_copies_default_prompt(tmp_path) -> None:
 
     prompt_file = tmp_path / "prompts" / "dream.md"
     assert "Created Dream memory instructions" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert "fully replaces nanobot's default Dream guide" in out.content
     assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
 
 
@@ -244,7 +247,22 @@ async def test_dream_prompt_init_does_not_overwrite_existing_prompt(tmp_path) ->
     out = await cmd_dream_prompt(ctx)
 
     assert "already exist" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
     assert prompt_file.read_text(encoding="utf-8") == "custom"
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_recreates_empty_prompt(tmp_path) -> None:
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    prompt_file.parent.mkdir()
+    prompt_file.write_text("  \n", encoding="utf-8")
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    assert "Created Dream memory instructions" in out.content
+    assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
 
 
 def test_dream_prompt_command_in_help_and_palette() -> None:

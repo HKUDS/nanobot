@@ -419,20 +419,28 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
     """Show or set up the workspace Dream memory instructions."""
     store = ctx.loop.context.memory
     path = store.dream_prompt_file
+    display_path = path.relative_to(store.workspace).as_posix()
     args = ctx.args.strip().lower()
 
     if args == "init":
-        if path.exists():
+        try:
+            prompt_exists_with_content = path.exists() and (
+                not path.is_file() or bool(path.read_text(encoding="utf-8").strip())
+            )
+        except OSError:
+            prompt_exists_with_content = True
+        if prompt_exists_with_content:
             content = (
-                f"Dream memory instructions already exist at `{path}`.\n\n"
+                f"Dream memory instructions already exist at `{display_path}`.\n\n"
                 "Edit that file, or delete/empty it to return to nanobot's default."
             )
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(store.default_dream_prompt() + "\n", encoding="utf-8")
             content = (
-                f"Created Dream memory instructions at `{path}`.\n\n"
+                f"Created Dream memory instructions at `{display_path}`.\n\n"
                 "Edit that file to teach Dream how to organize memory. "
+                "This fully replaces nanobot's default Dream guide for this workspace. "
                 "Delete or empty it to return to nanobot's default."
             )
     elif args:
@@ -440,13 +448,13 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
     elif store.has_dream_prompt_override():
         content = (
             "Dream memory instructions: custom for this workspace\n\n"
-            f"- Path: `{path}`\n"
+            f"- Path: `{display_path}`\n"
             "- Delete or empty this file to return to nanobot's default."
         )
     else:
         content = (
             "Dream memory instructions: nanobot default\n\n"
-            f"- Editable file: `{path}`\n"
+            f"- Editable file: `{display_path}`\n"
             "- Run `/dream-prompt init` to create an editable copy."
         )
 
