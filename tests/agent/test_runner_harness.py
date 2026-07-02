@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse
-from tests.agent.harness import (
+from agent.harness import (
     ScriptedProvider,
     ScriptedTools,
     assert_tool_results_are_paired,
     tool_call,
 )
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.config.schema import AgentDefaults
+from nanobot.providers.base import LLMResponse
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
