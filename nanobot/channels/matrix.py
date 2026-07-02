@@ -250,6 +250,9 @@ class MatrixChannel(BaseChannel):
             max(1, int(self.config.max_concurrent_media_downloads))
         )
 
+    @staticmethod
+    def _stream_key(chat_id: str, stream_id: str | None = None) -> str:
+        return chat_id if not stream_id else f"{chat_id}\0{stream_id}"
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
@@ -540,9 +543,10 @@ class MatrixChannel(BaseChannel):
         resuming: bool = False,
     ) -> None:
         relates_to = self._build_thread_relates_to(metadata)
+        stream_key = self._stream_key(chat_id, stream_id)
 
         if stream_end:
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.pop(stream_key, None)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -556,10 +560,10 @@ class MatrixChannel(BaseChannel):
             await self._send_room_content(chat_id, content)
             return
 
-        buf = self._stream_bufs.get(chat_id)
+        buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _StreamBuf()
-            self._stream_bufs[chat_id] = buf
+            self._stream_bufs[stream_key] = buf
         buf.text += delta
 
         if not buf.text.strip():

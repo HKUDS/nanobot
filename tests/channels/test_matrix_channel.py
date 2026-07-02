@@ -1897,6 +1897,26 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_keeps_same_room_stream_ids_separate() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "event-1"
+    room_id = "!room:matrix.org"
+
+    await channel.send_delta(room_id, "A", stream_id="stream-a")
+    await channel.send_delta(room_id, "B", stream_id="stream-b")
+    await channel.send_delta(room_id, " done", stream_id="stream-a")
+    await channel.send_delta(room_id, "", stream_id="stream-a", stream_end=True)
+
+    stream_a_key = channel._stream_key(room_id, "stream-a")
+    stream_b_key = channel._stream_key(room_id, "stream-b")
+    assert stream_a_key not in channel._stream_bufs
+    assert channel._stream_bufs[stream_b_key].text == "B"
+    assert [call["content"]["body"] for call in client.room_send_calls] == ["A", "B", "A done"]
+
+
+@pytest.mark.asyncio
 async def test_send_delta_starts_threaded_stream_inside_thread() -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
