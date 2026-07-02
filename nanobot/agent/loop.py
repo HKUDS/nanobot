@@ -561,6 +561,7 @@ class AgentLoop:
             return f"channel {channel!r} is not configured"
 
         allow_from = self._channel_list(cfg, "allow_from", "allowFrom")
+        allow_from.extend(self._channel_nested_list(cfg, "dm", "allow_from", "allowFrom"))
         group_allow_from = self._channel_list(cfg, "group_allow_from", "groupAllowFrom")
         if "*" in allow_from or chat_id in allow_from or chat_id in group_allow_from:
             return None
@@ -586,6 +587,16 @@ class AgentLoop:
             if value:
                 return [str(item) for item in value]
         return []
+
+    @classmethod
+    def _channel_nested_list(cls, cfg: Any, section: str, *names: str) -> list[str]:
+        if isinstance(cfg, dict):
+            nested = cfg.get(section)
+        else:
+            nested = getattr(cfg, section, None)
+        if nested is None:
+            return []
+        return cls._channel_list(nested, *names)
 
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""

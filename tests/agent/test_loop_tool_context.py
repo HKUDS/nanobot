@@ -99,12 +99,13 @@ def test_message_tool_authorizer_uses_channel_allowlists(tmp_path: Path) -> None
         model="test-model",
         channels_config={
             "telegram": {"allow_from": ["user-1"]},
-            "slack": {"group_allow_from": ["C123"]},
+            "slack": {"dm": {"policy": "allowlist", "allow_from": ["U123"]}, "group_allow_from": ["C123"]},
         },
     )
 
     assert loop._authorize_message_tool_target("telegram", "same", "telegram", "same") is None
     assert loop._authorize_message_tool_target("telegram", "user-1", "cli", "direct") is None
+    assert loop._authorize_message_tool_target("slack", "U123", "cli", "direct") is None
     assert loop._authorize_message_tool_target("slack", "C123", "cli", "direct") is None
     assert loop._authorize_message_tool_target("telegram", "user-2", "cli", "direct") == (
         "telegram:user-2 is not in allow_from or group_allow_from"
