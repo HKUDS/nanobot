@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.automation_turns import AutomationTurnError
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.triggers.local_runner import run_local_trigger_queue
 from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
@@ -31,6 +31,10 @@ def _write_delivery_file(path: Path, *, trigger_id: str, delivery_id: str) -> No
         ),
         encoding="utf-8",
     )
+
+
+def _read_run_record(store: LocalTriggerStore, run_id: str) -> dict:
+    return json.loads((store.runs_dir / f"{run_id}.json").read_text(encoding="utf-8"))
 
 
 def test_trigger_store_allows_multiple_triggers_per_session(tmp_path: Path) -> None:
@@ -68,6 +72,34 @@ def test_enqueue_rejects_disabled_trigger(tmp_path: Path) -> None:
 
     with pytest.raises(TriggerDisabledError):
         store.enqueue(trigger.id, "Review PR #4502")
+
+
+def test_enqueue_writes_trigger_run_record(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+        origin_metadata={"webui": True},
+    )
+
+    delivery = store.enqueue(trigger.id, "Review PR #4591")
+
+    record = _read_run_record(store, delivery.id)
+    assert record["run_id"] == delivery.id
+    assert record["kind"] == "local_trigger"
+    assert record["status"] == "queued"
+    assert record["trigger_id"] == trigger.id
+    assert record["trigger_name"] == "PR review"
+    assert record["delivery_id"] == delivery.id
+    assert record["session_key"] == "websocket:chat-1"
+    assert record["channel"] == "websocket"
+    assert record["chat_id"] == "chat-1"
+    assert record["sender_id"] == "trigger"
+    assert record["content"] == "Review PR #4591"
+    assert record["origin_metadata"] == {"webui": True}
+    assert record["updated_at_ms"] > 0
 
 
 def test_delete_removes_delivery_files_for_trigger(tmp_path: Path) -> None:
@@ -140,12 +172,12 @@ async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path)
         session_key="websocket:chat-1",
         origin_metadata={"webui": True, WEBUI_TURN_METADATA_KEY: "old-turn"},
     )
-    store.enqueue(trigger.id, "Review PR #4502")
+    delivery = store.enqueue(trigger.id, "Review PR #4502")
     submitted: list[InboundMessage] = []
 
     async def _submit_turn(msg: InboundMessage):
         submitted.append(msg)
-        return None
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="done")
 
     task = asyncio.create_task(
         run_local_trigger_queue(store=store, submit_turn=_submit_turn, poll_interval_s=0.01)
@@ -184,6 +216,10 @@ async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path)
     assert stored.last_status == "ok"
     assert stored.last_run_at_ms is not None
     assert store.claim_deliveries() == []
+    record = _read_run_record(store, delivery.id)
+    assert record["status"] == "ok"
+    assert record["response"] == "done"
+    assert record["trigger_id"] == trigger.id
 
 
 @pytest.mark.asyncio
@@ -197,7 +233,7 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
         chat_id="chat-1",
         session_key="websocket:chat-1",
     )
-    store.enqueue(trigger.id, "Review failed CI")
+    delivery = store.enqueue(trigger.id, "Review failed CI")
     submitted: list[InboundMessage] = []
     release = asyncio.Event()
 
@@ -221,6 +257,8 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
 
         assert len(submitted) == 1
         assert list(store.processing_dir.glob("*.json"))
+        record = _read_run_record(store, delivery.id)
+        assert record["status"] == "processing"
         stored = store.get(trigger.id)
         assert stored is not None
         assert stored.last_status is None
@@ -237,6 +275,8 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
         assert stored is not None
         assert stored.last_status == "ok"
         assert store.claim_deliveries() == []
+        record = _read_run_record(store, delivery.id)
+        assert record["status"] == "ok"
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):
@@ -254,7 +294,7 @@ async def test_local_trigger_queue_requeues_when_submitted_turn_is_interrupted(
         chat_id="chat-1",
         session_key="websocket:chat-1",
     )
-    store.enqueue(trigger.id, "Review failed CI")
+    delivery = store.enqueue(trigger.id, "Review failed CI")
     started = asyncio.Event()
 
     async def _submit_turn(_msg: InboundMessage):
@@ -279,6 +319,9 @@ async def test_local_trigger_queue_requeues_when_submitted_turn_is_interrupted(
         assert reclaimed[0].trigger_id == trigger.id
         assert reclaimed[0].attempts == 1
         assert reclaimed[0].last_error == "CancelledError"
+        record = _read_run_record(store, delivery.id)
+        assert record["status"] == "interrupted"
+        assert record["attempts"] == 1
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):
@@ -296,7 +339,7 @@ async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
         chat_id="chat-1",
         session_key="websocket:chat-1",
     )
-    store.enqueue(trigger.id, "Review failed CI")
+    delivery = store.enqueue(trigger.id, "Review failed CI")
     started = asyncio.Event()
 
     async def _submit_turn(_msg: InboundMessage):
@@ -325,6 +368,9 @@ async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
         assert store.claim_deliveries() == []
         assert not list(store.processing_dir.glob("*.json"))
         assert not list(store.failed_dir.glob("*.json"))
+        record = _read_run_record(store, delivery.id)
+        assert record["status"] == "error"
+        assert record["error"] == "model failed"
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):

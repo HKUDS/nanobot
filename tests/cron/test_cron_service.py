@@ -52,6 +52,18 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     assert job.state.next_run_at_ms is not None
 
 
+def test_write_run_record_uses_cron_runs_dir(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    service.write_run_record("job:1", {"status": "queued"})
+
+    record_path = tmp_path / "cron" / "runs" / "job_1.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["run_id"] == "job:1"
+    assert record["status"] == "queued"
+    assert record["updated_at_ms"] > 0
+
+
 @pytest.mark.asyncio
 async def test_unbound_agent_jobs_are_disabled_on_add(tmp_path) -> None:
     called: list[str] = []

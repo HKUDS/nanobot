@@ -50,6 +50,12 @@ async def run_local_trigger_queue(
                 store.complete_delivery(delivery)
             except asyncio.CancelledError as exc:
                 store.retry_delivery(delivery, str(exc) or exc.__class__.__name__)
+                _write_delivery_run_record(
+                    store,
+                    delivery,
+                    status="interrupted",
+                    error=str(exc) or exc.__class__.__name__,
+                )
                 raise
             except _TerminalDeliveryError as exc:
                 store.record_delivery(
@@ -57,6 +63,12 @@ async def run_local_trigger_queue(
                     status="error",
                     error=str(exc),
                     run_at_ms=delivery.created_at_ms,
+                )
+                _write_delivery_run_record(
+                    store,
+                    delivery,
+                    status="error",
+                    error=str(exc),
                 )
                 store.complete_delivery(delivery)
                 logger.warning(
@@ -73,6 +85,12 @@ async def run_local_trigger_queue(
                     error=error,
                     run_at_ms=delivery.created_at_ms,
                 )
+                _write_delivery_run_record(
+                    store,
+                    delivery,
+                    status="error",
+                    error=error,
+                )
                 store.complete_delivery(delivery)
                 logger.warning(
                     "Trigger: delivery {} for {} reached the agent but failed: {}",
@@ -83,6 +101,12 @@ async def run_local_trigger_queue(
             except Exception as exc:
                 error = str(exc) or exc.__class__.__name__
                 retried = store.retry_delivery(delivery, error)
+                _write_delivery_run_record(
+                    store,
+                    delivery,
+                    status="retrying" if retried else "error",
+                    error=error,
+                )
                 store.record_delivery(
                     delivery.trigger_id,
                     status="error",
@@ -113,6 +137,7 @@ async def _deliver_delivery(
     if not trigger.enabled:
         raise _TerminalDeliveryError("trigger is disabled")
 
+    store.write_delivery_run_record(delivery, trigger=trigger, status="processing")
     msg = InboundMessage(
         channel=trigger.channel,
         sender_id=trigger.sender_id,
@@ -121,12 +146,43 @@ async def _deliver_delivery(
         metadata=_delivery_metadata(trigger, delivery),
         session_key_override=trigger.session_key,
     )
-    await submit_turn(msg)
+    response = await submit_turn(msg)
     store.record_delivery(
         trigger.id,
         status="ok",
         run_at_ms=delivery.created_at_ms,
     )
+    _write_delivery_run_record(
+        store,
+        delivery,
+        trigger=trigger,
+        status="ok",
+        response=response.content if response else "",
+    )
+
+
+def _write_delivery_run_record(
+    store: LocalTriggerStore,
+    delivery: TriggerDelivery,
+    *,
+    status: str,
+    trigger: LocalTrigger | None = None,
+    error: str | None = None,
+    response: str | None = None,
+) -> None:
+    try:
+        store.write_delivery_run_record(
+            delivery,
+            trigger=trigger,
+            status=status,
+            error=error,
+            response=response,
+        )
+    except Exception:
+        logger.exception(
+            "Trigger: failed to write run record for delivery {}",
+            delivery.id,
+        )
 
 
 def _delivery_metadata(trigger: LocalTrigger, delivery: TriggerDelivery) -> dict[str, Any]:

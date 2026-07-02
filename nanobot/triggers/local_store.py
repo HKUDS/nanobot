@@ -15,6 +15,7 @@ from filelock import FileLock
 from loguru import logger
 
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery, TriggerRunRecord
+from nanobot.utils.run_records import write_run_record as write_automation_run_record
 
 _TRIGGER_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _MAX_RUN_HISTORY = 20
@@ -44,6 +45,7 @@ class LocalTriggerStore:
         self.inbox_dir = self.root / "inbox"
         self.processing_dir = self.root / "processing"
         self.failed_dir = self.root / "failed"
+        self.runs_dir = self.root / "runs"
         self._lock = FileLock(str(self.root / ".lock"))
 
     def create(
@@ -175,6 +177,12 @@ class LocalTriggerStore:
             path = self.inbox_dir / f"{delivery.created_at_ms}-{delivery.id}.json"
             self._atomic_write(path, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
             delivery.path = path
+            try:
+                self.write_delivery_run_record(delivery, trigger=trigger, status="queued")
+            except BaseException:
+                path.unlink(missing_ok=True)
+                delivery.path = None
+                raise
             return delivery
 
     def claim_deliveries(self, *, limit: int = 20) -> list[TriggerDelivery]:
@@ -263,11 +271,37 @@ class LocalTriggerStore:
             trigger.run_history = trigger.run_history[-_MAX_RUN_HISTORY:]
             self._save_triggers_unlocked(triggers)
 
+    def write_run_record(self, run_id: str, record: dict[str, Any]) -> Path:
+        """Write an internal audit record for one local trigger delivery."""
+        self._ensure_dirs()
+        return write_automation_run_record(self.runs_dir, run_id, record)
+
+    def write_delivery_run_record(
+        self,
+        delivery: TriggerDelivery,
+        *,
+        status: str,
+        trigger: LocalTrigger | None = None,
+        error: str | None = None,
+        response: str | None = None,
+    ) -> Path:
+        """Write the durable audit record for one local trigger delivery."""
+        if trigger is None:
+            trigger = self.get(delivery.trigger_id)
+        record = _delivery_run_record(delivery, trigger)
+        record["status"] = status
+        if error:
+            record["error"] = error
+        if response is not None:
+            record["response"] = response
+        return self.write_run_record(delivery.id, record)
+
     def _ensure_dirs(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
         self.processing_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir.mkdir(parents=True, exist_ok=True)
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_triggers_unlocked(self) -> list[LocalTrigger]:
         if not self.store_path.exists():
@@ -399,3 +433,31 @@ def _delivery_payload(delivery: TriggerDelivery) -> dict[str, Any]:
         "version": 1,
         "delivery": delivery.to_dict(),
     }
+
+
+def _delivery_run_record(
+    delivery: TriggerDelivery,
+    trigger: LocalTrigger | None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "kind": "local_trigger",
+        "trigger_id": delivery.trigger_id,
+        "delivery_id": delivery.id,
+        "content": delivery.content,
+        "created_at_ms": delivery.created_at_ms,
+        "attempts": delivery.attempts,
+    }
+    if delivery.last_error:
+        record["last_error"] = delivery.last_error
+    if trigger is not None:
+        record.update(
+            {
+                "trigger_name": trigger.name,
+                "session_key": trigger.session_key,
+                "channel": trigger.channel,
+                "chat_id": trigger.chat_id,
+                "sender_id": trigger.sender_id,
+                "origin_metadata": trigger.origin_metadata,
+            }
+        )
+    return record

@@ -143,7 +143,8 @@ gateway exits after claiming a delivery but before the linked turn completes,
 the next gateway start requeues that delivery. The queue is at-least-once, not
 exactly-once, so the same message can be delivered again after an interrupted
 process. If the agent receives the delivery and the turn fails, the delivery is
-marked failed instead of retried indefinitely. Run one gateway consumer per
+marked failed instead of retried indefinitely. Each delivery also writes an
+audit record under `<workspace>/triggers/runs`. Run one gateway consumer per
 workspace; this local queue is not a distributed multi-consumer queue.
 
 Use stdin when another local process generates the message:
