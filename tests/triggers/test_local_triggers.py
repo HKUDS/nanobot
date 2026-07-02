@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
+import os
 from contextlib import suppress
 from pathlib import Path
 
@@ -58,6 +60,40 @@ def test_trigger_store_allows_multiple_triggers_per_session(tmp_path: Path) -> N
     assert first.id.startswith("trg_")
     assert second.id.startswith("trg_")
     assert first.id != second.id
+
+
+def test_trigger_store_atomic_write_ignores_unsupported_directory_fsync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shared folders may allow opening directories but reject directory fsync."""
+    store = LocalTriggerStore(tmp_path)
+    real_open = os.open
+    real_fsync = os.fsync
+    directory_fds: set[int] = set()
+
+    def fake_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if Path(path).name == "triggers":
+            directory_fds.add(fd)
+        return fd
+
+    def fake_fsync(fd: int) -> None:
+        if fd in directory_fds:
+            raise OSError(errno.EINVAL, "Invalid argument")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "open", fake_open)
+    monkeypatch.setattr(os, "fsync", fake_fsync)
+
+    trigger = store.create(
+        name="Shared folder safe",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+
+    assert store.get(trigger.id) is not None
 
 
 def test_enqueue_rejects_disabled_trigger(tmp_path: Path) -> None:
