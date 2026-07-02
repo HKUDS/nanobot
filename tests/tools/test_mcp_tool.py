@@ -321,6 +321,18 @@ async def test_execute_wraps_mcp_is_error_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_contains_malformed_success_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool call failed: TypeError)"
+
+
+@pytest.mark.asyncio
 async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(

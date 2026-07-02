@@ -461,10 +461,19 @@ class MCPToolWrapper(_MCPWrapperBase):
                 return f"(MCP tool call failed: {type(exc).__name__})"
             else:
                 # Success — extract text and persist any image content as artifacts.
-                rendered = self._render_call_result(result.content, kwargs)
-                if getattr(result, "isError", False):
-                    return ToolResult.error(rendered)
-                return rendered
+                try:
+                    rendered = self._render_call_result(result.content, kwargs)
+                    if getattr(result, "isError", False):
+                        return ToolResult.error(rendered)
+                    return rendered
+                except Exception as exc:
+                    logger.exception(
+                        "MCP tool '{}' failed while rendering result: {}: {}",
+                        self._name,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    return f"(MCP tool call failed: {type(exc).__name__})"
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
 
