@@ -346,6 +346,7 @@ def enable_optional_feature(
     name: str,
     *,
     config_path: Path | None = None,
+    allow_install: bool = True,
     runner: Any = run_install_command,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import (
@@ -365,6 +366,12 @@ def enable_optional_feature(
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
 
     if name in extras and not extra_installed(name, extras[name]):
+        if not allow_install:
+            raise OptionalFeatureError(
+                "Installing optional features from a remote WebUI is disabled. "
+                "Run this action from localhost or set tools.webuiAllowRemotePackageInstall to true.",
+                status=403,
+            )
         result = install_extra(name, extras[name], runner=runner)
         if not result.ok:
             failed = command_text(result.failed_cmd or result.pip_cmd)

@@ -475,7 +475,8 @@
       "featured": "Nổi bật",
       "loading": "Đang tải ứng dụng...",
       "empty": "Không có ứng dụng phù hợp.",
-      "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật."
+      "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật.",
+      "packageInstallNotice": "Bật tính năng Nanobot có thể cài các gói Python vào runtime này. Trình duyệt từ xa chỉ được cài gói khi tools.webuiAllowRemotePackageInstall được bật trong cấu hình."
     },
     "nanobotFeatures": {
       "enabled": "Đã bật",

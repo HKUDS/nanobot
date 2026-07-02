@@ -94,9 +94,16 @@ for provider setup and output behavior.
 ## Apps
 
 Open Apps from the sidebar or settings navigation to manage integrations that
-nanobot can call from a chat. CLI Apps install local adapters that nanobot runs
-on your machine; they do not modify the native apps themselves. MCP presets add
-predefined MCP server configurations.
+nanobot can call from a chat. Nanobot features can enable built-in channels and
+optional capabilities such as `bedrock` or `documents`. CLI Apps install local
+adapters that nanobot runs on your machine; they do not modify the native apps
+themselves. MCP presets add predefined MCP server configurations.
+
+Enabling a Nanobot feature may install Python packages into the environment
+running nanobot. The WebUI allows those installs from localhost by default.
+Remote browsers can only trigger package installs when
+`tools.webuiAllowRemotePackageInstall` is set to `true` in `config.json`; keep it
+`false` for shared or internet-exposed deployments.
 
 Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
 preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
@@ -199,6 +206,21 @@ The gateway refuses to start with `host` set to `"0.0.0.0"` unless `token` or
 `tokenIssueSecret` is configured. After the gateway starts, open
 `http://<your-ip>:8765` from the other device and enter the secret in the login
 form.
+
+Remote WebUI clients can view Apps and toggle already-installed features with a
+valid token, but they cannot install missing Python packages by default. To allow
+trusted remote admins to install optional feature dependencies from the WebUI,
+opt in explicitly:
+
+```json
+{
+  "tools": {
+    "webuiAllowRemotePackageInstall": true
+  }
+}
+```
+
+Leave this disabled when the WebUI is exposed beyond a private, trusted network.
 
 ## Troubleshooting
 

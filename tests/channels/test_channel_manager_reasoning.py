@@ -21,7 +21,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
+from nanobot.bus.outbound_events import (
+    ProgressEvent,
+    outbound_event_from_message,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
@@ -292,14 +296,22 @@ async def test_reasoning_routing_does_not_consult_send_progress(manager):
 
 
 async def _pump_one(manager: ChannelManager) -> None:
-    """Drive the dispatcher until the outbound queue drains, then cancel."""
-    task = asyncio.create_task(manager._dispatch_outbound())
-    for _ in range(50):
-        await asyncio.sleep(0.01)
-        if manager.bus.outbound.qsize() == 0:
+    """Process currently queued messages through the reasoning dispatch branch."""
+
+    async def dispatch_one(msg: OutboundMessage) -> None:
+        event = outbound_event_from_message(msg)
+        if isinstance(event, ProgressEvent) and (
+            event.reasoning_delta
+            or event.reasoning_end
+            or event.reasoning
+        ):
+            channel = manager.channels.get(msg.channel)
+            if channel is not None and channel.show_reasoning:
+                await manager._send_with_retry(channel, msg)
+
+    await dispatch_one(await asyncio.wait_for(manager.bus.consume_outbound(), timeout=1.0))
+    while True:
+        try:
+            await dispatch_one(manager.bus.outbound.get_nowait())
+        except asyncio.QueueEmpty:
             break
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass

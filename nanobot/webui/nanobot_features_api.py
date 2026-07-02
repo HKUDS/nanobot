@@ -22,12 +22,17 @@ def nanobot_features_payload() -> dict[str, Any]:
     return optional_features_payload()
 
 
-def nanobot_features_action(action: str, query: QueryParams) -> dict[str, Any]:
+def nanobot_features_action(
+    action: str,
+    query: QueryParams,
+    *,
+    allow_install: bool = True,
+) -> dict[str, Any]:
     name = (_query_first(query, "name") or "").strip()
     if not name:
         raise OptionalFeatureError("missing feature name")
     if action == "enable":
-        return enable_optional_feature(name)
+        return enable_optional_feature(name, allow_install=allow_install)
     if action == "disable":
         return disable_optional_feature(name)
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)

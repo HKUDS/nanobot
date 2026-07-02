@@ -12,6 +12,18 @@ If that fails, fix installation, config, provider, or model setup first with [`q
 
 Most examples below are snippets to merge into `~/.nanobot/config.json`.
 
+> [!NOTE]
+> If you are upgrading from a version where chat app SDKs were installed by default,
+> install the channel extra in the same Python environment before enabling or
+> restarting that channel:
+>
+> ```bash
+> nanobot plugins enable <channel>
+> ```
+>
+> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
+> `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
+
 ## Common Setup Pattern
 
 Every chat app uses the same shape:

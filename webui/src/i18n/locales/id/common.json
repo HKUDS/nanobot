@@ -475,7 +475,8 @@
       "featured": "Unggulan",
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada aplikasi yang cocok.",
-      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui.",
+      "packageInstallNotice": "Mengaktifkan fitur Nanobot dapat memasang paket Python ke runtime ini. Browser jarak jauh hanya dapat memasang paket saat tools.webuiAllowRemotePackageInstall diaktifkan di konfigurasi."
     },
     "nanobotFeatures": {
       "enabled": "Aktif",

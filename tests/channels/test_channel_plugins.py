@@ -710,6 +710,157 @@ def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_pat
     assert not config_path.exists()
 
 
+def test_enable_optional_feature_blocks_install_when_disallowed(monkeypatch, tmp_path):
+    from nanobot.optional_features import OptionalFeatureError, enable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        enable_optional_feature("bedrock", config_path=config_path, allow_install=False)
+
+    assert exc.value.status == 403
+    assert "remote WebUI is disabled" in exc.value.message
+    assert not config_path.exists()
+
+
+def test_enable_optional_feature_skips_install_when_dependency_present(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.optional_features import InstallResult, enable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    install_calls: list[str] = []
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
+
+    def _install_extra(
+        name: str,
+        deps: list[str] | None,
+        *,
+        runner,
+    ) -> InstallResult:
+        install_calls.append(name)
+        return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+
+    payload = enable_optional_feature("bedrock", config_path=config_path, allow_install=False)
+
+    assert install_calls == []
+    assert payload["last_action"]["message"] == "Enabled feature 'bedrock'"
+    assert payload["requires_restart"] is True
+    assert not config_path.exists()
+
+
+def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
+    from nanobot.optional_features import (
+        InstallResult,
+        OptionalFeatureError,
+        enable_optional_feature,
+    )
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr(
+        "nanobot.optional_features.install_extra",
+        lambda _name, _deps, *, runner: InstallResult(
+            False,
+            "bedrock support",
+            ["python", "-m", "pip", "install", "boto3>=1.43.0"],
+            failed_cmd=["python", "-m", "pip", "install", "boto3>=1.43.0"],
+            output="network unavailable",
+        ),
+    )
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        enable_optional_feature("bedrock", config_path=config_path)
+
+    assert exc.value.status == 500
+    assert "Failed:" in exc.value.message
+    assert "network unavailable" in exc.value.message
+    assert not config_path.exists()
+
+
+def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.optional_features import OptionalFeatureError, disable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names",
+        lambda: ["matrix", "websocket"],
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+
+    with pytest.raises(OptionalFeatureError) as unknown:
+        disable_optional_feature("missing", config_path=config_path)
+    assert unknown.value.status == 404
+    assert "Unknown feature: missing" in unknown.value.message
+
+    with pytest.raises(OptionalFeatureError) as non_channel:
+        disable_optional_feature("bedrock", config_path=config_path)
+    assert non_channel.value.status == 400
+    assert non_channel.value.message == "Feature 'bedrock' cannot be disabled"
+
+    with pytest.raises(OptionalFeatureError) as protected:
+        disable_optional_feature("websocket", config_path=config_path)
+    assert protected.value.status == 400
+    assert protected.value.message == "Channel 'websocket' cannot be disabled"
+
+    assert not config_path.exists()
+
+
+def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path):
+    from nanobot.optional_features import disable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    config_path.write_text(
+        json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = disable_optional_feature("matrix", config_path=config_path)
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["enabled"] is False
+    assert data["channels"]["matrix"]["homeserver"] == "keep"
+    assert payload["last_action"]["message"] == "Disabled channel 'matrix'"
+    assert payload["requires_restart"] is True
+
+
 def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
     from nanobot.cli import commands as cli_commands
 

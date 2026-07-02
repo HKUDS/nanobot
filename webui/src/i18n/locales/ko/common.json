@@ -475,7 +475,8 @@
       "featured": "추천",
       "loading": "앱을 불러오는 중...",
       "empty": "일치하는 앱이 없습니다.",
-      "restartRequired": "업데이트된 앱과 기능을 적용하려면 nanobot을 다시 시작하세요."
+      "restartRequired": "업데이트된 앱과 기능을 적용하려면 nanobot을 다시 시작하세요.",
+      "packageInstallNotice": "Nanobot 기능을 활성화하면 이 런타임에 Python 패키지가 설치될 수 있습니다. 원격 브라우저의 패키지 설치는 설정에서 tools.webuiAllowRemotePackageInstall을 활성화한 경우에만 허용됩니다."
     },
     "nanobotFeatures": {
       "enabled": "활성화됨",

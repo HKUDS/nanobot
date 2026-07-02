@@ -5126,6 +5126,15 @@ function AppsCatalogSettings({
             onChange={(value) => onFilterChange(value as AppsKindFilter)}
           />
         </div>
+        <div className="flex items-start gap-2 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12.5px] leading-5 text-amber-800 dark:text-amber-200">
+          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            {tx(
+              "settings.apps.packageInstallNotice",
+              "Enabling Nanobot features may install Python packages into this runtime. Remote browsers can install packages only when tools.webuiAllowRemotePackageInstall is enabled in config.",
+            )}
+          </span>
+        </div>
       </section>
 
       {statusMessage ? (

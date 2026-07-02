@@ -327,6 +327,7 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView();
 
     expect(await screen.findByText("Matrix")).toBeInTheDocument();
+    expect(screen.getByText(/Enabling Nanobot features may install Python packages/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
 
     await waitFor(() =>

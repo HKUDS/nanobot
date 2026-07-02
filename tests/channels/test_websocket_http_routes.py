@@ -623,6 +623,255 @@ async def test_nanobot_feature_routes_require_token_and_enable(
 
 
 @pytest.mark.asyncio
+async def test_nanobot_feature_remote_install_requires_opt_in(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.base import BaseChannel
+    from nanobot.optional_features import InstallResult
+
+    class _MatrixChannel(BaseChannel):
+        name = "matrix"
+        display_name = "Matrix"
+
+        @classmethod
+        def default_config(cls) -> dict[str, Any]:
+            return {"enabled": False, "allowFrom": []}
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    install_calls: list[str] = []
+
+    def _install_extra(name: str, deps: list[str] | None, *, runner: Any) -> InstallResult:
+        install_calls.append(name)
+        return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    path = "/api/settings/nanobot-features/enable?name=matrix"
+    request = _FakeReq({"Authorization": f"Bearer {token}"}, path=path)
+
+    blocked = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert blocked is not None
+    assert blocked.status_code == 403
+    assert "remote WebUI is disabled" in blocked.body.decode()
+    assert install_calls == []
+
+    config_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+
+    allowed = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert allowed is not None
+    assert allowed.status_code == 200
+    assert install_calls == ["matrix"]
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_local_install_allowed_by_default(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.base import BaseChannel
+    from nanobot.optional_features import InstallResult
+
+    class _MatrixChannel(BaseChannel):
+        name = "matrix"
+        display_name = "Matrix"
+
+        @classmethod
+        def default_config(cls) -> dict[str, Any]:
+            return {"enabled": False, "allowFrom": []}
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    install_calls: list[str] = []
+
+    def _install_extra(name: str, deps: list[str] | None, *, runner: Any) -> InstallResult:
+        install_calls.append(name)
+        return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}"},
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert install_calls == ["matrix"]
+    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
+        "enabled"
+    ] is True
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_remote_enable_without_install_is_allowed(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.base import BaseChannel
+    from nanobot.optional_features import InstallResult
+
+    class _MatrixChannel(BaseChannel):
+        name = "matrix"
+        display_name = "Matrix"
+
+        @classmethod
+        def default_config(cls) -> dict[str, Any]:
+            return {"enabled": False, "allowFrom": []}
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
+
+    install_calls: list[str] = []
+
+    def _install_extra(name: str, deps: list[str] | None, *, runner: Any) -> InstallResult:
+        install_calls.append(name)
+        return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}"},
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert install_calls == []
+    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
+        "enabled"
+    ] is True
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_remote_disable_does_not_need_install_policy(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}"},
+        path="/api/settings/nanobot-features/disable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/disable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["enabled"] is False
+    assert data["channels"]["matrix"]["homeserver"] == "keep"
+
+
+@pytest.mark.asyncio
 async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     bus: MagicMock,
     tmp_path: Path,
@@ -1752,8 +2001,9 @@ class _FakeConn:
 class _FakeReq:
     """Minimal request stub with configurable headers."""
 
-    def __init__(self, headers: dict[str, str] | None = None):
+    def __init__(self, headers: dict[str, str] | None = None, *, path: str = "/"):
         self.headers = headers or {}
+        self.path = path
 
 
 _REMOTE = _FakeConn(("192.168.1.5", 12345))

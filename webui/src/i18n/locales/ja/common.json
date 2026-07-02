@@ -475,7 +475,8 @@
       "featured": "注目",
       "loading": "アプリを読み込み中...",
       "empty": "一致するアプリはありません。",
-      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。"
+      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。",
+      "packageInstallNotice": "Nanobot 機能を有効にすると、この実行環境に Python パッケージがインストールされる場合があります。リモートブラウザーからのパッケージインストールは、設定で tools.webuiAllowRemotePackageInstall が有効な場合のみ可能です。"
     },
     "nanobotFeatures": {
       "enabled": "有効",
