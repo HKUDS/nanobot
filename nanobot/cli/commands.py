@@ -1017,6 +1017,7 @@ def _run_gateway(
 
             store = agent.context.memory
             resp = None
+            diff_body = ""
             try:
                 result = store.build_dream_prompt()
                 if result is None:
@@ -1031,9 +1032,20 @@ def _run_gateway(
                     tools=store.build_dream_tools(),
                     on_progress=_silent,
                 )
-                if MemoryStore.dream_run_completed(resp):
+                # Ground truth: the real file delta, not the LLM's self-report.
+                diff_body = store.dream_content_diff()
+                productive = bool(diff_body) or (
+                    not store.git.is_initialized()
+                    and MemoryStore.dream_run_completed(resp)
+                )
+                if productive:
                     store.set_last_dream_cursor(last_cursor)
                     logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
+                elif MemoryStore.dream_run_completed(resp):
+                    logger.info(
+                        "Dream cron job completed with no memory changes; "
+                        "cursor not advanced",
+                    )
                 else:
                     logger.warning(
                         "Dream cron job did not complete; cursor remains at {}",
@@ -1051,7 +1063,7 @@ def _run_gateway(
                 )
                 if store.git.is_initialized():
                     msg = build_dream_commit_message(
-                        "dream: periodic memory consolidation", resp,
+                        "dream: periodic memory consolidation", diff_body,
                     )
                     sha = store.git.auto_commit(msg)
                     if sha:

@@ -352,6 +352,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         store = loop.context.memory
         content = ""
         resp = None
+        diff_body = ""
         t0 = time.monotonic()
         try:
             result = store.build_dream_prompt()
@@ -372,9 +373,17 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 on_progress=_silent,
             )
             elapsed = time.monotonic() - t0
-            if MemoryStore.dream_run_completed(resp):
+            # Ground truth: the real file delta, not the LLM's self-report.
+            diff_body = store.dream_content_diff()
+            productive = bool(diff_body) or (
+                not store.git.is_initialized()
+                and MemoryStore.dream_run_completed(resp)
+            )
+            if productive:
                 store.set_last_dream_cursor(last_cursor)
                 content = f"Dream completed in {elapsed:.1f}s."
+            elif MemoryStore.dream_run_completed(resp):
+                content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
                 content = (
                     f"Dream did not complete after {elapsed:.1f}s; "
@@ -392,7 +401,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 timezone_name=getattr(loop.context, "timezone", None),
             )
             if store.git.is_initialized():
-                commit_msg = build_dream_commit_message("dream: manual run", resp)
+                commit_msg = build_dream_commit_message("dream: manual run", diff_body)
                 sha = store.git.auto_commit(commit_msg)
                 if sha:
                     content += f" (commit {sha})"
