@@ -463,6 +463,60 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
         for block in injected_user_messages[-1]["content"]
         if isinstance(block, dict)
     )
+    assert any(
+        block.get("type") == "text" and "Sender ID: u" in block.get("text", "")
+        for block in injected_user_messages[-1]["content"]
+        if isinstance(block, dict)
+    )
+
+
+@pytest.mark.asyncio
+async def test_pending_injection_includes_runtime_context(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    captured_messages: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append(list(messages))
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage={})
+        return LLMResponse(content="second answer", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="discord",
+        sender_id="user-2",
+        chat_id="room-7",
+        content="follow-up",
+    ))
+
+    final_content, _, _, _, had_injections = await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        channel="discord",
+        chat_id="room-7",
+        pending_queue=pending_queue,
+    )
+
+    assert final_content == "second answer"
+    assert had_injections is True
+    assert call_count["n"] == 2
+    injected = captured_messages[-1][-1]
+    assert injected["role"] == "user"
+    assert "follow-up" in injected["content"]
+    assert "Channel: discord" in injected["content"]
+    assert "Chat ID: room-7" in injected["content"]
+    assert "Sender ID: user-2" in injected["content"]
 
 
 @pytest.mark.asyncio
@@ -519,7 +573,8 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
     assert had_injections is True
     assert call_count["n"] == 2
     injected_users = [message for message in all_msgs if message.get("role") == "user"][-2:]
-    assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
+    assert "visible follow-up" in injected_users[0]["content"]
+    assert payload in injected_users[1]["content"]
     assert injected_users[1][HIDDEN_HISTORY_META] == {
         "kind": "subagent_result",
         "subagent_task_id": "sub-1",

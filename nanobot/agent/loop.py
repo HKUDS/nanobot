@@ -796,6 +796,20 @@ class AgentLoop:
                     content, media = self._prepare_message_media(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
+                scope = self.workspace_scopes.for_message(
+                    pending_msg,
+                    session.metadata if session is not None else None,
+                )
+                extra = goal_state_runtime_lines(session.metadata if session is not None else None)
+                extra.extend(agent_context.runtime_lines(self, pending_msg, scope.project_path))
+                runtime_ctx = self.context._build_runtime_context(
+                    pending_msg.channel,
+                    self._runtime_chat_id(pending_msg),
+                    self.context.timezone,
+                    sender_id=pending_msg.sender_id,
+                    supplemental_lines=extra or None,
+                )
+                user_content = self.context._merge_message_content(user_content, runtime_ctx)
                 row: dict[str, Any] = {"role": "user", "content": user_content}
                 metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
                 if (
