@@ -247,6 +247,72 @@ def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
     ]
 
 
+def test_drop_orphan_tool_results_removes_duplicate_results_without_duplicate_calls():
+    messages = [
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_once", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_once", "name": "exec", "content": "first"},
+        {"role": "tool", "tool_call_id": "call_once", "name": "exec", "content": "duplicate"},
+        {"role": "assistant", "content": "after tool"},
+    ]
+
+    cleaned = ContextGovernor.drop_orphan_tool_results(messages)
+
+    assert [
+        message.get("content")
+        for message in cleaned
+        if message.get("role") == "tool"
+    ] == ["first"]
+
+
+def test_drop_orphan_tool_results_allows_duplicate_results_for_duplicate_calls():
+    messages = [
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_same", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+                {"id": "call_same", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_same", "name": "exec", "content": "first"},
+        {"role": "tool", "tool_call_id": "call_same", "name": "exec", "content": "second"},
+    ]
+
+    cleaned = ContextGovernor.drop_orphan_tool_results(messages)
+
+    assert cleaned is messages
+
+
+def test_backfill_missing_tool_results_counts_duplicate_call_ids():
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_same", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+                {"id": "call_same", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_same", "name": "exec", "content": "first"},
+    ]
+
+    repaired = ContextGovernor.backfill_missing_tool_results(messages)
+
+    tool_messages = [message for message in repaired if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == ["call_same", "call_same"]
+    assert tool_messages[0]["content"] == "first"
+    assert tool_messages[1]["content"] == BACKFILL_CONTENT
+
+
 @pytest.mark.asyncio
 async def test_backfill_noop_when_complete():
     """Complete message chains should not be modified."""

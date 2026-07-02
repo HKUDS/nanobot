@@ -233,20 +233,25 @@ class ContextGovernor:
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Drop tool results that have no matching assistant tool_call earlier in history."""
-        declared: set[str] = set()
+        declared: dict[str, int] = {}
+        fulfilled: dict[str, int] = {}
         updated: list[dict[str, Any]] | None = None
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
                 for tc in msg.get("tool_calls") or []:
                     if isinstance(tc, dict) and tc.get("id"):
-                        declared.add(str(tc["id"]))
+                        call_id = str(tc["id"])
+                        declared[call_id] = declared.get(call_id, 0) + 1
             if role == "tool":
                 tid = msg.get("tool_call_id")
-                if tid and str(tid) not in declared:
+                call_id = str(tid) if tid else ""
+                seen = fulfilled.get(call_id, 0)
+                if not call_id or seen >= declared.get(call_id, 0):
                     if updated is None:
                         updated = [dict(m) for m in messages[:idx]]
                     continue
+                fulfilled[call_id] = seen + 1
             if updated is not None:
                 updated.append(dict(msg))
 
@@ -260,7 +265,7 @@ class ContextGovernor:
     ) -> list[dict[str, Any]]:
         """Insert synthetic error results for assistant tool_calls with missing tool outputs."""
         declared: list[tuple[int, str, str]] = []
-        fulfilled: set[str] = set()
+        fulfilled: dict[str, int] = {}
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             if role == "assistant":
@@ -274,9 +279,17 @@ class ContextGovernor:
             elif role == "tool":
                 tid = msg.get("tool_call_id")
                 if tid:
-                    fulfilled.add(str(tid))
+                    call_id = str(tid)
+                    fulfilled[call_id] = fulfilled.get(call_id, 0) + 1
 
-        missing = [(ai, cid, name) for ai, cid, name in declared if cid not in fulfilled]
+        missing: list[tuple[int, str, str]] = []
+        remaining_fulfilled = dict(fulfilled)
+        for assistant_idx, call_id, name in declared:
+            available = remaining_fulfilled.get(call_id, 0)
+            if available:
+                remaining_fulfilled[call_id] = available - 1
+            else:
+                missing.append((assistant_idx, call_id, name))
         if not missing:
             return messages
 
