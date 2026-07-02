@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.agent.memory_harness import MemoryLifecycleHarness
+from agent.memory_harness import MemoryLifecycleHarness
 
 
 @pytest.mark.asyncio
