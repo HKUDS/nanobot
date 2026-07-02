@@ -1,4 +1,4 @@
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session, SessionManager, build_retention_plan
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -140,6 +140,23 @@ def test_retain_recent_legal_suffix_keeps_recent_messages():
     assert len(session.messages) == 4
     assert session.messages[0]["content"] == "msg6"
     assert session.messages[-1]["content"] == "msg9"
+
+
+def test_build_retention_plan_is_pure_and_matches_recent_suffix():
+    session = Session(key="test:plan-pure")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+    session.last_consolidated = 7
+    original_messages = list(session.messages)
+
+    plan = build_retention_plan(session.messages, session.last_consolidated, 4)
+
+    assert session.messages == original_messages
+    assert session.last_consolidated == 7
+    assert [m["content"] for m in plan.retained] == ["msg6", "msg7", "msg8", "msg9"]
+    assert [m["content"] for m in plan.dropped] == [f"msg{i}" for i in range(6)]
+    assert plan.last_consolidated == 1
+    assert plan.already_consolidated_count == 6
 
 
 def test_retain_recent_legal_suffix_adjusts_last_consolidated():
@@ -638,6 +655,30 @@ def test_retain_recent_legal_suffix_can_extend_to_user_for_long_recent_turn():
     assert session.messages[-1]["content"] == "done"
     history = session.get_history(max_messages=500)
     _assert_no_orphans(history)
+
+
+def test_build_retention_plan_can_extend_to_user_without_mutating_session():
+    session = Session(key="test:plan-extend-to-user")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.append({"role": "assistant", "content": "old answer"})
+    session.messages.append({"role": "user", "content": "record this"})
+    for i in range(4):
+        session.messages.extend(_tool_turn("recent", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+    original_messages = list(session.messages)
+
+    plan = build_retention_plan(
+        session.messages,
+        session.last_consolidated,
+        8,
+        extend_to_user=True,
+    )
+
+    assert session.messages == original_messages
+    assert len(plan.retained) > 8
+    assert plan.retained[0]["content"] == "record this"
+    assert plan.retained[-1]["content"] == "done"
+    assert [m["content"] for m in plan.dropped] == ["old", "old answer"]
 
 
 def test_get_history_can_extend_to_user_for_long_recent_turn():

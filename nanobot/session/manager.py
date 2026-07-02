@@ -111,9 +111,108 @@ def _metadata_title(metadata: Any) -> str:
 
 
 @dataclass
+class RetentionPlan:
+    retained: list[dict[str, Any]]
+    dropped: list[dict[str, Any]]
+    last_consolidated: int
+    already_consolidated_count: int
+
+
+@dataclass
 class RetentionResult:
     dropped: list[dict]
     already_consolidated_count: int
+
+
+def build_retention_plan(
+    messages: list[dict[str, Any]],
+    last_consolidated: int,
+    max_messages: int,
+    *,
+    extend_to_user: bool = False,
+) -> RetentionPlan:
+    """Calculate session retention without mutating the session."""
+    original = list(messages)
+    before_lc = max(0, min(last_consolidated, len(original)))
+
+    if max_messages <= 0:
+        return RetentionPlan(
+            retained=[],
+            dropped=original,
+            last_consolidated=0,
+            already_consolidated_count=min(before_lc, len(original)),
+        )
+    if len(original) <= max_messages:
+        return RetentionPlan(
+            retained=original,
+            dropped=[],
+            last_consolidated=before_lc,
+            already_consolidated_count=0,
+        )
+
+    start_idx = max(0, len(original) - max_messages)
+    if extend_to_user:
+        start_idx = next(
+            (i for i in range(start_idx, -1, -1) if original[i].get("role") == "user"),
+            start_idx,
+        )
+
+    retained = original[start_idx:]
+
+    # Prefer starting at a user turn when one exists within the retained window.
+    first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
+    if first_user is not None:
+        retained = retained[first_user:]
+    elif not extend_to_user:
+        # If the hard-capped tail is assistant/tool-only, anchor to the
+        # latest user in the full session and take a capped forward window.
+        latest_user = next(
+            (i for i in range(len(original) - 1, -1, -1)
+             if original[i].get("role") == "user"),
+            None,
+        )
+        if latest_user is not None:
+            retained = original[latest_user: latest_user + max_messages]
+
+    # Mirror get_history(): avoid persisting orphan tool results at the front.
+    start = find_legal_message_start(retained)
+    if start:
+        retained = retained[start:]
+
+    # Hard-cap guarantee unless the caller requested user-turn extension.
+    if not extend_to_user and len(retained) > max_messages:
+        retained = retained[-max_messages:]
+        start = find_legal_message_start(retained)
+        if start:
+            retained = retained[start:]
+
+    # Compute actually-dropped messages using identity comparison so that
+    # even when retained is a non-contiguous slice of original, we never
+    # duplicate or lose messages.
+    retained_ids = set(id(m) for m in retained)
+    dropped = [m for m in original if id(m) not in retained_ids]
+
+    # Count how many dropped messages were in the already-consolidated prefix
+    # of the original list. This cannot be a simple min() because dropped may
+    # include messages from after the consolidated prefix.
+    already_consolidated = sum(
+        1 for i, m in enumerate(original)
+        if i < before_lc and id(m) not in retained_ids
+    )
+
+    # New last_consolidated = count of retained messages that were inside the
+    # old consolidated prefix.
+    new_lc = sum(
+        1 for i, m in enumerate(original)
+        if i < before_lc and id(m) in retained_ids
+    )
+
+    return RetentionPlan(
+        retained=retained,
+        dropped=dropped,
+        last_consolidated=new_lc,
+        already_consolidated_count=already_consolidated,
+    )
 
 
 @dataclass
@@ -302,87 +401,24 @@ class Session:
         were in the already-consolidated prefix. This method mutates
         self.messages and self.last_consolidated in place.
         """
-        if max_messages <= 0:
-            dropped = list(self.messages)
-            lc = self.last_consolidated
-            self.clear()
-            return RetentionResult(
-                dropped=dropped,
-                already_consolidated_count=min(lc, len(dropped)),
-            )
-        if len(self.messages) <= max_messages:
+        plan = build_retention_plan(
+            self.messages,
+            self.last_consolidated,
+            max_messages,
+            extend_to_user=extend_to_user,
+        )
+        if not plan.dropped:
             return RetentionResult(
                 dropped=[],
                 already_consolidated_count=0,
             )
 
-        original = list(self.messages)
-        before_lc = self.last_consolidated
-
-        start_idx = max(0, len(self.messages) - max_messages)
-        if extend_to_user:
-            start_idx = next(
-                (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                start_idx,
-            )
-
-        retained = self.messages[start_idx:]
-
-        # Prefer starting at a user turn when one exists within the retained window.
-        first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
-        if first_user is not None:
-            retained = retained[first_user:]
-        elif not extend_to_user:
-            # If the hard-capped tail is assistant/tool-only, anchor to the
-            # latest user in the full session and take a capped forward window.
-            latest_user = next(
-                (i for i in range(len(self.messages) - 1, -1, -1)
-                 if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if latest_user is not None:
-                retained = self.messages[latest_user: latest_user + max_messages]
-
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = find_legal_message_start(retained)
-        if start:
-            retained = retained[start:]
-
-        # Hard-cap guarantee unless the caller requested user-turn extension.
-        if not extend_to_user and len(retained) > max_messages:
-            retained = retained[-max_messages:]
-            start = find_legal_message_start(retained)
-            if start:
-                retained = retained[start:]
-
-        # Compute actually-dropped messages using identity comparison so that
-        # even when retained is a non-contiguous slice of original (the else
-        # branch above), we never duplicate or lose messages.
-        retained_ids = set(id(m) for m in retained)
-        dropped = [m for m in original if id(m) not in retained_ids]
-
-        # Count how many dropped messages were in the already-consolidated
-        # prefix of the original list.  This cannot be a simple min() because
-        # dropped may include messages from *after* the consolidated prefix
-        # (e.g. in the else branch).
-        already_consolidated = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) not in retained_ids
-        )
-
-        # New last_consolidated = count of retained messages that were inside
-        # the old consolidated prefix.
-        new_lc = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) in retained_ids
-        )
-
-        self.messages = retained
-        self.last_consolidated = new_lc
+        self.messages = plan.retained
+        self.last_consolidated = plan.last_consolidated
         self.updated_at = datetime.now()
         return RetentionResult(
-            dropped=dropped,
-            already_consolidated_count=already_consolidated,
+            dropped=plan.dropped,
+            already_consolidated_count=plan.already_consolidated_count,
         )
 
     def enforce_file_cap(
