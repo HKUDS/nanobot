@@ -112,8 +112,10 @@ def _metadata_title(metadata: Any) -> str:
 
 @dataclass
 class RetentionResult:
+    retained: list[dict[str, Any]]
     dropped: list[dict]
     already_consolidated_count: int
+    new_last_consolidated: int
 
 
 @dataclass
@@ -290,30 +292,27 @@ class Session:
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 
-    def retain_recent_legal_suffix(
+    def plan_recent_legal_suffix(
         self,
         max_messages: int,
         *,
         extend_to_user: bool = False,
     ) -> RetentionResult:
-        """Keep a legal recent suffix, optionally extending it back to a user turn.
-
-        Returns a RetentionResult with dropped messages and how many of those
-        were in the already-consolidated prefix. This method mutates
-        self.messages and self.last_consolidated in place.
-        """
+        """Plan a legal recent suffix without mutating the session."""
         if max_messages <= 0:
             dropped = list(self.messages)
-            lc = self.last_consolidated
-            self.clear()
             return RetentionResult(
+                retained=[],
                 dropped=dropped,
-                already_consolidated_count=min(lc, len(dropped)),
+                already_consolidated_count=min(self.last_consolidated, len(dropped)),
+                new_last_consolidated=0,
             )
         if len(self.messages) <= max_messages:
             return RetentionResult(
+                retained=list(self.messages),
                 dropped=[],
                 already_consolidated_count=0,
+                new_last_consolidated=self.last_consolidated,
             )
 
         original = list(self.messages)
@@ -377,13 +376,27 @@ class Session:
             if i < before_lc and id(m) in retained_ids
         )
 
-        self.messages = retained
-        self.last_consolidated = new_lc
-        self.updated_at = datetime.now()
         return RetentionResult(
+            retained=retained,
             dropped=dropped,
             already_consolidated_count=already_consolidated,
+            new_last_consolidated=new_lc,
         )
+
+    def retain_recent_legal_suffix(
+        self,
+        max_messages: int,
+        *,
+        extend_to_user: bool = False,
+    ) -> RetentionResult:
+        """Keep a legal recent suffix, optionally extending it back to a user turn."""
+        result = self.plan_recent_legal_suffix(max_messages, extend_to_user=extend_to_user)
+        self.messages = result.retained
+        self.last_consolidated = result.new_last_consolidated
+        self.updated_at = datetime.now()
+        if max_messages <= 0:
+            self.metadata.pop("_last_summary", None)
+        return result
 
     def enforce_file_cap(
         self,
@@ -394,13 +407,16 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
-        result = self.retain_recent_legal_suffix(limit)
+        result = self.plan_recent_legal_suffix(limit)
         if not result.dropped:
             return
 
         archive_chunk = result.dropped[result.already_consolidated_count:]
         if archive_chunk and on_archive:
             on_archive(archive_chunk)
+        self.messages = result.retained
+        self.last_consolidated = result.new_last_consolidated
+        self.updated_at = datetime.now()
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,

@@ -691,6 +691,25 @@ def test_retain_recent_legal_suffix_returns_dropped_messages():
     assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(6)]
     assert len(session.messages) == 4
     assert result.already_consolidated_count == 0
+    assert [m["content"] for m in result.retained] == [f"msg{i}" for i in range(6, 10)]
+    assert result.new_last_consolidated == 0
+
+
+def test_plan_recent_legal_suffix_is_pure_and_explicit():
+    """Retention planning exposes retained/dropped/cursor fields without mutating."""
+    session = Session(key="test:plan-retention")
+    for i in range(8):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+    session.last_consolidated = 5
+
+    result = session.plan_recent_legal_suffix(4)
+
+    assert [m["content"] for m in result.retained] == [f"msg{i}" for i in range(4, 8)]
+    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(4)]
+    assert result.already_consolidated_count == 4
+    assert result.new_last_consolidated == 1
+    assert [m["content"] for m in session.messages] == [f"msg{i}" for i in range(8)]
+    assert session.last_consolidated == 5
 
 
 def test_retain_recent_legal_suffix_returns_empty_when_no_drop():

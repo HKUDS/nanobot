@@ -102,11 +102,11 @@ def _make_fake_compact(
             metadata={},
             last_consolidated=0,
         )
-        result = probe.retain_recent_legal_suffix(
+        result = probe.plan_recent_legal_suffix(
             max_suffix,
             extend_to_user=True,
         )
-        kept = probe.messages
+        kept = result.retained
         archive_msgs = result.dropped[result.already_consolidated_count:]
 
         if not archive_msgs and not kept:

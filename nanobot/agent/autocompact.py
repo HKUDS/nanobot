@@ -47,7 +47,7 @@ class AutoCompact:
             metadata={},
             last_consolidated=0,
         )
-        result = probe.retain_recent_legal_suffix(
+        result = probe.plan_recent_legal_suffix(
             self._RECENT_SUFFIX_MESSAGES,
             extend_to_user=True,
         )
