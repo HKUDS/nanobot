@@ -466,6 +466,65 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_loop_injected_followup_preserves_capability_metadata(tmp_path):
+    """Mid-turn follow-ups should keep persisted capability metadata extras."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    captured_messages: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        captured_messages.append([dict(message) for message in messages])
+        if call_count["n"] == 1:
+            return LLMResponse(content="first answer", tool_calls=[], usage={})
+        return LLMResponse(content="second answer", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    cli_apps = [{"name": "build", "entry_point": "bun run build"}]
+    mcp_presets = [{"name": "docs", "display_name": "Docs", "transport": "stdio"}]
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="cli",
+        sender_id="u",
+        chat_id="c",
+        content="follow-up with attachments",
+        metadata={"cli_apps": cli_apps, "mcp_presets": mcp_presets},
+    ))
+
+    final_content, _, all_messages, _, had_injections = await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        channel="cli",
+        chat_id="c",
+        pending_queue=pending_queue,
+    )
+
+    assert final_content == "second answer"
+    assert had_injections is True
+    assert call_count["n"] == 2
+    injected = next(
+        message for message in captured_messages[-1]
+        if message.get("role") == "user" and message.get("content") == "follow-up with attachments"
+    )
+    assert injected["cli_apps"] == cli_apps
+    assert injected["mcp_presets"] == mcp_presets
+    persisted = next(
+        message for message in all_messages
+        if message.get("role") == "user" and message.get("content") == "follow-up with attachments"
+    )
+    assert persisted["cli_apps"] == cli_apps
+    assert persisted["mcp_presets"] == mcp_presets
+
+
+@pytest.mark.asyncio
 async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage

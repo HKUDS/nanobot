@@ -798,6 +798,7 @@ class AgentLoop:
                 user_content = self.context._build_user_content(content, media)
                 row: dict[str, Any] = {"role": "user", "content": user_content}
                 metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
+                row.update(agent_context.session_extra(metadata))
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
