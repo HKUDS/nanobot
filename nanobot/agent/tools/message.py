@@ -15,6 +15,26 @@ from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
 
 
+def _target_allowed_by_metadata(
+    metadata: dict[str, Any], channel: str, chat_id: str
+) -> bool:
+    if metadata.get("_allow_cross_target_message") is True:
+        return True
+    allowed = metadata.get("allowed_outbound_targets") or metadata.get("outbound_targets")
+    if not isinstance(allowed, list):
+        return False
+    target = f"{channel}:{chat_id}"
+    for entry in allowed:
+        if entry == "*" or entry == target:
+            return True
+        if isinstance(entry, dict):
+            allowed_channel = str(entry.get("channel", ""))
+            allowed_chat_id = str(entry.get("chat_id", ""))
+            if allowed_channel in {"*", channel} and allowed_chat_id in {"*", chat_id}:
+                return True
+    return False
+
+
 @tool_parameters(
     tool_parameters_schema(
         content=StringSchema(
@@ -162,22 +182,38 @@ class MessageTool(Tool, ContextAware):
         )
 
     def _resolve_media(self, media: list[str]) -> list[str]:
-        """Resolve local media attachments and enforce workspace restriction when enabled."""
+        """Resolve local media attachments and enforce workspace/media roots by default."""
         resolved: list[str] = []
         access = current_tool_workspace(
             self._workspace,
             restrict_to_workspace=self._restrict_to_workspace,
         )
         workspace = access.project_path or self._workspace
+        metadata = self._default_metadata.get()
+        allow_arbitrary_local_media = metadata.get("_allow_arbitrary_local_media") is True
         for p in media:
             if p.startswith(("http://", "https://")):
                 resolved.append(p)
-            elif not access.restrict_to_workspace:
+            elif allow_arbitrary_local_media:
                 path = Path(p).expanduser()
                 resolved.append(p if path.is_absolute() else str(workspace / path))
             else:
-                resolved.append(str(resolve_workspace_path(p, workspace, access.allowed_root)))
+                allowed_root = access.allowed_root or workspace
+                resolved.append(str(resolve_workspace_path(p, workspace, allowed_root)))
         return resolved
+
+    def _is_authorized_target(
+        self,
+        channel: str,
+        chat_id: str,
+        default_channel: str,
+        default_chat_id: str,
+    ) -> bool:
+        if not default_channel and not default_chat_id:
+            return True
+        if channel == default_channel and chat_id == default_chat_id:
+            return True
+        return _target_allowed_by_metadata(self._default_metadata.get(), channel, chat_id)
 
     async def execute(
         self,
@@ -230,6 +266,13 @@ class MessageTool(Tool, ContextAware):
 
         if not channel or not chat_id:
             return ToolResult.error("Error: No target channel/chat specified")
+
+        if not self._is_authorized_target(channel, chat_id, default_channel, default_chat_id):
+            return ToolResult.error(
+                "Error: outbound message target is not authorized for this turn. "
+                "Omit channel/chat_id to send to the current chat, or configure an explicit "
+                "allowed outbound destination."
+            )
 
         if not self._send_callback:
             return ToolResult.error("Error: Message sending not configured")
