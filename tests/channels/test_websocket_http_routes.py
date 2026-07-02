@@ -1150,6 +1150,8 @@ async def test_webui_automations_route_manages_local_triggers(
         chat_id="abc",
         session_key="websocket:abc",
     )
+    delivery = trigger_store.enqueue(trigger.id, "Review queued PR")
+    assert delivery.path is not None
     channel = _ch(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
@@ -1216,6 +1218,7 @@ async def test_webui_automations_route_manages_local_triggers(
         )
         assert deleted.status_code == 200
         assert trigger_store.get(trigger.id) is None
+        assert not delivery.path.exists()
     finally:
         await channel.stop()
         await server_task

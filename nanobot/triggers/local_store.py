@@ -143,6 +143,7 @@ class LocalTriggerStore:
 
     def delete(self, trigger_id: str) -> bool:
         """Delete a trigger by ID."""
+        trigger_id = trigger_id.strip()
         self._ensure_dirs()
         with self._lock:
             triggers = self._load_triggers_unlocked()
@@ -150,6 +151,7 @@ class LocalTriggerStore:
             if len(remaining) == len(triggers):
                 return False
             self._save_triggers_unlocked(remaining)
+            self._delete_delivery_files_for_trigger_unlocked(trigger_id)
             return True
 
     def enqueue(self, trigger_id: str, content: str) -> TriggerDelivery:
@@ -323,6 +325,35 @@ class LocalTriggerStore:
         self._atomic_write(target, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
         delivery.path.unlink(missing_ok=True)
         return True
+
+    def _delete_delivery_files_for_trigger_unlocked(self, trigger_id: str) -> None:
+        for directory in (self.inbox_dir, self.processing_dir, self.failed_dir):
+            for path in directory.iterdir():
+                if not path.is_file():
+                    continue
+                if self._delivery_file_trigger_id(path) != trigger_id:
+                    continue
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        "Trigger: failed to delete delivery file {} for deleted trigger {}: {}",
+                        path,
+                        trigger_id,
+                        exc,
+                    )
+
+    @staticmethod
+    def _delivery_file_trigger_id(path: Path) -> str | None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        raw = data.get("delivery", data) if isinstance(data, dict) else None
+        if not isinstance(raw, dict):
+            return None
+        trigger_id = raw.get("triggerId", raw.get("trigger_id", ""))
+        return str(trigger_id) if trigger_id else None
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:

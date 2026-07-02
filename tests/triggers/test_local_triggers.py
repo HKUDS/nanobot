@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import suppress
 from pathlib import Path
 
@@ -11,6 +12,25 @@ from nanobot.bus.events import InboundMessage
 from nanobot.triggers.local_runner import run_local_trigger_queue
 from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+
+
+def _write_delivery_file(path: Path, *, trigger_id: str, delivery_id: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "delivery": {
+                    "id": delivery_id,
+                    "triggerId": trigger_id,
+                    "content": "queued",
+                    "createdAtMs": 1,
+                    "attempts": 0,
+                    "lastError": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_trigger_store_allows_multiple_triggers_per_session(tmp_path: Path) -> None:
@@ -48,6 +68,39 @@ def test_enqueue_rejects_disabled_trigger(tmp_path: Path) -> None:
 
     with pytest.raises(TriggerDisabledError):
         store.enqueue(trigger.id, "Review PR #4502")
+
+
+def test_delete_removes_delivery_files_for_trigger(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    other = store.create(
+        name="CI summary",
+        channel="websocket",
+        chat_id="chat-2",
+        session_key="websocket:chat-2",
+    )
+    inbox = store.inbox_dir / "1-tdl_inbox.json"
+    processing = store.processing_dir / "2-tdl_processing.json"
+    failed = store.failed_dir / "3-tdl_failed.json"
+    other_inbox = store.inbox_dir / "4-tdl_other.json"
+    _write_delivery_file(inbox, trigger_id=trigger.id, delivery_id="tdl_inbox")
+    _write_delivery_file(processing, trigger_id=trigger.id, delivery_id="tdl_processing")
+    _write_delivery_file(failed, trigger_id=trigger.id, delivery_id="tdl_failed")
+    _write_delivery_file(other_inbox, trigger_id=other.id, delivery_id="tdl_other")
+
+    assert store.delete(trigger.id) is True
+
+    assert store.get(trigger.id) is None
+    assert not inbox.exists()
+    assert not processing.exists()
+    assert not failed.exists()
+    assert other_inbox.exists()
+    assert store.get(other.id) is not None
 
 
 def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path) -> None:
