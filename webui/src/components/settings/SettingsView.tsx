@@ -5131,7 +5131,7 @@ function AppsCatalogSettings({
           <span>
             {tx(
               "settings.apps.packageInstallNotice",
-              "Enabling Nanobot features may install Python packages into this runtime. Remote browsers can install packages only when tools.webuiAllowRemotePackageInstall is enabled in config.",
+              "Enabling Nanobot features may install Python packages. Package installs from another device, tunnel, or shared WebUI require admin opt-in.",
             )}
           </span>
         </div>

@@ -662,7 +662,13 @@ async def test_nanobot_feature_remote_install_requires_opt_in(
 
     install_calls: list[str] = []
 
-    def _install_extra(name: str, deps: list[str] | None, *, runner: Any) -> InstallResult:
+    def _install_extra(
+        name: str,
+        deps: list[str] | None,
+        *,
+        package_index: str = "default",
+        runner: Any,
+    ) -> InstallResult:
         install_calls.append(name)
         return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
 
@@ -739,7 +745,13 @@ async def test_nanobot_feature_local_install_allowed_by_default(
 
     install_calls: list[str] = []
 
-    def _install_extra(name: str, deps: list[str] | None, *, runner: Any) -> InstallResult:
+    def _install_extra(
+        name: str,
+        deps: list[str] | None,
+        *,
+        package_index: str = "default",
+        runner: Any,
+    ) -> InstallResult:
         install_calls.append(name)
         return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
 
@@ -747,7 +759,7 @@ async def test_nanobot_feature_local_install_allowed_by_default(
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
     token = channel.gateway.tokens.issue_token(300, api_token=True)
     request = _FakeReq(
-        {"Authorization": f"Bearer {token}"},
+        {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
         path="/api/settings/nanobot-features/enable?name=matrix",
     )
 
@@ -763,6 +775,94 @@ async def test_nanobot_feature_local_install_allowed_by_default(
     assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
         "enabled"
     ] is True
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.base import BaseChannel
+    from nanobot.optional_features import InstallResult
+
+    class _MatrixChannel(BaseChannel):
+        name = "matrix"
+        display_name = "Matrix"
+
+        @classmethod
+        def default_config(cls) -> dict[str, Any]:
+            return {"enabled": False, "allowFrom": []}
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    install_calls: list[str] = []
+
+    def _install_extra(
+        name: str,
+        deps: list[str] | None,
+        *,
+        package_index: str = "default",
+        runner: Any,
+    ) -> InstallResult:
+        install_calls.append(name)
+        return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {
+            "Authorization": f"Bearer {token}",
+            "Host": "nanobot.example",
+            "X-Forwarded-For": "203.0.113.42",
+        },
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    blocked = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert blocked is not None
+    assert blocked.status_code == 403
+    assert install_calls == []
+
+    config_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+
+    allowed = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert allowed is not None
+    assert allowed.status_code == 200
+    assert install_calls == ["matrix"]
 
 
 @pytest.mark.asyncio
@@ -805,7 +905,13 @@ async def test_nanobot_feature_remote_enable_without_install_is_allowed(
 
     install_calls: list[str] = []
 
-    def _install_extra(name: str, deps: list[str] | None, *, runner: Any) -> InstallResult:
+    def _install_extra(
+        name: str,
+        deps: list[str] | None,
+        *,
+        package_index: str = "default",
+        runner: Any,
+    ) -> InstallResult:
         install_calls.append(name)
         return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
 
@@ -2009,6 +2115,43 @@ class _FakeReq:
 _REMOTE = _FakeConn(("192.168.1.5", 12345))
 _LOCAL = _FakeConn(("127.0.0.1", 12345))
 _NO_HEADERS = _FakeReq()
+
+
+def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> None:
+    from nanobot.webui.http_utils import is_local_browser_request
+
+    assert is_local_browser_request(_LOCAL, {"Host": "127.0.0.1:8765"}) is True
+    assert is_local_browser_request(_LOCAL, {"Host": "localhost:8765"}) is True
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "localhost:8765", "X-Forwarded-For": "127.0.0.1"},
+        )
+        is True
+    )
+    assert is_local_browser_request(_REMOTE, {"Host": "127.0.0.1:8765"}) is False
+    assert is_local_browser_request(_LOCAL, {"Host": "nanobot.example"}) is False
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "127.0.0.1:8765", "X-Forwarded-For": "203.0.113.42"},
+        )
+        is False
+    )
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "127.0.0.1:8765", "X-Forwarded-Host": "nanobot.example"},
+        )
+        is False
+    )
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "127.0.0.1:8765", "Forwarded": "for=203.0.113.42;host=nanobot.example"},
+        )
+        is False
+    )
 
 
 def test_wildcard_host_without_auth_raises_on_startup(bus: MagicMock) -> None:

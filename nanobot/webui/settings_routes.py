@@ -20,7 +20,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config
 from nanobot.optional_features import OptionalFeatureError
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
-from nanobot.webui.http_utils import is_localhost as _is_localhost
+from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.http_utils import query_first as _query_first
 from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
 from nanobot.webui.nanobot_features_api import nanobot_features_action, nanobot_features_payload
@@ -367,7 +367,8 @@ class WebUISettingsRouter:
                 nanobot_features_action,
                 action,
                 self._query(request),
-                allow_install=action != "enable" or self._allow_feature_package_install(connection),
+                allow_install=action != "enable"
+                or self._allow_feature_package_install(connection, request),
             )
         except OptionalFeatureError as e:
             return self._error_response(e.status, e.message)
@@ -379,8 +380,8 @@ class WebUISettingsRouter:
             return self._error_response(status, message)
         return self._json_response(self._with_restart_state(payload, section="runtime"))
 
-    def _allow_feature_package_install(self, connection: Any) -> bool:
-        if _is_localhost(connection):
+    def _allow_feature_package_install(self, connection: Any, request: WsRequest) -> bool:
+        if _is_local_browser_request(connection, request.headers):
             return True
         try:
             return bool(load_config().tools.webui_allow_remote_package_install)

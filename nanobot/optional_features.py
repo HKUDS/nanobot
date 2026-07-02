@@ -36,6 +36,15 @@ class InstallResult:
 _INSTALL_TIMEOUT_SECONDS = 300
 _DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
 _LOG_OUTPUT_LIMIT = 4000
+_PACKAGE_INDEX_URLS = {
+    "default": "",
+    "pypi": "https://pypi.org/simple",
+    "tuna": "https://pypi.tuna.tsinghua.edu.cn/simple",
+    "aliyun": "https://mirrors.aliyun.com/pypi/simple",
+    "ustc": "https://pypi.mirrors.ustc.edu.cn/simple",
+    "douban": "https://pypi.doubanio.com/simple",
+    "huawei": "https://repo.huaweicloud.com/repository/pypi/simple",
+}
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -92,11 +101,26 @@ def has_extra_marker(raw: str) -> bool:
     return marker is not None and "extra" in str(marker)
 
 
-def install_args_for_extra(extra: str, deps: list[str] | None) -> tuple[list[str], str]:
+def package_index_url(preset: str) -> str:
+    key = (preset or "default").strip().lower()
+    if key not in _PACKAGE_INDEX_URLS:
+        available = ", ".join(sorted(_PACKAGE_INDEX_URLS))
+        raise OptionalFeatureError(f"Unknown package index preset: {preset}. Available: {available}")
+    return _PACKAGE_INDEX_URLS[key]
+
+
+def install_args_for_extra(
+    extra: str,
+    deps: list[str] | None,
+    *,
+    package_index: str = "default",
+) -> tuple[list[str], str]:
+    index_url = package_index_url(package_index)
+    prefix = ["--index-url", index_url] if index_url else []
     if deps and not any(has_extra_marker(dep) for dep in deps):
-        return deps, f"{extra} support"
+        return [*prefix, *deps], f"{extra} support"
     target = f"nanobot-ai[{extra}]"
-    return [target], f'"{target}"'
+    return [*prefix, target], f'"{target}"'
 
 
 def _requirement_installed(req: Requirement, extra: str, seen: set[tuple[str, str]]) -> bool:
@@ -194,11 +218,12 @@ def install_extra(
     extra: str,
     deps: list[str] | None,
     *,
+    package_index: str = "default",
     runner: Any = run_install_command,
 ) -> InstallResult:
     import importlib
 
-    install_args, label = install_args_for_extra(extra, deps)
+    install_args, label = install_args_for_extra(extra, deps, package_index=package_index)
     pip_cmd = [sys.executable, "-m", "pip", "install", *install_args]
 
     logger.info("Installing optional feature '{}': {}", extra, command_text(pip_cmd))
@@ -354,9 +379,10 @@ def enable_optional_feature(
         discover_plugins,
         load_channel_class,
     )
-    from nanobot.config.loader import get_config_path
+    from nanobot.config.loader import get_config_path, load_config
 
     config_path = config_path or get_config_path()
+    config = load_config(config_path)
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
     plugin_channels = discover_plugins()
@@ -372,7 +398,12 @@ def enable_optional_feature(
                 "Run this action from localhost or set tools.webuiAllowRemotePackageInstall to true.",
                 status=403,
             )
-        result = install_extra(name, extras[name], runner=runner)
+        result = install_extra(
+            name,
+            extras[name],
+            package_index=config.tools.optional_feature_install_index,
+            runner=runner,
+        )
         if not result.ok:
             failed = command_text(result.failed_cmd or result.pip_cmd)
             detail = f": {result.output}" if result.output else ""

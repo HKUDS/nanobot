@@ -701,10 +701,20 @@ def _run_install_command(argv: list[str]):
     return feature_support.run_install_command(argv)
 
 
-def _install_extra(extra: str, deps: list[str] | None) -> bool:
-    _, label = _install_args_for_extra(extra, deps)
+def _install_extra(
+    extra: str,
+    deps: list[str] | None,
+    *,
+    package_index: str = "default",
+) -> bool:
+    _, label = _install_args_for_extra(extra, deps, package_index=package_index)
     console.print(f"Installing [cyan]{escape(label)}[/cyan]")
-    result = feature_support.install_extra(extra, deps, runner=_run_install_command)
+    result = feature_support.install_extra(
+        extra,
+        deps,
+        package_index=package_index,
+        runner=_run_install_command,
+    )
     if result.ok:
         return True
     console.print(f"[red]Failed:[/red] {escape(_command_text(result.failed_cmd or result.pip_cmd))}")
@@ -1820,13 +1830,14 @@ def plugins_enable(
         discover_plugins,
         load_channel_class,
     )
-    from nanobot.config.loader import get_config_path, set_config_path
+    from nanobot.config.loader import get_config_path, load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
         set_config_path(resolved_config_path)
     resolved_config_path = resolved_config_path or get_config_path()
 
+    config = load_config(resolved_config_path)
     extras = _optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
     plugin_channels = discover_plugins()
@@ -1836,7 +1847,15 @@ def plugins_enable(
         console.print(f"[red]Unknown feature: {name}[/red]  Available: {available}")
         raise typer.Exit(1)
 
-    if name in extras and not _extra_installed(name, extras[name]) and not _install_extra(name, extras[name]):
+    if (
+        name in extras
+        and not _extra_installed(name, extras[name])
+        and not _install_extra(
+            name,
+            extras[name],
+            package_index=config.tools.optional_feature_install_index,
+        )
+    ):
         raise typer.Exit(1)
 
     if name in builtin_channels:

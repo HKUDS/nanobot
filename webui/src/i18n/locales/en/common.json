@@ -476,7 +476,7 @@
       "loading": "Loading Apps...",
       "empty": "No apps match this filter.",
       "restartRequired": "Restart nanobot to apply updated apps and features.",
-      "packageInstallNotice": "Enabling Nanobot features may install Python packages into this runtime. Remote browsers can install packages only when tools.webuiAllowRemotePackageInstall is enabled in config."
+      "packageInstallNotice": "Enabling Nanobot features may install Python packages. Package installs from another device, tunnel, or shared WebUI require admin opt-in."
     },
     "nanobotFeatures": {
       "enabled": "Enabled",

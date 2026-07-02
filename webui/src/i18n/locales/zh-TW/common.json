@@ -476,7 +476,7 @@
       "loading": "正在載入應用...",
       "empty": "沒有符合的應用。",
       "restartRequired": "重新啟動 nanobot 以套用更新後的應用和能力。",
-      "packageInstallNotice": "啟用 Nanobot 功能可能會向目前執行環境安裝 Python 套件。遠端瀏覽器只有在設定中啟用 tools.webuiAllowRemotePackageInstall 後才能安裝套件。"
+      "packageInstallNotice": "啟用 Nanobot 功能可能會安裝 Python 套件。從其他裝置、通道或共用 WebUI 安裝套件，需要管理員明確允許。"
     },
     "nanobotFeatures": {
       "enabled": "已啟用",

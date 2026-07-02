@@ -752,6 +752,7 @@ def test_enable_optional_feature_skips_install_when_dependency_present(
         name: str,
         deps: list[str] | None,
         *,
+        package_index: str = "default",
         runner,
     ) -> InstallResult:
         install_calls.append(name)
@@ -785,7 +786,7 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
     monkeypatch.setattr(
         "nanobot.optional_features.install_extra",
-        lambda _name, _deps, *, runner: InstallResult(
+        lambda _name, _deps, *, package_index="default", runner: InstallResult(
             False,
             "bedrock support",
             ["python", "-m", "pip", "install", "boto3>=1.43.0"],
@@ -801,6 +802,44 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     assert "Failed:" in exc.value.message
     assert "network unavailable" in exc.value.message
     assert not config_path.exists()
+
+
+def test_enable_optional_feature_uses_configured_package_index(monkeypatch, tmp_path):
+    from nanobot.optional_features import enable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tools": {"optionalFeatureInstallIndex": "aliyun"}}),
+        encoding="utf-8",
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    payload = enable_optional_feature("bedrock", config_path=config_path, runner=_run)
+
+    assert calls == [
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--index-url",
+            "https://mirrors.aliyun.com/pypi/simple",
+            "boto3>=1.43.0",
+        ]
+    ]
+    assert payload["last_action"]["message"] == "Enabled feature 'bedrock'"
 
 
 def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
@@ -903,6 +942,36 @@ def test_install_extra_logs_command_and_output(monkeypatch):
     assert any("Installing optional feature 'weixin':" in record for record in records)
     assert any("Optional feature 'weixin' install exited with code 0" in record for record in records)
     assert any("install ok" in record for record in records)
+
+
+def test_install_extra_uses_configured_package_index():
+    from nanobot import optional_features
+
+    calls: list[list[str]] = []
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    result = optional_features.install_extra(
+        "bedrock",
+        ["boto3>=1.43.0"],
+        package_index="tuna",
+        runner=_run,
+    )
+
+    assert result.ok is True
+    assert calls == [
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--index-url",
+            "https://pypi.tuna.tsinghua.edu.cn/simple",
+            "boto3>=1.43.0",
+        ]
+    ]
 
 
 def test_run_install_command_returns_failure_on_timeout(monkeypatch):
