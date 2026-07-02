@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
+import re
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -19,7 +21,7 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest, parse_tool_arguments
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.file_edit_events import (
     StreamingFileEditTracker,
@@ -68,6 +70,10 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_TEXT_TOOL_CALL_RE = re.compile(
+    r"<(?P<tag>tool_call|function_call)>\s*(?P<body>.*?)\s*</(?P=tag)>",
+    re.IGNORECASE | re.DOTALL,
+)
 # Backward-compatible module attribute for tests/extensions that monkeypatch
 # the former single-file tracker hook. Runtime uses prepare_file_edit_trackers.
 prepare_file_edit_tracker = _prepare_file_edit_tracker
@@ -880,6 +886,7 @@ class AgentRunner:
             )
         if progress_state and progress_state.get("reasoning_open"):
             await hook.emit_reasoning_end()
+        self._normalize_text_tool_calls(response)
         dropped, all_dropped, original_finish_reason = (
             self._drop_malformed_tool_calls(response)
         )
@@ -912,6 +919,59 @@ class AgentRunner:
             )
             return await self._request_no_tools(spec, fallback_messages)
         return response
+
+    @staticmethod
+    def _normalize_text_tool_calls(response: LLMResponse) -> None:
+        """Convert explicit text tool-call markup into structured tool calls.
+
+        Some OpenAI-compatible gateways return tool calls as assistant text in
+        `<tool_call>{...}</tool_call>` blocks instead of SDK tool-call fields.
+        Only valid JSON object payloads are normalized; malformed markup remains
+        visible text so it is not guessed into executable arguments.
+        """
+        if response.tool_calls or not isinstance(response.content, str):
+            return
+
+        content = response.content
+        tool_calls: list[ToolCallRequest] = []
+        remove_spans: list[tuple[int, int]] = []
+        for match in _TEXT_TOOL_CALL_RE.finditer(content):
+            try:
+                payload = json.loads(match.group("body").strip())
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            function = payload.get("function") if isinstance(payload.get("function"), dict) else None
+            name = payload.get("name")
+            arguments = payload.get("arguments", payload.get("args", payload.get("input", {})))
+            if function is not None:
+                name = function.get("name", name)
+                arguments = function.get("arguments", arguments)
+            if not isinstance(name, str) or not name:
+                continue
+
+            call_id = payload.get("id") or payload.get("call_id") or f"text_tool_call_{len(tool_calls) + 1}"
+            tool_calls.append(ToolCallRequest(
+                id=str(call_id),
+                name=name,
+                arguments=parse_tool_arguments(arguments),
+            ))
+            remove_spans.append(match.span())
+
+        if not tool_calls:
+            return
+
+        cleaned_parts: list[str] = []
+        last = 0
+        for start, end in remove_spans:
+            cleaned_parts.append(content[last:start])
+            last = end
+        cleaned_parts.append(content[last:])
+        response.content = "".join(cleaned_parts).strip() or None
+        response.tool_calls = tool_calls
+        response.finish_reason = "tool_calls"
 
     @staticmethod
     def _drop_malformed_tool_calls(
