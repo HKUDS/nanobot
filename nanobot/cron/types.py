@@ -32,6 +32,8 @@ class CronPayload:
     origin_channel: str | None = None
     origin_chat_id: str | None = None
     origin_metadata: dict[str, Any] = field(default_factory=dict)
+    model: str | None = None
+    model_preset: str | None = None
 
 
 @dataclass

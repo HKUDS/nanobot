@@ -604,10 +604,64 @@ class AgentLoop:
         return ensure_runtime_event_publisher(self)
 
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
-        return await self._cron_turns.submit(msg)
+        override = self._message_model_override_snapshot(msg)
+        if override is None:
+            return await self._cron_turns.submit(msg)
+
+        restore = self._current_provider_snapshot()
+        restore_signature = self._provider_signature
+        restore_preset = self._active_preset
+        model_preset = self._metadata_str(msg.metadata, "model_preset")
+        self._apply_provider_snapshot(override, publish_update=False, model_preset=model_preset)
+        self._active_preset = model_preset
+        try:
+            return await self._cron_turns.submit(msg)
+        finally:
+            self._apply_provider_snapshot(restore, publish_update=False, model_preset=restore_preset)
+            self._provider_signature = restore_signature
+            self._active_preset = restore_preset
 
     async def submit_local_trigger_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         return await self._local_trigger_turns.submit(msg)
+
+    @staticmethod
+    def _metadata_str(metadata: dict[str, Any] | None, key: str) -> str | None:
+        value = (metadata or {}).get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    def _current_provider_snapshot(self) -> ProviderSnapshot:
+        signature = self._provider_signature
+        if signature is None:
+            signature = ("runtime", id(self.provider), self.model)
+        return ProviderSnapshot(
+            provider=self.provider,
+            model=self.model,
+            context_window_tokens=self.context_window_tokens,
+            signature=signature,
+        )
+
+    def _message_model_override_snapshot(self, msg: InboundMessage) -> ProviderSnapshot | None:
+        model = self._metadata_str(msg.metadata, "model")
+        model_preset = self._metadata_str(msg.metadata, "model_preset")
+        if model and model_preset:
+            raise ValueError("cron model and model_preset overrides are mutually exclusive")
+        if model_preset:
+            return self._build_model_preset_snapshot(model_preset)
+        if not model:
+            return None
+
+        generation = getattr(self.provider, "generation", None)
+        preset = ModelPresetConfig(
+            model=model,
+            provider="auto",
+            max_tokens=getattr(generation, "max_tokens", 8192),
+            context_window_tokens=self.context_window_tokens,
+            temperature=getattr(generation, "temperature", 0.1),
+            reasoning_effort=getattr(generation, "reasoning_effort", None),
+        )
+        return preset_helpers.build_static_preset_snapshot(self.provider, "cron:override", preset)
 
     def pending_cron_job_ids_for_session(self, session_key: str) -> set[str]:
         return self._cron_turns.pending_job_ids_for_session(session_key)

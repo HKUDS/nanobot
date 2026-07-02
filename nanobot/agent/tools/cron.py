@@ -39,6 +39,12 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "Naive values use the tool's default timezone."
     ),
     job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+    model=StringSchema(
+        "Optional model override for the triggered run. Mutually exclusive with model_preset."
+    ),
+    model_preset=StringSchema(
+        "Optional named model preset override for the triggered run. Mutually exclusive with model."
+    ),
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
@@ -143,13 +149,15 @@ class CronTool(Tool, ContextAware):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        model: str | None = None,
+        model_preset: str | None = None,
         deliver: bool = True,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return ToolResult.error("Error: cannot schedule new jobs from within a cron job execution")
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at)
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at, model, model_preset)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -164,6 +172,8 @@ class CronTool(Tool, ContextAware):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        model: str | None,
+        model_preset: str | None,
     ) -> str:
         if not message:
             return ToolResult.error(
@@ -183,6 +193,10 @@ class CronTool(Tool, ContextAware):
         if tz:
             if err := self._validate_timezone(tz):
                 return err
+        model = model.strip() if isinstance(model, str) else None
+        model_preset = model_preset.strip() if isinstance(model_preset, str) else None
+        if model and model_preset:
+            return ToolResult.error("Error: model and model_preset are mutually exclusive")
 
         # Build schedule
         delete_after = False
@@ -219,6 +233,8 @@ class CronTool(Tool, ContextAware):
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             origin_metadata=dict(self._origin_metadata.get() or {}),
+            model=model or None,
+            model_preset=model_preset or None,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
