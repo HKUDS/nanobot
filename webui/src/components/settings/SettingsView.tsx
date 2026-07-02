@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Cloud,
+  Clipboard,
   Cpu,
   Database,
   Eye,
@@ -109,6 +110,7 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
@@ -3737,6 +3739,7 @@ function AutomationListItem({
   const status = automationStatus(job, tx);
   const origin = automationOriginLabel(job, tx);
   const nextRun = formatAutomationNext(job, tx);
+  const summary = automationSummary(job, tx);
 
   return (
     <div role="listitem">
@@ -3762,7 +3765,7 @@ function AutomationListItem({
             </span>
           </span>
           <span className="mt-1.5 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
-            {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
+            {summary}
           </span>
           <span className="mt-2.5 flex min-w-0 items-center gap-2 text-[11.5px] leading-none text-muted-foreground">
             <span className="truncate" title={formatAutomationNextTitle(job, locale, tx)}>
@@ -3819,13 +3822,20 @@ function AutomationDetailPanel({
     : null;
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
-  const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+  const localTrigger = isLocalTriggerAutomation(job);
+  const triggerCommand = automationTriggerCommand(job);
+  const message = automationDetailText(job, tx);
+  const messageLabel = localTrigger
+    ? tx("settings.automations.fields.command", "Command")
+    : tx("settings.automations.fields.message", "Message");
   const schedule = formatAutomationSchedule(job, locale, tx);
   const [messageExpanded, setMessageExpanded] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
   const messageNeedsExpansion = automationMessageNeedsExpansion(message);
 
   useEffect(() => {
     setMessageExpanded(false);
+    setCommandCopied(false);
   }, [job.id]);
 
   return (
@@ -3859,12 +3869,37 @@ function AutomationDetailPanel({
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <section className="rounded-[20px] border border-border/35 bg-background/62 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/10 dark:bg-background/24">
-            <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
-              {tx("settings.automations.fields.message", "Message")}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
+                {messageLabel}
+              </div>
+              {localTrigger && triggerCommand ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 rounded-full px-2 text-[11.5px]"
+                  onClick={() => {
+                    void copyTextToClipboard(triggerCommand).then((ok) => {
+                      if (ok) setCommandCopied(true);
+                    });
+                  }}
+                >
+                  {commandCopied ? (
+                    <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {commandCopied
+                    ? tx("settings.automations.commandCopied", "Copied")
+                    : tx("settings.automations.copyCommand", "Copy")}
+                </Button>
+              ) : null}
             </div>
             <div
               className={cn(
                 "mt-3 whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85",
+                localTrigger && "font-mono text-[12.5px]",
                 !messageExpanded && messageNeedsExpansion && "line-clamp-6",
               )}
             >
@@ -3971,7 +4006,8 @@ function AutomationActionGroup({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const canManage = !job.protected;
   const hasLinkedChat = Boolean(job.origin);
-  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending;
+  const localTrigger = isLocalTriggerAutomation(job);
+  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending && !localTrigger;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
   const canToggle = canManage && (job.enabled || hasLinkedChat);
   const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
@@ -3993,14 +4029,16 @@ function AutomationActionGroup({
       >
         <Pencil className="h-4 w-4" aria-hidden />
       </AppsActionButton>
-      <AppsActionButton
-        ariaLabel={tx("settings.automations.runNow", "Run now")}
-        busy={actionKey === `run:${job.id}`}
-        disabled={!canRun}
-        onClick={() => void onAction("run", job)}
-      >
-        <PlayCircle className="h-4 w-4" aria-hidden />
-      </AppsActionButton>
+      {!localTrigger ? (
+        <AppsActionButton
+          ariaLabel={tx("settings.automations.runNow", "Run now")}
+          busy={actionKey === `run:${job.id}`}
+          disabled={!canRun}
+          onClick={() => void onAction("run", job)}
+        >
+          <PlayCircle className="h-4 w-4" aria-hidden />
+        </AppsActionButton>
+      ) : null}
       <AppsActionButton
         ariaLabel={
           job.enabled
@@ -4123,6 +4161,7 @@ function AutomationEditDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [draft, setDraft] = useState<AutomationEditDraft>(() => automationDraftFromJob(null));
+  const localTrigger = isLocalTriggerAutomation(job);
 
   useEffect(() => {
     setDraft(automationDraftFromJob(job));
@@ -4172,34 +4211,38 @@ function AutomationEditDialog({
                 />
               </label>
 
-              <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.automations.fields.message", "Message")}
-                </span>
-                <Textarea
-                  value={draft.message}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
-                  className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
-                />
-              </label>
+              {!localTrigger ? (
+                <label className="block space-y-1.5">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.message", "Message")}
+                  </span>
+                  <Textarea
+                    value={draft.message}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
+                    className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
+                  />
+                </label>
+              ) : null}
 
-              <div className="space-y-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.automations.fields.scheduleType", "Schedule type")}
-                </span>
-                <SegmentedControl
-                  value={draft.scheduleKind}
-                  options={scheduleOptions}
-                  onChange={(value) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      scheduleKind: value as AutomationEditDraft["scheduleKind"],
-                    }))
-                  }
-                />
-              </div>
+              {!localTrigger ? (
+                <div className="space-y-2">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.scheduleType", "Schedule type")}
+                  </span>
+                  <SegmentedControl
+                    value={draft.scheduleKind}
+                    options={scheduleOptions}
+                    onChange={(value) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        scheduleKind: value as AutomationEditDraft["scheduleKind"],
+                      }))
+                    }
+                  />
+                </div>
+              ) : null}
 
-              {draft.scheduleKind === "every" ? (
+              {!localTrigger && draft.scheduleKind === "every" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4240,7 +4283,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {draft.scheduleKind === "cron" ? (
+              {!localTrigger && draft.scheduleKind === "cron" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4267,7 +4310,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {draft.scheduleKind === "at" ? (
+              {!localTrigger && draft.scheduleKind === "at" ? (
                 <label className="block space-y-1.5">
                   <span className="text-[12px] font-medium text-muted-foreground">
                     {tx("settings.automations.fields.runAt", "Run at")}
@@ -4332,7 +4375,7 @@ function AutomationDeleteDialog({
           <DialogDescription>
             {tx(
               "settings.automations.deleteDescription",
-              "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+              "This removes {{name}} from automations. Past chat messages stay in the session.",
               { name: job?.name || job?.id || "" },
             )}
           </DialogDescription>
@@ -4363,6 +4406,34 @@ function AutomationDeleteDialog({
   );
 }
 
+function isLocalTriggerAutomation(job: SessionAutomationJob | null): boolean {
+  if (!job) return false;
+  return job.kind === "local_trigger"
+    || job.payload.kind === "local_trigger"
+    || job.schedule.kind === "local";
+}
+
+function automationTriggerCommand(job: SessionAutomationJob): string {
+  return job.trigger?.command || job.payload.command || job.payload.message || "";
+}
+
+function automationSummary(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (isLocalTriggerAutomation(job)) {
+    return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
+  }
+  return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+}
+
+function automationDetailText(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  return automationSummary(job, tx);
+}
+
 function automationNeedsAttention(job: SessionAutomationJob): boolean {
   return job.state.last_status === "error";
 }
@@ -4374,6 +4445,7 @@ function automationStatusKey(
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
   if (job.state.last_status === "error") return "failed";
+  if (isLocalTriggerAutomation(job)) return "active";
   if (job.delete_after_run && !job.state.next_run_at_ms && job.state.last_status === "ok") {
     return "completed";
   }
@@ -4437,6 +4509,7 @@ function automationEditDraftError(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
   if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
+  if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
     return tx("settings.automations.validation.messageRequired", "Message is required.");
   }
@@ -4466,6 +4539,10 @@ function automationUpdatePayloadFromDraft(
   job: SessionAutomationJob | null,
 ): AutomationUpdatePayload | string {
   const name = draft.name.trim();
+  if (isLocalTriggerAutomation(job)) {
+    if (!name) return "invalid";
+    return { name };
+  }
   const message = draft.message.trim();
   if (!name || !message) return "invalid";
   const payload: AutomationUpdatePayload = { name, message };
@@ -4583,7 +4660,7 @@ function automationSearchParts(
   const scheduleParts = automationScheduleSearchParts(job);
   if (field === "id") return [job.id];
   if (field === "name") return [job.name, job.id];
-  if (field === "message") return [job.payload.message];
+  if (field === "message") return [job.payload.message, job.payload.command, job.trigger?.command];
   if (field === "chat") return originParts;
   if (field === "cron" || field === "schedule") return scheduleParts;
   if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
@@ -4591,6 +4668,9 @@ function automationSearchParts(
     job.id,
     job.name,
     job.payload.message,
+    job.payload.command,
+    job.trigger?.command,
+    isLocalTriggerAutomation(job) ? "trigger local" : null,
     ...scheduleParts,
     automationStatusKey(job),
     ...originParts,
@@ -4780,6 +4860,9 @@ function formatAutomationSchedule(
         })
       : tx("settings.automations.schedule.cron", "Cron {{expr}}", { expr: job.schedule.expr });
   }
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.schedule.local", "Local trigger");
+  }
   return tx("settings.automations.schedule.custom", "Custom schedule");
 }
 
@@ -4834,6 +4917,9 @@ function formatAutomationNext(
 ): string {
   if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
   if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.next.local", "Waiting for trigger");
+  }
   if (!job.state.next_run_at_ms) return tx("settings.automations.next.none", "No next run");
   return relativeTime(job.state.next_run_at_ms);
 }

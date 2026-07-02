@@ -120,6 +120,7 @@ const MCP_PRESETS: McpPresetInfo[] = [
     connection_summary: "",
   },
 ];
+
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 const ORIGINAL_MEDIA_DEVICES = navigator.mediaDevices;
 
@@ -226,7 +227,20 @@ function mockVoiceRecorder(blob = new Blob(["voice"], { type: "audio/webm" })) {
   return { getUserMedia, stopTrack };
 }
 
-function mockVoiceAudioInput(sample = 128, state: AudioContextState = "running") {
+function mockVoiceAudioInput(
+  sample = 128,
+  state: AudioContextState = "running",
+  decodedChannels?: Float32Array[],
+) {
+  const decodeAudioDataMock = vi.fn(async () => {
+    if (!decodedChannels) throw new Error("decodeAudioData not mocked");
+    return {
+      numberOfChannels: decodedChannels.length,
+      sampleRate: 16_000,
+      getChannelData: (channel: number) => decodedChannels[channel],
+    } as AudioBuffer;
+  });
+
   class FakeAudioContext {
     state = state;
 
@@ -244,6 +258,7 @@ function mockVoiceAudioInput(sample = 128, state: AudioContextState = "running")
     }
 
     close = vi.fn(async () => undefined);
+    decodeAudioData = decodeAudioDataMock;
     resume = vi.fn(async () => undefined);
   }
 
@@ -254,12 +269,22 @@ function mockVoiceAudioInput(sample = 128, state: AudioContextState = "running")
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) =>
     window.clearTimeout(id as unknown as number)
   );
+  return { decodeAudioData: decodeAudioDataMock };
 }
 
 async function waitForVoiceCapture(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 700));
   });
+}
+
+function bytesFromDataUrl(dataUrl: string): Uint8Array {
+  const [, base64 = ""] = dataUrl.split(",");
+  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+}
+
+function ascii(bytes: Uint8Array, offset: number, length: number): string {
+  return String.fromCharCode(...bytes.slice(offset, offset + length));
 }
 
 describe("ThreadComposer", () => {
@@ -281,6 +306,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");
+    expect(input.className).toContain("text-[16px]");
     expect(input.className).toContain("pt-[27px]");
     fireEvent.change(input, { target: { value: "1" } });
     expect(input.className).toContain("pt-[27px]");
@@ -302,6 +328,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
+    expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
     expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
@@ -333,6 +360,47 @@ describe("ThreadComposer", () => {
     ));
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("hello voice"));
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("converts voice recordings to wav for Xiaomi MiMo transcription", async () => {
+    mockVoiceRecorder(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/webm" }));
+    const { decodeAudioData } = mockVoiceAudioInput(
+      180,
+      "running",
+      [new Float32Array([0, 0.5, -0.5])],
+    );
+    const onTranscribeAudio = vi.fn(async () => "mimo voice");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+        transcriptionProvider="xiaomi_mimo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
+    const [dataUrl, options] = onTranscribeAudio.mock.calls[0];
+    expect(dataUrl).toMatch(/^data:audio\/wav;base64,/);
+    expect(options).toEqual(expect.objectContaining({ durationMs: expect.any(Number) }));
+    expect(decodeAudioData).toHaveBeenCalledTimes(1);
+
+    const bytes = bytesFromDataUrl(dataUrl);
+    const view = new DataView(bytes.buffer);
+    expect(ascii(bytes, 0, 4)).toBe("RIFF");
+    expect(ascii(bytes, 8, 4)).toBe("WAVE");
+    expect(ascii(bytes, 12, 4)).toBe("fmt ");
+    expect(view.getUint16(20, true)).toBe(1);
+    expect(view.getUint16(22, true)).toBe(1);
+    expect(view.getUint32(24, true)).toBe(16_000);
+    expect(view.getUint16(34, true)).toBe(16);
+    expect(ascii(bytes, 36, 4)).toBe("data");
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("mimo voice"));
   });
 
   it("does not start duplicate voice recordings while microphone access is pending", async () => {
@@ -1045,6 +1113,36 @@ describe("ThreadComposer", () => {
         brand_color: "#111827",
       }],
     });
+  });
+
+  it("opens skills only from a $ reference anywhere", () => {
+    render(
+        <ThreadComposer
+          onSend={vi.fn()}
+          placeholder="Type your message..."
+          skills={[{
+            name: "github",
+            description: "Work with pull requests and issues",
+            source: "builtin",
+            available: true,
+          }]}
+          slashCommands={COMMANDS}
+        />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+
+    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("$github");
+    expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("please use $github ");
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {

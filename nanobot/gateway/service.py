@@ -141,7 +141,7 @@ class GatewayServiceInstaller:
             "Label": label,
             "ProgramArguments": build_gateway_command(options.python_executable, options.start),
             "WorkingDirectory": _working_directory_text(options.start),
-            "RunAtLoad": bool(options.start_now),
+            "RunAtLoad": bool(options.enable),
             "KeepAlive": {"SuccessfulExit": False},
             "StandardOutPath": str(stdout_path),
             "StandardErrorPath": str(stderr_path),
@@ -149,7 +149,7 @@ class GatewayServiceInstaller:
         content = plistlib.dumps(payload, sort_keys=False).decode("utf-8")
         domain = _launchd_domain()
         commands: list[tuple[str, ...]] = []
-        if options.enable or options.start_now:
+        if options.start_now:
             commands.append(("launchctl", "bootstrap", domain, str(path)))
         if options.enable:
             commands.append(("launchctl", "enable", f"{domain}/{label}"))
@@ -162,7 +162,7 @@ class GatewayServiceInstaller:
         path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        if options.enable or options.start_now:
+        if options.start_now:
             self._run_best_effort(("launchctl", "bootout", domain, str(path)))
         for command_args in commands:
             self._subprocess_run(list(command_args), check=True)

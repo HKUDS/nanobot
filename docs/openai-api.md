@@ -12,6 +12,32 @@ Run the CLI check first. If `nanobot agent -m "Hello!"` fails, fix provider or c
 
 For setup help, see [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md).
 
+## Authentication
+
+Local-only `127.0.0.1` usage does not require an API key. If you bind the API
+server to all interfaces with `api.host: "0.0.0.0"` or `"::"`, nanobot requires
+`api.apiKey`; otherwise startup fails to avoid exposing an unauthenticated agent
+endpoint on the network.
+
+```json
+{
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8900,
+    "apiKey": "${NANOBOT_API_KEY}"
+  }
+}
+```
+
+When `api.apiKey` is set, send it as a Bearer token on API routes. The health
+endpoint remains unauthenticated so local probes and load balancers can still
+check process health.
+
+```bash
+curl http://127.0.0.1:8900/v1/models \
+  -H "Authorization: Bearer $NANOBOT_API_KEY"
+```
+
 ## Behavior
 
 - Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`)

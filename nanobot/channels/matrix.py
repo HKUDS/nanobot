@@ -50,6 +50,7 @@ except ImportError as e:
     ) from e
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
@@ -505,7 +506,7 @@ class MatrixChannel(BaseChannel):
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
         relates_to = self._build_thread_relates_to(msg.metadata)
-        is_progress = bool((msg.metadata or {}).get("_progress"))
+        is_progress = isinstance(msg.event, ProgressEvent)
         try:
             failures: list[str] = []
             if candidates:
@@ -529,11 +530,19 @@ class MatrixChannel(BaseChannel):
             if not is_progress:
                 await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        meta = metadata or {}
+    async def send_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
+    ) -> None:
         relates_to = self._build_thread_relates_to(metadata)
 
-        if meta.get("_stream_end"):
+        if stream_end:
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.event_id or not buf.text:
                 return

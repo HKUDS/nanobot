@@ -56,7 +56,7 @@ Enter `tokenIssueSecret` when the WebUI asks for a password.
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for Apps or MCP presets |
 | Apps | Install, test, update, and use local CLI App adapters and MCP presets |
 | Skills | Inspect available built-in and workspace skills before relying on them |
-| Automations | Review, search, run, pause, edit, and delete scheduled agent turns |
+| Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
 ## Chat Workspace
@@ -116,24 +116,56 @@ to perform that task.
 
 ## Automations
 
-Automations are scheduled agent turns. They should be created from the chat,
-channel, or session where they are supposed to run so nanobot keeps the correct
-target context.
+Automations are agent turns that run later in a linked chat/session. They should
+be created from the chat, channel, or session where they are supposed to run so
+nanobot keeps the correct target context. When an automation runs, it normally
+delivers the result back to that linked chat.
+
+There are two user-facing automation types:
+
+- Scheduled automations, created by the agent's cron tool, run at a time,
+  interval, or cron expression.
+- Local triggers, created with `/trigger <name>`, run when you call a local
+  command such as `nanobot trigger trg_8K4P2Q9X "Review PR #4502"`.
+
+If a GitHub webhook, CI system, or another service should wake nanobot up, keep
+that webhook/service outside nanobot and have it call the trigger command with
+the final message.
+
+Trigger deliveries use the same workspace as the gateway. They survive gateway
+restarts and are requeued if the process exits before the linked turn completes.
+If the linked session is already running a turn, the local trigger waits until
+that session is idle instead of being injected into the active turn. This is an
+at-least-once local queue, so repeated delivery is possible after an interrupted
+process. A delivered trigger is recorded as an automation turn in the linked
+session; if the agent receives it but the turn fails, Automations marks the run
+failed instead of retrying indefinitely.
+
+For recurring background checks that should stay quiet unless there is something
+useful to report, use the protected heartbeat job by editing `HEARTBEAT.md`
+instead of creating a chat automation.
 
 Use the Automations view to:
 
 - Filter by all, active, paused, needs-attention, or system jobs.
-- Search by task name, message, linked chat, schedule, or status.
+- Search by task name, message, trigger command, linked chat, schedule, or status.
 - Sort by next run, last run, updated time, or name.
-- Run now, pause or resume, edit, or delete user-created automations.
+- Run scheduled automations now.
+- Pause or resume, rename, or delete user-created automations.
+- Copy the CLI command for local triggers.
 - Inspect protected system automations without changing them.
 
 Search accepts plain text and field filters such as `name:backup`,
-`chat:WeChat`, `schedule:09:30`, `cron:"0 23 * * *"`, and `status:paused`.
+`chat:WeChat`, `schedule:09:30`, `cron:"0 23 * * *"`, `trigger`, and
+`status:paused`.
 
 An automation without a linked chat cannot be enabled or run from the WebUI,
 because nanobot would not know where to deliver the scheduled turn. Recreate it
 from the target chat or channel so the automation has complete context.
+
+Local triggers do not have a WebUI "Run now" action because each run needs a
+message. Use the copied `nanobot trigger ...` command and replace `"message"`
+with the content that should be delivered.
 
 ## Settings
 

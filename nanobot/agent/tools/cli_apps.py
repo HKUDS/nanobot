@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -136,4 +136,4 @@ class CliAppsTool(Tool):
                 restrict_to_workspace=access.restrict_to_workspace,
             )
         except CliAppError as exc:
-            return f"Error: {exc.message}"
+            return ToolResult.error(f"Error: {exc.message}")

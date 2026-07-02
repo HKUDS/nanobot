@@ -12,6 +12,7 @@ from nio import RoomSendResponse, SyncError
 
 import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.matrix import (
     MATRIX_HTML_FORMAT,
@@ -1539,7 +1540,7 @@ async def test_send_progress_keeps_typing_keepalive_running() -> None:
             channel="matrix",
             chat_id="!room:matrix.org",
             content="working...",
-            metadata={"_progress": True, "_progress_kind": "reasoning"},
+            event=ProgressEvent(content="working..."),
         )
     )
 
@@ -1561,7 +1562,7 @@ async def test_send_empty_content_does_not_call_room_send() -> None:
             channel="matrix",
             chat_id="!room:matrix.org",
             content="",
-            metadata={"_progress": True},
+            event=ProgressEvent(),
         )
     )
 
@@ -1580,7 +1581,7 @@ async def test_send_whitespace_only_content_does_not_call_room_send() -> None:
             channel="matrix",
             chat_id="!room:matrix.org",
             content="   \n\n  ",
-            metadata={"_progress": True},
+            event=ProgressEvent(content="   \n\n  "),
         )
     )
 
@@ -1900,7 +1901,7 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
         last_edit=100.0,
     )
 
-    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True})
+    await channel.send_delta("!room:matrix.org", "", stream_end=True)
 
     assert "!room:matrix.org" not in channel._stream_bufs
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
@@ -1950,7 +1951,7 @@ async def test_send_delta_threaded_edit_keeps_replace_and_thread_relation(monkey
     }
     await channel.send_delta("!room:matrix.org", "Hello", metadata)
     await channel.send_delta("!room:matrix.org", " world", metadata)
-    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True, **metadata})
+    await channel.send_delta("!room:matrix.org", "", metadata, stream_end=True)
 
     edit_content = client.room_send_calls[1]["content"]
     final_content = client.room_send_calls[2]["content"]
@@ -1983,7 +1984,7 @@ async def test_send_delta_stream_end_noop_when_buffer_missing() -> None:
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
-    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True})
+    await channel.send_delta("!room:matrix.org", "", stream_end=True)
 
     assert client.room_send_calls == []
     assert client.typing_calls == []

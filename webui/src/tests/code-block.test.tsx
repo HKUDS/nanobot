@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -143,6 +143,35 @@ describe("CodeBlock", () => {
       expect(writeText).toHaveBeenCalledWith("PASS");
     } finally {
       Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("copies with the textarea fallback when Clipboard API is unavailable", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+
+    try {
+      render(
+        <ThemeProvider theme="dark">
+          <CodeBlock language="ts" code="const value = 1;" highlight={false} />
+        </ThemeProvider>,
+      );
+
+      await user.click(screen.getByRole("button", { name: /copy/i }));
+
+      await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
+      expect(screen.getByText("Copied")).toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+      Reflect.deleteProperty(document, "execCommand");
     }
   });
 

@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
 
-
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
@@ -479,6 +478,9 @@ class MemoryStore:
     def set_last_dream_cursor(self, cursor: int) -> None:
         self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
+    def get_latest_cursor(self) -> int:
+        return max(self._next_cursor() - 1, 0)
+
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
@@ -709,17 +711,12 @@ class Consolidator:
     @staticmethod
     def _full_unconsolidated_history(
         session: Session,
-        *,
-        include_timestamps: bool = False,
     ) -> list[dict[str, Any]]:
         """Return the whole unconsolidated tail for consolidation decisions."""
         unconsolidated_count = len(session.messages) - session.last_consolidated
         if unconsolidated_count <= 0:
             return []
-        return session.get_history(
-            max_messages=unconsolidated_count,
-            include_timestamps=include_timestamps,
-        )
+        return session.get_history(max_messages=unconsolidated_count)
 
     @staticmethod
     def _replay_overflow_boundary(
@@ -794,7 +791,7 @@ class Consolidator:
         session: Session,
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
-        history = self._full_unconsolidated_history(session, include_timestamps=True)
+        history = self._full_unconsolidated_history(session)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
@@ -1008,7 +1005,6 @@ class Consolidator:
 
             messages_to_summarize = list(session.messages[session.last_consolidated:])
             if not messages_to_summarize:
-                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -1020,12 +1016,11 @@ class Consolidator:
                 metadata={},
                 last_consolidated=0,
             )
-            dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
+            result = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
             messages_to_keep = probe.messages
-            messages_to_remove = dropped[already_consolidated:]
+            messages_to_remove = result.dropped[result.already_consolidated_count:]
 
             if not messages_to_remove and not messages_to_keep:
-                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -1048,7 +1043,6 @@ class Consolidator:
 
             session.messages = messages_to_keep
             session.last_consolidated = 0
-            session.updated_at = datetime.now()
             self.sessions.save(session)
 
             if messages_to_remove:

@@ -85,6 +85,8 @@ nanobot plugins enable telegram
 ```
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
 **3. Run**
@@ -315,9 +317,15 @@ nanobot gateway
 <details>
 <summary><b>WhatsApp</b></summary>
 
-Requires **Node.js ≥18**.
+Requires the WhatsApp optional dependencies:
 
-**1. Link device**
+```bash
+pip install "nanobot-ai[whatsapp]"
+# Source checkout:
+python -m pip install -e ".[whatsapp]"
+```
+
+**1. Link device with QR**
 
 ```bash
 nanobot channels login whatsapp
@@ -331,30 +339,41 @@ nanobot channels login whatsapp
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "allowFrom": ["+1234567890"]
+      "allowFrom": ["1234567890"]
     }
   }
 }
 ```
 
-**3. Run** (two terminals)
+Optional session database path:
 
-```bash
-# Terminal 1
-nanobot channels login whatsapp
-
-# Terminal 2
-nanobot gateway
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "databasePath": "~/.nanobot/whatsapp-auth/neonize.db"
+    }
+  }
+}
 ```
 
-> WhatsApp bridge updates are not applied automatically for existing installations. After upgrading nanobot, rebuild the local bridge with:
-> `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
+**Migrating from the old bridge**
+
+- Remove `bridgeUrl` and `bridgeToken`; WhatsApp no longer runs a local Node.js bridge.
+- Re-run `nanobot channels login whatsapp`; old Baileys bridge auth data is not reused by neonize.
+- Update `allowFrom` entries to the WhatsApp sender ID without a leading `+`.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
 
 **Optional: static LID mappings**
 
 Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
-learns the LID→phone mapping at runtime (and reuses the ones the bridge persists on
-disk), but you can also seed mappings up front so the phone number resolves from the
+learns LID to phone mappings at runtime when both identifiers are present, but you
+can also seed mappings up front so the phone number resolves from the
 very first message:
 
 ```json
@@ -362,7 +381,7 @@ very first message:
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "allowFrom": ["+1234567890"],
+      "allowFrom": ["1234567890"],
       "lidMappings": { "123456789012345": "1234567890" }
     }
   }

@@ -508,6 +508,7 @@
       "emptyHint": "Tạo từ nơi tác vụ sẽ chạy để nanobot giữ đúng ngữ cảnh.",
       "oneShot": "Một lần",
       "systemTask": "Tự động hóa do hệ thống quản lý",
+      "localTrigger": "Trình kích hoạt cục bộ",
       "labels": {
         "schedule": "Lịch",
         "next": "Tiếp theo",
@@ -566,11 +567,13 @@
         "weekdaysAt": "Ngày làm việc lúc {{time}}",
         "hourlyAt": "Mỗi giờ tại :{{minute}}",
         "hourlyWindow": "Mỗi giờ {{start}}-{{end}} tại :{{minute}}",
+        "local": "Trình kích hoạt cục bộ",
         "custom": "Lịch tùy chỉnh"
       },
       "next": {
         "paused": "Đã tạm dừng",
         "pending": "Đang chạy",
+        "local": "Đang chờ kích hoạt",
         "none": "Không có lần chạy tiếp theo"
       },
       "message": {
@@ -707,11 +710,13 @@
       "every": "Mỗi {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Trình kích hoạt cục bộ",
       "unknown": "Lịch tùy chỉnh"
     },
     "next": {
       "label": "Tiếp theo: {{time}}",
       "disabled": "Đã tạm dừng",
+      "local": "Đang chờ kích hoạt",
       "none": "Không có lần chạy tiếp theo"
     }
   },
@@ -806,12 +811,14 @@
         "every": "Mỗi {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Trình kích hoạt cục bộ",
         "unknown": "Lịch tùy chỉnh"
       },
       "next": {
         "label": "Tiếp theo {{time}}",
         "pending": "Sắp chạy",
         "disabled": "Đã tạm dừng",
+        "local": "Đang chờ kích hoạt",
         "none": "Không có lần chạy tiếp theo"
       }
     },
@@ -922,6 +929,10 @@
           "goal": {
             "title": "Mục tiêu dài hạn",
             "description": "Yêu cầu agent xử lý đây là mục tiêu nhiều bước kéo dài."
+          },
+          "trigger": {
+            "title": "Tạo trigger cục bộ",
+            "description": "Tạo trigger CLI gắn với phiên chat này."
           },
           "help": {
             "title": "Hiển thị trợ giúp",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import time
 from contextlib import suppress
@@ -50,7 +51,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/restart",
         "Restart nanobot",
-        "Restart the bot process in place.",
+        "Restart the bot process.",
         "rotate-cw",
     ),
     BuiltinCommandSpec(
@@ -79,6 +80,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Tell the agent to treat the request as a long-running goal.",
         "activity",
         "<goal>",
+    ),
+    BuiltinCommandSpec(
+        "/trigger",
+        "Create named local trigger",
+        "Create a named CLI trigger bound to this chat session.",
+        "zap",
+        "<name>",
     ),
     BuiltinCommandSpec(
         "/dream",
@@ -130,6 +138,15 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     msg = ctx.msg
     total = await loop._cancel_active_tasks(ctx.key)
+    # Also drain pending queue to prevent mid-turn injection deadlock
+    pending = loop._pending_queues.pop(ctx.key, None)
+    if pending is not None:
+        while not pending.empty():
+            try:
+                pending.get_nowait()
+                total += 1
+            except Exception:
+                break
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -138,7 +155,7 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
-    """Restart the process in-place via os.execv."""
+    """Restart the process."""
     msg = ctx.msg
     set_restart_notice_to_env(
         channel=msg.channel,
@@ -148,7 +165,19 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
     async def _do_restart():
         await asyncio.sleep(1)
-        os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
+        argv = [sys.executable, "-m", "nanobot"] + sys.argv[1:]
+        mode = getattr(ctx.loop, "restart_mode", "auto") or "auto"
+        if mode == "auto":
+            mode = "spawn" if sys.platform == "win32" else "exec"
+        if mode == "exec":
+            os.execv(sys.executable, argv)
+            return
+        if mode == "spawn":
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(argv, **kwargs)
+        os._exit(0)
 
     asyncio.create_task(_do_restart())
     return OutboundMessage(
@@ -696,6 +725,61 @@ async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
         metadata=dict(ctx.msg.metadata or {}),
     )
 
+
+async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
+    """Create a local trigger bound to the current session."""
+    name = ctx.args.strip()
+    if not name:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=(
+                "Usage: /trigger <name>\n\n"
+                "Create a named local trigger bound to this chat session."
+            ),
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    from nanobot.triggers.local_store import LocalTriggerStore
+
+    loop = ctx.loop
+    workspace = getattr(loop, "workspace", None)
+    if workspace is None:
+        workspace = getattr(getattr(loop, "context", None), "workspace", None)
+    if workspace is None:
+        raise RuntimeError("workspace unavailable for trigger creation")
+
+    store = getattr(loop, "local_trigger_store", None)
+    if store is None:
+        store = LocalTriggerStore(workspace)
+
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    session_key = (
+        ctx.msg.session_key
+        if ctx.key == UNIFIED_SESSION_KEY
+        else ctx.key
+    )
+    trigger = store.create(
+        name=name,
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        session_key=session_key,
+        sender_id="trigger",
+        origin_metadata=dict(ctx.msg.metadata or {}),
+    )
+    command = f'nanobot trigger {trigger.id} "message"'
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=(
+            f"Trigger created: {trigger.name}\n"
+            f"ID: {trigger.id}\n\n"
+            f"Command:\n{command}"
+        ),
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -730,6 +814,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/history ", cmd_history)
     router.exact("/goal", cmd_goal)
     router.prefix("/goal ", cmd_goal)
+    router.exact("/trigger", cmd_trigger)
+    router.prefix("/trigger ", cmd_trigger)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)

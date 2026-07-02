@@ -21,6 +21,7 @@ const SLASH_COMMAND_KEYS = [
   "dream_log",
   "dream_restore",
   "goal",
+  "trigger",
   "help",
   "pairing",
 ];

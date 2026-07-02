@@ -853,10 +853,11 @@ class TestApiServerRegistration:
         config = Config()
         from nanobot.config.schema import ApiConfig
 
-        new_api = ApiConfig(host="0.0.0.0", port=9999)
+        new_api = ApiConfig(host="0.0.0.0", port=9999, api_key="secret")
         _SETTINGS_SETTER["API Server"](config, new_api)
         assert config.api.host == "0.0.0.0"
         assert config.api.port == 9999
+        assert config.api.api_key == "secret"
 
 
 class TestMainMenuUpdate:
@@ -1998,3 +1999,27 @@ class TestModelPresetWizard:
         defaults = AgentDefaults()
         _handle_provider_field(defaults, "provider", "Provider", "auto")
         assert defaults.provider == "anthropic"
+
+    def test_search_provider_field_handler(self, monkeypatch):
+        """_handle_search_provider_field should set the search engine from choices."""
+        from nanobot.agent.tools.web import WebSearchConfig
+        from nanobot.cli.onboard import _handle_search_provider_field
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "keenable")
+
+        cfg = WebSearchConfig()
+        _handle_search_provider_field(cfg, "provider", "Provider", "duckduckgo")
+        assert cfg.provider == "keenable"
+
+    def test_provider_field_dispatch_is_model_type_aware(self):
+        """WebSearchConfig.provider must not be hijacked by the LLM provider handler."""
+        from nanobot.agent.tools.web import WebSearchConfig
+        from nanobot.cli.onboard import (
+            _handle_provider_field,
+            _handle_search_provider_field,
+            _resolve_field_handler,
+        )
+        from nanobot.config.schema import AgentDefaults
+
+        assert _resolve_field_handler(WebSearchConfig(), "provider") is _handle_search_provider_field
+        assert _resolve_field_handler(AgentDefaults(), "provider") is _handle_provider_field
