@@ -38,6 +38,14 @@ _log_handler_id = logger.add(
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )
 
+
+def _set_nanobot_logs(enabled: bool) -> None:
+    if enabled:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
+
+
 from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
 from prompt_toolkit.application import run_in_terminal  # noqa: E402
 from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
@@ -727,6 +735,7 @@ def _install_extra(
 _read_config_data = feature_support.read_config_data
 _write_config_data = feature_support.write_config_data
 _enable_channel_config = feature_support.enable_channel_config
+_disable_optional_feature = feature_support.disable_optional_feature
 _channel_enabled = feature_support.channel_enabled
 
 
@@ -881,17 +890,12 @@ def serve(
         console.print("[red]aiohttp is required. Install with: pip install 'nanobot-ai[api]'[/red]")
         raise typer.Exit(1)
 
-    from loguru import logger
-
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
+    _set_nanobot_logs(verbose)
 
     runtime_config = _load_runtime_config(config, workspace)
     api_cfg = runtime_config.api
@@ -1459,8 +1463,6 @@ def agent(
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
-    from loguru import logger
-
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.providers.image_generation import image_gen_provider_configs
@@ -1478,10 +1480,7 @@ def agent(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    if logs:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
+    _set_nanobot_logs(logs)
 
     try:
         agent_loop = AgentLoop.from_config(
@@ -1823,6 +1822,7 @@ def plugins_list(
 def plugins_enable(
     name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, pdf)"),
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show optional package install logs"),
 ):
     """Enable a nanobot feature."""
     from nanobot.channels.registry import (
@@ -1836,6 +1836,7 @@ def plugins_enable(
     if resolved_config_path is not None:
         set_config_path(resolved_config_path)
     resolved_config_path = resolved_config_path or get_config_path()
+    _set_nanobot_logs(logs)
 
     config = load_config(resolved_config_path)
     extras = _optional_dependency_groups()
@@ -1871,6 +1872,30 @@ def plugins_enable(
         console.print(f"[green]Enabled[/green] channel '{name}' in {resolved_config_path}")
     else:
         console.print(f"[green]Enabled[/green] feature '{name}'")
+
+
+@plugins_app.command("disable")
+def plugins_disable(
+    name: str = typer.Argument(..., help="Channel name (e.g. telegram, matrix, slack)"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Disable a nanobot channel feature."""
+    from nanobot.config.loader import get_config_path, set_config_path
+    from nanobot.optional_features import OptionalFeatureError
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+    resolved_config_path = resolved_config_path or get_config_path()
+
+    try:
+        payload = _disable_optional_feature(name, config_path=resolved_config_path)
+    except OptionalFeatureError as exc:
+        console.print(f"[red]{escape(exc.message)}[/red]")
+        raise typer.Exit(1) from exc
+
+    message = payload.get("last_action", {}).get("message") or f"Disabled channel '{name}'"
+    console.print(f"[green]{escape(message)}[/green] in {resolved_config_path}")
 
 
 # ============================================================================

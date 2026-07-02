@@ -655,14 +655,21 @@ def test_plugins_enable_channel_installs_extra_and_writes_config(monkeypatch, tm
 def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
+    from nanobot.cli import commands as cli_commands
     from nanobot.cli.commands import app
 
     commands: list[list[str]] = []
+    log_flags: list[bool] = []
     config_path = tmp_path / "config.json"
+    original_set_logs = cli_commands._set_nanobot_logs
 
     def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         commands.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    def _set_logs(enabled: bool) -> None:
+        log_flags.append(enabled)
+        original_set_logs(enabled)
 
     runner = CliRunner()
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
@@ -673,12 +680,54 @@ def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_pat
     )
     monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
     monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
+    monkeypatch.setattr("nanobot.cli.commands._set_nanobot_logs", _set_logs)
 
     result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
 
     assert result.exit_code == 0
+    assert log_flags == [False]
     assert commands == [[sys.executable, "-m", "pip", "install", "boto3>=1.43.0"]]
+    assert "Installing bedrock support" in result.stdout
+    assert "Installing optional feature" not in result.output
     assert not config_path.exists()
+
+
+def test_plugins_enable_logs_option_enables_nanobot_logs(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli import commands as cli_commands
+    from nanobot.cli.commands import app
+
+    config_path = tmp_path / "config.json"
+    log_flags: list[bool] = []
+    original_set_logs = cli_commands._set_nanobot_logs
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    def _set_logs(enabled: bool) -> None:
+        log_flags.append(enabled)
+        original_set_logs(enabled)
+
+    runner = CliRunner()
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.cli.commands._optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
+    monkeypatch.setattr("nanobot.cli.commands._set_nanobot_logs", _set_logs)
+
+    result = runner.invoke(
+        app,
+        ["plugins", "enable", "bedrock", "--logs", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert log_flags == [True]
+    assert "Installing bedrock support" in result.output
 
 
 def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_path):
@@ -707,6 +756,63 @@ def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_pat
 
     assert result.exit_code == 0
     assert commands == []
+    assert not config_path.exists()
+
+
+def test_plugins_disable_channel_writes_config(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    result = runner.invoke(app, ["plugins", "disable", "matrix", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert "Disabled channel 'matrix'" in result.output
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["enabled"] is False
+    assert data["channels"]["matrix"]["homeserver"] == "keep"
+
+
+def test_plugins_disable_rejects_non_channel_and_protected_websocket(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    config_path = tmp_path / "config.json"
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names",
+        lambda: ["matrix", "websocket"],
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+
+    non_channel = runner.invoke(
+        app,
+        ["plugins", "disable", "bedrock", "--config", str(config_path)],
+    )
+    protected = runner.invoke(
+        app,
+        ["plugins", "disable", "websocket", "--config", str(config_path)],
+    )
+
+    assert non_channel.exit_code == 1
+    assert "Feature 'bedrock' cannot be disabled" in non_channel.output
+    assert protected.exit_code == 1
+    assert "Channel 'websocket' cannot be disabled" in protected.output
     assert not config_path.exists()
 
 

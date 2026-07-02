@@ -23,6 +23,9 @@ Most examples below are snippets to merge into `~/.nanobot/config.json`.
 >
 > Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
 > `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
+> To turn a channel off later, run `nanobot plugins disable <channel>`.
+> nanobot keeps the saved settings, but stops loading that channel after the
+> next restart.
 
 ## Common Setup Pattern
 
