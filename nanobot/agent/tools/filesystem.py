@@ -5,7 +5,7 @@ import mimetypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
@@ -48,6 +48,7 @@ class _FsTool(Tool):
         extra_read_allowed_dirs: list[Path] | None = None,
         extra_write_allowed_dirs: list[Path] | None = None,
         extra_write_allowed_files: list[Path] | None = None,
+        write_guard: Callable[[Path, str | None], str | None] | None = None,
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
@@ -62,6 +63,7 @@ class _FsTool(Tool):
         ]
         self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
         self._extra_write_allowed_files = list(extra_write_allowed_files or [])
+        self._write_guard = write_guard
         self._restrict_to_workspace = (
             bool(restrict_to_workspace)
             if restrict_to_workspace is not None
@@ -149,6 +151,13 @@ class _FsTool(Tool):
             self._extra_write_allowed_files,
             include_media_dir=False,
         )
+
+    def _check_write_guard(self, path: Path, content: str | None = None) -> None:
+        if self._write_guard is None:
+            return
+        message = self._write_guard(path, content)
+        if message:
+            raise PermissionError(message)
 
     def _resolve(self, path: str) -> Path:
         return self._resolve_read(path)
@@ -487,6 +496,7 @@ class WriteFileTool(_FsTool):
             if content is None:
                 raise ValueError("Unknown content")
             fp = self._resolve_write(path)
+            self._check_write_guard(fp, content)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
             self._file_states.record_write(fp)
@@ -837,6 +847,7 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
             fp = self._resolve_write(path)
+            self._check_write_guard(fp, new_text)
 
             # Create-file semantics: old_text='' + file doesn't exist → create
             if not fp.exists():
