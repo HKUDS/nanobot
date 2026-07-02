@@ -172,8 +172,8 @@ class CronTool(Tool, ContextAware):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
-        model: str | None,
-        model_preset: str | None,
+        model: str | None = None,
+        model_preset: str | None = None,
     ) -> str:
         if not message:
             return ToolResult.error(
