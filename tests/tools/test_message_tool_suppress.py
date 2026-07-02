@@ -67,7 +67,13 @@ class TestMessageToolSuppressLogic:
         if isinstance(mt, MessageTool):
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
 
-        msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send email")
+        msg = InboundMessage(
+            channel="feishu",
+            sender_id="user1",
+            chat_id="chat123",
+            content="Send email",
+            metadata={"allowed_outbound_targets": ["email:user@example.com"]},
+        )
         result = await loop._process_message(msg)
 
         assert len(sent) == 1

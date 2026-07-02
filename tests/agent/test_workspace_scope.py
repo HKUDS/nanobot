@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
@@ -217,7 +218,9 @@ def test_image_reference_scope_restricted_blocks_outside_and_full_allows(tmp_pat
         reset_workspace_scope(token)
 
 
-def test_message_media_scope_restricted_blocks_outside_and_full_allows(tmp_path: Path) -> None:
+def test_message_media_scope_restricted_blocks_outside_even_in_full_access(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
     project.mkdir()
@@ -245,7 +248,22 @@ def test_message_media_scope_restricted_blocks_outside_and_full_allows(tmp_path:
     )
     token = bind_workspace_scope(full)
     try:
-        assert tool._resolve_media([str(media)]) == [str(media)]
+        with pytest.raises(PermissionError):
+            tool._resolve_media([str(media)])
+    finally:
+        reset_workspace_scope(token)
+
+    trusted_tool = MessageTool(workspace=tmp_path, restrict_to_workspace=True)
+    trusted_tool.set_context(
+        RequestContext(
+            channel="internal",
+            chat_id="trusted",
+            metadata={"_allow_arbitrary_local_media": True},
+        )
+    )
+    token = bind_workspace_scope(full)
+    try:
+        assert trusted_tool._resolve_media([str(media)]) == [str(media)]
     finally:
         reset_workspace_scope(token)
 
