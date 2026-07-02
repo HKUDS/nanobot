@@ -418,7 +418,9 @@ class MCPToolWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
                 )
-                return f"(MCP tool call timed out after {self._tool_timeout}s)"
+                return ToolResult.error(
+                    f"(MCP tool call timed out after {self._tool_timeout}s)"
+                )
             except asyncio.CancelledError:
                 # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
@@ -426,7 +428,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return "(MCP tool call was cancelled)"
+                return ToolResult.error("(MCP tool call was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -451,20 +453,35 @@ class MCPToolWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP tool call failed after retry: {type(exc).__name__})"
+                    return ToolResult.error(
+                        f"(MCP tool call failed after retry: {type(exc).__name__})"
+                    )
                 logger.exception(
                     "MCP tool '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc,
                 )
-                return f"(MCP tool call failed: {type(exc).__name__})"
+                return ToolResult.error(
+                    f"(MCP tool call failed: {type(exc).__name__})"
+                )
             else:
                 # Success — extract text and persist any image content as artifacts.
-                rendered = self._render_call_result(result.content, kwargs)
-                if getattr(result, "isError", False):
-                    return ToolResult.error(rendered)
-                return rendered
+                try:
+                    rendered = self._render_call_result(result.content, kwargs)
+                    if getattr(result, "isError", False):
+                        return ToolResult.error(rendered)
+                    return rendered
+                except Exception as exc:
+                    logger.exception(
+                        "MCP tool '{}' failed while rendering result: {}: {}",
+                        self._name,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    return ToolResult.error(
+                        f"(MCP tool returned malformed content: {type(exc).__name__})"
+                    )
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
 
