@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 from unittest.mock import patch
@@ -12,6 +13,7 @@ import pytest
 from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.web import WebFetchTool, _get_with_safe_redirects
 from nanobot.config.schema import WebFetchConfig
+from nanobot.security.network import PinnedDNSAsyncTransport
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     build_workspace_scope,
@@ -98,27 +100,51 @@ async def test_web_fetch_result_contains_untrusted_flag():
 
 
 @pytest.mark.asyncio
-async def test_safe_redirect_request_pins_validated_dns(monkeypatch):
-    calls: list[str] = []
+async def test_safe_redirect_requests_use_independent_pinned_dns_concurrently(monkeypatch):
+    public_ips = {
+        "a.example": "93.184.216.34",
+        "b.example": "93.184.216.35",
+    }
+    calls: dict[str, int] = {host: 0 for host in public_ips}
+    seen: dict[str, str] = {}
 
-    def _rebinding_resolver(hostname, port, family=0, type_=0):
-        calls.append(hostname)
-        ip = "93.184.216.34" if len(calls) == 1 else "169.254.169.254"
+    def _rebinding_resolver(hostname, port, family=0, type_=0, proto=0, flags=0):
+        host = str(hostname).rstrip(".").lower()
+        calls[host] += 1
+        ip = public_ips[host] if calls[host] <= 2 else "169.254.169.254"
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0))]
 
-    class FakeClient:
-        async def get(self, url, headers=None, follow_redirects=False):
-            infos = socket.getaddrinfo("attacker.example", 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            assert infos[0][4][0] == "93.184.216.34"
-            return httpx.Response(200, request=httpx.Request("GET", url))
+    class ResolvingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0)
+            infos = socket.getaddrinfo(
+                request.url.host,
+                request.url.port or 443,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
+            )
+            seen[str(request.url)] = infos[0][4][0]
+            return httpx.Response(200, request=request)
+
+    async def _fetch(url: str) -> tuple[httpx.Response | None, str | None]:
+        async with httpx.AsyncClient(
+            transport=PinnedDNSAsyncTransport(inner=ResolvingTransport())
+        ) as client:
+            return await _get_with_safe_redirects(client, url)
 
     monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver)
 
-    response, error = await _get_with_safe_redirects(FakeClient(), "https://attacker.example/")
+    results = await asyncio.gather(
+        _fetch("https://a.example/"),
+        _fetch("https://b.example/"),
+    )
 
-    assert error is None
-    assert response is not None
-    assert calls == ["attacker.example"]
+    assert all(error is None and response is not None for response, error in results)
+    assert seen == {
+        "https://a.example/": "93.184.216.34",
+        "https://b.example/": "93.184.216.35",
+    }
+    assert calls == {"a.example": 2, "b.example": 2}
 
 
 @pytest.mark.asyncio
@@ -318,6 +344,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
     class TransportAsyncClient(real_async_client):
         def __init__(self, *args, **kwargs):
             kwargs.pop("proxy", None)
+            kwargs.pop("transport", None)
             super().__init__(*args, transport=transport, **kwargs)
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)

@@ -118,6 +118,12 @@ def _resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
     return resolve_url_target(url)
 
 
+def _pinned_dns_transport(proxy: str | None = None) -> httpx.AsyncBaseTransport:
+    from nanobot.security.network import PinnedDNSAsyncTransport
+
+    return PinnedDNSAsyncTransport(proxy=proxy)
+
+
 async def _get_with_safe_redirects(
     client: httpx.AsyncClient,
     url: str,
@@ -126,14 +132,11 @@ async def _get_with_safe_redirects(
     """GET a URL while validating every redirect target before requesting it."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg, resolved_ips = _resolve_url_safe(current_url)
+        is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
             return None, f"Redirect blocked: {error_msg}"
 
-        from nanobot.security.network import pin_resolved_url_dns
-
-        with pin_resolved_url_dns(current_url, resolved_ips):
-            response = await client.get(current_url, headers=headers, follow_redirects=False)
+        response = await client.get(current_url, headers=headers, follow_redirects=False)
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
             return response, None
@@ -162,11 +165,9 @@ async def _stream_with_safe_redirects(
     """Open a streamed response while validating every redirect target first."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg, resolved_ips = _resolve_url_safe(current_url)
+        is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
             return None, None, f"Redirect blocked: {error_msg}"
-
-        from nanobot.security.network import pin_resolved_url_dns
 
         stream = client.stream(
             "GET",
@@ -174,8 +175,7 @@ async def _stream_with_safe_redirects(
             headers=headers,
             follow_redirects=False,
         )
-        with pin_resolved_url_dns(current_url, resolved_ips):
-            response = await stream.__aenter__()
+        response = await stream.__aenter__()
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
             return response, stream, None
@@ -924,7 +924,10 @@ class WebFetchTool(Tool):
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
-            async with httpx.AsyncClient(proxy=self.proxy, timeout=15.0) as client:
+            async with httpx.AsyncClient(
+                transport=_pinned_dns_transport(self.proxy),
+                timeout=15.0,
+            ) as client:
                 r, stream, redirect_error = await _stream_with_safe_redirects(
                     client,
                     url,
@@ -995,7 +998,7 @@ class WebFetchTool(Tool):
         try:
             async with httpx.AsyncClient(
                 timeout=30.0,
-                proxy=self.proxy,
+                transport=_pinned_dns_transport(self.proxy),
             ) as client:
                 r, redirect_error = await _get_with_safe_redirects(
                     client,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import re
 import socket
@@ -114,7 +115,12 @@ def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool
 
 @contextmanager
 def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
-    """Pin DNS lookups for the URL hostname to previously validated IPs."""
+    """Pin DNS lookups for the URL hostname to previously validated IPs.
+
+    This temporarily overrides process-global resolver state. Do not use it
+    directly across awaits unless the caller serializes access; prefer
+    PinnedDNSAsyncTransport for HTTP requests.
+    """
     try:
         hostname = urlparse(url).hostname
     except Exception:
@@ -149,17 +155,26 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
 class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
     """HTTPX transport that pins each request to the IPs validated for its URL."""
 
-    def __init__(self, *, allow_loopback: bool = False) -> None:
+    _resolver_lock = asyncio.Lock()
+
+    def __init__(
+        self,
+        *,
+        allow_loopback: bool = False,
+        proxy: httpx.ProxyTypes | None = None,
+        inner: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._allow_loopback = allow_loopback
-        self._inner = httpx.AsyncHTTPTransport()
+        self._inner = inner or httpx.AsyncHTTPTransport(proxy=proxy)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         ok, error, resolved_ips = resolve_url_target(url, allow_loopback=self._allow_loopback)
         if not ok:
             raise httpx.RequestError(error, request=request)
-        with pin_resolved_url_dns(url, resolved_ips):
-            return await self._inner.handle_async_request(request)
+        async with self._resolver_lock:
+            with pin_resolved_url_dns(url, resolved_ips):
+                return await self._inner.handle_async_request(request)
 
     async def aclose(self) -> None:
         await self._inner.aclose()
