@@ -1753,6 +1753,11 @@ class AgentLoop:
             for tc in m.get("tool_calls") or []
             if isinstance(tc, dict) and tc.get("id")
         }
+        fulfilled_tool_call_ids = {
+            str(m["tool_call_id"])
+            for m in session.messages
+            if m.get("role") == "tool" and m.get("tool_call_id")
+        }
         last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
@@ -1767,14 +1772,20 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
                 tool_call_id = entry.get("tool_call_id")
-                if not tool_call_id or str(tool_call_id) not in declared_tool_call_ids:
+                tool_call_id_str = str(tool_call_id) if tool_call_id else ""
+                if (
+                    not tool_call_id_str
+                    or tool_call_id_str not in declared_tool_call_ids
+                    or tool_call_id_str in fulfilled_tool_call_ids
+                ):
                     # Undeclared tool results corrupt future provider requests.
                     logger.warning(
-                        "Dropping orphaned tool result {} from session {} during persistence",
-                        tool_call_id or "(missing id)",
+                        "Dropping invalid tool result {} from session {} during persistence",
+                        tool_call_id_str or "(missing id)",
                         session.key,
                     )
                     continue
+                fulfilled_tool_call_ids.add(tool_call_id_str)
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
                 elif isinstance(content, list):

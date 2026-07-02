@@ -232,8 +232,9 @@ class ContextGovernor:
     def drop_orphan_tool_results(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Drop tool results that have no matching assistant tool_call earlier in history."""
+        """Drop invalid tool results before history is sent back to providers."""
         declared: set[str] = set()
+        fulfilled: set[str] = set()
         updated: list[dict[str, Any]] | None = None
         for idx, msg in enumerate(messages):
             role = msg.get("role")
@@ -243,10 +244,12 @@ class ContextGovernor:
                         declared.add(str(tc["id"]))
             if role == "tool":
                 tid = msg.get("tool_call_id")
-                if tid and str(tid) not in declared:
+                tid_str = str(tid) if tid else ""
+                if not tid_str or tid_str not in declared or tid_str in fulfilled:
                     if updated is None:
                         updated = [dict(m) for m in messages[:idx]]
                     continue
+                fulfilled.add(tid_str)
             if updated is not None:
                 updated.append(dict(msg))
 

@@ -1870,3 +1870,58 @@ def test_save_turn_keeps_tool_results_declared_in_prior_history() -> None:
     )
 
     assert [m["role"] for m in session.messages] == ["assistant", "tool"]
+
+
+def test_save_turn_drops_tool_result_already_fulfilled_in_history() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:prior-fulfilled")
+    session.add_message(
+        "assistant",
+        "",
+        tool_calls=[{
+            "id": "call_prior",
+            "type": "function",
+            "function": {"name": "exec", "arguments": "{}"},
+        }],
+    )
+    session.add_message(
+        "tool",
+        "first",
+        tool_call_id="call_prior",
+        name="exec",
+    )
+
+    loop._save_turn(
+        session,
+        [{"role": "tool", "tool_call_id": "call_prior", "name": "exec", "content": "duplicate"}],
+        skip=0,
+    )
+
+    assert [m["role"] for m in session.messages] == ["assistant", "tool"]
+    assert session.messages[1]["content"] == "first"
+
+
+def test_save_turn_drops_duplicate_tool_result_ids() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:duplicate-tool-result")
+
+    loop._save_turn(
+        session,
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_dupe",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_dupe", "name": "exec", "content": "first"},
+            {"role": "tool", "tool_call_id": "call_dupe", "name": "exec", "content": "second"},
+        ],
+        skip=0,
+    )
+
+    assert [m["role"] for m in session.messages] == ["assistant", "tool"]
+    assert session.messages[1]["content"] == "first"
