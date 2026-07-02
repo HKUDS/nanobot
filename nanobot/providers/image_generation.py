@@ -33,12 +33,15 @@ _AIHUBMIX_ASPECT_RATIO_SIZES = {
 }
 _GEMINI_DEFAULT_TIMEOUT_S = 120.0
 _GEMINI_IMAGEN_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "3:4", "4:3"}
-# Aspect ratios accepted by the Gemini Flash image (generateContent) models.
+# Aspect ratios documented for every Gemini Flash image (generateContent) model.
+# The extreme ratios (1:4, 4:1, 1:8, 8:1) are only listed for the 3.1 Flash /
+# Flash Lite tables, so they are left out to avoid sending an unsupported value
+# to 2.5 Flash Image or 3.1 Pro Image.
 _GEMINI_FLASH_ASPECT_RATIOS = {
-    "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
-    "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1",
+    "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
 }
-# Image-size tokens accepted by Gemini 3+ image models (2.5 Flash Image ignores it).
+# Image-size tokens accepted by Gemini 3+ image models (earlier Flash image
+# models expose only a single fixed resolution).
 _GEMINI_FLASH_IMAGE_SIZES = {"512", "1K", "2K", "4K"}
 _OLLAMA_DEFAULT_SIDE = 1024
 _OLLAMA_SIZE_PRESETS = {
@@ -776,8 +779,13 @@ def _gemini_flash_image_config(
 
 
 def _gemini_flash_supports_image_size(model: str) -> bool:
-    """Return whether the model honors ``imageSize`` (Gemini 3+ image models)."""
-    return "2.5" not in model.lower()
+    """Return whether the model honors ``imageSize``.
+
+    Only Gemini 3+ image models expose a configurable image size; earlier Flash
+    image models (2.0, 2.5) generate at a single fixed resolution, so ``imageSize``
+    is identified positively rather than by excluding a single version.
+    """
+    return "gemini-3" in model.lower()
 
 
 async def _aihubmix_images_from_payload(

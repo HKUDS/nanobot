@@ -464,14 +464,32 @@ async def test_gemini_flash_2_5_drops_image_size() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gemini_flash_ignores_unsupported_hints() -> None:
+async def test_gemini_flash_2_0_drops_image_size() -> None:
     fake = FakeClient(_gemini_flash_image_response())
     client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
 
     await client.generate(
         prompt="draw a cat",
+        model="gemini-2.0-flash-preview-image-generation",
+        aspect_ratio="16:9",
+        image_size="1K",
+    )
+
+    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    assert image_config == {"aspectRatio": "16:9"}
+
+
+@pytest.mark.asyncio
+async def test_gemini_flash_ignores_unsupported_hints() -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    # 7:5 is not a documented ratio; 1:8 is only valid for 3.1 Flash, not Pro;
+    # 1024x1024 is not a valid Gemini image-size token. All are dropped.
+    await client.generate(
+        prompt="draw a cat",
         model="gemini-3-pro-image",
-        aspect_ratio="7:5",
+        aspect_ratio="1:8",
         image_size="1024x1024",
     )
 
