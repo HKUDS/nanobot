@@ -116,19 +116,19 @@ class TestSpawnUnix:
 class TestSpawnWindows:
 
     @pytest.mark.asyncio
-    async def test_single_line_uses_shell(self):
+    async def test_single_line_uses_cmd_with_standard_flags(self):
         env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
         ):
-            mock_shell.return_value = AsyncMock()
+            mock_exec.return_value = AsyncMock()
             await ExecTool._spawn("dir", r"C:\work", env)
 
-        args = mock_shell.call_args[0]
-        assert "dir" in args
+        args = mock_exec.call_args[0]
+        assert args == (r"C:\Windows\system32\cmd.exe", "/d", "/s", "/c", "dir")
 
-        kwargs = mock_shell.call_args[1]
+        kwargs = mock_exec.call_args[1]
         assert kwargs["stdin"] == asyncio.subprocess.DEVNULL
 
     @pytest.mark.asyncio
@@ -136,17 +136,19 @@ class TestSpawnWindows:
         env = {"PATH": "/usr/bin"}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
         ):
-            mock_shell.return_value = AsyncMock()
+            mock_exec.return_value = AsyncMock()
             await ExecTool._spawn("echo hi", r"C:\work", env)
 
-        kwargs = mock_shell.call_args[1]
+        args = mock_exec.call_args[0]
+        assert args[:4] == ("cmd.exe", "/d", "/s", "/c")
+        kwargs = mock_exec.call_args[1]
         assert kwargs["cwd"] == r"C:\work"
         assert kwargs["env"] == env
 
     @pytest.mark.asyncio
-    async def test_multiline_uses_powershell(self):
+    async def test_multiline_uses_cmd_with_standard_flags(self):
         env = {"PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -156,9 +158,7 @@ class TestSpawnWindows:
             await ExecTool._spawn('python -c "print(1)\nprint(2)"', r"C:\work", env)
 
         args = mock_exec.call_args[0]
-        assert args[0] == "powershell"
-        assert "-NoProfile" in args
-        assert "-Command" in args
+        assert args[:4] == ("cmd.exe", "/d", "/s", "/c")
         assert "print(1)" in args[-1]
         assert "print(2)" in args[-1]
 
@@ -484,14 +484,14 @@ class TestExtractAbsolutePaths:
 
 
 # ---------------------------------------------------------------------------
-# Windows multi-line command PowerShell fallback
+# Windows command shell semantics
 # ---------------------------------------------------------------------------
 
-class TestWindowsMultilineExec:
-    """Verify multi-line commands on Windows route through PowerShell."""
+class TestWindowsCmdExec:
+    """Verify Windows commands route through cmd.exe consistently."""
 
     @pytest.mark.asyncio
-    async def test_multiline_python_uses_powershell(self):
+    async def test_multiline_python_uses_cmd(self):
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"1\n2\n", b"")
         mock_proc.returncode = 0
@@ -509,10 +509,13 @@ class TestWindowsMultilineExec:
         assert "2" in result
         assert "Exit code: 0" in result
         args = mock_exec.call_args[0]
-        assert args[0] == "powershell"
+        assert args[0].lower().endswith("cmd.exe")
+        assert args[1:4] == ("/d", "/s", "/c")
+        assert "print(1)" in args[-1]
+        assert "print(2)" in args[-1]
 
     @pytest.mark.asyncio
-    async def test_multiline_node_uses_powershell(self):
+    async def test_multiline_node_uses_cmd(self):
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"1\n", b"")
         mock_proc.returncode = 0
@@ -528,7 +531,10 @@ class TestWindowsMultilineExec:
 
         assert "1" in result
         args = mock_exec.call_args[0]
-        assert args[0] == "powershell"
+        assert args[0].lower().endswith("cmd.exe")
+        assert args[1:4] == ("/d", "/s", "/c")
+        assert "console.log(1)" in args[-1]
+        assert "console.log(2)" in args[-1]
 
     @pytest.mark.asyncio
     async def test_single_line_uses_shell(self):

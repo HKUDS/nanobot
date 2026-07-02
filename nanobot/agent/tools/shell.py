@@ -492,17 +492,9 @@ class ExecTool(Tool):
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
-            if "\n" in command:
-                return await asyncio.create_subprocess_exec(
-                    "powershell", "-NoProfile", "-Command", command,
-                    stdin=stdin,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=env,
-                )
-            return await asyncio.create_subprocess_shell(
-                command,
+            comspec = env.get("COMSPEC") or os.environ.get("COMSPEC") or "cmd.exe"
+            return await asyncio.create_subprocess_exec(
+                comspec, "/d", "/s", "/c", command,
                 stdin=stdin,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
