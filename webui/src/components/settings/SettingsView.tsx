@@ -5133,7 +5133,7 @@ function AppsCatalogSettings({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
     { value: "all", label: tx("settings.apps.filterAll", "All") },
-    { value: "nanobot", label: tx("settings.apps.filterNanobot", "Nanobot") },
+    { value: "nanobot", label: tx("settings.apps.filterPlugins", "Plugins") },
     { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
     { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
   ];
@@ -5171,11 +5171,11 @@ function AppsCatalogSettings({
     mcpError ||
     (!focusedApp ? cliMessage || nanobotMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || nanobotError || mcpError);
-  const caption = t("settings.apps.captionWithNanobot", {
+  const caption = t("settings.apps.caption", {
+    plugins: nanobotFeatures?.enabled_count ?? 0,
     cli: cliApps?.installed_count ?? 0,
     mcp: mcpPresets?.installed_count ?? 0,
-    nanobot: nanobotFeatures?.enabled_count ?? 0,
-    defaultValue: "{{nanobot}} Nanobot enabled · {{cli}} CLI installed · {{mcp}} MCP connected",
+    defaultValue: "{{plugins}} Plugin · {{cli}} CLI · {{mcp}} MCP",
   });
 
   return (
@@ -5184,8 +5184,8 @@ function AppsCatalogSettings({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
-              "settings.apps.descriptionWithNanobot",
-              "Enable nanobot capabilities, local app adapters, and connected tool servers.",
+              "settings.apps.description",
+              "Enable plugins, local app adapters, and connected tool servers.",
             )}
           </p>
           <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>

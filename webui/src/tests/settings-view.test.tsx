@@ -407,7 +407,7 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView();
 
     expect(await screen.findByText("Matrix")).toBeInTheDocument();
-    expect(screen.getByText("1 Nanobot enabled · 0 CLI installed · 0 MCP connected")).toBeInTheDocument();
+    expect(screen.getByText("1 Plugin · 0 CLI · 0 MCP")).toBeInTheDocument();
     expect(screen.getByText("Support missing")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Install support" }));
