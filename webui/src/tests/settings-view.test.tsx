@@ -327,8 +327,15 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView();
 
     expect(await screen.findByText("Matrix")).toBeInTheDocument();
-    expect(screen.getByText(/Enabling Nanobot features may install Python packages/)).toBeInTheDocument();
+    expect(screen.queryByText(/Enabling Nanobot features may install Python packages/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
+    expect(screen.getByText("nanobot will add what Matrix needs, then turn it on. Continue?")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/enable?name=matrix",
+      expect.anything(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -404,6 +411,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByText("Support missing")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(

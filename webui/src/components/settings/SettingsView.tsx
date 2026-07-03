@@ -560,6 +560,7 @@ export function SettingsView({
   });
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
   const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
+  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
@@ -1364,9 +1365,21 @@ export function SettingsView({
     }
   };
 
-  const handleNanobotFeatureAction = async (action: "enable" | "disable", name: string) => {
+  const handleNanobotFeatureAction = async (
+    action: "enable" | "disable",
+    name: string,
+    confirmed = false,
+  ) => {
+    const feature = nanobotFeatures?.features.find((item) => item.name === name);
+    if (action === "enable" && !confirmed && feature && !feature.installed && feature.install_supported) {
+      setNanobotFeaturesMessage(null);
+      setNanobotFeaturesError(null);
+      setNanobotFeatureConfirm(feature);
+      return;
+    }
     const key = `${action}:${name}`;
     setNanobotFeatureAction(key);
+    setNanobotFeatureConfirm(null);
     setNanobotFeaturesMessage(null);
     setNanobotFeaturesError(null);
     try {
@@ -1797,6 +1810,15 @@ export function SettingsView({
         onOpenChange={setModelConfigurationOpen}
         onChangeDraft={setModelConfigurationForm}
         onSave={handleCreateModelConfiguration}
+      />
+
+      <NanobotFeatureInstallDialog
+        feature={nanobotFeatureConfirm}
+        installing={nanobotFeatureAction === `enable:${nanobotFeatureConfirm?.name ?? ""}`}
+        onOpenChange={(open) => {
+          if (!open) setNanobotFeatureConfirm(null);
+        }}
+        onConfirm={(feature) => handleNanobotFeatureAction("enable", feature.name, true)}
       />
 
       <AutomationDeleteDialog
@@ -4406,6 +4428,61 @@ function AutomationDeleteDialog({
   );
 }
 
+function NanobotFeatureInstallDialog({
+  feature,
+  installing,
+  onOpenChange,
+  onConfirm,
+}: {
+  feature: NanobotFeatureInfo | null;
+  installing: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (feature: NanobotFeatureInfo) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const name = feature?.display_name || feature?.name || "";
+  return (
+    <Dialog open={Boolean(feature)} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(calc(100vw-2rem),26rem)] rounded-[26px]">
+        <DialogHeader>
+          <DialogTitle>
+            {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
+          </DialogTitle>
+          <DialogDescription>
+            {tx(
+              "settings.nanobotFeatures.installConfirmDescription",
+              "nanobot will add what {{name}} needs, then turn it on. Continue?",
+              { name },
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={installing}
+            className="rounded-full"
+          >
+            {tx("settings.automations.cancel", "Cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => feature && void onConfirm(feature)}
+            disabled={!feature || installing}
+            className="rounded-full"
+          >
+            {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+            {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function isLocalTriggerAutomation(job: SessionAutomationJob | null): boolean {
   if (!job) return false;
   return job.kind === "local_trigger"
@@ -5125,15 +5202,6 @@ function AppsCatalogSettings({
             options={filterOptions}
             onChange={(value) => onFilterChange(value as AppsKindFilter)}
           />
-        </div>
-        <div className="flex items-start gap-2 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12.5px] leading-5 text-amber-800 dark:text-amber-200">
-          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span>
-            {tx(
-              "settings.apps.packageInstallNotice",
-              "Enabling Nanobot features may install Python packages. Package installs from another device, tunnel, or shared WebUI require admin opt-in.",
-            )}
-          </span>
         </div>
       </section>
 

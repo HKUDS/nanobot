@@ -475,8 +475,7 @@
       "featured": "Katalog",
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada aplikasi yang cocok.",
-      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui.",
-      "packageInstallNotice": "Mengaktifkan fitur Nanobot dapat memasang paket Python. Pemasangan paket dari perangkat lain, tunnel, atau WebUI bersama memerlukan izin admin."
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
     },
     "nanobotFeatures": {
       "enabled": "Aktif",
@@ -485,6 +484,9 @@
       "ready": "Siap",
       "missingDependency": "Dukungan belum terpasang",
       "installSupport": "Instal dukungan",
+      "installConfirmTitle": "Instal dukungan untuk {{name}}?",
+      "installConfirmDescription": "nanobot akan menambahkan yang dibutuhkan {{name}}, lalu mengaktifkannya. Lanjutkan?",
+      "installConfirmAction": "Instal dan aktifkan",
       "websocketRequired": "Wajib untuk WebUI",
       "channelDisabled": "Kanal dinonaktifkan",
       "notEnabled": "Belum aktif"

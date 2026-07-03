@@ -475,8 +475,7 @@
       "featured": "Danh mục",
       "loading": "Đang tải ứng dụng...",
       "empty": "Không có ứng dụng phù hợp.",
-      "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật.",
-      "packageInstallNotice": "Bật tính năng Nanobot có thể cài các gói Python. Việc cài gói từ thiết bị khác, đường hầm hoặc WebUI dùng chung cần quản trị viên cho phép."
+      "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật."
     },
     "nanobotFeatures": {
       "enabled": "Đã bật",
@@ -485,6 +484,9 @@
       "ready": "Sẵn sàng",
       "missingDependency": "Thiếu gói hỗ trợ",
       "installSupport": "Cài gói hỗ trợ",
+      "installConfirmTitle": "Cài hỗ trợ cho {{name}}?",
+      "installConfirmDescription": "nanobot sẽ thêm những gì {{name}} cần, rồi bật tính năng này. Tiếp tục?",
+      "installConfirmAction": "Cài và bật",
       "websocketRequired": "Bắt buộc cho WebUI",
       "channelDisabled": "Kênh đang tắt",
       "notEnabled": "Chưa bật"

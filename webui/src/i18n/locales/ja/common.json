@@ -475,8 +475,7 @@
       "featured": "カタログ",
       "loading": "アプリを読み込み中...",
       "empty": "一致するアプリはありません。",
-      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。",
-      "packageInstallNotice": "Nanobot 機能を有効にすると、Python パッケージがインストールされる場合があります。別の端末、トンネル、共有 WebUI からのインストールには管理者の許可が必要です。"
+      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。"
     },
     "nanobotFeatures": {
       "enabled": "有効",
@@ -485,6 +484,9 @@
       "ready": "準備完了",
       "missingDependency": "サポート不足",
       "installSupport": "サポートをインストール",
+      "installConfirmTitle": "{{name}} のサポートをインストールしますか？",
+      "installConfirmDescription": "nanobot が {{name}} に必要なものを追加し、その後有効化します。続けますか？",
+      "installConfirmAction": "インストールして有効化",
       "websocketRequired": "WebUI に必須",
       "channelDisabled": "チャンネルは無効",
       "notEnabled": "未有効"

@@ -475,8 +475,7 @@
       "featured": "Catalogue",
       "loading": "Chargement des apps...",
       "empty": "Aucune app ne correspond.",
-      "restartRequired": "Redémarrez nanobot pour appliquer les apps et fonctions mises à jour.",
-      "packageInstallNotice": "Activer des fonctionnalités Nanobot peut installer des paquets Python. Installer des paquets depuis un autre appareil, un tunnel ou une WebUI partagée nécessite l'autorisation d'un administrateur."
+      "restartRequired": "Redémarrez nanobot pour appliquer les apps et fonctions mises à jour."
     },
     "nanobotFeatures": {
       "enabled": "Activé",
@@ -485,6 +484,9 @@
       "ready": "Prêt",
       "missingDependency": "Support manquant",
       "installSupport": "Installer le support",
+      "installConfirmTitle": "Installer le support pour {{name}} ?",
+      "installConfirmDescription": "nanobot ajoutera ce dont {{name}} a besoin, puis l'activera. Continuer ?",
+      "installConfirmAction": "Installer et activer",
       "websocketRequired": "Requis pour la WebUI",
       "channelDisabled": "Canal désactivé",
       "notEnabled": "Non activé"

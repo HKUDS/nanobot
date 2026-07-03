@@ -475,8 +475,7 @@
       "featured": "应用目录",
       "loading": "正在加载应用...",
       "empty": "没有匹配的应用。",
-      "restartRequired": "重启 nanobot 以应用更新后的应用和能力。",
-      "packageInstallNotice": "启用 Nanobot 功能可能会安装 Python 包。从其他设备、隧道或共享 WebUI 安装包，需要管理员明确允许。"
+      "restartRequired": "重启 nanobot 以应用更新后的应用和能力。"
     },
     "nanobotFeatures": {
       "enabled": "已启用",
@@ -485,6 +484,9 @@
       "ready": "就绪",
       "missingDependency": "缺少支持包",
       "installSupport": "安装支持包",
+      "installConfirmTitle": "安装 {{name}} 支持？",
+      "installConfirmDescription": "nanobot 会补齐 {{name}} 需要的支持，然后启用它。是否继续？",
+      "installConfirmAction": "安装并启用",
       "websocketRequired": "WebUI 必需",
       "channelDisabled": "渠道已禁用",
       "notEnabled": "未启用"

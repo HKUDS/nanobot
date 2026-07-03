@@ -475,8 +475,7 @@
       "featured": "Catalog",
       "loading": "Loading Apps...",
       "empty": "No apps match this filter.",
-      "restartRequired": "Restart nanobot to apply updated apps and features.",
-      "packageInstallNotice": "Enabling Nanobot features may install Python packages. Package installs from another device, tunnel, or shared WebUI require admin opt-in."
+      "restartRequired": "Restart nanobot to apply updated apps and features."
     },
     "nanobotFeatures": {
       "enabled": "Enabled",
@@ -485,6 +484,9 @@
       "ready": "Ready",
       "missingDependency": "Support missing",
       "installSupport": "Install support",
+      "installConfirmTitle": "Install support for {{name}}?",
+      "installConfirmDescription": "nanobot will add what {{name}} needs, then turn it on. Continue?",
+      "installConfirmAction": "Install and enable",
       "websocketRequired": "Required for WebUI",
       "channelDisabled": "Channel is disabled",
       "notEnabled": "Not enabled"
