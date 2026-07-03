@@ -696,49 +696,6 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-_load_pyproject = feature_support.load_pyproject
-_optional_dependency_groups_from_metadata = feature_support.optional_dependency_groups_from_metadata
-_optional_dependency_groups = feature_support.optional_dependency_groups
-_install_args_for_extra = feature_support.install_args_for_extra
-_extra_installed = feature_support.extra_installed
-_command_text = feature_support.command_text
-_missing_pip = feature_support.missing_pip
-
-
-def _run_install_command(argv: list[str]):
-    return feature_support.run_install_command(argv)
-
-
-def _install_extra(
-    extra: str,
-    deps: list[str] | None,
-    *,
-    package_index: str = "default",
-) -> bool:
-    _, label = _install_args_for_extra(extra, deps, package_index=package_index)
-    console.print(f"Installing [cyan]{escape(label)}[/cyan]")
-    result = feature_support.install_extra(
-        extra,
-        deps,
-        package_index=package_index,
-        runner=_run_install_command,
-    )
-    if result.ok:
-        return True
-    console.print(f"[red]Failed:[/red] {escape(_command_text(result.failed_cmd or result.pip_cmd))}")
-    if result.output:
-        console.print(result.output, markup=False)
-    console.print(f"[dim]Manual command: {escape(_command_text(result.pip_cmd))}[/dim]")
-    return False
-
-
-_read_config_data = feature_support.read_config_data
-_write_config_data = feature_support.write_config_data
-_enable_channel_config = feature_support.enable_channel_config
-_disable_optional_feature = feature_support.disable_optional_feature
-_channel_enabled = feature_support.channel_enabled
-
-
 def _print_enable_options(
     extras: dict[str, list[str] | None],
     builtin_channels: set[str],
@@ -752,7 +709,11 @@ def _print_enable_options(
 
     for item in sorted(builtin_channels | set(plugin_channels) | set(extras)):
         is_channel = item in builtin_channels or item in plugin_channels
-        enabled = _channel_enabled(config, item) if is_channel else _extra_installed(item, extras[item])
+        enabled = (
+            feature_support.channel_enabled(config, item)
+            if is_channel
+            else feature_support.extra_installed(item, extras[item])
+        )
         table.add_row(
             item,
             "channel" if is_channel else "feature",
@@ -1811,7 +1772,7 @@ def plugins_list(
         set_config_path(resolved_config_path)
 
     _print_enable_options(
-        _optional_dependency_groups(),
+        feature_support.optional_dependency_groups(),
         set(discover_channel_names()),
         discover_plugins(),
         load_config(resolved_config_path),
@@ -1825,12 +1786,7 @@ def plugins_enable(
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show optional package install logs"),
 ):
     """Enable a nanobot feature."""
-    from nanobot.channels.registry import (
-        discover_channel_names,
-        discover_plugins,
-        load_channel_class,
-    )
-    from nanobot.config.loader import get_config_path, load_config, set_config_path
+    from nanobot.config.loader import get_config_path, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -1838,40 +1794,18 @@ def plugins_enable(
     resolved_config_path = resolved_config_path or get_config_path()
     _set_nanobot_logs(logs)
 
-    config = load_config(resolved_config_path)
-    extras = _optional_dependency_groups()
-    builtin_channels = set(discover_channel_names())
-    plugin_channels = discover_plugins()
-    known = builtin_channels | set(plugin_channels) | set(extras)
-    if name not in known:
-        available = ", ".join(sorted(known))
-        console.print(f"[red]Unknown feature: {name}[/red]  Available: {available}")
-        raise typer.Exit(1)
-
-    if (
-        name in extras
-        and not _extra_installed(name, extras[name])
-        and not _install_extra(
+    try:
+        payload = feature_support.enable_optional_feature(
             name,
-            extras[name],
-            package_index=config.tools.optional_feature_install_index,
+            config_path=resolved_config_path,
+            runner=feature_support.run_install_command,
         )
-    ):
-        raise typer.Exit(1)
+    except feature_support.OptionalFeatureError as exc:
+        console.print(f"[red]{escape(exc.message)}[/red]")
+        raise typer.Exit(1) from exc
 
-    if name in builtin_channels:
-        try:
-            channel_cls = load_channel_class(name)
-        except Exception as exc:
-            console.print(f"[red]Channel '{name}' is not importable after enable:[/red] {exc}")
-            raise typer.Exit(1)
-        _enable_channel_config(resolved_config_path, name, channel_cls.default_config())
-        console.print(f"[green]Enabled[/green] channel '{name}' in {resolved_config_path}")
-    elif name in plugin_channels:
-        _enable_channel_config(resolved_config_path, name, plugin_channels[name].default_config())
-        console.print(f"[green]Enabled[/green] channel '{name}' in {resolved_config_path}")
-    else:
-        console.print(f"[green]Enabled[/green] feature '{name}'")
+    message = payload.get("last_action", {}).get("message") or f"Enabled feature '{name}'"
+    console.print(f"[green]{escape(message)}[/green]")
 
 
 @plugins_app.command("disable")
@@ -1881,7 +1815,6 @@ def plugins_disable(
 ):
     """Disable a nanobot channel feature."""
     from nanobot.config.loader import get_config_path, set_config_path
-    from nanobot.optional_features import OptionalFeatureError
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -1889,8 +1822,8 @@ def plugins_disable(
     resolved_config_path = resolved_config_path or get_config_path()
 
     try:
-        payload = _disable_optional_feature(name, config_path=resolved_config_path)
-    except OptionalFeatureError as exc:
+        payload = feature_support.disable_optional_feature(name, config_path=resolved_config_path)
+    except feature_support.OptionalFeatureError as exc:
         console.print(f"[red]{escape(exc.message)}[/red]")
         raise typer.Exit(1) from exc
 

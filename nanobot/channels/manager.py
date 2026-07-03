@@ -25,6 +25,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
@@ -51,9 +52,6 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "show_reasoning": "showReasoning",
 }
 
-_DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
-
-
 def _default_channel_config(name: str) -> dict[str, Any] | None:
     if name != "websocket":
         return None
@@ -63,7 +61,7 @@ def _default_channel_config(name: str) -> dict[str, Any] | None:
 
 
 def _channel_config_enabled(name: str, section: Any) -> bool:
-    default_enabled = name in _DEFAULT_ENABLED_CHANNELS
+    default_enabled = name in DEFAULT_ENABLED_CHANNELS
     if isinstance(section, dict):
         return bool(section.get("enabled", default_enabled))
     return bool(getattr(section, "enabled", default_enabled))
@@ -127,7 +125,7 @@ class ChannelManager:
 
         def section_for(name: str) -> Any:
             section = getattr(self.config.channels, name, None)
-            if section is not None or name not in _DEFAULT_ENABLED_CHANNELS:
+            if section is not None or name not in DEFAULT_ENABLED_CHANNELS:
                 return section
             if name not in default_sections:
                 default = _default_channel_config(name)

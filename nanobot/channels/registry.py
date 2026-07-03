@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
 
 _INTERNAL = frozenset({"base", "manager", "registry"})
+DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
 
 
 def discover_channel_names() -> list[str]:

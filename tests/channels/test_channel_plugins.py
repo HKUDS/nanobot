@@ -78,6 +78,28 @@ def _make_entry_point(name: str, cls: type):
     return ep
 
 
+def _stub_optional_feature_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    extras: dict[str, list[str] | None],
+    installed: bool,
+    commands: list[list[str]] | None = None,
+    channels: list[str] | None = None,
+    channel_cls: type[BaseChannel] | None = None,
+) -> None:
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: channels or [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    if channel_cls is not None:
+        monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: channel_cls)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: extras)
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: installed)
+    if commands is not None:
+        monkeypatch.setattr(
+            "nanobot.optional_features.run_install_command",
+            lambda argv: commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+        )
+
+
 # ---------------------------------------------------------------------------
 # ChannelsConfig extra="allow"
 # ---------------------------------------------------------------------------
@@ -590,7 +612,7 @@ def test_plugins_list_shows_available_features(monkeypatch):
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     monkeypatch.setattr(
-        "nanobot.cli.commands._optional_dependency_groups",
+        "nanobot.optional_features.optional_dependency_groups",
         lambda: {"weixin": ["qrcode[pil]>=8.0"], "bedrock": ["boto3>=1.43.0"]},
     )
 
@@ -625,20 +647,15 @@ def test_plugins_enable_channel_installs_extra_and_writes_config(monkeypatch, tm
         encoding="utf-8",
     )
 
-    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        commands.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
     runner = CliRunner()
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _WeixinChannel)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._optional_dependency_groups",
-        lambda: {"weixin": ["qrcode[pil]>=8.0", "pycryptodome>=3.20.0"]},
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"weixin": ["qrcode[pil]>=8.0", "pycryptodome>=3.20.0"]},
+        installed=False,
+        commands=commands,
+        channels=["weixin"],
+        channel_cls=_WeixinChannel,
     )
-    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
-    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
 
     result = runner.invoke(app, ["plugins", "enable", "weixin", "--config", str(config_path)])
 
@@ -663,23 +680,17 @@ def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_pat
     config_path = tmp_path / "config.json"
     original_set_logs = cli_commands._set_nanobot_logs
 
-    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        commands.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
     def _set_logs(enabled: bool) -> None:
         log_flags.append(enabled)
         original_set_logs(enabled)
 
     runner = CliRunner()
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr(
-        "nanobot.cli.commands._optional_dependency_groups",
-        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"bedrock": ["boto3>=1.43.0"]},
+        installed=False,
+        commands=commands,
     )
-    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
-    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
     monkeypatch.setattr("nanobot.cli.commands._set_nanobot_logs", _set_logs)
 
     result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
@@ -687,7 +698,6 @@ def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_pat
     assert result.exit_code == 0
     assert log_flags == [False]
     assert commands == [[sys.executable, "-m", "pip", "install", "boto3>=1.43.0"]]
-    assert "Installing bedrock support" in result.stdout
     assert "Installing optional feature" not in result.output
     assert not config_path.exists()
 
@@ -702,22 +712,17 @@ def test_plugins_enable_logs_option_enables_nanobot_logs(monkeypatch, tmp_path):
     log_flags: list[bool] = []
     original_set_logs = cli_commands._set_nanobot_logs
 
-    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
     def _set_logs(enabled: bool) -> None:
         log_flags.append(enabled)
         original_set_logs(enabled)
 
     runner = CliRunner()
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr(
-        "nanobot.cli.commands._optional_dependency_groups",
-        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"bedrock": ["boto3>=1.43.0"]},
+        installed=False,
+        commands=[],
     )
-    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: False)
-    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
     monkeypatch.setattr("nanobot.cli.commands._set_nanobot_logs", _set_logs)
 
     result = runner.invoke(
@@ -727,7 +732,7 @@ def test_plugins_enable_logs_option_enables_nanobot_logs(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert log_flags == [True]
-    assert "Installing bedrock support" in result.output
+    assert "Enabled feature 'bedrock'" in result.output
 
 
 def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_path):
@@ -738,19 +743,13 @@ def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_pat
     commands: list[list[str]] = []
     config_path = tmp_path / "config.json"
 
-    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        commands.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
     runner = CliRunner()
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr(
-        "nanobot.cli.commands._optional_dependency_groups",
-        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"bedrock": ["boto3>=1.43.0"]},
+        installed=True,
+        commands=commands,
     )
-    monkeypatch.setattr("nanobot.cli.commands._extra_installed", lambda _name, _deps: True)
-    monkeypatch.setattr("nanobot.cli.commands._run_install_command", _run)
 
     result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
 
@@ -860,7 +859,6 @@ def test_enable_optional_feature_skips_install_when_dependency_present(
         name: str,
         deps: list[str] | None,
         *,
-        package_index: str = "default",
         runner,
     ) -> InstallResult:
         install_calls.append(name)
@@ -894,7 +892,7 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
     monkeypatch.setattr(
         "nanobot.optional_features.install_extra",
-        lambda _name, _deps, *, package_index="default", runner: InstallResult(
+        lambda _name, _deps, *, runner: InstallResult(
             False,
             "bedrock support",
             ["python", "-m", "pip", "install", "boto3>=1.43.0"],
@@ -910,44 +908,6 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     assert "Failed:" in exc.value.message
     assert "network unavailable" in exc.value.message
     assert not config_path.exists()
-
-
-def test_enable_optional_feature_uses_configured_package_index(monkeypatch, tmp_path):
-    from nanobot.optional_features import enable_optional_feature
-
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps({"tools": {"optionalFeatureInstallIndex": "aliyun"}}),
-        encoding="utf-8",
-    )
-    calls: list[list[str]] = []
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr(
-        "nanobot.optional_features.optional_dependency_groups",
-        lambda: {"bedrock": ["boto3>=1.43.0"]},
-    )
-    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
-
-    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
-    payload = enable_optional_feature("bedrock", config_path=config_path, runner=_run)
-
-    assert calls == [
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--index-url",
-            "https://mirrors.aliyun.com/pypi/simple",
-            "boto3>=1.43.0",
-        ]
-    ]
-    assert payload["last_action"]["message"] == "Enabled feature 'bedrock'"
 
 
 def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
@@ -1033,7 +993,7 @@ def test_optional_features_payload_counts_enabled_channel_with_missing_dependenc
 
 
 def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
-    from nanobot.cli import commands as cli_commands
+    from nanobot import optional_features
 
     calls: list[list[str]] = []
 
@@ -1043,14 +1003,11 @@ def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="No module named pip")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(cli_commands, "_run_install_command", _run)
-    monkeypatch.setattr("nanobot.optional_features.shutil.which", lambda _name: None)
-
-    assert cli_commands._install_extra("weixin", None) is True
+    assert optional_features.install_extra("weixin", None, runner=_run).ok is True
     assert calls == [
-        [cli_commands.sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
-        [cli_commands.sys.executable, "-m", "ensurepip", "--upgrade"],
-        [cli_commands.sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
+        [sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
+        [sys.executable, "-m", "ensurepip", "--upgrade"],
+        [sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
     ]
 
 
@@ -1074,36 +1031,6 @@ def test_install_extra_logs_command_and_output(monkeypatch):
     assert any("Installing optional feature 'weixin':" in record for record in records)
     assert any("Optional feature 'weixin' install exited with code 0" in record for record in records)
     assert any("install ok" in record for record in records)
-
-
-def test_install_extra_uses_configured_package_index():
-    from nanobot import optional_features
-
-    calls: list[list[str]] = []
-
-    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-
-    result = optional_features.install_extra(
-        "bedrock",
-        ["boto3>=1.43.0"],
-        package_index="tuna",
-        runner=_run,
-    )
-
-    assert result.ok is True
-    assert calls == [
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--index-url",
-            "https://pypi.tuna.tsinghua.edu.cn/simple",
-            "boto3>=1.43.0",
-        ]
-    ]
 
 
 def test_run_install_command_returns_failure_on_timeout(monkeypatch):

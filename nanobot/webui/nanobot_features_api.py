@@ -9,13 +9,9 @@ from nanobot.optional_features import (
     enable_optional_feature,
     optional_features_payload,
 )
+from nanobot.webui.http_utils import query_first
 
 QueryParams = dict[str, list[str]]
-
-
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
 
 
 def nanobot_features_payload() -> dict[str, Any]:
@@ -28,11 +24,13 @@ def nanobot_features_action(
     *,
     allow_install: bool = True,
 ) -> dict[str, Any]:
-    name = (_query_first(query, "name") or "").strip()
+    name = (query_first(query, "name") or "").strip()
     if not name:
         raise OptionalFeatureError("missing feature name")
     if action == "enable":
         return enable_optional_feature(name, allow_install=allow_install)
     if action == "disable":
+        if name == "websocket":
+            raise OptionalFeatureError("Channel 'websocket' cannot be disabled from WebUI", status=400)
         return disable_optional_feature(name)
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)

@@ -384,23 +384,6 @@ class ToolsConfig(Base):
             "webui_allow_remote_package_install",
         ),
     )  # allow non-local WebUI clients to install optional Python packages
-    optional_feature_install_index: Literal[
-        "default",
-        "pypi",
-        "tuna",
-        "aliyun",
-        "ustc",
-        "douban",
-        "huawei",
-    ] = Field(
-        default="default",
-        validation_alias=AliasChoices(
-            "optionalFeatureInstallIndex",
-            "optional_feature_install_index",
-            "packageInstallIndex",
-            "package_install_index",
-        ),
-    )  # package index preset for optional feature installs; "default" uses pip/uv config
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 

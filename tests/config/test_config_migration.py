@@ -308,28 +308,3 @@ def test_load_config_accepts_remote_package_install_aliases(tmp_path) -> None:
 
     assert load_config(camel_path).tools.webui_allow_remote_package_install is True
     assert load_config(snake_path).tools.webui_allow_remote_package_install is True
-
-
-def test_load_config_defaults_optional_feature_install_index(tmp_path) -> None:
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
-
-    config = load_config(config_path)
-
-    assert config.tools.optional_feature_install_index == "default"
-
-
-def test_load_config_accepts_optional_feature_install_index_aliases(tmp_path) -> None:
-    camel_path = tmp_path / "camel.json"
-    camel_path.write_text(
-        json.dumps({"tools": {"optionalFeatureInstallIndex": "tuna"}}),
-        encoding="utf-8",
-    )
-    legacy_path = tmp_path / "legacy.json"
-    legacy_path.write_text(
-        json.dumps({"tools": {"packageInstallIndex": "aliyun"}}),
-        encoding="utf-8",
-    )
-
-    assert load_config(camel_path).tools.optional_feature_install_index == "tuna"
-    assert load_config(legacy_path).tools.optional_feature_install_index == "aliyun"

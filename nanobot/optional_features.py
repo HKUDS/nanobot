@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from loguru import logger
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
 
 
@@ -34,17 +34,7 @@ class InstallResult:
 
 
 _INSTALL_TIMEOUT_SECONDS = 300
-_DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
 _LOG_OUTPUT_LIMIT = 4000
-_PACKAGE_INDEX_URLS = {
-    "default": "",
-    "pypi": "https://pypi.org/simple",
-    "tuna": "https://pypi.tuna.tsinghua.edu.cn/simple",
-    "aliyun": "https://mirrors.aliyun.com/pypi/simple",
-    "ustc": "https://pypi.mirrors.ustc.edu.cn/simple",
-    "douban": "https://pypi.doubanio.com/simple",
-    "huawei": "https://repo.huaweicloud.com/repository/pypi/simple",
-}
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -108,29 +98,17 @@ def _install_requirements_for_extra(extra: str, deps: list[str]) -> list[str]:
     return install_args
 
 
-def package_index_url(preset: str) -> str:
-    key = (preset or "default").strip().lower()
-    if key not in _PACKAGE_INDEX_URLS:
-        available = ", ".join(sorted(_PACKAGE_INDEX_URLS))
-        raise OptionalFeatureError(f"Unknown package index preset: {preset}. Available: {available}")
-    return _PACKAGE_INDEX_URLS[key]
-
-
 def install_args_for_extra(
     extra: str,
     deps: list[str] | None,
-    *,
-    package_index: str = "default",
 ) -> tuple[list[str], str]:
-    index_url = package_index_url(package_index)
-    prefix = ["--index-url", index_url] if index_url else []
     if deps:
         install_args = _install_requirements_for_extra(extra, deps)
         if install_args:
-            return [*prefix, *install_args], f"{extra} support"
+            return install_args, f"{extra} support"
         return [], f"{extra} support"
     target = f"nanobot-ai[{extra}]"
-    return [*prefix, target], f'"{target}"'
+    return [target], f'"{target}"'
 
 
 def _requirement_installed(req: Requirement, extra: str, seen: set[tuple[str, str]]) -> bool:
@@ -228,12 +206,11 @@ def install_extra(
     extra: str,
     deps: list[str] | None,
     *,
-    package_index: str = "default",
     runner: Any = run_install_command,
 ) -> InstallResult:
     import importlib
 
-    install_args, label = install_args_for_extra(extra, deps, package_index=package_index)
+    install_args, label = install_args_for_extra(extra, deps)
     pip_cmd = [sys.executable, "-m", "pip", "install", *install_args]
     if not install_args:
         logger.info("Optional feature '{}' has no installable dependencies for this platform", extra)
@@ -265,17 +242,6 @@ def install_extra(
         else:
             failed_cmd = ensure_cmd
             failed_proc = ensure_proc
-
-        if uv := shutil.which("uv"):
-            uv_cmd = [uv, "pip", "install", "--python", sys.executable, *install_args]
-            logger.info("Retrying optional feature '{}' with uv: {}", extra, command_text(uv_cmd))
-            proc = runner(uv_cmd)
-            _log_completed_command(f"Optional feature '{extra}' uv install", proc)
-            if proc.returncode == 0:
-                importlib.invalidate_caches()
-                return InstallResult(True, label, pip_cmd)
-            failed_cmd = uv_cmd
-            failed_proc = proc
 
     output = (failed_proc.stderr or failed_proc.stdout or "").strip()
     return InstallResult(False, label, pip_cmd, failed_cmd=failed_cmd, output=output)
@@ -329,7 +295,7 @@ def disable_channel_config(config_path: Path, channel_name: str) -> None:
 
 def channel_enabled(config: Config, name: str) -> bool:
     section = getattr(config.channels, name, None)
-    default_enabled = name in _DEFAULT_ENABLED_CHANNELS
+    default_enabled = name in DEFAULT_ENABLED_CHANNELS
     if section is None:
         return default_enabled
     if isinstance(section, dict):
@@ -392,10 +358,9 @@ def enable_optional_feature(
         discover_plugins,
         load_channel_class,
     )
-    from nanobot.config.loader import get_config_path, load_config
+    from nanobot.config.loader import get_config_path
 
     config_path = config_path or get_config_path()
-    config = load_config(config_path)
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
     plugin_channels = discover_plugins()
@@ -414,7 +379,6 @@ def enable_optional_feature(
         result = install_extra(
             name,
             extras[name],
-            package_index=config.tools.optional_feature_install_index,
             runner=runner,
         )
         if not result.ok:

@@ -105,9 +105,9 @@ you open it on the same machine as nanobot. If you open the WebUI from another
 device, a domain name, a tunnel, or a reverse proxy, package install is blocked
 unless you explicitly allow it with `tools.webuiAllowRemotePackageInstall`.
 
-Optional feature installs use your existing pip or uv download settings by
-default. If PyPI is slow or unavailable from your network, choose a built-in
-mirror with `tools.optionalFeatureInstallIndex`.
+Optional feature installs use your existing pip download settings. If PyPI is
+slow or unavailable from your network, configure pip or set `PIP_INDEX_URL`
+before starting nanobot.
 
 Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
 preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
@@ -229,15 +229,8 @@ trusted to change the Python environment that nanobot runs in. If you publish
 the WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it
 as remote access and leave package installs disabled unless that is intentional.
 
-To use a package mirror for optional feature installs:
-
-```json
-{
-  "tools": {
-    "optionalFeatureInstallIndex": "tuna"
-  }
-}
-```
+Optional feature installs use pip's configured package index, including
+`PIP_INDEX_URL`.
 
 Leave remote package installs disabled when the WebUI is exposed beyond a
 private, trusted network.
