@@ -93,6 +93,29 @@ class TestConsolidatorSummarize:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["session_key"] == "telegram:chat-1"
 
+    async def test_archive_includes_prior_summary_in_prompt(
+        self,
+        consolidator,
+        mock_provider,
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Earlier auth work plus the new deployment decision.",
+            finish_reason="stop",
+        )
+        messages = [{"role": "user", "content": "deploy the auth fix"}]
+
+        await consolidator.archive(
+            messages,
+            prior_summary="Earlier summary: user fixed auth race condition.",
+        )
+
+        sent_messages = mock_provider.chat_with_retry.call_args.kwargs["messages"]
+        user_content = sent_messages[1]["content"]
+        assert "[Previously archived summary]" in user_content
+        assert "Earlier summary: user fixed auth race condition." in user_content
+        assert "[New conversation messages]" in user_content
+        assert "deploy the auth fix" in user_content
+
     async def test_summarize_raw_dumps_on_llm_failure(self, consolidator, mock_provider, store):
         """On LLM failure, raw-dump messages to HISTORY.md."""
         mock_provider.chat_with_retry.side_effect = Exception("API error")
@@ -231,6 +254,41 @@ class TestConsolidatorTokenBudget:
         assert session.last_consolidated == 14
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
         consolidator.sessions.save.assert_called()
+
+    async def test_token_consolidation_rolls_existing_metadata_summary(
+        self,
+        consolidator,
+    ):
+        consolidator._SAFETY_BUFFER = 0
+        session = Session(
+            key="test:rolling-summary",
+            metadata={
+                "_last_summary": {
+                    "text": "Earlier summary: user fixed auth race condition.",
+                    "last_active": "2026-06-01T10:00:00",
+                }
+            },
+        )
+        session.add_message("user", "deploy the auth fix")
+        session.add_message("assistant", "Deployed.")
+        session.add_message("user", "write release notes")
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1000, "tiktoken"), (100, "tiktoken")]
+        )
+        consolidator.archive = AsyncMock(
+            return_value="Earlier auth work plus the new deployment decision."
+        )
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        assert consolidator.archive.await_args.kwargs["prior_summary"] == (
+            "Earlier summary: user fixed auth race condition."
+        )
+        assert session.metadata["_last_summary"]["text"] == (
+            "Earlier auth work plus the new deployment decision."
+        )
 
     async def test_replay_window_overflow_extends_to_long_recent_user_turn(
         self,

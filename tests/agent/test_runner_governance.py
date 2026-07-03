@@ -190,6 +190,170 @@ def test_snip_history_reserves_budget_for_tool_definitions(monkeypatch):
     assert contents == ["system", "recent two"]
 
 
+def test_snip_history_injects_compacted_anchor_for_dropped_prefix(monkeypatch):
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "older setup"},
+        {
+            "role": "assistant",
+            "content": "I found three task groups. Should I create these tasks now?",
+        },
+        {"role": "user", "content": "yes, please do it"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=820,
+    )
+
+    def _estimate(_provider, _model, estimate_messages, _tools):
+        if estimate_messages == [{"role": "system", "content": "system"}]:
+            return 100, None
+        return 2000, None
+
+    def _tokens(message):
+        content = str(message.get("content"))
+        if "Runtime Context - compacted earlier messages" in content:
+            return 100
+        return {
+            "system": 50,
+            "older setup": 300,
+            "I found three task groups. Should I create these tasks now?": 240,
+            "yes, please do it": 80,
+        }.get(content, 80)
+
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", _estimate)
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_message_tokens", _tokens)
+
+    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+
+    assert trimmed[0]["role"] == "system"
+    anchor = trimmed[1]
+    assert anchor["role"] == "user"
+    assert "Runtime Context - compacted earlier messages" in anchor["content"]
+    assert "Should I create these tasks now?" in anchor["content"]
+    assert trimmed[-1]["content"] == "yes, please do it"
+
+
+async def test_snip_anchor_is_request_only_not_persisted(monkeypatch):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    captured_messages: list[dict] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        captured_messages[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    initial_messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "older setup"},
+        {
+            "role": "assistant",
+            "content": "I found three task groups. Should I create these tasks now?",
+        },
+        {"role": "user", "content": "yes, please do it"},
+    ]
+
+    def _estimate(_provider, _model, estimate_messages, _tools):
+        if estimate_messages == [{"role": "system", "content": "system"}]:
+            return 100, None
+        return 2000, None
+
+    def _tokens(message):
+        content = str(message.get("content"))
+        if "Runtime Context - compacted earlier messages" in content:
+            return 100
+        return {
+            "system": 50,
+            "older setup": 300,
+            "I found three task groups. Should I create these tasks now?": 240,
+            "yes, please do it": 80,
+            "done": 20,
+        }.get(content, 80)
+
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", _estimate)
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_message_tokens", _tokens)
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=initial_messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=820,
+    ))
+
+    assert any(
+        "Runtime Context - compacted earlier messages" in str(message.get("content"))
+        for message in captured_messages
+    )
+    assert not any(
+        "Runtime Context - compacted earlier messages" in str(message.get("content"))
+        for message in result.messages
+    )
+
+
+def test_snip_history_omits_anchor_when_budget_is_too_small(monkeypatch):
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "older setup"},
+        {"role": "assistant", "content": "Should I create these tasks now?"},
+        {"role": "user", "content": "yes"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=200,
+    )
+
+    def _estimate(_provider, _model, estimate_messages, _tools):
+        if estimate_messages == [{"role": "system", "content": "system"}]:
+            return 100, None
+        return 2000, None
+
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", _estimate)
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_message_tokens", lambda _msg: 80)
+
+    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+
+    assert not any(
+        "Runtime Context - compacted earlier messages" in str(message.get("content"))
+        for message in trimmed
+    )
+
+
+def test_snip_preview_handles_multimodal_content():
+    preview = ContextGovernor.message_preview_for_snip({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "look at this"},
+            {"type": "image_url", "image_url": {"url": "file://image.png"}},
+        ],
+    })
+
+    assert "look at this" in preview
+    assert "non-text block(s) omitted" in preview
+
+
 async def test_backfill_missing_tool_results_inserts_error():
     """Orphaned tool_use (no matching tool_result) should get a synthetic error."""
 
