@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -10,6 +11,26 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
 
 Handler = Callable[["CommandContext"], Awaitable["OutboundMessage | None"]]
+_BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def normalize_command_text(text: str) -> str:
+    """Normalize slash-command transport variants before routing.
+
+    Telegram and Discord-style command dispatch can produce ``/cmd@bot args``.
+    The bot suffix belongs to the transport, not the command name, so strip it
+    once at the router boundary while preserving user arguments verbatim.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return stripped
+    first, sep, rest = stripped.partition(" ")
+    if "@" not in first:
+        return stripped
+    command, suffix = first.rsplit("@", 1)
+    if command and suffix and _BOT_SUFFIX_RE.fullmatch(suffix):
+        return f"{command}{sep}{rest}" if sep else command
+    return stripped
 
 
 @dataclass
@@ -50,7 +71,7 @@ class CommandRouter:
         self._prefix.sort(key=lambda p: len(p[0]), reverse=True)
 
     def is_priority(self, text: str) -> bool:
-        return text.strip().lower() in self._priority
+        return normalize_command_text(text).lower() in self._priority
 
     def is_dispatchable_command(self, text: str) -> bool:
         """Check whether *text* matches any non-priority command tier (exact or prefix).
@@ -58,7 +79,7 @@ class CommandRouter:
         Does NOT check priority tier.
         If this returns True, ``dispatch()`` is guaranteed to match a handler.
         """
-        cmd = text.strip().lower()
+        cmd = normalize_command_text(text).lower()
         if cmd in self._exact:
             return True
         for pfx, _ in self._prefix:
@@ -68,6 +89,7 @@ class CommandRouter:
 
     async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
+        ctx.raw = normalize_command_text(ctx.raw)
         handler = self._priority.get(ctx.raw.lower())
         if handler:
             return await handler(ctx)
@@ -75,6 +97,7 @@ class CommandRouter:
 
     async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
         """Try exact, then prefix handlers. Returns None if unhandled."""
+        ctx.raw = normalize_command_text(ctx.raw)
         cmd = ctx.raw.lower()
 
         if handler := self._exact.get(cmd):

@@ -167,8 +167,14 @@ export function MessageBubble({
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
-  const automationSourceLabel = message.source?.kind === "cron"
-    ? (message.source.label?.trim() || t("message.automationSourceFallback"))
+  const automationSourceKind = message.source?.kind;
+  const automationSourceName = message.source?.label?.trim();
+  const automationSourceLabel = (
+    automationSourceKind === "cron"
+    || automationSourceKind === "local_trigger"
+    || automationSourceKind === "trigger"
+  )
+    ? (automationSourceName || t("message.automationSourceFallback"))
     : "";
   const automationTriggeredLabel = t("message.automationTriggered");
 

@@ -458,18 +458,36 @@
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
     },
     "apps": {
-      "description": "nanobot がチャットで使用できる App CLI と MCP サービスを追加します。",
+      "description": "プラグイン、ローカルアプリアダプター、接続済みツールサーバーを有効にします。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "チャンネル",
+      "featureLabel": "機能",
       "filterAll": "すべて",
+      "filterPlugins": "プラグイン",
       "filterCli": "CLI アプリ",
       "filterMcp": "MCP サービス",
       "enabledSummary": "{{count}} 件有効",
-      "caption": "CLI {{cli}} 件 · MCP {{mcp}} 件",
+      "caption": "{{plugins}} 件のプラグイン · CLI {{cli}} 件 · MCP {{mcp}} 件",
       "searchPlaceholder": "アプリを検索",
-      "featured": "注目",
+      "featured": "カタログ",
       "loading": "アプリを読み込み中...",
-      "empty": "一致するアプリはありません。"
+      "empty": "一致するアプリはありません。",
+      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。"
+    },
+    "nanobotFeatures": {
+      "enabled": "有効",
+      "enable": "有効化",
+      "disable": "無効化",
+      "ready": "準備完了",
+      "missingDependency": "サポート不足",
+      "installSupport": "サポートをインストール",
+      "installConfirmTitle": "{{name}} のサポートをインストールしますか？",
+      "installConfirmDescription": "nanobot が {{name}} に必要なものを追加し、その後有効化します。続けますか？",
+      "installConfirmAction": "インストールして有効化",
+      "websocketRequired": "WebUI に必須",
+      "channelDisabled": "チャンネルは無効",
+      "notEnabled": "未有効"
     },
     "automations": {
       "filters": {
@@ -493,6 +511,7 @@
       "emptyHint": "実行元から作成すると、nanobot が正しいコンテキストを保持できます。",
       "oneShot": "一回限り",
       "systemTask": "システム管理の自動タスク",
+      "localTrigger": "ローカルトリガー",
       "labels": {
         "schedule": "スケジュール",
         "next": "次回",
@@ -551,11 +570,13 @@
         "weekdaysAt": "平日 {{time}}",
         "hourlyAt": "毎時 :{{minute}}",
         "hourlyWindow": "{{start}}-{{end}} の毎時 :{{minute}}",
+        "local": "ローカルトリガー",
         "custom": "カスタムスケジュール"
       },
       "next": {
         "paused": "一時停止",
         "pending": "実行中",
+        "local": "トリガー待ち",
         "none": "次回実行なし"
       },
       "message": {
@@ -692,11 +713,13 @@
       "every": "{{duration}} ごと",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "ローカルトリガー",
       "unknown": "カスタムスケジュール"
     },
     "next": {
       "label": "次回: {{time}}",
       "disabled": "一時停止中",
+      "local": "トリガー待ち",
       "none": "次回実行なし"
     }
   },
@@ -791,12 +814,14 @@
         "every": "{{duration}}ごと",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "ローカルトリガー",
         "unknown": "カスタムスケジュール"
       },
       "next": {
         "label": "次回 {{time}}",
         "pending": "まもなく実行",
         "disabled": "一時停止",
+        "local": "トリガー待ち",
         "none": "次回実行なし"
       }
     },
@@ -904,9 +929,17 @@
             "title": "メモリを復元",
             "description": "以前の Dream スナップショットへメモリを戻します。"
           },
+          "dream_prompt": {
+            "title": "Dream の記憶",
+            "description": "このワークスペースの記憶を Dream がどう整理するかを設定します。"
+          },
           "goal": {
             "title": "長期目標",
             "description": "持続的な複数ステップの目標として扱うようエージェントに伝えます。"
+          },
+          "trigger": {
+            "title": "ローカルトリガーを作成",
+            "description": "このチャットセッションに紐づく CLI トリガーを作成します。"
           },
           "help": {
             "title": "ヘルプを表示",
@@ -950,11 +983,11 @@
         "mcpDescription": "@{{name}} を MCP サーバーとして使用"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "ワークスペースのアクセスモード",
         "projectAria": "プロジェクトを選択",
         "projectPlaceholder": "プロジェクトを選択",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "既定の権限",
+        "full": "フルアクセス"
       }
     },
     "scrollToBottom": "一番下へスクロール",
@@ -1038,17 +1071,17 @@
       "body": "サイズ上限を超えたため、直前のメッセージはサーバーに拒否されました。画像を減らすか、より小さいファイルに差し替えて再送してください。"
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "ワークスペースは変更されませんでした",
+      "body": "要求されたプロジェクトまたはアクセスモードがゲートウェイで拒否されたため、Nanobot は以前のワークスペースをそのまま使用しています。"
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "既定のワークスペース",
       "manual": "パスを貼り付け",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "パスを使用",
+      "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
     }
   }
 }

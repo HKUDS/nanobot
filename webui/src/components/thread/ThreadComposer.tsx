@@ -74,6 +74,7 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   SlashCommand,
+  SkillSummary,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -159,6 +160,7 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  skills?: SkillSummary[];
   onStop?: () => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
@@ -772,6 +774,7 @@ export function ThreadComposer({
   slashCommands = [],
   cliApps = [],
   mcpPresets = [],
+  skills = [],
   onStop,
   onTranscribeAudio,
   runStartedAt = null,
@@ -909,6 +912,19 @@ export function ThreadComposer({
     return commandToken.toLowerCase();
   }, [disabled, slashMenuDismissed, value]);
 
+  const skillQuery = useMemo(() => {
+    if (disabled || slashMenuDismissed) return null;
+    const caret = Math.min(Math.max(cursorPosition, 0), value.length);
+    const beforeCaret = value.slice(0, caret);
+    const match = /\$([A-Za-z0-9_-]*)$/i.exec(beforeCaret);
+    if (!match) return null;
+    return {
+      end: caret,
+      start: match.index,
+      text: match[1].toLowerCase(),
+    };
+  }, [cursorPosition, disabled, slashMenuDismissed, value]);
+
   const visibleSlashCommands = useMemo(() => {
     const baseCommands = slashCommands.filter((command) => command.command !== "/stop");
     if (!(isStreaming && onStop)) return baseCommands;
@@ -925,6 +941,31 @@ export function ThreadComposer({
   }, [isStreaming, onStop, slashCommands]);
 
   const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
+    if (skillQuery !== null) {
+      const query = skillQuery.text;
+      return skills
+        .filter((skill) => skill.available)
+        .filter((skill) => {
+          const haystack = [
+            skill.name,
+            skill.description,
+          ].join(" ").toLowerCase();
+          return haystack.includes(query);
+        })
+        .map((skill) => {
+          const command = `$${skill.name}`;
+          const description = skill.description || skill.name;
+          return {
+            command,
+            title: skill.name,
+            description,
+            detail: description,
+            icon: "brain",
+            recent: recentSlashCommands.includes(command),
+          };
+        })
+        .slice(0, 8);
+    }
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands
       .filter((command) => {
@@ -989,7 +1030,7 @@ export function ThreadComposer({
 
     return withDetails
       .slice(0, 8);
-  }, [goalState?.active, isStreaming, modelLabel, recentSlashCommands, slashQuery, t, visibleSlashCommands]);
+  }, [goalState?.active, isStreaming, modelLabel, recentSlashCommands, skills, skillQuery, slashQuery, t, visibleSlashCommands]);
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
@@ -1232,7 +1273,7 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const chooseSlashCommand = useCallback(
-    (command: SlashCommand) => {
+    (command: SlashPaletteCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
         onStop();
         setValue("");
@@ -1250,13 +1291,28 @@ export function ThreadComposer({
       setRecentSlashCommands(nextRecents);
       storeSlashRecents(nextRecents);
 
-      setValue(command.argHint ? `${command.command} ` : command.command);
+      if (skillQuery !== null) {
+        const suffix = value.slice(skillQuery.end);
+        const inserted = `${command.command}${suffix.startsWith(" ") ? "" : " "}`;
+        const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
+        const nextCursor = skillQuery.start + inserted.length;
+        setValue(next);
+        setCursorPosition(nextCursor);
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.focus();
+          el.setSelectionRange(nextCursor, nextCursor);
+        });
+      } else {
+        setValue(command.argHint ? `${command.command} ` : command.command);
+      }
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
     },
-    [isStreaming, onStop, recentSlashCommands, resizeTextarea],
+    [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
   );
 
   const chooseMentionCandidate = useCallback(

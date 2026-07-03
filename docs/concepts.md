@@ -123,7 +123,7 @@ Tools are discovered automatically from built-in modules and plugin entry points
 - shell execution with configurable sandboxing;
 - web search and web fetch with SSRF checks;
 - MCP servers;
-- cron reminders and heartbeat tasks;
+- cron reminders, local triggers, and heartbeat tasks;
 - image generation;
 - subagents and runtime self-inspection.
 
@@ -131,14 +131,29 @@ Security-sensitive controls live in [`configuration.md#security`](./configuratio
 
 ## Background Jobs
 
-When `nanobot gateway` starts, it creates workspace-scoped cron storage at `<workspace>/cron/jobs.json` and registers system jobs:
+When `nanobot gateway` starts, it runs workspace-scoped automations and
+registers system jobs:
 
 - `dream`, when `agents.defaults.dream.enabled` is true;
 - `heartbeat`, when `gateway.heartbeat.enabled` is true.
 
 Heartbeat reads `<workspace>/HEARTBEAT.md`. If the file has tasks under `## Active Tasks`, nanobot executes them and sends only useful/actionable results to the most recently active chat target. Routine "nothing changed" results are suppressed.
 
-User-created reminders use the same cron service but are not the same as the protected heartbeat system job. They run as scheduled turns in their origin chat/session and normally deliver the result back to that channel.
+User-created reminders use the same cron service but are not the same as the
+protected heartbeat system job. They run as scheduled turns in their origin
+chat/session and normally deliver the result back to that channel.
+
+Local triggers are also session-bound, but they do not have their own
+schedule. Create one from the target chat with `/trigger <name>`, then call
+`nanobot trigger <id> "<message>"` when a local script or external service wants
+nanobot to respond in that session. Webhook servers, third-party auth, and
+event-to-message formatting stay outside nanobot. Trigger deliveries are stored
+in the workspace until the linked agent turn finishes successfully. If the
+target session is busy, the trigger waits until that session is idle instead of
+being injected into the active turn. The message is recorded as an automation
+turn in that session. Delivery is at-least-once, so external systems should
+tolerate repeated trigger messages; a delivery that reaches the agent but fails
+is marked failed rather than retried forever.
 
 ## Where to Go Next
 

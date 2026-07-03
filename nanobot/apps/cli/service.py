@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
@@ -941,12 +942,19 @@ class CliAppManager:
         raise CliAppError("this CLI app uses an unsupported install strategy")
 
     def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        command = subprocess.list2cmdline(argv)
+        logger.info("CLI Apps: running {}", command)
+        result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=timeout,
         )
+        logger.info("CLI Apps: command exited with code {}: {}", result.returncode, command)
+        output = (result.stderr or result.stdout or "").strip()
+        if output:
+            logger.info("CLI Apps command output:\n{}", _truncate(output, 4000))
+        return result
 
     def _installed_entry(self, app: dict[str, Any]) -> dict[str, Any]:
         entry_point = str(app.get("entry_point") or "")

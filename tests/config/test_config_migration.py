@@ -283,3 +283,28 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
     config = load_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is False
+
+
+def test_load_config_defaults_remote_package_install_to_disabled(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.tools.webui_allow_remote_package_install is False
+
+
+def test_load_config_accepts_remote_package_install_aliases(tmp_path) -> None:
+    camel_path = tmp_path / "camel.json"
+    camel_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+    snake_path = tmp_path / "snake.json"
+    snake_path.write_text(
+        json.dumps({"tools": {"webui_allow_remote_package_install": True}}),
+        encoding="utf-8",
+    )
+
+    assert load_config(camel_path).tools.webui_allow_remote_package_install is True
+    assert load_config(snake_path).tools.webui_allow_remote_package_install is True

@@ -18,8 +18,9 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.file_edit_events import (
     StreamingFileEditTracker,
     build_file_edit_end_event,
@@ -155,6 +156,8 @@ class AgentRunner:
                 messages
                 and injection.get("role") == "user"
                 and messages[-1].get("role") == "user"
+                and not is_hidden_history_message(injection)
+                and not is_hidden_history_message(messages[-1])
             ):
                 merged = dict(messages[-1])
                 merged["content"] = cls._merge_message_content(
@@ -1266,7 +1269,7 @@ class AgentRunner:
                 return payload, event, exc
             return payload, event, None
 
-        if isinstance(result, str) and result.startswith("Error"):
+        if is_tool_error_result(tool_call.name, result):
             if file_edit_trackers and progress_callback is not None:
                 await invoke_file_edit_progress(
                     progress_callback,
