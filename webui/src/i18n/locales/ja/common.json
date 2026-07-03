@@ -979,11 +979,11 @@
         "mcpDescription": "@{{name}} を MCP サーバーとして使用"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "ワークスペースのアクセスモード",
         "projectAria": "プロジェクトを選択",
         "projectPlaceholder": "プロジェクトを選択",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "既定の権限",
+        "full": "フルアクセス"
       }
     },
     "scrollToBottom": "一番下へスクロール",
@@ -1067,17 +1067,17 @@
       "body": "サイズ上限を超えたため、直前のメッセージはサーバーに拒否されました。画像を減らすか、より小さいファイルに差し替えて再送してください。"
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "ワークスペースは変更されませんでした",
+      "body": "要求されたプロジェクトまたはアクセスモードがゲートウェイで拒否されたため、Nanobot は以前のワークスペースをそのまま使用しています。"
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "既定のワークスペース",
       "manual": "パスを貼り付け",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "パスを使用",
+      "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
     }
   }
 }

@@ -979,11 +979,11 @@
         "mcpDescription": "Utiliser @{{name}} comme serveur MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Mode d’accès à l’espace de travail",
         "projectAria": "Choisir un projet",
         "projectPlaceholder": "Sélectionner un projet",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Autorisation par défaut",
+        "full": "Accès complet"
       }
     },
     "scrollToBottom": "Faire défiler vers le bas",
@@ -1067,17 +1067,17 @@
       "body": "Le serveur a rejeté votre dernier message car il dépasse la taille autorisée. Retirez des images ou choisissez des fichiers plus légers, puis renvoyez-le."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "L’espace de travail n’a pas changé",
+      "body": "La passerelle a refusé le projet ou le mode d’accès demandé ; Nanobot a conservé l’espace de travail précédent."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Espace de travail par défaut",
       "manual": "Coller un chemin",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Utiliser le chemin",
+      "absolutePathRequired": "Saisissez un chemin absolu de dossier sur cette machine."
     }
   }
 }

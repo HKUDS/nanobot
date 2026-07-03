@@ -116,6 +116,16 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.about.upToDate",
   "settings.about.updateAvailable",
 ];
+const LOCALIZED_WORKSPACE_COPY_KEYS = [
+  "thread.composer.workspace.accessAria",
+  "thread.composer.workspace.default",
+  "thread.composer.workspace.full",
+  "errors.workspaceScopeRejected.title",
+  "errors.workspaceScopeRejected.body",
+  "workspace.dialog.defaultProject",
+  "workspace.dialog.usePath",
+  "workspace.dialog.absolutePathRequired",
+];
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -282,7 +292,7 @@ describe("webui i18n", () => {
     for (const [locale, resource] of Object.entries(resources)) {
       if (locale === "en") continue;
       const current = flattenResource(resource.common);
-      const leaked = LOCALIZED_SETTINGS_COPY_KEYS.filter(
+      const leaked = [...LOCALIZED_SETTINGS_COPY_KEYS, ...LOCALIZED_WORKSPACE_COPY_KEYS].filter(
         (key) => current.get(key) === english.get(key),
       );
 

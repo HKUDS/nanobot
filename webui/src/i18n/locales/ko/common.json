@@ -979,11 +979,11 @@
         "mcpDescription": "@{{name}}을 MCP 서버로 사용"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "작업공간 접근 모드",
         "projectAria": "프로젝트 선택",
         "projectPlaceholder": "프로젝트 선택",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "기본 권한",
+        "full": "전체 접근 권한"
       }
     },
     "scrollToBottom": "맨 아래로 스크롤",
@@ -1067,17 +1067,17 @@
       "body": "마지막 메시지가 서버의 크기 제한을 초과하여 거부되었습니다. 이미지를 줄이거나 더 작은 파일로 바꿔서 다시 보내 주세요."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "작업공간이 변경되지 않았습니다",
+      "body": "요청한 프로젝트 또는 접근 모드가 게이트웨이에서 거부되어 Nanobot이 이전 작업공간을 계속 사용합니다."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "기본 작업공간",
       "manual": "경로 붙여넣기",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "경로 사용",
+      "absolutePathRequired": "이 머신의 절대 폴더 경로를 입력하세요."
     }
   }
 }

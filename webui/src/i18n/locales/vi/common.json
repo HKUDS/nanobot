@@ -979,11 +979,11 @@
         "mcpDescription": "Dùng @{{name}} như máy chủ MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Chế độ truy cập workspace",
         "projectAria": "Chọn dự án",
         "projectPlaceholder": "Chọn dự án",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Quyền mặc định",
+        "full": "Toàn quyền truy cập"
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
@@ -1067,17 +1067,17 @@
       "body": "Máy chủ đã từ chối tin nhắn trước vì vượt quá giới hạn kích thước. Hãy bớt ảnh hoặc chọn tệp nhỏ hơn rồi thử lại."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace không thay đổi",
+      "body": "Gateway đã từ chối dự án hoặc chế độ truy cập được yêu cầu, nên Nanobot giữ workspace trước đó."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace mặc định",
       "manual": "Dán đường dẫn",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Dùng đường dẫn",
+      "absolutePathRequired": "Nhập đường dẫn thư mục tuyệt đối trên máy này."
     }
   }
 }

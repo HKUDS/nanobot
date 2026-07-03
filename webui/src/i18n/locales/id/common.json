@@ -979,11 +979,11 @@
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Mode akses workspace",
         "projectAria": "Pilih proyek",
         "projectPlaceholder": "Pilih proyek",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Izin default",
+        "full": "Akses penuh"
       }
     },
     "scrollToBottom": "Gulir ke bawah",
@@ -1067,17 +1067,17 @@
       "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace tidak berubah",
+      "body": "Gateway menolak proyek atau mode akses yang diminta, jadi Nanobot tetap memakai workspace sebelumnya."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace default",
       "manual": "Tempel path",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Gunakan path",
+      "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
   }
 }
