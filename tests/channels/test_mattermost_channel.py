@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -155,14 +156,29 @@ def test_config_default_config_classmethod():
 async def test_start_identifies_bot():
     channel, fake = _make_channel({"serverUrl": "https://chat.example.com", "token": "tok"})
     calls_before = len(fake.get_calls)
-    with patch("websockets.connect", AsyncMock(side_effect=Exception("no-op"))):
-        await channel.start()
+
+    async def fake_listen_loop():
+        while channel._running:
+            await asyncio.sleep(0.01)
+
+    with patch.object(channel, "_ws_listen_loop", fake_listen_loop):
+        start_task = asyncio.create_task(channel.start())
+        for _ in range(50):
+            if channel._self_id:
+                break
+            await asyncio.sleep(0.01)
+
     assert channel._self_id == "botuserid123"
     assert channel._self_username == "nanobot"
     assert channel._self_email == "bot@example.com"
+    assert not start_task.done()
     user_me_calls = [c for c in fake.get_calls[calls_before:] if "/api/v4/users/me" in c["path"]]
     assert len(user_me_calls) == 1
     await channel.stop()
+    try:
+        await start_task
+    except asyncio.CancelledError:
+        pass
 
 
 @pytest.mark.asyncio
@@ -540,6 +556,65 @@ async def test_stream_chunk_boundary_finalizes_and_creates_new():
     assert channel._stream_buffers["s1"] == "Hello world"
 
 
+@pytest.mark.asyncio
+async def test_stream_end_keyword_resuming_does_not_post_or_mark_done():
+    channel, fake = _make_channel()
+    channel._self_id = "bot_id"
+    await channel.send_delta("chan_1", "Working", stream_id="s1")
+
+    await channel.send_delta(
+        "chan_1",
+        "",
+        {"message_id": "orig_post_1"},
+        stream_id="s1",
+        stream_end=True,
+        resuming=True,
+    )
+
+    posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
+    reactions = [c for c in fake.post_calls if c["path"] == "/api/v4/reactions"]
+    assert posts == []
+    assert reactions == []
+    assert "s1" not in channel._stream_buffers
+
+
+@pytest.mark.asyncio
+async def test_stream_end_failure_keeps_buffer_for_retry():
+    channel, fake = _make_channel()
+    channel._self_id = "bot_id"
+    await channel.send_delta("chan_1", "final answer", stream_id="s1")
+
+    async def fail_create_post(*args, **kwargs):
+        raise RuntimeError("network down")
+
+    channel._create_post = fail_create_post
+    with pytest.raises(RuntimeError):
+        await channel.send_delta("chan_1", "", stream_id="s1", stream_end=True)
+
+    assert channel._stream_buffers["s1"] == "final answer"
+    assert channel._stream_committed["s1"] == "final answer"
+
+
+@pytest.mark.asyncio
+async def test_coalesced_stream_end_posts_inline_content():
+    channel, fake = _make_channel()
+    channel._self_id = "bot_id"
+    fake.set_post_response("/api/v4/posts", {"id": "stream_post_1"})
+
+    await channel.send_delta(
+        "chan_1",
+        "coalesced final",
+        {"mattermost": {"root_id": "root_1"}},
+        stream_id="s1",
+        stream_end=True,
+    )
+
+    posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
+    assert len(posts) == 1
+    assert posts[0]["json"]["message"] == "coalesced final"
+    assert posts[0]["json"]["root_id"] == "root_1"
+
+
 # ---------------------------------------------------------------------------
 # Reactions
 # ---------------------------------------------------------------------------
@@ -632,6 +707,31 @@ async def test_team_filtering_dm_bypass():
         mock_handle.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_team_filtering_resolves_missing_broadcast_team_and_rejects_wrong_team():
+    channel, fake = _make_channel({"teamId": "team_a"})
+    channel._self_id = "bot_id"
+    fake.set_get_response("/api/v4/channels/c1", {
+        "id": "c1",
+        "type": "O",
+        "team_id": "team_b",
+    })
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "posted",
+            "data": {
+                "channel_type": "O",
+                "post": json.dumps({
+                    "id": "p1", "user_id": "u1",
+                    "channel_id": "c1", "message": "hi", "root_id": "",
+                }),
+            },
+            "broadcast": {"channel_id": "c1"},
+        }
+        await channel._handle_ws_message(ws_msg)
+        mock_handle.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Thread session key
 # ---------------------------------------------------------------------------
@@ -659,6 +759,31 @@ async def test_thread_session_key():
                 await channel._handle_ws_message(ws_msg)
                 kwargs = mock_handle.call_args[1]
                 assert kwargs["session_key"] == "mattermost:c1:root_99"
+
+
+@pytest.mark.asyncio
+async def test_top_level_mention_uses_thread_session_key():
+    channel, fake = _make_channel({"replyInThread": True})
+    channel._self_id = "bot_id"
+    channel._self_username = "nanobot"
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        with patch.object(channel, "_is_allowed", AsyncMock(return_value=True)):
+            ws_msg = {
+                "event": "posted",
+                "data": {
+                    "channel_type": "O",
+                    "post": json.dumps({
+                        "id": "post_1", "user_id": "u1",
+                        "channel_id": "c1", "message": "@nanobot start thread",
+                        "root_id": "",
+                    }),
+                },
+                "broadcast": {},
+            }
+            await channel._handle_ws_message(ws_msg)
+            kwargs = mock_handle.call_args[1]
+            assert kwargs["session_key"] == "mattermost:c1:post_1"
+            assert kwargs["metadata"]["mattermost"]["thread_ts"] == "post_1"
 
 
 # ---------------------------------------------------------------------------
@@ -695,6 +820,29 @@ async def test_action_event_denied_dm():
     channel, fake = _make_channel({"dm": {"policy": "allowlist", "allowFrom": ["u_other"]}})
     channel._self_id = "bot_id"
     fake.set_get_response("/api/v4/channels/c1", {"id": "c1", "type": "D"})
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "action",
+            "data": {
+                "user_id": "u1",
+                "channel_id": "c1",
+                "context": {"selected_option": "Approve"},
+            },
+            "broadcast": {},
+        }
+        await channel._handle_ws_message(ws_msg)
+        mock_handle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_action_event_rejects_wrong_team():
+    channel, fake = _make_channel({"teamId": "team_a"})
+    channel._self_id = "bot_id"
+    fake.set_get_response("/api/v4/channels/c1", {
+        "id": "c1",
+        "type": "O",
+        "team_id": "team_b",
+    })
     with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
         ws_msg = {
             "event": "action",
@@ -761,6 +909,13 @@ async def test_dm_allowlist_with_username_match():
     fake.set_get_response("/api/v4/users/u1", {"id": "u1", "username": "alice", "email": ""})
     assert await channel._is_allowed("u1", "dm_chan", "dm") is True
     assert await channel._is_allowed("u2", "dm_chan", "dm") is False
+
+
+@pytest.mark.asyncio
+async def test_dm_allowlist_accepts_pairing_approval():
+    channel, fake = _make_channel({"dm": {"policy": "allowlist", "allowFrom": ["u_allowed"]}})
+    with patch("nanobot.channels.mattermost.is_approved", return_value=True):
+        assert await channel._is_allowed("u_paired", "dm_chan", "dm") is True
 
 
 # ---------------------------------------------------------------------------
