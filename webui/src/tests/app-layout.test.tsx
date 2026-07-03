@@ -1527,6 +1527,10 @@ describe("App layout", () => {
       }),
     );
 
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ brandLogos: true }),
+    );
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());

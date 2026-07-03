@@ -16,13 +16,13 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 
 ### 1. Configure
 
-Add to `config.json` under `channels.websocket`:
+The WebSocket channel is enabled by default. Add only the fields you want to
+override under `channels.websocket`:
 
 ```json
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "127.0.0.1",
       "port": 8765,
       "path": "/",
@@ -208,7 +208,7 @@ All fields go under `channels.websocket` in `config.json`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable the WebSocket server. |
+| `enabled` | bool | `true` | Enable the WebSocket server. Set to `false` only when you intentionally do not want the bundled WebUI/WebSocket surface. |
 | `host` | string | `"127.0.0.1"` | Bind address. Use `"0.0.0.0"` to accept external connections. |
 | `port` | int | `8765` | Listen port. |
 | `path` | string | `"/"` | WebSocket upgrade path. Trailing slashes are normalized (root `/` is preserved). |
@@ -272,7 +272,6 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "port": 8765,
       "path": "/ws",
       "tokenIssuePath": "/auth/token",
@@ -367,7 +366,6 @@ Outbound `message` events may include a `media` field containing local filesyste
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
       "websocketRequiresToken": false,
@@ -384,7 +382,6 @@ Outbound `message` events may include a `media` field containing local filesyste
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "token": "my-shared-secret",
       "allowFrom": ["alice", "bob"]
     }
@@ -400,7 +397,6 @@ Clients connect with `?token=my-shared-secret&client_id=alice`.
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
       "path": "/ws",
@@ -421,7 +417,6 @@ Clients connect with `?token=my-shared-secret&client_id=alice`.
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "path": "/chat/ws",
       "allowFrom": ["*"]
     }

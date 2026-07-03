@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -61,6 +63,40 @@ class _DelayTool(Tool):
         return self._name
 
 
+class _LegacyErrorPluginTool(Tool):
+    @property
+    def name(self) -> str:
+        return "legacy_plugin"
+
+    @property
+    def description(self) -> str:
+        return "legacy entry-point plugin"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs):
+        return "Error: legacy plugin failed"
+
+
+class _StructuredSuccessPluginTool(Tool):
+    @property
+    def name(self) -> str:
+        return "structured_success_plugin"
+
+    @property
+    def description(self) -> str:
+        return "structured entry-point plugin"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs):
+        return ToolResult("Error: generated report successfully")
+
+
 async def _run_optional_tool_response(response: LLMResponse):
     provider = MagicMock()
     calls = {"n": 0}
@@ -89,6 +125,20 @@ async def _run_optional_tool_response(response: LLMResponse):
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
     return result, shared_events
+
+
+def _load_entry_point_plugin(tool_cls: type[Tool], tmp_path) -> ToolRegistry:
+    mock_ep = MagicMock()
+    mock_ep.name = tool_cls.__name__
+    mock_ep.load.return_value = tool_cls
+
+    registry = ToolRegistry()
+    with patch("nanobot.agent.tools.loader.entry_points", return_value=[mock_ep]):
+        ToolLoader(test_classes=[]).load(
+            ToolContext(config=None, workspace=str(tmp_path)),
+            registry,
+        )
+    return registry
 
 
 def _tool_message(result, tool_call_id: str) -> dict:
@@ -318,6 +368,63 @@ async def test_runner_rejects_openai_responses_array_arguments_without_executing
     assert shared_events == []
     tool_message = _tool_message(result, "call_1|fc_1")
     assert "parameters must be a JSON object" in tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_treats_legacy_entry_point_error_prefix_as_tool_error(tmp_path):
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="working",
+        tool_calls=[ToolCallRequest(id="call_1", name="legacy_plugin", arguments={})],
+        usage={},
+    ))
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "run plugin"}],
+        tools=_load_entry_point_plugin(_LegacyErrorPluginTool, tmp_path),
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        fail_on_tool_error=True,
+    ))
+
+    assert result.stop_reason == "tool_error"
+    assert result.tool_events == [
+        {"name": "legacy_plugin", "status": "error", "detail": "Error: legacy plugin failed"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_structured_plugin_success_that_starts_with_error(tmp_path):
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="working",
+            tool_calls=[
+                ToolCallRequest(id="call_1", name="structured_success_plugin", arguments={})
+            ],
+            usage={},
+        ),
+        LLMResponse(content="done", tool_calls=[], usage={}),
+    ])
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "run plugin"}],
+        tools=_load_entry_point_plugin(_StructuredSuccessPluginTool, tmp_path),
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        fail_on_tool_error=True,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.tool_events == [
+        {
+            "name": "structured_success_plugin",
+            "status": "ok",
+            "detail": "Error: generated report successfully",
+        }
+    ]
 
 
 @pytest.mark.asyncio

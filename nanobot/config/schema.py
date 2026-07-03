@@ -154,10 +154,6 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
-    max_messages: int = Field(
-        default=120,
-        ge=0,
-    )  # Max messages to replay from session history (0 = use default 120, respects token budget)
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
@@ -183,6 +179,7 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
+    proxy: str | None = None  # OpenAI-compatible/Codex HTTP proxy URL
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
@@ -310,6 +307,18 @@ class ApiConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
+    api_key: str = Field(default="", repr=False)
+
+    @model_validator(mode="after")
+    def wildcard_host_requires_auth(self) -> "ApiConfig":
+        if self.host not in ("0.0.0.0", "::"):
+            return self
+        if self.api_key.strip():
+            return self
+        raise ValueError(
+            "host is 0.0.0.0 (all interfaces) but api_key is not set "
+            "- set api.api_key to prevent unauthenticated access"
+        )
 
 
 class GatewayConfig(Base):
@@ -317,6 +326,7 @@ class GatewayConfig(Base):
 
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
+    restart_mode: Literal["auto", "exec", "spawn", "exit"] = "auto"
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
@@ -367,6 +377,13 @@ class ToolsConfig(Base):
             "allow_local_preview_access",
         ),
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
+    webui_allow_remote_package_install: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "webuiAllowRemotePackageInstall",
+            "webui_allow_remote_package_install",
+        ),
+    )  # allow non-local WebUI clients to install optional Python packages
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 

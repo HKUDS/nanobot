@@ -348,6 +348,42 @@ def test_install_dispatches_safe_pip_and_installs_skill(
     assert 'run_cli_app` tool with `name="gimp"' in skill.read_text(encoding="utf-8")
 
 
+def test_run_argv_logs_command_exit_and_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.apps.cli import service as cli_service
+
+    manager = _manager(tmp_path)
+    records: list[str] = []
+
+    class _Logger:
+        def info(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    def fake_run(
+        argv: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        assert timeout == 5
+        return subprocess.CompletedProcess(argv, 0, stdout="installed ok", stderr="")
+
+    monkeypatch.setattr(cli_service, "logger", _Logger())
+    monkeypatch.setattr(cli_service.subprocess, "run", fake_run)
+
+    result = manager._run_argv(["python", "-m", "pip", "install", "sample"], timeout=5)
+
+    assert result.returncode == 0
+    assert any(record.startswith("CLI Apps: running ") for record in records)
+    assert any("command exited with code 0" in record for record in records)
+    assert any("installed ok" in record for record in records)
+
+
 def test_install_records_available_cli_without_reinstalling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1,6 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -13,7 +14,7 @@ from weakref import WeakKeyDictionary
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
@@ -165,12 +166,31 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
         return False
 
 
+def _redact_url(url: str) -> str:
+    """Strip credentials and query/fragment before logging an MCP URL.
+
+    Server URLs may embed secrets (``https://user:token@host/sse`` or a
+    ``?token=`` query). Some deployments also put opaque tokens in the path, so
+    log only the origin and a path placeholder.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+        hostname = parts.hostname or ""
+        netloc = f"[{hostname}]" if ":" in hostname else hostname
+        if parts.port:
+            netloc = f"{netloc}:{parts.port}"
+        path = "/..." if parts.path and parts.path != "/" else parts.path
+        return urllib.parse.urlunsplit((parts.scheme, netloc, path, "", ""))
+    except Exception:
+        return "<redacted-url>"
+
+
 async def _validate_mcp_request_url(request: httpx.Request) -> None:
     """Validate each outgoing MCP HTTP request, including redirect targets."""
     ok, error = validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(
-            f"Blocked unsafe MCP URL {request.url} ({error})",
+            f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
             request=request,
         )
 
@@ -313,6 +333,52 @@ class _MCPWrapperBase(Tool):
         return True
 
 
+def _image_block_data_url(block: Any, types: Any) -> str | None:
+    """Return a base64 ``data:`` URL for an MCP image-bearing content block.
+
+    Handles ``ImageContent`` directly and ``EmbeddedResource`` wrapping a binary
+    blob with an ``image/*`` MIME type. Returns ``None`` for anything else.
+    ``getattr`` guards keep this safe when the installed/faked ``mcp`` SDK does
+    not expose a given type.
+    """
+    image_cls = getattr(types, "ImageContent", None)
+    if image_cls is not None and isinstance(block, image_cls):
+        mime = getattr(block, "mimeType", None) or "image/png"
+        return f"data:{mime};base64,{block.data}"
+
+    embedded_cls = getattr(types, "EmbeddedResource", None)
+    blob_cls = getattr(types, "BlobResourceContents", None)
+    if embedded_cls is not None and isinstance(block, embedded_cls):
+        resource = getattr(block, "resource", None)
+        if blob_cls is not None and isinstance(resource, blob_cls):
+            mime = getattr(resource, "mimeType", None) or ""
+            if isinstance(mime, str) and mime.startswith("image/"):
+                return f"data:{mime};base64,{resource.blob}"
+    return None
+
+
+def _mcp_image_tool_result(text_parts: list[str], artifacts: list[dict[str, Any]]) -> str:
+    """Build the compact tool result for an MCP call that returned image(s).
+
+    The base64 stays out of the model context entirely — only artifact paths and
+    metadata are returned, so the result is small and the channel can deliver the
+    saved file via the message tool.
+    """
+    payload: dict[str, Any] = {
+        "artifacts": artifacts,
+        "next_step": (
+            "These images were returned by an MCP tool and saved as local artifacts. "
+            "Call the message tool with the artifact 'path' values in the media "
+            "parameter to deliver the images to the user. Do not paste base64 or raw "
+            "paths into your reply unless the user asks for debug details."
+        ),
+    }
+    text = "\n".join(part for part in text_parts if part)
+    if text:
+        payload["text"] = text
+    return json.dumps(payload, ensure_ascii=False)
+
+
 class MCPToolWrapper(_MCPWrapperBase):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
@@ -340,8 +406,6 @@ class MCPToolWrapper(_MCPWrapperBase):
         return self._parameters
 
     async def execute(self, **kwargs: Any) -> str:
-        from mcp import types
-
         retried_transient = False
         refreshed_session = False
         while True:
@@ -396,16 +460,65 @@ class MCPToolWrapper(_MCPWrapperBase):
                 )
                 return f"(MCP tool call failed: {type(exc).__name__})"
             else:
-                # Success — extract result
-                parts = []
-                for block in result.content:
-                    if isinstance(block, types.TextContent):
-                        parts.append(block.text)
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
+                # Success — extract text and persist any image content as artifacts.
+                rendered = self._render_call_result(result.content, kwargs)
+                if getattr(result, "isError", False):
+                    return ToolResult.error(rendered)
+                return rendered
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
+
+    def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
+        """Turn MCP content blocks into a tool result string.
+
+        Text is concatenated as before. Image blocks are decoded and saved as
+        local artifacts (mirroring the built-in image generation tool) so the
+        model can deliver them via the message tool instead of trying to forward
+        base64 — which would be truncated and bloat the context window.
+        """
+        from mcp import types
+
+        text_parts: list[str] = []
+        artifacts: list[dict[str, Any]] = []
+        for block in content:
+            if isinstance(block, types.TextContent):
+                text_parts.append(block.text)
+                continue
+            data_url = _image_block_data_url(block, types)
+            if data_url is not None:
+                stored = self._store_image_block(data_url, arguments)
+                if stored is not None:
+                    artifacts.append(stored)
+                else:
+                    text_parts.append("(MCP tool returned an image that could not be stored)")
+                continue
+            text_parts.append(str(block))
+
+        if artifacts:
+            return _mcp_image_tool_result(text_parts, artifacts)
+        return "\n".join(text_parts) or "(no output)"
+
+    def _store_image_block(
+        self, data_url: str, arguments: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """Persist one image data URL as an artifact; return its metadata or None."""
+        from nanobot.utils.artifacts import ArtifactError, store_generated_image_artifact
+
+        try:
+            return store_generated_image_artifact(
+                data_url,
+                prompt=str(arguments.get("prompt") or ""),
+                model=str(arguments.get("model") or ""),
+                save_dir="generated",
+                provider=f"mcp:{self._server_name}",
+            )
+        except (ArtifactError, OSError) as exc:
+            logger.warning(
+                "MCP tool '{}' returned an image that could not be stored: {}",
+                self._name,
+                exc,
+            )
+            return None
 
 
 class MCPResourceWrapper(_MCPWrapperBase):
@@ -683,7 +796,7 @@ async def connect_mcp_servers(
                     logger.warning(
                         "MCP server '{}': blocked unsafe URL {} ({})",
                         name,
-                        cfg.url,
+                        _redact_url(cfg.url),
                         error,
                     )
                     await server_stack.aclose()
@@ -704,7 +817,7 @@ async def connect_mcp_servers(
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
                 if not await _probe_http_url(cfg.url):
-                    logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
+                    logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     await server_stack.aclose()
                     return name, None
 
@@ -731,7 +844,7 @@ async def connect_mcp_servers(
                 )
             elif transport_type == "streamableHttp":
                 if not await _probe_http_url(cfg.url):
-                    logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
+                    logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     await server_stack.aclose()
                     return name, None
 

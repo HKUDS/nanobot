@@ -120,6 +120,7 @@ const MCP_PRESETS: McpPresetInfo[] = [
     connection_summary: "",
   },
 ];
+
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 const ORIGINAL_MEDIA_DEVICES = navigator.mediaDevices;
 
@@ -1112,6 +1113,36 @@ describe("ThreadComposer", () => {
         brand_color: "#111827",
       }],
     });
+  });
+
+  it("opens skills only from a $ reference anywhere", () => {
+    render(
+        <ThreadComposer
+          onSend={vi.fn()}
+          placeholder="Type your message..."
+          skills={[{
+            name: "github",
+            description: "Work with pull requests and issues",
+            source: "builtin",
+            available: true,
+          }]}
+          slashCommands={COMMANDS}
+        />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+
+    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("$github");
+    expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("please use $github ");
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {

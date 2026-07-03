@@ -70,7 +70,7 @@ def test_convert_user_content_coerces_typeless_dict():
         {"foo": "bar"},
         {"type": "text", "text": "ok"},
     ])
-    assert result[0] == {"type": "text", "text": str({"foo": "bar"})}
+    assert result[0] == {"type": "text", "text": '{"foo": "bar"}'}
     assert result[1] == {"type": "text", "text": "ok"}
 
 
@@ -81,7 +81,16 @@ def test_convert_user_content_coerces_mixed_typeless():
         {"key": "val"},
     ])
     assert result[0] == {"type": "text", "text": "42"}
-    assert result[1] == {"type": "text", "text": str({"key": "val"})}
+    assert result[1] == {"type": "text", "text": '{"key": "val"}'}
+
+
+def test_assistant_blocks_coerce_typeless_dict_to_json_text():
+    blocks = AnthropicProvider._assistant_blocks({
+        "role": "assistant",
+        "content": [{"answer": "ok", "count": 2}],
+    })
+
+    assert blocks == [{"type": "text", "text": '{"answer": "ok", "count": 2}'}]
 
 
 def test_convert_assistant_message_repairs_history_tool_arguments():
