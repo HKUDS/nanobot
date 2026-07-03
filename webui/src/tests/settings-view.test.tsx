@@ -354,6 +354,67 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("Disabled channel 'matrix'")).toBeInTheDocument();
   });
 
+  it("shows enabled nanobot channels with missing support as enabled", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: true,
+            installed: false,
+            ready: false,
+            status: "missing_dependency",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+        });
+      }
+      if (url === "/api/settings/nanobot-features/enable?name=matrix") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+          last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView();
+
+    expect(await screen.findByText("Matrix")).toBeInTheDocument();
+    expect(screen.getByText("1 Nanobot · 0 CLI · 0 MCP")).toBeInTheDocument();
+    expect(screen.getByText("Install required support")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install required support" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=matrix",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+  });
+
   it("does not offer to disable the websocket channel", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

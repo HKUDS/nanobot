@@ -373,7 +373,7 @@ def optional_features_payload(
 
     payload = {
         "features": features,
-        "enabled_count": sum(1 for feature in features if feature["ready"]),
+        "enabled_count": sum(1 for feature in features if feature["enabled"]),
     }
     if last_action:
         payload["last_action"] = last_action

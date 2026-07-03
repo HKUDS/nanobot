@@ -1006,6 +1006,30 @@ def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path)
     assert payload["requires_restart"] is True
 
 
+def test_optional_features_payload_counts_enabled_channel_with_missing_dependency(
+    monkeypatch,
+):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({"channels": {"matrix": {"enabled": True}}})
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    payload = optional_features_payload(config=config)
+
+    matrix = payload["features"][0]
+    assert matrix["name"] == "matrix"
+    assert matrix["enabled"] is True
+    assert matrix["installed"] is False
+    assert matrix["ready"] is False
+    assert payload["enabled_count"] == 1
+
+
 def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
     from nanobot.cli import commands as cli_commands
 

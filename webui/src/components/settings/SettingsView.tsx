@@ -5273,6 +5273,7 @@ function NanobotFeatureCatalogRow({
   const enableBusy = actionKey === `enable:${feature.name}`;
   const disableBusy = actionKey === `disable:${feature.name}`;
   const description = nanobotFeatureStatusLabel(feature, tx);
+  const missingSupport = feature.enabled && !feature.installed;
 
   return (
     <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
@@ -5293,7 +5294,15 @@ function NanobotFeatureCatalogRow({
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {feature.ready && feature.type === "channel" && feature.name !== "websocket" ? (
+        {missingSupport && feature.install_supported ? (
+          <AppsActionButton
+            ariaLabel={tx("settings.nanobotFeatures.missingDependency", "Install required support")}
+            busy={enableBusy}
+            onClick={() => onAction("enable", feature.name)}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : feature.enabled && feature.type === "channel" && feature.name !== "websocket" ? (
           <AppsActionButton
             ariaLabel={tx("settings.nanobotFeatures.disable", "Disable")}
             busy={disableBusy}
@@ -5302,7 +5311,7 @@ function NanobotFeatureCatalogRow({
           >
             <X className="h-4 w-4" aria-hidden />
           </AppsActionButton>
-        ) : feature.ready ? (
+        ) : feature.enabled ? (
           <AppsActionButton
             ariaLabel={tx("settings.nanobotFeatures.enabled", "Enabled")}
             disabled
@@ -5736,7 +5745,7 @@ function appsTitle(item: AppsCatalogItem): string {
 }
 
 function appsReady(item: AppsCatalogItem): boolean {
-  if (item.kind === "nanobot") return item.feature.ready;
+  if (item.kind === "nanobot") return item.feature.enabled;
   return item.kind === "cli" ? item.app.installed : item.preset.installed && item.preset.configured;
 }
 
