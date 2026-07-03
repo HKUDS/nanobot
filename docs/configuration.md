@@ -1930,7 +1930,7 @@ Pairing lets users get access to the bot through a simple code exchange — no c
 
 ### How it works
 
-1. A user sends a DM to the bot on any channel (Telegram, Discord, Slack, Mattermost, etc.) where they aren't yet approved.
+1. A user sends a DM to the bot on any channel (Telegram, Discord, Slack, or Mattermost) where they aren't yet approved.
 2. The bot replies with a pairing code (like `ABCD-EFGH`) and tells them to forward it to you.
 3. You approve the code:
 
