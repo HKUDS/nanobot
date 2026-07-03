@@ -478,6 +478,61 @@ async def test_execute_handles_generic_exception() -> None:
     assert is_tool_error_result(wrapper.name, result)
 
 
+@pytest.mark.asyncio
+async def test_execute_reconnects_on_transient_failure() -> None:
+    class ClosedResourceError(Exception):
+        pass
+
+    reconnects = 0
+
+    async def stale_call_tool(_name: str, arguments: dict) -> object:
+        raise ClosedResourceError("stream closed")
+
+    async def fresh_call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=stale_call_tool))
+
+    async def reconnect(_server_name: str, _tool_name: str, _stale_tool: object) -> object:
+        nonlocal reconnects
+        reconnects += 1
+        return SimpleNamespace(_session=SimpleNamespace(call_tool=fresh_call_tool))
+
+    wrapper.set_reconnect_handler(reconnect)
+
+    result = await wrapper.execute()
+
+    assert result == "ok"
+    assert reconnects == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_marks_transient_retry_failure_as_tool_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ClosedResourceError(Exception):
+        pass
+
+    calls = 0
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        nonlocal calls
+        calls += 1
+        raise ClosedResourceError("closed")
+
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(mcp_mod.asyncio, "sleep", fast_sleep)
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert calls == 2
+    assert result == "(MCP tool call failed after retry: ClosedResourceError)"
+    assert is_tool_error_result(wrapper.name, result)
+
+
 def _make_tool_def(name: str) -> SimpleNamespace:
     return SimpleNamespace(
         name=name,
