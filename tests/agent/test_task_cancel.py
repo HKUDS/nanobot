@@ -127,6 +127,7 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_streaming_preserves_message_metadata(self):
         from nanobot.bus.events import InboundMessage
+        from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 
         loop, bus = _make_loop()
         msg = InboundMessage(
@@ -156,10 +157,10 @@ class TestDispatch:
 
         assert first.metadata["thread_root_event_id"] == "$root1"
         assert first.metadata["thread_reply_to_event_id"] == "$reply1"
-        assert first.metadata["_stream_delta"] is True
+        assert isinstance(first.event, StreamDeltaEvent)
         assert second.metadata["thread_root_event_id"] == "$root1"
         assert second.metadata["thread_reply_to_event_id"] == "$reply1"
-        assert second.metadata["_stream_end"] is True
+        assert isinstance(second.event, StreamEndEvent)
 
     @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):

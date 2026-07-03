@@ -128,6 +128,21 @@ class Schema(ABC):
         return Schema.validate_json_schema_value(value, self.to_json_schema(), path)
 
 
+class ToolResult(str):
+    """String-compatible tool output with structured status."""
+
+    is_error: bool
+
+    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+        obj = str.__new__(cls, content)
+        obj.is_error = is_error
+        return obj
+
+    @classmethod
+    def error(cls, content: str) -> ToolResult:
+        return cls(content, is_error=True)
+
+
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
 
@@ -193,8 +208,12 @@ class Tool(ABC):
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:
-        """Run the tool; returns a string or list of content blocks."""
+        """Run the tool; return content, or ``ToolResult.error(...)`` for failures."""
         ...
+
+    @staticmethod
+    def error(content: str) -> ToolResult:
+        return ToolResult.error(content)
 
     def _cast_object(self, obj: Any, schema: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(obj, dict):

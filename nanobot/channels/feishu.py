@@ -22,6 +22,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -1797,14 +1798,19 @@ class FeishuChannel(BaseChannel):
         return self._stream_update_text_sync(card_id, content, sequence), sequence
 
     async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
         Supported metadata keys:
-            _stream_end: Finalize the streaming card.
-            _tool_hint:  Delta is a formatted tool hint (for display only).
-            message_id:  Original message id (used with _stream_end for reaction cleanup).
+            message_id:  Original message id (used with stream end for reaction cleanup).
             chat_type:   "group" or "p2p" — controls reply-in-thread for streaming cards.
         """
         if not self._client:
@@ -1815,14 +1821,14 @@ class FeishuChannel(BaseChannel):
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
         # --- stream end: final update or fallback ---
-        if meta.get("_stream_end"):
+        if stream_end:
             message_id = meta.get("message_id")
             # Only finalize the OnIt -> DONE reaction transition on the truly
-            # final stream end. _resuming=True means the agent will keep
+            # final stream end. resuming=True means the agent will keep
             # working (more tool-call rounds), so leave the reaction state
             # in place — otherwise the OnIt indicator disappears prematurely
             # and the DONE reaction fires after every tool call.
-            if message_id and not meta.get("_resuming"):
+            if message_id and not resuming:
                 reaction_id = self._reaction_ids.pop(message_id, None)
                 if reaction_id:
                     await self._remove_reaction(message_id, reaction_id)
@@ -1965,7 +1971,9 @@ class FeishuChannel(BaseChannel):
             # Handle tool hint messages.  When a streaming card is active for
             # this chat, inline the hint into the card instead of sending a
             # separate message so the user experience stays cohesive.
-            if msg.metadata.get("_tool_hint"):
+            progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
+
+            if progress_event and progress_event.tool_hint:
                 hint = (msg.content or "").strip()
                 if not hint:
                     return
@@ -1976,6 +1984,7 @@ class FeishuChannel(BaseChannel):
                     await self.send_delta(
                         msg.chat_id,
                         "\n\n" + self._format_tool_hint_delta(hint) + "\n\n",
+                        metadata=msg.metadata,
                     )
                     return
                 # No active streaming card — send as a regular interactive card
@@ -2009,7 +2018,7 @@ class FeishuChannel(BaseChannel):
             reply_message_id: str | None = None
             _msg_id = msg.metadata.get("message_id")
             has_thread_id = msg.metadata.get("thread_id")
-            if self.config.reply_to_message and not msg.metadata.get("_progress", False):
+            if self.config.reply_to_message and progress_event is None:
                 reply_message_id = _msg_id
             # For topic group messages, always reply to keep context in thread
             elif has_thread_id:

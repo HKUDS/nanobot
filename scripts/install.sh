@@ -269,7 +269,15 @@ if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
   exit 0
 fi
 
-info "Starting setup wizard..."
-run_nanobot onboard --wizard
+if [ -t 0 ]; then
+  info "Starting setup wizard..."
+  run_nanobot onboard --wizard
+elif : 2>/dev/null < /dev/tty; then
+  info "Starting setup wizard..."
+  run_nanobot onboard --wizard < /dev/tty
+else
+  info "Skipping setup wizard because no interactive terminal is available."
+  info "Run this later: $(nanobot_try_command) onboard --wizard"
+fi
 
 info "Done. Try: $(nanobot_try_command) agent -m \"Hello!\""

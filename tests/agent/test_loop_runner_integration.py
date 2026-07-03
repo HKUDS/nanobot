@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -23,8 +24,8 @@ def _make_loop(tmp_path):
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
 
@@ -193,8 +194,9 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
     assert result is not None
     assert "503" in result.content
-    assert not result.metadata.get("_streamed"), \
-        "_streamed must not be set when stop_reason is error"
+    assert not isinstance(result.event, StreamedResponseEvent), (
+        "streamed response event must not be set when stop_reason is error"
+    )
 
 
 @pytest.mark.asyncio
@@ -239,7 +241,7 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
 
     assert result is not None
     assert result.content == "I cannot access private URLs. Please share the local file."
-    assert result.metadata.get("_streamed") is True
+    assert isinstance(result.event, StreamedResponseEvent)
 
 
 @pytest.mark.asyncio

@@ -23,7 +23,7 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ### "What model are you running?"
 ```
 → my(action="check", key="model")
-  → 'anthropic/claude-sonnet-4-20250514'
+  → 'anthropic/claude-sonnet-4-6'
 → my(action="check", key="model_preset")
   → 'deep'
 ```
@@ -49,7 +49,7 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ### Switching to a raw model when no preset exists
 ```
 → my(action="set", key="model", value="anthropic/claude-haiku-4-5-20251001")
-  → "Set model = 'anthropic/claude-haiku-4-5-20251001' (was 'anthropic/claude-sonnet-4-20250514')"
+  → "Set model = 'anthropic/claude-haiku-4-5-20251001' (was 'anthropic/claude-sonnet-4-6')"
 → "Switched to a faster model for these batch tasks."
 ```
 

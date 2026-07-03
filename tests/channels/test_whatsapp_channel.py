@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -84,6 +86,23 @@ def _patch_neonize_api(monkeypatch) -> None:
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
         ),
     )
+
+
+def _patch_receipt_type(monkeypatch):
+    neonize = types.ModuleType("neonize")
+    utils = types.ModuleType("neonize.utils")
+    enum = types.ModuleType("neonize.utils.enum")
+
+    class ReceiptType:
+        READ = "read"
+
+    enum.ReceiptType = ReceiptType
+    neonize.utils = utils
+    utils.enum = enum
+    monkeypatch.setitem(sys.modules, "neonize", neonize)
+    monkeypatch.setitem(sys.modules, "neonize.utils", utils)
+    monkeypatch.setitem(sys.modules, "neonize.utils.enum", enum)
+    return ReceiptType
 
 
 class _FakeLoginClient:
@@ -299,6 +318,60 @@ async def test_group_sender_id_uses_participant_not_group_jid() -> None:
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["sender_id"] == "SENDERLID"
     assert kwargs["metadata"]["participant"] == "SENDERLID@lid"
+
+
+@pytest.mark.asyncio
+async def test_read_receipt_is_requested_once_after_dedup() -> None:
+    ch = _make_channel()
+    ch._send_read_receipt = AsyncMock()
+    ch._handle_message = AsyncMock()
+    client = SimpleNamespace(download_any=AsyncMock())
+    event = _event(
+        message=_Proto(conversation="hi"),
+        sender=_jid("15551234567", "s.whatsapp.net"),
+    )
+
+    await ch._handle_neonize_message(client, event)
+    await ch._handle_neonize_message(client, event)
+
+    ch._send_read_receipt.assert_awaited_once_with(
+        client,
+        event.Info.MessageSource,
+        "m1",
+    )
+    ch._handle_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_read_receipt_uses_mark_read_and_swallows_failures(monkeypatch) -> None:
+    receipt_type = _patch_receipt_type(monkeypatch)
+    ch = _make_channel()
+    source = _event(
+        message=_Proto(conversation="hi"),
+        sender=_jid("15551234567", "s.whatsapp.net"),
+    ).Info.MessageSource
+    client = SimpleNamespace(
+        mark_read=AsyncMock(),
+        download_any=AsyncMock(),
+    )
+
+    await ch._send_read_receipt(client, source, "m1")
+
+    client.mark_read.assert_awaited_once_with(
+        "m1",
+        chat=source.Chat,
+        sender=source.Sender,
+        receipt=receipt_type.READ,
+    )
+
+    failing_client = SimpleNamespace(
+        mark_read=AsyncMock(side_effect=RuntimeError("boom")),
+        download_any=AsyncMock(),
+    )
+
+    await ch._send_read_receipt(failing_client, source, "m2")
+
+    failing_client.mark_read.assert_awaited_once()
 
 
 @pytest.mark.asyncio

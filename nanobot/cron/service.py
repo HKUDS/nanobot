@@ -1,6 +1,7 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
+import errno
 import json
 import os
 import time
@@ -22,6 +23,12 @@ from nanobot.cron.types import (
     CronRunRecord,
     CronSchedule,
     CronStore,
+)
+from nanobot.utils.run_records import (
+    safe_run_record_name,
+)
+from nanobot.utils.run_records import (
+    write_run_record as write_automation_run_record,
 )
 
 
@@ -456,11 +463,15 @@ class CronService:
             os.replace(tmp_path, path)
             # fsync the parent directory so the rename itself is durable.
             # Skip on Windows where opening a directory raises PermissionError;
-            # NTFS journals metadata synchronously so this is a no-op there.
+            # some shared filesystems reject directory fsync with EINVAL.
             with suppress(PermissionError):
                 fd = os.open(str(path.parent), os.O_RDONLY)
                 try:
-                    os.fsync(fd)
+                    try:
+                        os.fsync(fd)
+                    except OSError as exc:
+                        if exc.errno != errno.EINVAL:
+                            raise
                 finally:
                     os.close(fd)
         except BaseException:
@@ -469,20 +480,11 @@ class CronService:
 
     @staticmethod
     def _safe_run_record_name(run_id: str) -> str:
-        return "".join(c if c.isalnum() or c in "._-" else "_" for c in run_id)
+        return safe_run_record_name(run_id)
 
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""
-        name = self._safe_run_record_name(run_id)
-        if not name:
-            name = str(uuid.uuid4())
-        path = self._run_records_dir / f"{name}.json"
-        payload = {
-            **record,
-            "run_id": run_id,
-            "updated_at_ms": _now_ms(),
-        }
-        self._atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False))
+        write_automation_run_record(self._run_records_dir, run_id, record)
 
     async def start(self) -> None:
         """Start the cron service."""

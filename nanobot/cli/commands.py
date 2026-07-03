@@ -50,6 +50,14 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.bus.outbound_events import (  # noqa: E402
+    ProgressEvent,
+    RetryWaitEvent,
+    StreamDeltaEvent,
+    StreamedResponseEvent,
+    StreamEndEvent,
+    outbound_event_from_message,
+)
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
@@ -461,25 +469,25 @@ async def _maybe_print_interactive_progress(
     renderer: StreamRenderer | None = None,
     reasoning_buffer: _ReasoningBuffer | None = None,
 ) -> bool:
-    metadata = msg.metadata or {}
-    if metadata.get("_retry_wait"):
+    event = outbound_event_from_message(msg)
+    if isinstance(event, RetryWaitEvent):
         await _print_interactive_progress_line(msg.content, thinking, renderer)
         return True
 
-    if not metadata.get("_progress"):
+    if not isinstance(event, ProgressEvent):
         return False
 
     reasoning_buffer = reasoning_buffer or _ReasoningBuffer()
 
-    if metadata.get("_reasoning_end"):
+    if event.reasoning_end:
         if channels_config and not channels_config.show_reasoning:
             reasoning_buffer.clear()
         else:
             _flush_cli_reasoning(reasoning_buffer, thinking, renderer)
         return True
 
-    is_tool_hint = metadata.get("_tool_hint", False)
-    is_reasoning = metadata.get("_reasoning", False) or metadata.get("_reasoning_delta", False)
+    is_tool_hint = event.tool_hint
+    is_reasoning = event.reasoning or event.reasoning_delta
     if is_reasoning:
         if channels_config and not channels_config.show_reasoning:
             reasoning_buffer.clear()
@@ -710,6 +718,21 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _read_trigger_cli_message(message: str | None) -> str:
+    """Read a trigger message from an argument or stdin."""
+    if message and message.strip():
+        return message
+    try:
+        if not sys.stdin.isatty():
+            content = sys.stdin.read()
+            if content.strip():
+                return content
+    except Exception:
+        pass
+    console.print("[red]Error: trigger message is required[/red]")
+    raise typer.Exit(1)
+
+
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
@@ -739,6 +762,35 @@ def _migrate_cron_store(config: "Config") -> None:
         import shutil
 
         shutil.move(str(legacy_path), str(new_path))
+
+
+@app.command()
+def trigger(
+    trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
+    message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Deliver a local trigger message to its bound chat session."""
+    from nanobot.triggers.local_store import (
+        LocalTriggerStore,
+        TriggerDisabledError,
+        TriggerNotFoundError,
+        TriggerStoreError,
+    )
+
+    runtime_config = _load_runtime_config(config, workspace)
+    content = _read_trigger_cli_message(message)
+    store = LocalTriggerStore(runtime_config.workspace_path)
+    try:
+        delivery = store.enqueue(trigger_id, content)
+    except (TriggerNotFoundError, TriggerDisabledError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    except (TriggerStoreError, ValueError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Queued[/green] {delivery.trigger_id} ({delivery.id})")
 
 
 # ============================================================================
@@ -798,14 +850,24 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
     if host in {"0.0.0.0", "::"}:
+        if not api_key:
+            console.print(
+                "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+                "Set api.api_key in config to prevent unauthenticated access.[/red]"
+            )
+            raise typer.Exit(1)
         console.print(
-            "[yellow]Warning:[/yellow] API is bound to all interfaces. "
-            "Only do this behind a trusted network boundary, firewall, or reverse proxy."
+            "[yellow]API is bound to all interfaces "
+            "(authentication required).[/yellow]"
         )
     console.print()
 
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+    api_app = create_app(
+        agent_loop, model_name=model_name, request_timeout=timeout,
+        api_key=api_key,
+    )
 
     async def on_startup(_app):
         await agent_loop._connect_mcp()
@@ -847,6 +909,8 @@ def _run_gateway(
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.triggers.local_runner import run_local_trigger_queue
+    from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -869,6 +933,7 @@ def _run_gateway(
     # Create cron service with workspace-scoped store
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    trigger_store = LocalTriggerStore(config.workspace_path)
 
     # Create agent with cron service
     agent = AgentLoop.from_config(
@@ -883,13 +948,13 @@ def _run_gateway(
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
+        local_trigger_store=trigger_store,
     )
     WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
-
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -1085,8 +1150,14 @@ def _run_gateway(
         bus,
         session_manager=session_manager,
         cron_service=cron,
+        local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
+        webui_local_trigger_pending_ids=getattr(
+            agent,
+            "pending_local_trigger_ids_for_session",
+            None,
+        ),
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
@@ -1227,6 +1298,13 @@ def _run_gateway(
             tasks = [
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
+                asyncio.create_task(
+                    run_local_trigger_queue(
+                        store=trigger_store,
+                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                    ),
+                    name="nanobot-local-triggers",
+                ),
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
@@ -1446,7 +1524,7 @@ def agent(
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
-            turn_response: list[tuple[str, dict]] = []
+            turn_response: list[Any] = []
             renderer: StreamRenderer | None = None
             reasoning_buffer = _ReasoningBuffer()
 
@@ -1454,18 +1532,19 @@ def agent(
                 while True:
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                        event = outbound_event_from_message(msg)
 
-                        if msg.metadata.get("_stream_delta"):
+                        if isinstance(event, StreamDeltaEvent):
                             if renderer:
                                 await renderer.on_delta(msg.content)
                             continue
-                        if msg.metadata.get("_stream_end"):
+                        if isinstance(event, StreamEndEvent):
                             if renderer:
                                 await renderer.on_end(
-                                    resuming=msg.metadata.get("_resuming", False),
+                                    resuming=event.resuming,
                                 )
                             continue
-                        if msg.metadata.get("_streamed"):
+                        if isinstance(event, StreamedResponseEvent):
                             turn_done.set()
                             continue
 
@@ -1480,7 +1559,7 @@ def agent(
 
                         if not turn_done.is_set():
                             if msg.content:
-                                turn_response.append((msg.content, dict(msg.metadata or {})))
+                                turn_response.append(msg)
                             turn_done.set()
                         elif msg.content:
                             await _print_interactive_response(
@@ -1533,8 +1612,10 @@ def agent(
                         await turn_done.wait()
 
                         if turn_response:
-                            content, meta = turn_response[0]
-                            if content and not meta.get("_streamed"):
+                            response_msg = turn_response[0]
+                            content = response_msg.content
+                            meta = response_msg.metadata
+                            if content and not isinstance(response_msg.event, StreamedResponseEvent):
                                 if renderer:
                                     await renderer.close()
                                 print_kwargs: dict[str, Any] = {}
@@ -1744,6 +1825,11 @@ _PROVIDER_DISPLAY: dict[str, str] = {
     "github_copilot": "GitHub Copilot",
 }
 
+_OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "openai_codex": "openai-codex/gpt-5.4-mini",
+    "github_copilot": "github-copilot/gpt-5.4-mini",
+}
+
 
 def _register_login(name: str):
     """Register an OAuth login handler."""
@@ -1775,9 +1861,51 @@ def _resolve_oauth_provider(provider: str):
     return spec
 
 
+def _set_oauth_provider_as_main(
+    provider_name: str,
+    *,
+    model: str | None = None,
+    config_path: str | None = None,
+) -> None:
+    """Persist an OAuth provider as the active agent provider."""
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
+
+    config = load_config(resolved_config_path)
+    selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
+    config.agents.defaults.model_preset = None
+    config.agents.defaults.provider = provider_name
+    config.agents.defaults.model = selected_model
+    save_config(config, resolved_config_path)
+
+    saved_path = resolved_config_path or get_config_path()
+    console.print(
+        f"[green]✓ Set {provider_name.replace('_', '-')} as the main provider[/green]  "
+        f"[dim]{selected_model}[/dim]"
+    )
+    console.print(f"[dim]Saved: {saved_path}[/dim]")
+
+
 @provider_app.command("login")
 def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    set_main: bool = typer.Option(
+        False,
+        "--set-main",
+        "--main",
+        help="Set this OAuth provider as the active agent provider after login",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model to use when setting this provider as the active provider",
+    ),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -1789,6 +1917,8 @@ def provider_login(
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
+    if set_main or model:
+        _set_oauth_provider_as_main(spec.name, model=model, config_path=config)
 
 
 @provider_app.command("logout")
@@ -1812,14 +1942,23 @@ def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
 
+        from nanobot.config.loader import load_config, resolve_config_env_vars
+
+        proxy = None
+        try:
+            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from e
         token = None
         with suppress(Exception):
-            token = get_token()
+            token = get_token(proxy=proxy)
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
                 print_fn=lambda s: console.print(s),
                 prompt_fn=lambda s: typer.prompt(s),
+                proxy=proxy,
             )
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")

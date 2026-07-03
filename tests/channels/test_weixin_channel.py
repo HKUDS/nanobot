@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 import nanobot.channels.weixin as weixin_mod
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.weixin import (
     ITEM_IMAGE,
@@ -686,7 +687,8 @@ async def test_send_progress_message_keeps_typing_indicator() -> None:
                 "chat_id": "wx-user",
                 "content": "thinking",
                 "media": [],
-                "metadata": {"_progress": True},
+                "event": ProgressEvent(content="thinking"),
+                "metadata": {},
             },
         )()
     )
@@ -1409,7 +1411,8 @@ async def test_buffer_single_tool_hint_not_sent_immediately() -> None:
                 "chat_id": "wx-user",
                 "content": "Using tool",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="Using tool", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1437,7 +1440,8 @@ async def test_buffer_multiple_tool_hints_flushed_on_final_answer() -> None:
                     "chat_id": "wx-user",
                     "content": hint,
                     "media": [],
-                    "metadata": {"_progress": True, "_tool_hint": True},
+                    "event": ProgressEvent(content=hint, tool_hint=True),
+                    "metadata": {},
                 },
             )()
         )
@@ -1482,7 +1486,8 @@ async def test_thought_progress_flushes_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "search 'foo'",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="search 'foo'", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1497,7 +1502,8 @@ async def test_thought_progress_flushes_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "Let me think...",
                 "media": [],
-                "metadata": {"_progress": True},
+                "event": ProgressEvent(content="Let me think..."),
+                "metadata": {},
             },
         )()
     )
@@ -1547,7 +1553,8 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "search 'foo'",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="search 'foo'", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1561,7 +1568,8 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "Thinking step 1...",
                 "media": [],
-                "metadata": {"_progress": True, "_reasoning_delta": True},
+                "event": ProgressEvent(content="Thinking step 1...", reasoning_delta=True),
+                "metadata": {},
             },
         )()
     )
@@ -1610,7 +1618,8 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "search 'foo'",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="search 'foo'", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1624,7 +1633,8 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_events": [{"phase": "end"}]},
+                "event": ProgressEvent(tool_events=[{"phase": "end"}]),
+                "metadata": {},
             },
         )()
     )
@@ -1671,7 +1681,8 @@ async def test_buffer_flush_refreshes_context_token() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1712,7 +1723,8 @@ async def test_buffer_flush_failure_does_not_block_final_answer() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
@@ -1753,15 +1765,54 @@ async def test_buffer_flushed_on_stream_end() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )
 
-    await channel.send_delta("wx-user", "", {"_stream_end": True})
+    await channel.send_delta("wx-user", "", stream_end=True)
 
     channel._send_text.assert_awaited_once_with("wx-user", "hint", "ctx-1")
     assert "wx-user" not in channel._pending_tool_hints
+
+
+@pytest.mark.asyncio
+async def test_stream_end_flushes_buffered_answer() -> None:
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._context_token_at["wx-user"] = time.time()
+    channel._send_text = AsyncMock()
+
+    await channel.send_delta("wx-user", "hello ", {"_stream_delta": True})
+    await channel.send_delta("wx-user", "world", {"_stream_end": True})
+
+    channel._send_text.assert_awaited_once_with("wx-user", "hello world", "ctx-1")
+    assert "wx-user" not in channel._stream_buffers
+
+
+@pytest.mark.asyncio
+async def test_stream_end_send_failure_keeps_buffer_for_retry() -> None:
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._context_token_at["wx-user"] = time.time()
+    channel._send_text = AsyncMock(side_effect=RuntimeError("temporary send failure"))
+
+    await channel.send_delta("wx-user", "hello ", {"_stream_delta": True})
+    with pytest.raises(RuntimeError):
+        await channel.send_delta("wx-user", "world", {"_stream_end": True})
+
+    assert channel._stream_buffers["wx-user"] == ["hello "]
+
+    channel._send_text = AsyncMock()
+    await channel.send_delta("wx-user", "world", {"_stream_end": True})
+
+    channel._send_text.assert_awaited_once_with("wx-user", "hello world", "ctx-1")
+    assert "wx-user" not in channel._stream_buffers
 
 
 @pytest.mark.asyncio
@@ -1788,7 +1839,8 @@ async def test_send_tool_hints_false_drops_tool_hints() -> None:
                 "chat_id": "wx-user",
                 "content": "hint",
                 "media": [],
-                "metadata": {"_progress": True, "_tool_hint": True},
+                "event": ProgressEvent(content="hint", tool_hint=True),
+                "metadata": {},
             },
         )()
     )

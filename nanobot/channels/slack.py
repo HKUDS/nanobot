@@ -14,6 +14,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -164,7 +165,7 @@ class SlackChannel(BaseChannel):
             # only makes sense within the originating conversation.
             thread_ts_param = thread_ts if thread_ts and target_chat_id == origin_chat_id else None
 
-            is_progress = (msg.metadata or {}).get("_progress", False)
+            is_progress = isinstance(msg.event, ProgressEvent)
             if is_progress and not msg.content:
                 pass  # skip empty progress messages (e.g. tool-event-only updates)
             elif msg.content or not (msg.media or []):
@@ -190,7 +191,7 @@ class SlackChannel(BaseChannel):
                     self.logger.exception("Failed to upload file {}", media_path)
 
             # Update reaction emoji when the final (non-progress) response is sent
-            if not (msg.metadata or {}).get("_progress"):
+            if not is_progress:
                 event = slack_meta.get("event", {})
                 await self._update_react_emoji(origin_chat_id, event.get("ts"))
 

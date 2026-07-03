@@ -529,6 +529,9 @@ class StreamingFileEditTracker:
         """Keep final start/end events keyed to any earlier streamed placeholder."""
         used_canonicals: set[str] = set()
         for tool_call in final_tool_calls:
+            name = getattr(tool_call, "name", None)
+            if not is_file_edit_tool(name):
+                continue
             canonical = self.canonical_call_id_for(tool_call)
             if canonical and canonical not in used_canonicals:
                 try:

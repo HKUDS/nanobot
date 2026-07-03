@@ -23,6 +23,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -218,7 +219,7 @@ class EmailChannel(BaseChannel):
             return
 
         # Skip progress messages to prevent sending an empty email after each tool call
-        if (msg.metadata or {}).get("_progress"):
+        if isinstance(msg.event, ProgressEvent):
             self.logger.debug("Skip progress message to {}", msg.chat_id)
             return
 

@@ -115,6 +115,24 @@ def test_fable_omits_temperature_none() -> None:
     assert "temperature" not in kw
 
 
+def test_sonnet_5_omits_temperature_adaptive() -> None:
+    kw = _build(_make_provider("claude-sonnet-5"), "adaptive")
+    assert "temperature" not in kw
+    assert kw["thinking"] == {"type": "adaptive"}
+
+
+def test_sonnet_5_omits_temperature_enabled() -> None:
+    kw = _build(_make_provider("claude-sonnet-5"), "high", max_tokens=4096)
+    assert "temperature" not in kw
+    assert kw["thinking"]["type"] == "enabled"
+
+
+def test_sonnet_5_omits_temperature_none() -> None:
+    kw = _build(_make_provider("anthropic/claude-sonnet-5"), None)
+    assert "temperature" not in kw
+    assert "thinking" not in kw
+
+
 def test_ordinary_model_sends_temperature() -> None:
     kw = _build(_make_provider("claude-sonnet-4-6"), None)
     assert kw["temperature"] == 0.7

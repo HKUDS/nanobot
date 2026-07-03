@@ -51,7 +51,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 |---|---|---|
 | Open the bundled browser UI | [`webui.md`](./webui.md) | WebUI on port `8765`, chat workspace, Apps, Skills, Automations, and settings |
 | Connect Telegram, Discord, WeChat, Slack, and other apps | [`chat-apps.md`](./chat-apps.md) | A gateway-backed chat channel with access control |
-| Use slash commands and periodic tasks | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, heartbeat tasks, and chat-side controls |
+| Use slash commands and automations | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, local triggers, heartbeat tasks, and chat-side controls |
 | Generate images | [`image-generation.md`](./image-generation.md) | Image provider config, WebUI image mode, and artifact behavior |
 | Run several isolated bots | [`multiple-instances.md`](./multiple-instances.md) | Separate configs, workspaces, ports, and sessions |
 | Deploy outside a terminal | [`deployment.md`](./deployment.md) | Docker, systemd user services, and macOS LaunchAgent setup |

@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
@@ -198,7 +198,7 @@ class MessageTool(Tool, ContextAware):
                 not isinstance(row, list) or any(not isinstance(label, str) for label in row)
                 for row in buttons
             ):
-                return "Error: buttons must be a list of list of strings"
+                return ToolResult.error("Error: buttons must be a list of list of strings")
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
         channel = channel or default_channel
@@ -210,7 +210,7 @@ class MessageTool(Tool, ContextAware):
             and str(explicit_chat_id).strip() != ""
             and str(explicit_chat_id).strip() != str(default_chat_id).strip()
         ):
-            return (
+            return ToolResult.error(
                 "Error: chat_id does not match the active WebSocket conversation. "
                 "Omit chat_id (and usually channel) so delivery uses the current "
                 "conversation id from context — WebSocket client_id strings "
@@ -229,16 +229,16 @@ class MessageTool(Tool, ContextAware):
             message_id = None
 
         if not channel or not chat_id:
-            return "Error: No target channel/chat specified"
+            return ToolResult.error("Error: No target channel/chat specified")
 
         if not self._send_callback:
-            return "Error: Message sending not configured"
+            return ToolResult.error("Error: Message sending not configured")
 
         if media:
             try:
                 media = self._resolve_media(media)
             except (OSError, PermissionError, ValueError) as e:
-                return f"Error: media path is not allowed: {str(e)}"
+                return ToolResult.error(f"Error: media path is not allowed: {str(e)}")
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id:
@@ -270,4 +270,4 @@ class MessageTool(Tool, ContextAware):
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
             return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
-            return f"Error sending message: {str(e)}"
+            return ToolResult.error(f"Error sending message: {str(e)}")

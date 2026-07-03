@@ -10,7 +10,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 
 
@@ -29,23 +30,19 @@ def build_bus_progress_callback(
         reasoning: bool = False,
         reasoning_end: bool = False,
     ) -> None:
-        meta = dict(msg.metadata or {})
-        meta["_progress"] = True
-        meta["_tool_hint"] = tool_hint
-        if reasoning:
-            meta["_reasoning_delta"] = True
-        if reasoning_end:
-            meta["_reasoning_end"] = True
-        if tool_events:
-            meta["_tool_events"] = tool_events
-        if file_edit_events:
-            meta["_file_edit_events"] = file_edit_events
         await bus.publish_outbound(
-            OutboundMessage(
+            outbound_message_for_event(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=content,
-                metadata=meta,
+                event=ProgressEvent(
+                    content=content,
+                    tool_hint=tool_hint,
+                    reasoning_delta=reasoning,
+                    reasoning_end=reasoning_end,
+                    tool_events=tool_events,
+                    file_edit_events=file_edit_events,
+                ),
+                metadata=msg.metadata,
             )
         )
 

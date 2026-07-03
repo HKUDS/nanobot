@@ -58,7 +58,7 @@ class AnthropicProvider(LLMProvider):
         self,
         api_key: str | None = None,
         api_base: str | None = None,
-        default_model: str = "claude-sonnet-4-20250514",
+        default_model: str = "claude-sonnet-4-6",
         extra_headers: dict[str, str] | None = None,
     ):
         super().__init__(api_key, api_base)
@@ -545,10 +545,12 @@ class AnthropicProvider(LLMProvider):
         max_tokens = max(1, max_tokens)
         thinking_enabled = bool(reasoning_effort) and reasoning_effort.lower() != "none"
 
-        # Several Anthropic models (opus-4-7, opus-4-8, fable) deprecated the
+        # Several Anthropic models (opus-4-7, opus-4-8, sonnet-5, fable) deprecated the
         # `temperature` parameter — the API returns 400 if it is present.
         _model_lower = model_name.lower()
-        omit_temperature = any(m in _model_lower for m in ("opus-4-7", "opus-4-8", "fable"))
+        omit_temperature = any(
+            m in _model_lower for m in ("opus-4-7", "opus-4-8", "sonnet-5", "fable")
+        )
 
         kwargs: dict[str, Any] = {
             "model": model_name,

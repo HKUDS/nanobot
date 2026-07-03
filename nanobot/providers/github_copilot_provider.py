@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import webbrowser
 from collections.abc import Awaitable, Callable
@@ -27,6 +28,12 @@ EDITOR_VERSION = "vscode/1.99.0"
 EDITOR_PLUGIN_VERSION = "copilot-chat/0.26.0"
 _EXPIRY_SKEW_SECONDS = 60
 _LONG_LIVED_TOKEN_SECONDS = 315360000
+
+
+def _resolve(env_var: str, default: str) -> str:
+    """Allow GitHub Enterprise / Copilot for Business deployments to override defaults via env."""
+    value = os.environ.get(env_var)
+    return value.strip() if value and value.strip() else default
 
 
 def get_storage() -> FileTokenStorage:
@@ -68,11 +75,16 @@ def login_github_copilot(
     printer = print_fn or print
     timeout = httpx.Timeout(20.0, connect=20.0)
 
+    client_id = _resolve("NANOBOT_GITHUB_COPILOT_CLIENT_ID", GITHUB_COPILOT_CLIENT_ID)
+    device_code_url = _resolve("NANOBOT_GITHUB_DEVICE_CODE_URL", DEFAULT_GITHUB_DEVICE_CODE_URL)
+    access_token_url = _resolve("NANOBOT_GITHUB_ACCESS_TOKEN_URL", DEFAULT_GITHUB_ACCESS_TOKEN_URL)
+    user_url = _resolve("NANOBOT_GITHUB_USER_URL", DEFAULT_GITHUB_USER_URL)
+
     with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=True) as client:
         response = client.post(
-            DEFAULT_GITHUB_DEVICE_CODE_URL,
+            device_code_url,
             headers={"Accept": "application/json", "User-Agent": USER_AGENT},
-            data={"client_id": GITHUB_COPILOT_CLIENT_ID, "scope": GITHUB_COPILOT_SCOPE},
+            data={"client_id": client_id, "scope": GITHUB_COPILOT_SCOPE},
         )
         response.raise_for_status()
         payload = response.json()
@@ -96,10 +108,10 @@ def login_github_copilot(
         token_expires_in = _LONG_LIVED_TOKEN_SECONDS
         while time.time() < deadline:
             poll = client.post(
-                DEFAULT_GITHUB_ACCESS_TOKEN_URL,
+                access_token_url,
                 headers={"Accept": "application/json", "User-Agent": USER_AGENT},
                 data={
-                    "client_id": GITHUB_COPILOT_CLIENT_ID,
+                    "client_id": client_id,
                     "device_code": device_code,
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 },
@@ -132,7 +144,7 @@ def login_github_copilot(
             raise RuntimeError("GitHub device flow timed out.")
 
         user = client.get(
-            DEFAULT_GITHUB_USER_URL,
+            user_url,
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Accept": "application/vnd.github+json",
@@ -164,7 +176,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         self._copilot_expires_at: float = 0.0
         super().__init__(
             api_key="no-key",
-            api_base=DEFAULT_COPILOT_BASE_URL,
+            api_base=_resolve("NANOBOT_COPILOT_BASE_URL", DEFAULT_COPILOT_BASE_URL),
             default_model=default_model,
             extra_headers={
                 "Editor-Version": EDITOR_VERSION,
@@ -186,7 +198,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         timeout = httpx.Timeout(20.0, connect=20.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=True) as client:
             response = await client.get(
-                DEFAULT_COPILOT_TOKEN_URL,
+                _resolve("NANOBOT_COPILOT_TOKEN_URL", DEFAULT_COPILOT_TOKEN_URL),
                 headers=_copilot_headers(github_token.access),
             )
             response.raise_for_status()

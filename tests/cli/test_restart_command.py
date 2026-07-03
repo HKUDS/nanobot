@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -44,7 +45,8 @@ class TestRestartCommand:
             RESTART_STARTED_AT_ENV,
         )
 
-        loop, bus = _make_loop()
+        loop, _bus = _make_loop()
+        loop.restart_mode = "exec"
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
@@ -77,9 +79,74 @@ class TestRestartCommand:
             mock_execv.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_restart_windows_auto_spawns_and_exits(self):
+        from nanobot.command.builtin import cmd_restart
+        from nanobot.command.router import CommandContext
+
+        loop, _bus = _make_loop()
+        msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
+
+        async def _fast_sleep(_delay: float) -> None:
+            return None
+
+        scheduled: list[asyncio.Task] = []
+        fake_asyncio = SimpleNamespace(
+            sleep=_fast_sleep,
+            create_task=lambda coro: scheduled.append(asyncio.create_task(coro)) or scheduled[-1],
+        )
+
+        with patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
+             patch("nanobot.command.builtin.sys.platform", "win32"), \
+             patch("nanobot.command.builtin.subprocess.CREATE_NEW_PROCESS_GROUP", 512, create=True), \
+             patch("nanobot.command.builtin.subprocess.Popen") as mock_popen, \
+             patch("nanobot.command.builtin.os._exit") as mock_exit, \
+             patch("nanobot.command.builtin.os.execv") as mock_execv:
+            await cmd_restart(ctx)
+            await scheduled[0]
+
+        mock_popen.assert_called_once_with(
+            [sys.executable, "-m", "nanobot"] + sys.argv[1:],
+            creationflags=512,
+        )
+        mock_exit.assert_called_once_with(0)
+        mock_execv.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_restart_exit_mode_does_not_spawn(self):
+        from nanobot.command.builtin import cmd_restart
+        from nanobot.command.router import CommandContext
+
+        loop, _bus = _make_loop()
+        loop.restart_mode = "exit"
+        msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
+
+        async def _fast_sleep(_delay: float) -> None:
+            return None
+
+        scheduled: list[asyncio.Task] = []
+        fake_asyncio = SimpleNamespace(
+            sleep=_fast_sleep,
+            create_task=lambda coro: scheduled.append(asyncio.create_task(coro)) or scheduled[-1],
+        )
+
+        with patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
+             patch("nanobot.command.builtin.subprocess.Popen") as mock_popen, \
+             patch("nanobot.command.builtin.os._exit") as mock_exit, \
+             patch("nanobot.command.builtin.os.execv") as mock_execv:
+            await cmd_restart(ctx)
+            await scheduled[0]
+
+        mock_exit.assert_called_once_with(0)
+        mock_popen.assert_not_called()
+        mock_execv.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_restart_intercepted_in_run_loop(self):
         """Verify /restart is handled at the run-loop level, not inside _dispatch."""
         loop, bus = _make_loop()
+        loop.restart_mode = "exec"
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
         async def _fast_sleep(_delay: float) -> None:

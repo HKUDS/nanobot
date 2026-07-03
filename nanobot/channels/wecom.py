@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -497,7 +498,7 @@ class WecomChannel(BaseChannel):
 
         try:
             content = (msg.content or "").strip()
-            is_progress = bool(msg.metadata.get("_progress"))
+            is_progress = isinstance(msg.event, ProgressEvent)
 
             # Get the stored frame for this chat
             frame = self._chat_frames.get(msg.chat_id)

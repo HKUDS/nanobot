@@ -1,6 +1,7 @@
 import type { UIMessage } from "@/lib/types";
 
 export interface PromptAnchor {
+  answerPreview: string;
   id: string;
   label: string;
   preview: string;
@@ -10,9 +11,10 @@ export interface PromptAnchor {
 
 export function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
   let index = 0;
-  return messages.flatMap((message) => {
+  return messages.flatMap((message, messageIndex) => {
     if (message.role !== "user") return [];
     const anchor: PromptAnchor = {
+      answerPreview: nextAssistantPreview(messages, messageIndex),
       id: message.id,
       label: promptLabel(message.content, index),
       preview: promptPreview(message.content, index),
@@ -27,13 +29,34 @@ export function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
 export function promptLabel(content: string, index: number): string {
   const text = content.replace(/\s+/g, " ").trim();
   if (!text) return `Prompt ${index + 1}`;
-  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+  return truncatePreview(text, 80);
 }
 
 export function promptPreview(content: string, index: number): string {
-  const text = content.replace(/\n{3,}/g, "\n\n").trim();
+  const text = compactPreview(content);
   if (!text) return `Prompt ${index + 1}`;
-  return text.length > 320 ? `${text.slice(0, 317)}...` : text;
+  return truncatePreview(text, 320);
+}
+
+function nextAssistantPreview(messages: UIMessage[], promptIndex: number): string {
+  for (let index = promptIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "user") return "";
+    if (message.role !== "assistant") continue;
+
+    const preview = truncatePreview(compactPreview(message.content), 240);
+    if (preview) return preview;
+  }
+
+  return "";
+}
+
+function compactPreview(content: string): string {
+  return content.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function truncatePreview(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
 export function jumpToPrompt(scrollEl: HTMLElement | null, promptId: string | undefined): void {

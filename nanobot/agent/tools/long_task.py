@@ -20,7 +20,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
@@ -150,12 +150,12 @@ class LongTaskTool(Tool, _GoalToolsMixin):
     async def execute(self, goal: str, ui_summary: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
-            return (
+            return ToolResult.error(
                 "Error: long_task requires an active chat session (missing routing context)."
             )
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if isinstance(prior, dict) and prior.get("status") == "active":
-            return (
+            return ToolResult.error(
                 "Error: a sustained goal is already active. "
                 "Use complete_goal when finished, or ask the user before replacing it."
             )
@@ -230,7 +230,7 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
     async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
-            return "Error: complete_goal requires an active chat session."
+            return ToolResult.error("Error: complete_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active goal to complete."

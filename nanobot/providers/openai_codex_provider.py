@@ -33,9 +33,14 @@ class OpenAICodexProvider(LLMProvider):
 
     supports_progress_deltas = True
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.1-codex",
+        proxy: str | None = None,
+    ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
+        self.proxy = proxy or None
 
     async def _call_codex(
         self,
@@ -51,9 +56,6 @@ class OpenAICodexProvider(LLMProvider):
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         system_prompt, input_items = convert_messages(messages)
-
-        token = await asyncio.to_thread(get_codex_token)
-        headers = _build_headers(token.account_id, token.access)
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -74,9 +76,13 @@ class OpenAICodexProvider(LLMProvider):
             body["tools"] = convert_tools(tools)
 
         try:
+            token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
+            headers = _build_headers(token.account_id, token.access)
+
             try:
                 content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=True,
+                    proxy=self.proxy,
                     on_content_delta=on_content_delta,
                     on_thinking_delta=on_thinking_delta,
                     on_tool_call_delta=on_tool_call_delta,
@@ -87,6 +93,7 @@ class OpenAICodexProvider(LLMProvider):
                 logger.warning("SSL verification failed for Codex API; retrying with verify=False")
                 content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=False,
+                    proxy=self.proxy,
                     on_content_delta=on_content_delta,
                     on_thinking_delta=on_thinking_delta,
                     on_tool_call_delta=on_tool_call_delta,
@@ -199,12 +206,17 @@ async def _request_codex(
     headers: dict[str, str],
     body: dict[str, Any],
     verify: bool,
+    proxy: str | None = None,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
     idle_timeout_s = resolve_stream_idle_timeout_s()
-    async with httpx.AsyncClient(timeout=idle_timeout_s, verify=verify) as client:
+    client_kwargs: dict[str, Any] = {"timeout": idle_timeout_s, "verify": verify}
+    if proxy:
+        client_kwargs["proxy"] = proxy
+        client_kwargs["trust_env"] = False
+    async with httpx.AsyncClient(**client_kwargs) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()

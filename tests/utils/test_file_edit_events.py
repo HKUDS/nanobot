@@ -412,6 +412,41 @@ def test_streaming_tracker_applies_canonical_call_id_to_final_tool(tmp_path: Pat
     asyncio.run(run())
 
 
+def test_streaming_tracker_does_not_remap_non_file_edit_final_tool(tmp_path: Path) -> None:
+    events: list[dict] = []
+
+    async def emit(batch: list[dict]) -> None:
+        events.extend(batch)
+
+    async def run() -> None:
+        tracker = StreamingFileEditTracker(workspace=tmp_path, tools={}, emit=emit)
+        await tracker.update({
+            "index": 0,
+            "name": "read_file",
+            "arguments_delta": '{"path":"matched.md"}',
+        })
+        await tracker.update({
+            "index": 1,
+            "name": "write_file",
+            "arguments_delta": '{"path":"matched.md","content":"one\\n',
+        })
+        read_final = SimpleNamespace(
+            id="read-unique",
+            name="read_file",
+            arguments={"path": "matched.md"},
+        )
+        write_final = SimpleNamespace(
+            id="write-final",
+            name="write_file",
+            arguments={"path": "matched.md", "content": "one\n"},
+        )
+        tracker.apply_final_call_ids([read_final, write_final])
+        assert read_final.id == "read-unique"
+        assert write_final.id == "idx:1"
+
+    asyncio.run(run())
+
+
 def test_streaming_tracker_does_not_restore_duplicate_canonical_ids(tmp_path: Path) -> None:
     events: list[dict] = []
 

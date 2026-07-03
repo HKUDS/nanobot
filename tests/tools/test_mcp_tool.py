@@ -19,7 +19,7 @@ from nanobot.agent.tools.mcp import (
     _sanitize_name,
     connect_mcp_servers,
 )
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.config.schema import MCPServerConfig
 
 
@@ -302,6 +302,38 @@ async def test_execute_returns_text_blocks() -> None:
     result = await wrapper.execute(value=1)
 
     assert result == "hello\n42"
+
+
+@pytest.mark.asyncio
+async def test_execute_wraps_mcp_is_error_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent("Error: server-side MCP failure")],
+            isError=True,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "Error: server-side MCP failure"
+    assert is_tool_error_result(wrapper.name, result)
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_success_text_that_starts_with_error() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent("Error: generated report successfully")],
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "Error: generated report successfully"
+    assert not is_tool_error_result(wrapper.name, result)
 
 
 # Smallest valid 1x1 PNG, base64 without the data: prefix.
@@ -1240,3 +1272,18 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
         await stack.aclose()
 
     assert registry.tool_names == ["mcp_test_My_Tool"]
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://user:secret@host.example/sse", "https://host.example/..."),
+        ("https://host.example:8443/mcp?token=abc#frag", "https://host.example:8443/..."),
+        ("https://user:secret@[::1]:8443/sse?token=abc", "https://[::1]:8443/..."),
+        ("https://host.example/sse", "https://host.example/..."),
+        ("https://host.example", "https://host.example"),
+        ("https://host.example/", "https://host.example/"),
+    ],
+)
+def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
+    assert mcp_mod._redact_url(url) == expected

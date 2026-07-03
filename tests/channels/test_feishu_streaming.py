@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig, _FeishuStreamBuf
 
@@ -272,7 +273,7 @@ class TestSendDelta:
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
         ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.cardkit.v1.card_element.content.assert_called_once()
@@ -289,7 +290,7 @@ class TestSendDelta:
         )
         ch._client.im.v1.message.create.return_value = _mock_send_response("om_fb")
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.cardkit.v1.card_element.content.assert_not_called()
@@ -306,7 +307,8 @@ class TestSendDelta:
         await ch.send_delta(
             "oc_chat1",
             "",
-            metadata={"_stream_end": True, "message_id": "om_001", "chat_type": "group"},
+            metadata={"message_id": "om_001", "chat_type": "group"},
+            stream_end=True,
         )
 
         ch._client.im.v1.message.create.assert_called_once()
@@ -326,11 +328,11 @@ class TestSendDelta:
             "oc_chat1",
             "",
             metadata={
-                "_stream_end": True,
                 "message_id": "om_001",
                 "chat_type": "group",
                 "thread_id": "ot_001",
             },
+            stream_end=True,
         )
 
         ch._client.im.v1.message.reply.assert_called_once()
@@ -351,7 +353,8 @@ class TestSendDelta:
         await ch.send_delta(
             "oc_chat1",
             "",
-            metadata={"_stream_end": True, "message_id": "om_001", "chat_type": "group"},
+            metadata={"message_id": "om_001", "chat_type": "group"},
+            stream_end=True,
         )
 
         ch._client.im.v1.message.reply.assert_called_once()
@@ -369,7 +372,7 @@ class TestSendDelta:
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response(success=False)
         ch._client.im.v1.message.create.return_value = _mock_send_response("om_fb")
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         assert ch._client.cardkit.v1.card.settings.call_count == 2
@@ -388,7 +391,7 @@ class TestSendDelta:
         ]
         ch._client.cardkit.v1.card.settings.return_value = _mock_content_response(True)
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         assert ch._client.cardkit.v1.card_element.content.call_count == 2
@@ -398,7 +401,7 @@ class TestSendDelta:
     @pytest.mark.asyncio
     async def test_stream_end_without_buf_is_noop(self):
         ch = _make_channel()
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
         ch._client.cardkit.v1.card_element.content.assert_not_called()
 
     @pytest.mark.asyncio
@@ -446,7 +449,7 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='web_fetch("https://example.com")',
-            metadata={"_tool_hint": True},
+            event=ProgressEvent(content='web_fetch("https://example.com")', tool_hint=True),
         )
         await ch.send(msg)
 
@@ -482,7 +485,7 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
-            metadata={"_tool_hint": True},
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
         )
         await ch.send(msg)
 
@@ -497,7 +500,8 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
-            metadata={"_tool_hint": True, "message_id": "om_001", "chat_type": "group"},
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
+            metadata={"message_id": "om_001", "chat_type": "group"},
         )
         await ch.send(msg)
 
@@ -514,8 +518,8 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
             metadata={
-                "_tool_hint": True,
                 "message_id": "om_001",
                 "chat_type": "group",
                 "thread_id": "ot_001",
@@ -538,7 +542,8 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
-            metadata={"_tool_hint": True, "message_id": "om_001", "chat_type": "group"},
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
+            metadata={"message_id": "om_001", "chat_type": "group"},
         )
         await ch.send(msg)
 
@@ -558,13 +563,15 @@ class TestToolHintInlineStreaming:
 
         msg1 = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
-            content='$ cd /project', metadata={"_tool_hint": True},
+            content='$ cd /project',
+            event=ProgressEvent(content='$ cd /project', tool_hint=True),
         )
         await ch.send(msg1)
 
         msg2 = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
-            content='$ git status', metadata={"_tool_hint": True},
+            content='$ git status',
+            event=ProgressEvent(content='$ git status', tool_hint=True),
         )
         await ch.send(msg2)
 
@@ -577,7 +584,7 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_final_stream_end(self):
-        """When final _stream_end closes the card, tool hint is kept in the final text."""
+        """When stream end closes the card, tool hint is kept in the final text."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Final content\n\n🔧 web_fetch(\"url\")\n\n",
@@ -586,7 +593,7 @@ class TestToolHintInlineStreaming:
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
         ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         update_call = ch._client.cardkit.v1.card_element.content.call_args[0][0]
@@ -603,7 +610,8 @@ class TestToolHintInlineStreaming:
         for content in ("", "   ", "\t\n"):
             msg = OutboundMessage(
                 channel="feishu", chat_id="oc_chat1",
-                content=content, metadata={"_tool_hint": True},
+                content=content,
+                event=ProgressEvent(content=content, tool_hint=True),
             )
             await ch.send(msg)
 

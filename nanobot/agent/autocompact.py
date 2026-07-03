@@ -34,6 +34,26 @@ class AutoCompact:
             ts = datetime.fromisoformat(ts)
         return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
 
+    def _has_compactable_idle_tail(self, key: str) -> bool:
+        session = self.sessions.get_or_create(key)
+        tail = list(session.messages[session.last_consolidated:])
+        if not tail:
+            return False
+        probe = Session(
+            key=session.key,
+            messages=tail,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            metadata={},
+            last_consolidated=0,
+        )
+        result = probe.retain_recent_legal_suffix(
+            self._RECENT_SUFFIX_MESSAGES,
+            extend_to_user=True,
+        )
+        messages_to_remove = result.dropped[result.already_consolidated_count:]
+        return bool(messages_to_remove)
+
     @staticmethod
     def _format_summary(text: str, last_active: datetime) -> str:
         return f"Previous conversation summary (last active {last_active.isoformat()}):\n{text}"
@@ -52,7 +72,8 @@ class AutoCompact:
                 continue
             if key in active_session_keys:
                 continue
-            if self._is_expired(info.get("updated_at"), now):
+            updated_at = info.get("updated_at")
+            if self._is_expired(updated_at, now) and self._has_compactable_idle_tail(key):
                 self._archiving.add(key)
                 schedule_background(self._archive(key))
 

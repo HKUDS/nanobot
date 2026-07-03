@@ -29,10 +29,6 @@ _GOAL_CONTINUATION_SENDER = "system:continuation"
 _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
 _STRIPPED_INBOUND_META_KEYS = {
-    "_stream_id",
-    "_stream_delta",
-    "_stream_end",
-    "_resuming",
     INTERNAL_CONTINUATION_PENDING_META,
 }
 

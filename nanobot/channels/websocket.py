@@ -19,6 +19,16 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
+from nanobot.bus.outbound_events import (
+    GoalStateSyncEvent,
+    GoalStatusEvent,
+    ProgressEvent,
+    RuntimeModelUpdatedEvent,
+    SessionUpdatedEvent,
+    TurnEndEvent,
+    outbound_event_from_message,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -148,16 +158,13 @@ def publish_runtime_model_update(
     model_preset: str | None,
 ) -> None:
     """Enqueue a runtime model snapshot for websocket subscribers (fan-out in-channel)."""
-    bus.outbound.put_nowait(OutboundMessage(
-        channel="websocket",
-        chat_id="*",
-        content="",
-        metadata={
-            "_runtime_model_updated": True,
-            "model": model,
-            "model_preset": model_preset,
-        },
-    ))
+    bus.outbound.put_nowait(
+        outbound_message_for_event(
+            channel="websocket",
+            chat_id="*",
+            event=RuntimeModelUpdatedEvent(model=model, model_preset=model_preset),
+        )
+    )
 
 
 def _parse_inbound_payload(raw: str) -> str | None:
@@ -851,70 +858,63 @@ class WebSocketChannel(BaseChannel):
             raise
 
     async def send(self, msg: OutboundMessage) -> None:
-        if msg.metadata.get("_runtime_model_updated"):
+        event = outbound_event_from_message(msg)
+        progress_event = event if isinstance(event, ProgressEvent) else None
+        if isinstance(event, RuntimeModelUpdatedEvent):
             await self.send_runtime_model_updated(
-                model_name=msg.metadata.get("model"),
-                model_preset=msg.metadata.get("model_preset"),
+                model_name=event.model,
+                model_preset=event.model_preset,
             )
             return
 
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
         conns = list(self._subs.get(msg.chat_id, ()))
         if not conns:
-            if (
-                msg.metadata.get("_progress")
-                or msg.metadata.get("_file_edit_events")
-                or msg.metadata.get("_turn_end")
-                or msg.metadata.get("_session_updated")
-                or msg.metadata.get("_goal_status")
-                or msg.metadata.get("_goal_state_sync")
+            if isinstance(
+                event,
+                ProgressEvent
+                | TurnEndEvent
+                | SessionUpdatedEvent
+                | GoalStatusEvent
+                | GoalStateSyncEvent,
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
-        if msg.metadata.get("_goal_state_sync"):
+        if isinstance(event, GoalStateSyncEvent):
             if conns:
-                blob = msg.metadata.get("goal_state")
-                await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
+                await self.send_goal_state(msg.chat_id, event.goal_state or {"active": False})
             return
-        if msg.metadata.get("_goal_status"):
+        if isinstance(event, GoalStatusEvent):
             if conns:
-                status = msg.metadata.get("goal_status")
-                if status in ("running", "idle"):
-                    started_raw = msg.metadata.get("started_at", msg.metadata.get("goal_started_at"))
+                if event.status in ("running", "idle"):
                     await self.send_goal_status(
                         msg.chat_id,
-                        status,
-                        started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
+                        event.status,
+                        started_at=event.started_at,
                     )
             return
         # Signal that the agent has fully finished processing the current turn.
-        if msg.metadata.get("_turn_end"):
-            lat = msg.metadata.get("latency_ms")
-            lat_i = int(lat) if isinstance(lat, (int, float)) else None
-            gs = msg.metadata.get("goal_state")
-            gs_blob = gs if isinstance(gs, dict) else None
+        if isinstance(event, TurnEndEvent):
             await self.send_turn_end(
                 msg.chat_id,
-                latency_ms=lat_i,
-                goal_state=gs_blob,
+                latency_ms=event.latency_ms,
+                goal_state=event.goal_state,
                 metadata=msg.metadata,
             )
             await self.send_session_updated(msg.chat_id, scope="thread")
             return
-        if msg.metadata.get("_session_updated"):
+        if isinstance(event, SessionUpdatedEvent):
             if conns:
-                scope = msg.metadata.get("_session_update_scope")
                 await self.send_session_updated(
                     msg.chat_id,
-                    scope=scope if isinstance(scope, str) else None,
+                    scope=event.scope,
                 )
             return
-        if msg.metadata.get("_file_edit_events"):
-            edits = msg.metadata.get("_file_edit_events")
+        if progress_event and progress_event.file_edit_events:
             await self.send_file_edit_events(
                 msg.chat_id,
-                edits if isinstance(edits, list) else [],
+                progress_event.file_edit_events,
                 msg.metadata,
             )
             return
@@ -939,17 +939,17 @@ class WebSocketChannel(BaseChannel):
         lat = msg.metadata.get("latency_ms")
         if isinstance(lat, (int, float)):
             payload["latency_ms"] = int(lat)
-        if msg.metadata.get("_tool_events"):
-            payload["tool_events"] = msg.metadata["_tool_events"]
+        if progress_event and progress_event.tool_events:
+            payload["tool_events"] = progress_event.tool_events
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
             payload["agent_ui"] = agent_ui
         # Mark intermediate agent breadcrumbs (tool-call hints, generic
         # progress strings) so WS clients can render them as subordinate
         # trace rows rather than conversational replies.
-        if msg.metadata.get("_tool_hint"):
+        if progress_event and progress_event.tool_hint:
             payload["kind"] = "tool_hint"
-        elif msg.metadata.get("_progress"):
+        elif progress_event:
             payload["kind"] = "progress"
         phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
         self._transcripts.prepare_and_append(
@@ -971,6 +971,8 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         delta: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Push one chunk of model reasoning. Mirrors ``send_delta`` shape so
         clients receive a stream that opens, updates in place, and closes —
@@ -986,7 +988,6 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "text": delta,
         }
-        stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
         self._transcripts.prepare_and_append(
@@ -1005,6 +1006,8 @@ class WebSocketChannel(BaseChannel):
         self,
         chat_id: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Close the current reasoning stream segment for in-place renderers."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1013,7 +1016,6 @@ class WebSocketChannel(BaseChannel):
             "event": "reasoning_end",
             "chat_id": chat_id,
         }
-        stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
         self._transcripts.prepare_and_append(
@@ -1057,11 +1059,15 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         delta: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
         meta = metadata or {}
-        stream_key = (chat_id, str(meta.get("_stream_id") or ""))
-        if meta.get("_stream_end"):
+        stream_key = (chat_id, str(stream_id or ""))
+        if stream_end:
             body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
             buffered = self._stream_text_buffers.pop(stream_key, [])
             if delta:
@@ -1077,8 +1083,8 @@ class WebSocketChannel(BaseChannel):
                 "text": delta,
             }
             self._stream_text_buffers.setdefault(stream_key, []).append(delta)
-        if meta.get("_stream_id") is not None:
-            body["stream_id"] = meta["_stream_id"]
+        if stream_id is not None:
+            body["stream_id"] = stream_id
         self._transcripts.prepare_and_append(
             chat_id,
             body,
