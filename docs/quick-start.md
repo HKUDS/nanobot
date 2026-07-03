@@ -288,7 +288,7 @@ Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
 | Understand provider/model matching | [`providers.md`](./providers.md) |
 | Open the bundled browser UI | [`webui.md`](./webui.md) |
-| Connect Telegram, Discord, WeChat, Slack, Mattermost, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
+| Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [`chat-apps.md`](./chat-apps.md) |
 | Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
 | Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
 | Debug a failure | [`troubleshooting.md`](./troubleshooting.md) |
