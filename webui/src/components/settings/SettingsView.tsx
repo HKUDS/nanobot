@@ -265,7 +265,7 @@ const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
-  brandLogos: true,
+  brandLogos: false,
 };
 const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
   { value: "auto", label: "Auto" },
@@ -327,7 +327,7 @@ function readLocalPreferences(): LocalPreferences {
       density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos !== false,
+      brandLogos: parsed.brandLogos === true,
     };
   } catch {
     return DEFAULT_LOCAL_PREFS;
@@ -5095,7 +5095,7 @@ function AppsCatalogSettings({
     cli: cliApps?.installed_count ?? 0,
     mcp: mcpPresets?.installed_count ?? 0,
     nanobot: nanobotFeatures?.enabled_count ?? 0,
-    defaultValue: "{{nanobot}} Nanobot · {{cli}} CLI · {{mcp}} MCP",
+    defaultValue: "{{nanobot}} Nanobot enabled · {{cli}} CLI installed · {{mcp}} MCP connected",
   });
 
   return (
@@ -5193,7 +5193,7 @@ function AppsCatalogSettings({
 
       <section>
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>{tx("settings.apps.featured", "Featured")}</SettingsSectionTitle>
+          <SettingsSectionTitle>{tx("settings.apps.featured", "Catalog")}</SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
             {items.length}
           </span>
@@ -5274,6 +5274,14 @@ function NanobotFeatureCatalogRow({
   const disableBusy = actionKey === `disable:${feature.name}`;
   const description = nanobotFeatureStatusLabel(feature, tx);
   const missingSupport = feature.enabled && !feature.installed;
+  const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
+  const enabledLabel =
+    feature.type === "channel" && feature.name === "websocket"
+      ? tx("settings.nanobotFeatures.websocketRequired", "Required for WebUI")
+      : tx("settings.nanobotFeatures.enabled", "Enabled");
+  const enableLabel = feature.installed
+    ? tx("settings.nanobotFeatures.enable", "Enable")
+    : installSupportLabel;
 
   return (
     <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
@@ -5296,7 +5304,7 @@ function NanobotFeatureCatalogRow({
       <div className="flex shrink-0 items-center gap-1">
         {missingSupport && feature.install_supported ? (
           <AppsActionButton
-            ariaLabel={tx("settings.nanobotFeatures.missingDependency", "Install required support")}
+            ariaLabel={installSupportLabel}
             busy={enableBusy}
             onClick={() => onAction("enable", feature.name)}
           >
@@ -5313,7 +5321,7 @@ function NanobotFeatureCatalogRow({
           </AppsActionButton>
         ) : feature.enabled ? (
           <AppsActionButton
-            ariaLabel={tx("settings.nanobotFeatures.enabled", "Enabled")}
+            ariaLabel={enabledLabel}
             disabled
             tone="installed"
           >
@@ -5321,7 +5329,7 @@ function NanobotFeatureCatalogRow({
           </AppsActionButton>
         ) : feature.install_supported ? (
           <AppsActionButton
-            ariaLabel={tx("settings.nanobotFeatures.enable", "Enable")}
+            ariaLabel={enableLabel}
             busy={enableBusy}
             onClick={() => onAction("enable", feature.name)}
           >
@@ -5794,8 +5802,11 @@ function nanobotFeatureStatusLabel(
   feature: NanobotFeatureInfo,
   tx: (key: string, fallback: string) => string,
 ): string {
+  if (feature.ready && feature.type === "channel" && feature.name === "websocket") {
+    return tx("settings.nanobotFeatures.websocketRequired", "Required for WebUI");
+  }
   if (feature.ready) return tx("settings.nanobotFeatures.ready", "Ready");
-  if (!feature.installed) return tx("settings.nanobotFeatures.missingDependency", "Install required support");
+  if (!feature.installed) return tx("settings.nanobotFeatures.missingDependency", "Support missing");
   if (feature.type === "channel") return tx("settings.nanobotFeatures.channelDisabled", "Channel is disabled");
   return tx("settings.nanobotFeatures.notEnabled", "Not enabled");
 }

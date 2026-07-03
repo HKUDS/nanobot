@@ -328,7 +328,7 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByText("Matrix")).toBeInTheDocument();
     expect(screen.getByText(/Enabling Nanobot features may install Python packages/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -400,10 +400,10 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView();
 
     expect(await screen.findByText("Matrix")).toBeInTheDocument();
-    expect(screen.getByText("1 Nanobot · 0 CLI · 0 MCP")).toBeInTheDocument();
-    expect(screen.getByText("Install required support")).toBeInTheDocument();
+    expect(screen.getByText("1 Nanobot enabled · 0 CLI installed · 0 MCP connected")).toBeInTheDocument();
+    expect(screen.getByText("Support missing")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Install required support" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -443,8 +443,9 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView();
 
     expect(await screen.findByText("Websocket")).toBeInTheDocument();
+    expect(screen.getByText("Required for WebUI")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enabled" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Required for WebUI" })).toBeDisabled();
   });
 
   it("publishes the latest settings payload to the shell", async () => {
