@@ -132,6 +132,36 @@ def bus() -> MagicMock:
     return b
 
 
+@pytest.mark.asyncio
+async def test_start_extends_http_open_timeout_for_slow_settings_routes(
+    bus,
+    monkeypatch,
+) -> None:
+    import nanobot.channels.websocket as websocket_module
+
+    channel = _ch(bus, port=0)
+    seen: dict[str, Any] = {}
+
+    class Server:
+        def close(self) -> None:
+            pass
+
+        async def wait_closed(self) -> None:
+            pass
+
+    async def fake_serve(*args: Any, **kwargs: Any) -> Server:
+        seen.update(kwargs)
+        assert channel._stop_event is not None
+        channel._stop_event.set()
+        return Server()
+
+    monkeypatch.setattr(websocket_module, "serve", fake_serve)
+
+    await channel.start()
+
+    assert seen["open_timeout"] >= 300
+
+
 @pytest.fixture(autouse=True)
 def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
