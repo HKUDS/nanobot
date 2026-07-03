@@ -84,6 +84,48 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "(empty)" in prompt
 
+    def test_workspace_dream_prompt_overrides_default(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text(
+            "Custom Dream prompt.",
+            encoding="utf-8",
+        )
+        store.append_history("keep this fact")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert prompt.startswith("Custom Dream prompt.")
+        assert "memory consolidation engine" not in prompt
+        assert "## Conversation History" in prompt
+        assert "keep this fact" in prompt
+
+    def test_workspace_dream_prompt_override_is_capped(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("x" * 40_000, encoding="utf-8")
+        store.append_history("keep this fact")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "x" * 40_000 not in prompt
+        assert "... (truncated)" in prompt
+        assert "## Conversation History" in prompt
+        assert "keep this fact" in prompt
+
+    def test_empty_workspace_dream_prompt_uses_default(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("  \n", encoding="utf-8")
+        store.append_history("test")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "memory consolidation engine" in prompt
+
     def test_truncates_long_entries(self, store):
         long_content = "x" * 2000
         store.append_history(long_content)

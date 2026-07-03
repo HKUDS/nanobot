@@ -71,6 +71,7 @@ class MemoryStore:
         self._corruption_logged = False  # rate-limit invalid cursor warning
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
+        self._dream_prompt_oversize_logged = False
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
@@ -489,6 +490,44 @@ class MemoryStore:
     def get_latest_cursor(self) -> int:
         return max(self._next_cursor() - 1, 0)
 
+    @property
+    def dream_prompt_file(self) -> Path:
+        return self.workspace / "prompts" / "dream.md"
+
+    def has_dream_prompt_override(self) -> bool:
+        with suppress(OSError):
+            return self.dream_prompt_file.is_file() and bool(
+                self.dream_prompt_file.read_text(encoding="utf-8").strip()
+            )
+        return False
+
+    @staticmethod
+    def default_dream_prompt() -> str:
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        return render_template(
+            "agent/dream.md",
+            strip=True,
+            skill_creator_path=str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"),
+        )
+
+    def _dream_template(self) -> str:
+        with suppress(OSError):
+            text = self.dream_prompt_file.read_text(encoding="utf-8")
+            if text.strip():
+                text = text.rstrip()
+                if len(text) > _DREAM_PROMPT_MAX_CHARS:
+                    if not self._dream_prompt_oversize_logged:
+                        self._dream_prompt_oversize_logged = True
+                        logger.warning(
+                            "workspace Dream prompt exceeds {} chars ({}); truncating. "
+                            "Further occurrences suppressed.",
+                            _DREAM_PROMPT_MAX_CHARS, len(text),
+                        )
+                    return truncate_text(text, _DREAM_PROMPT_MAX_CHARS)
+                return text
+        return self.default_dream_prompt()
+
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
@@ -499,8 +538,6 @@ class MemoryStore:
         than a stale mental model — eliminating a class of failed/out-of-bounds
         edits that previously produced hallucinated audit records.
         """
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
         if not entries:
@@ -511,10 +548,7 @@ class MemoryStore:
             f"[{e['timestamp']}] {truncate_text(e['content'], 500)}"
             for e in batch
         )
-        skill_creator_path = str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md")
-        template = render_template(
-            "agent/dream.md", strip=True, skill_creator_path=skill_creator_path,
-        )
+        template = self._dream_template()
         files_section = self._render_current_memory_files()
         prompt = (
             f"{template}\n\n{files_section}\n\n"
@@ -694,6 +728,7 @@ class MemoryStore:
 # that catches any new caller that forgot to set its own cap.
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
+_DREAM_PROMPT_MAX_CHARS = 32_000      # workspace-local Dream prompt override
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 

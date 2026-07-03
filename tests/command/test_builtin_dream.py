@@ -5,8 +5,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command.builtin import cmd_dream, cmd_dream_log, cmd_dream_restore
+from nanobot.command.builtin import (
+    build_help_text,
+    builtin_command_palette,
+    cmd_dream,
+    cmd_dream_log,
+    cmd_dream_prompt,
+    cmd_dream_restore,
+)
 from nanobot.command.router import CommandContext
 from nanobot.utils.gitstore import CommitInfo
 
@@ -104,6 +112,12 @@ def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
     return ctx, bus
 
 
+def _make_dream_prompt_ctx(tmp_path, raw: str = "/dream-prompt", args: str = "") -> CommandContext:
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
+    loop = SimpleNamespace(context=SimpleNamespace(memory=MemoryStore(tmp_path)))
+    return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
+
+
 @pytest.mark.asyncio
 async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     ctx, bus = _make_dream_ctx(tmp_path)
@@ -119,6 +133,7 @@ async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     assert "idle auto-compact" in content
     assert "Dream cursor" in content
     assert "agents.defaults.idleCompactAfterMinutes" in content
+    assert "/dream-prompt" in content
 
 
 @pytest.mark.asyncio
@@ -263,6 +278,79 @@ async def test_dream_log_before_first_run_is_clear() -> None:
 
     assert "Dream has not run yet." in out.content
     assert "Run `/dream`" in out.content
+    assert "/dream-prompt" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_log_without_saved_versions_mentions_prompt_command() -> None:
+    git = _FakeGit(initialized=True, commits=[])
+
+    out = await cmd_dream_log(_make_ctx("/dream-log", git))
+
+    assert "Dream memory has no saved versions yet." in out.content
+    assert "/dream-prompt" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_reports_default_prompt(tmp_path) -> None:
+    out = await cmd_dream_prompt(_make_dream_prompt_ctx(tmp_path))
+
+    assert "Dream memory instructions: nanobot default" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert "/dream-prompt init" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_copies_default_prompt(tmp_path) -> None:
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    assert "Created Dream memory instructions" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert "fully replaces nanobot's default Dream guide" in out.content
+    assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_does_not_overwrite_existing_prompt(tmp_path) -> None:
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    prompt_file.parent.mkdir()
+    prompt_file.write_text("custom", encoding="utf-8")
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    assert "already exist" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert prompt_file.read_text(encoding="utf-8") == "custom"
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_recreates_empty_prompt(tmp_path) -> None:
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    prompt_file.parent.mkdir()
+    prompt_file.write_text("  \n", encoding="utf-8")
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    assert "Created Dream memory instructions" in out.content
+    assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
+
+
+def test_dream_prompt_command_in_help_and_palette() -> None:
+    palette = builtin_command_palette()
+
+    assert any(
+        item["command"] == "/dream-prompt" and item["arg_hint"] == "[init]"
+        for item in palette
+    )
+    assert "/dream-prompt [init]" in build_help_text()
 
 
 @pytest.mark.asyncio

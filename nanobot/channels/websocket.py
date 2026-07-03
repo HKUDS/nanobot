@@ -59,6 +59,9 @@ from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
 
+# Plain HTTP WebUI routes also run through websockets.process_request.
+_WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
+
 
 class WebSocketConfig(Base):
     """WebSocket server channel configuration.
@@ -80,7 +83,7 @@ class WebSocketConfig(Base):
       shared filesystem or an HTTP file server to access these files.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8765
     unix_socket_path: str = ""
@@ -482,6 +485,7 @@ class WebSocketChannel(BaseChannel):
                     handler,
                     socket_path,
                     process_request=process_request,
+                    open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                     max_size=self.config.max_message_bytes,
                     ping_interval=self.config.ping_interval_s,
                     ping_timeout=self.config.ping_timeout_s,
@@ -495,6 +499,7 @@ class WebSocketChannel(BaseChannel):
                     self.config.host,
                     self.config.port,
                     process_request=process_request,
+                    open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                     max_size=self.config.max_message_bytes,
                     ping_interval=self.config.ping_interval_s,
                     ping_timeout=self.config.ping_timeout_s,

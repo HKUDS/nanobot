@@ -15,6 +15,8 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-prompt` | Show how Dream is being guided for memory |
+| `/dream-prompt init` | Create an editable Dream memory guide at `prompts/dream.md` |
 | `/skill` | List enabled skills and their descriptions |
 | `/trigger` | Show local trigger usage |
 | `/trigger <name>` | Create a named local trigger for the current chat/session |

@@ -72,7 +72,7 @@ def _load_neonize() -> _NeonizeAPI:
         from neonize.utils.jid import build_jid
     except ImportError as exc:
         raise RuntimeError(
-            'WhatsApp dependencies not installed. Run: pip install "nanobot-ai[whatsapp]"'
+            "WhatsApp dependencies not installed. Run: nanobot plugins enable whatsapp"
         ) from exc
 
     _NEONIZE_API = _NeonizeAPI(

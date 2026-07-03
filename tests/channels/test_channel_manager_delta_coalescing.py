@@ -62,7 +62,8 @@ class MockChannel(BaseChannel):
 
 @pytest.fixture
 def config():
-    return Config()
+    """Create a minimal config for testing."""
+    return Config.model_validate({"channels": {"websocket": {"enabled": False}}})
 
 
 @pytest.fixture

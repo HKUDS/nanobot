@@ -39,7 +39,7 @@ Without parameters, returns a key config overview:
 my(action="check")
 # → max_iterations: 40
 #   context_window_tokens: 200000
-#   model: 'anthropic/claude-sonnet-4-20250514'
+#   model: 'anthropic/claude-sonnet-4-6'
 #   workspace: PosixPath('/tmp/workspace')
 #   provider_retry_mode: 'standard'
 #   max_tool_result_chars: 16000

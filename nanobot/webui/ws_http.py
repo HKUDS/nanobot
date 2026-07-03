@@ -231,7 +231,7 @@ class GatewayHTTPHandler:
             return self._handle_bootstrap(connection, request)
 
         # Settings routes (delegated)
-        response = await self.settings_routes.dispatch(request, got)
+        response = await self.settings_routes.dispatch(connection, request, got)
         if response is not None:
             return response
 
