@@ -58,7 +58,7 @@ class AnthropicProvider(LLMProvider):
         self,
         api_key: str | None = None,
         api_base: str | None = None,
-        default_model: str = "claude-sonnet-4-20250514",
+        default_model: str = "claude-sonnet-4-6",
         extra_headers: dict[str, str] | None = None,
     ):
         super().__init__(api_key, api_base)
