@@ -4445,12 +4445,15 @@ function NanobotFeatureInstallDialog({
   const name = feature?.display_name || feature?.name || "";
   return (
     <Dialog open={Boolean(feature)} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(calc(100vw-2rem),26rem)] rounded-[26px]">
-        <DialogHeader>
-          <DialogTitle>
+      <DialogContent
+        showCloseButton={false}
+        className="w-[min(calc(100vw-2rem),24rem)] gap-0 rounded-[28px] border border-white/70 bg-card/95 p-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.20)] backdrop-blur-xl sm:rounded-[28px]"
+      >
+        <DialogHeader className="items-center space-y-0 text-center">
+          <DialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
             {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="mt-3 max-w-[20rem] text-center text-[14px] leading-6 text-muted-foreground">
             {tx(
               "settings.nanobotFeatures.installConfirmDescription",
               "nanobot will add what {{name}} needs, then turn it on. Continue?",
@@ -4458,13 +4461,13 @@ function NanobotFeatureInstallDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter>
+        <DialogFooter className="mt-7 !grid grid-cols-1 gap-3 space-x-0 sm:grid-cols-2 sm:space-x-0">
           <Button
             type="button"
             variant="ghost"
             onClick={() => onOpenChange(false)}
             disabled={installing}
-            className="rounded-full"
+            className="h-11 w-full min-w-0 rounded-full bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
           >
             {tx("settings.automations.cancel", "Cancel")}
           </Button>
@@ -4472,7 +4475,7 @@ function NanobotFeatureInstallDialog({
             type="button"
             onClick={() => feature && void onConfirm(feature)}
             disabled={!feature || installing}
-            className="rounded-full"
+            className="h-11 w-full min-w-0 !whitespace-normal rounded-full px-5 text-center text-[15px] font-semibold"
           >
             {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
             {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
