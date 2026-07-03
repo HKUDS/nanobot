@@ -5302,7 +5302,7 @@ function NanobotFeatureCatalogRow({
           >
             <Plus className="h-4 w-4" aria-hidden />
           </AppsActionButton>
-        ) : feature.enabled && feature.type === "channel" && feature.name !== "websocket" ? (
+        ) : feature.enabled && feature.type === "channel" ? (
           <AppsActionButton
             ariaLabel={tx("settings.nanobotFeatures.disable", "Disable")}
             busy={disableBusy}

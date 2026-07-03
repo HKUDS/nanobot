@@ -462,9 +462,6 @@ def disable_optional_feature(
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
     if name not in known_channels:
         raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
-    if name == "websocket":
-        raise OptionalFeatureError("Channel 'websocket' cannot be disabled", status=400)
-
     disable_channel_config(config_path, name)
     payload = optional_features_payload(
         last_action={"ok": True, "message": f"Disabled channel '{name}'", "enabled": False}

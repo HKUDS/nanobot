@@ -415,8 +415,8 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
-  it("does not offer to disable the websocket channel", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  it("offers to disable the websocket channel", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
       if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
@@ -437,14 +437,42 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 1,
         });
       }
+      if (url === "/api/settings/nanobot-features/disable?name=websocket") {
+        return jsonResponse({
+          features: [{
+            name: "websocket",
+            display_name: "Websocket",
+            type: "channel",
+            enabled: false,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+          requires_restart: true,
+          last_action: { ok: true, message: "Disabled channel 'websocket'", enabled: false },
+        });
+      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     renderSettingsView();
 
     expect(await screen.findByText("Websocket")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enabled" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/disable?name=websocket",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(await screen.findByText("Disabled channel 'websocket'")).toBeInTheDocument();
   });
 
   it("publishes the latest settings payload to the shell", async () => {

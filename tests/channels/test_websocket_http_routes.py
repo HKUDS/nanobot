@@ -599,12 +599,17 @@ async def test_nanobot_feature_routes_require_token_and_enable(
         assert body["last_action"]["message"] == "Enabled channel 'matrix'"
         assert body["restart_required_sections"] == ["runtime"]
 
-        protected = await _http_get(
+        disabled_websocket = await _http_get(
             "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=websocket",
             headers=auth,
         )
-        assert protected.status_code == 400
-        assert protected.text == "Channel 'websocket' cannot be disabled"
+        assert disabled_websocket.status_code == 200
+        body = disabled_websocket.json()
+        assert body["last_action"]["message"] == "Disabled channel 'websocket'"
+        assert body["restart_required_sections"] == ["runtime"]
+        assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["websocket"][
+            "enabled"
+        ] is False
 
         disabled = await _http_get(
             "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=matrix",

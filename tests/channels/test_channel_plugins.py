@@ -783,7 +783,7 @@ def test_plugins_disable_channel_writes_config(monkeypatch, tmp_path):
     assert data["channels"]["matrix"]["homeserver"] == "keep"
 
 
-def test_plugins_disable_rejects_non_channel_and_protected_websocket(monkeypatch, tmp_path):
+def test_plugins_disable_rejects_non_channel_and_allows_websocket(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
     from nanobot.cli.commands import app
@@ -804,16 +804,18 @@ def test_plugins_disable_rejects_non_channel_and_protected_websocket(monkeypatch
         app,
         ["plugins", "disable", "bedrock", "--config", str(config_path)],
     )
-    protected = runner.invoke(
+    websocket = runner.invoke(
         app,
         ["plugins", "disable", "websocket", "--config", str(config_path)],
     )
 
     assert non_channel.exit_code == 1
     assert "Feature 'bedrock' cannot be disabled" in non_channel.output
-    assert protected.exit_code == 1
-    assert "Channel 'websocket' cannot be disabled" in protected.output
-    assert not config_path.exists()
+    assert websocket.exit_code == 0
+    assert "Disabled channel 'websocket'" in websocket.output
+    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["websocket"][
+        "enabled"
+    ] is False
 
 
 def test_enable_optional_feature_blocks_install_when_disallowed(monkeypatch, tmp_path):
@@ -976,11 +978,6 @@ def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
     assert non_channel.value.status == 400
     assert non_channel.value.message == "Feature 'bedrock' cannot be disabled"
 
-    with pytest.raises(OptionalFeatureError) as protected:
-        disable_optional_feature("websocket", config_path=config_path)
-    assert protected.value.status == 400
-    assert protected.value.message == "Channel 'websocket' cannot be disabled"
-
     assert not config_path.exists()
 
 
@@ -993,7 +990,7 @@ def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path)
         json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix", "websocket"])
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
 
@@ -1004,6 +1001,11 @@ def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path)
     assert data["channels"]["matrix"]["homeserver"] == "keep"
     assert payload["last_action"]["message"] == "Disabled channel 'matrix'"
     assert payload["requires_restart"] is True
+
+    payload = disable_optional_feature("websocket", config_path=config_path)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["websocket"]["enabled"] is False
+    assert payload["last_action"]["message"] == "Disabled channel 'websocket'"
 
 
 def test_optional_features_payload_counts_enabled_channel_with_missing_dependency(
