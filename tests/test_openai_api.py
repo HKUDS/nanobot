@@ -110,6 +110,25 @@ async def test_missing_messages_returns_400(aiohttp_client, app) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_api_key_protects_api_routes_but_not_health(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="test-model", api_key="secret")
+    client = await aiohttp_client(app)
+
+    health = await client.get("/health")
+    missing = await client.get("/v1/models")
+    wrong = await client.get("/v1/models", headers={"Authorization": "Bearer wrong"})
+    ok = await client.get("/v1/models", headers={"Authorization": "Bearer secret"})
+
+    assert health.status == 200
+    assert missing.status == 401
+    assert wrong.status == 401
+    assert ok.status == 200
+    assert (await missing.json())["error"]["message"].startswith("Missing Authorization")
+    assert (await wrong.json())["error"]["message"] == "Invalid API key"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
     resp = await client.post(

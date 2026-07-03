@@ -193,7 +193,8 @@ class TestStreamEndReactionCleanup:
 
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "message_id": "om_001"},
+            metadata={"message_id": "om_001"},
+            stream_end=True,
         )
 
         ch._remove_reaction.assert_called_once_with("om_001", "rx_42")
@@ -210,7 +211,7 @@ class TestStreamEndReactionCleanup:
 
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True},
+            stream_end=True,
         )
 
         ch._remove_reaction.assert_not_called()
@@ -227,7 +228,8 @@ class TestStreamEndReactionCleanup:
 
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "message_id": "om_001"},
+            metadata={"message_id": "om_001"},
+            stream_end=True,
         )
 
         ch._remove_reaction.assert_not_called()
@@ -242,7 +244,7 @@ class TestStreamEndReactionCleanup:
         ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
         ch._remove_reaction = AsyncMock()
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         ch._remove_reaction.assert_not_called()
 
@@ -260,7 +262,7 @@ class TestStreamEndReactionCleanup:
 
     @pytest.mark.asyncio
     async def test_no_removal_when_resuming(self):
-        """_resuming=True means more tool-call rounds follow; reaction must persist."""
+        """resuming=True means more tool-call rounds follow; reaction must persist."""
         ch = _make_channel()
         ch.config.done_emoji = "DONE"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
@@ -274,7 +276,9 @@ class TestStreamEndReactionCleanup:
 
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "_resuming": True, "message_id": "om_001"},
+            metadata={"message_id": "om_001"},
+            stream_end=True,
+            resuming=True,
         )
 
         ch._remove_reaction.assert_not_called()
@@ -299,19 +303,23 @@ class TestStreamEndReactionCleanup:
         # Intermediate stream end (more tool calls coming).
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "_resuming": True, "message_id": "om_001"},
+            metadata={"message_id": "om_001"},
+            stream_end=True,
+            resuming=True,
         )
         ch._remove_reaction.assert_not_called()
         ch._add_reaction.assert_not_called()
 
-        # Re-prime the stream buffer for the final round (the previous _stream_end popped it).
+        # Re-prime the stream buffer for the final round (the previous stream end popped it).
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="t", card_id="card_1", sequence=5, last_edit=0.0,
         )
         # Final stream end (resuming=False): OnIt removed, done_emoji added.
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "_resuming": False, "message_id": "om_001"},
+            metadata={"message_id": "om_001"},
+            stream_end=True,
+            resuming=False,
         )
         ch._remove_reaction.assert_called_once_with("om_001", "rx_42")
         ch._add_reaction.assert_called_once_with("om_001", "DONE")

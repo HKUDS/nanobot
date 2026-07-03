@@ -8,6 +8,7 @@ import {
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpPresets,
+  fetchNanobotFeatures,
   fetchProviderModels,
   fetchSessionAutomations,
   fetchSettingsUsage,
@@ -21,6 +22,8 @@ import {
   listSlashCommands,
   loginProviderOAuth,
   logoutProviderOAuth,
+  disableNanobotFeature,
+  enableNanobotFeature,
   runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
@@ -435,6 +438,40 @@ describe("webui API helpers", () => {
     await expect(fetchInstalledCliApps("tok")).resolves.toMatchObject({ apps: [] });
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/cli-apps?installed_only=1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reads and toggles nanobot optional features", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        features: [],
+        enabled_count: 0,
+      }),
+    } as Response);
+
+    await expect(fetchNanobotFeatures("tok")).resolves.toMatchObject({ features: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/nanobot-features",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await enableNanobotFeature("tok", "matrix");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/enable?name=matrix",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await disableNanobotFeature("tok", "matrix");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/disable?name=matrix",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

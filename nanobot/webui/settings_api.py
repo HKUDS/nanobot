@@ -99,47 +99,6 @@ _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-_MODEL_LIST_UNSUPPORTED_BACKENDS = {
-    "anthropic",
-    "azure_openai",
-    "bedrock",
-    "github_copilot",
-    "openai_codex",
-}
-
-_MODEL_LIST_CATALOG_PROVIDERS = {
-    "aihubmix",
-    "byteplus",
-    "byteplus_coding_plan",
-    "huggingface",
-    "novita",
-    "openrouter",
-    "siliconflow",
-    "volcengine",
-    "volcengine_coding_plan",
-}
-
-_MODEL_LIST_OFFICIAL_PROVIDERS = {
-    "ant_ling",
-    "dashscope",
-    "deepseek",
-    "gemini",
-    "groq",
-    "longcat",
-    "minimax",
-    "minimax_anthropic",
-    "mistral",
-    "moonshot",
-    "nvidia",
-    "openai",
-    "qianfan",
-    "skywork",
-    "stepfun",
-    "xiaomi_mimo",
-    "zhipu",
-}
-
-
 class WebUISettingsError(ValueError):
     """User-facing settings validation failure."""
 
@@ -394,10 +353,13 @@ def _provider_settings_row(
 
 
 def _model_catalog_kind(spec: Any) -> str:
-    if spec.name in _MODEL_LIST_CATALOG_PROVIDERS:
-        return "catalog"
-    if spec.name in _MODEL_LIST_OFFICIAL_PROVIDERS:
-        return "official"
+    catalog = getattr(spec, "model_catalog", "auto")
+    if catalog != "auto":
+        return catalog
+    if spec.is_transcription_only or spec.is_oauth:
+        return "unsupported"
+    if spec.backend != "openai_compat" and spec.name != "minimax_anthropic":
+        return "unsupported"
     if spec.is_local:
         return "local"
     if spec.is_direct:
@@ -490,27 +452,20 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
 
+    catalog_kind = _model_catalog_kind(spec)
     base_payload: dict[str, Any] = {
         "provider": provider_key,
         "label": spec.label,
-        "catalog_kind": _model_catalog_kind(spec),
+        "catalog_kind": catalog_kind,
         "models": [],
         "model_count": 0,
         "message": None,
         "fetched_at": time.time(),
     }
-    if (
-        spec.is_transcription_only
-        or (
-            spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
-            and spec.name != "minimax_anthropic"
-        )
-        or spec.is_oauth
-    ):
+    if catalog_kind == "unsupported":
         return {
             **base_payload,
             "status": "unsupported",
-            "catalog_kind": "unsupported",
             "message": "Model list is not available for this provider. Type a model ID manually.",
         }
 

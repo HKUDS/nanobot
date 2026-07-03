@@ -38,6 +38,14 @@ _log_handler_id = logger.add(
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )
 
+
+def _set_nanobot_logs(enabled: bool) -> None:
+    if enabled:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
+
+
 from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
 from prompt_toolkit.application import run_in_terminal  # noqa: E402
 from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
@@ -45,11 +53,21 @@ from prompt_toolkit.history import FileHistory  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
+from rich.markup import escape  # noqa: E402
 from rich.table import Table  # noqa: E402
 from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
+from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.bus.outbound_events import (  # noqa: E402
+    ProgressEvent,
+    RetryWaitEvent,
+    StreamDeltaEvent,
+    StreamedResponseEvent,
+    StreamEndEvent,
+    outbound_event_from_message,
+)
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
@@ -461,25 +479,25 @@ async def _maybe_print_interactive_progress(
     renderer: StreamRenderer | None = None,
     reasoning_buffer: _ReasoningBuffer | None = None,
 ) -> bool:
-    metadata = msg.metadata or {}
-    if metadata.get("_retry_wait"):
+    event = outbound_event_from_message(msg)
+    if isinstance(event, RetryWaitEvent):
         await _print_interactive_progress_line(msg.content, thinking, renderer)
         return True
 
-    if not metadata.get("_progress"):
+    if not isinstance(event, ProgressEvent):
         return False
 
     reasoning_buffer = reasoning_buffer or _ReasoningBuffer()
 
-    if metadata.get("_reasoning_end"):
+    if event.reasoning_end:
         if channels_config and not channels_config.show_reasoning:
             reasoning_buffer.clear()
         else:
             _flush_cli_reasoning(reasoning_buffer, thinking, renderer)
         return True
 
-    is_tool_hint = metadata.get("_tool_hint", False)
-    is_reasoning = metadata.get("_reasoning", False) or metadata.get("_reasoning_delta", False)
+    is_tool_hint = event.tool_hint
+    is_reasoning = event.reasoning or event.reasoning_delta
     if is_reasoning:
         if channels_config and not channels_config.show_reasoning:
             reasoning_buffer.clear()
@@ -678,6 +696,33 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _print_enable_options(
+    extras: dict[str, list[str] | None],
+    builtin_channels: set[str],
+    plugin_channels: dict[str, Any],
+    config: Config,
+) -> None:
+    table = Table(title="Available Features")
+    table.add_column("Name", style="cyan")
+    table.add_column("Type")
+    table.add_column("Enabled")
+
+    for item in sorted(builtin_channels | set(plugin_channels) | set(extras)):
+        is_channel = item in builtin_channels or item in plugin_channels
+        enabled = (
+            feature_support.channel_enabled(config, item)
+            if is_channel
+            else feature_support.extra_installed(item, extras[item])
+        )
+        table.add_row(
+            item,
+            "channel" if is_channel else "feature",
+            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
+        )
+
+    console.print(table)
+
+
 def _model_display(config: Config) -> tuple[str, str]:
     """Return (resolved_model_name, preset_tag) for display strings."""
     resolved = config.resolve_preset()
@@ -708,6 +753,21 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     if workspace:
         loaded.agents.defaults.workspace = workspace
     return loaded
+
+
+def _read_trigger_cli_message(message: str | None) -> str:
+    """Read a trigger message from an argument or stdin."""
+    if message and message.strip():
+        return message
+    try:
+        if not sys.stdin.isatty():
+            content = sys.stdin.read()
+            if content.strip():
+                return content
+    except Exception:
+        pass
+    console.print("[red]Error: trigger message is required[/red]")
+    raise typer.Exit(1)
 
 
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
@@ -741,6 +801,35 @@ def _migrate_cron_store(config: "Config") -> None:
         shutil.move(str(legacy_path), str(new_path))
 
 
+@app.command()
+def trigger(
+    trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
+    message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Deliver a local trigger message to its bound chat session."""
+    from nanobot.triggers.local_store import (
+        LocalTriggerStore,
+        TriggerDisabledError,
+        TriggerNotFoundError,
+        TriggerStoreError,
+    )
+
+    runtime_config = _load_runtime_config(config, workspace)
+    content = _read_trigger_cli_message(message)
+    store = LocalTriggerStore(runtime_config.workspace_path)
+    try:
+        delivery = store.enqueue(trigger_id, content)
+    except (TriggerNotFoundError, TriggerDisabledError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    except (TriggerStoreError, ValueError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Queued[/green] {delivery.trigger_id} ({delivery.id})")
+
+
 # ============================================================================
 # OpenAI-Compatible API Server
 # ============================================================================
@@ -759,20 +848,15 @@ def serve(
     try:
         from aiohttp import web  # noqa: F401
     except ImportError:
-        console.print("[red]aiohttp is required. Install with: pip install 'nanobot-ai[api]'[/red]")
+        console.print("[red]aiohttp is required. Install with: nanobot plugins enable api[/red]")
         raise typer.Exit(1)
-
-    from loguru import logger
 
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
+    _set_nanobot_logs(verbose)
 
     runtime_config = _load_runtime_config(config, workspace)
     api_cfg = runtime_config.api
@@ -798,14 +882,24 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
     if host in {"0.0.0.0", "::"}:
+        if not api_key:
+            console.print(
+                "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+                "Set api.api_key in config to prevent unauthenticated access.[/red]"
+            )
+            raise typer.Exit(1)
         console.print(
-            "[yellow]Warning:[/yellow] API is bound to all interfaces. "
-            "Only do this behind a trusted network boundary, firewall, or reverse proxy."
+            "[yellow]API is bound to all interfaces "
+            "(authentication required).[/yellow]"
         )
     console.print()
 
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+    api_app = create_app(
+        agent_loop, model_name=model_name, request_timeout=timeout,
+        api_key=api_key,
+    )
 
     async def on_startup(_app):
         await agent_loop._connect_mcp()
@@ -847,6 +941,8 @@ def _run_gateway(
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.triggers.local_runner import run_local_trigger_queue
+    from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -869,6 +965,7 @@ def _run_gateway(
     # Create cron service with workspace-scoped store
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    trigger_store = LocalTriggerStore(config.workspace_path)
 
     # Create agent with cron service
     agent = AgentLoop.from_config(
@@ -883,13 +980,13 @@ def _run_gateway(
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
+        local_trigger_store=trigger_store,
     )
     WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
-
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -1085,8 +1182,14 @@ def _run_gateway(
         bus,
         session_manager=session_manager,
         cron_service=cron,
+        local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
+        webui_local_trigger_pending_ids=getattr(
+            agent,
+            "pending_local_trigger_ids_for_session",
+            None,
+        ),
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
@@ -1227,6 +1330,13 @@ def _run_gateway(
             tasks = [
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
+                asyncio.create_task(
+                    run_local_trigger_queue(
+                        store=trigger_store,
+                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                    ),
+                    name="nanobot-local-triggers",
+                ),
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
@@ -1314,8 +1424,6 @@ def agent(
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
-    from loguru import logger
-
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.providers.image_generation import image_gen_provider_configs
@@ -1333,10 +1441,7 @@ def agent(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    if logs:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
+    _set_nanobot_logs(logs)
 
     try:
         agent_loop = AgentLoop.from_config(
@@ -1446,7 +1551,7 @@ def agent(
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
-            turn_response: list[tuple[str, dict]] = []
+            turn_response: list[Any] = []
             renderer: StreamRenderer | None = None
             reasoning_buffer = _ReasoningBuffer()
 
@@ -1454,18 +1559,19 @@ def agent(
                 while True:
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                        event = outbound_event_from_message(msg)
 
-                        if msg.metadata.get("_stream_delta"):
+                        if isinstance(event, StreamDeltaEvent):
                             if renderer:
                                 await renderer.on_delta(msg.content)
                             continue
-                        if msg.metadata.get("_stream_end"):
+                        if isinstance(event, StreamEndEvent):
                             if renderer:
                                 await renderer.on_end(
-                                    resuming=msg.metadata.get("_resuming", False),
+                                    resuming=event.resuming,
                                 )
                             continue
-                        if msg.metadata.get("_streamed"):
+                        if isinstance(event, StreamedResponseEvent):
                             turn_done.set()
                             continue
 
@@ -1480,7 +1586,7 @@ def agent(
 
                         if not turn_done.is_set():
                             if msg.content:
-                                turn_response.append((msg.content, dict(msg.metadata or {})))
+                                turn_response.append(msg)
                             turn_done.set()
                         elif msg.content:
                             await _print_interactive_response(
@@ -1533,8 +1639,10 @@ def agent(
                         await turn_done.wait()
 
                         if turn_response:
-                            content, meta = turn_response[0]
-                            if content and not meta.get("_streamed"):
+                            response_msg = turn_response[0]
+                            content = response_msg.content
+                            meta = response_msg.metadata
+                            if content and not isinstance(response_msg.event, StreamedResponseEvent):
                                 if renderer:
                                     await renderer.close()
                                 print_kwargs: dict[str, Any] = {}
@@ -1647,42 +1755,80 @@ def channels_login(
 # Plugin Commands
 # ============================================================================
 
-plugins_app = typer.Typer(help="Manage channel plugins")
+plugins_app = typer.Typer(help="Manage optional nanobot features")
 app.add_typer(plugins_app, name="plugins")
 
 
 @plugins_app.command("list")
-def plugins_list():
-    """List all discovered channels (built-in and plugins)."""
-    from nanobot.channels.registry import discover_all, discover_channel_names
-    from nanobot.config.loader import load_config
+def plugins_list(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """List optional nanobot features."""
+    from nanobot.channels.registry import discover_channel_names, discover_plugins
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
-    builtin_names = set(discover_channel_names())
-    all_channels = discover_all()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
 
-    table = Table(title="Channel Plugins")
-    table.add_column("Name", style="cyan")
-    table.add_column("Source", style="magenta")
-    table.add_column("Enabled")
+    _print_enable_options(
+        feature_support.optional_dependency_groups(),
+        set(discover_channel_names()),
+        discover_plugins(),
+        load_config(resolved_config_path),
+    )
 
-    for name in sorted(all_channels):
-        cls = all_channels[name]
-        source = "builtin" if name in builtin_names else "plugin"
-        section = getattr(config.channels, name, None)
-        if section is None:
-            enabled = False
-        elif isinstance(section, dict):
-            enabled = section.get("enabled", False)
-        else:
-            enabled = getattr(section, "enabled", False)
-        table.add_row(
-            cls.display_name,
-            source,
-            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
+
+@plugins_app.command("enable")
+def plugins_enable(
+    name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, pdf)"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show optional package install logs"),
+):
+    """Enable a nanobot feature."""
+    from nanobot.config.loader import get_config_path, set_config_path
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+    resolved_config_path = resolved_config_path or get_config_path()
+    _set_nanobot_logs(logs)
+
+    try:
+        payload = feature_support.enable_optional_feature(
+            name,
+            config_path=resolved_config_path,
+            runner=feature_support.run_install_command,
         )
+    except feature_support.OptionalFeatureError as exc:
+        console.print(f"[red]{escape(exc.message)}[/red]")
+        raise typer.Exit(1) from exc
 
-    console.print(table)
+    message = payload.get("last_action", {}).get("message") or f"Enabled feature '{name}'"
+    console.print(f"[green]{escape(message)}[/green]")
+
+
+@plugins_app.command("disable")
+def plugins_disable(
+    name: str = typer.Argument(..., help="Channel name (e.g. telegram, matrix, slack)"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Disable a nanobot channel feature."""
+    from nanobot.config.loader import get_config_path, set_config_path
+
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+    resolved_config_path = resolved_config_path or get_config_path()
+
+    try:
+        payload = feature_support.disable_optional_feature(name, config_path=resolved_config_path)
+    except feature_support.OptionalFeatureError as exc:
+        console.print(f"[red]{escape(exc.message)}[/red]")
+        raise typer.Exit(1) from exc
+
+    message = payload.get("last_action", {}).get("message") or f"Disabled channel '{name}'"
+    console.print(f"[green]{escape(message)}[/green] in {resolved_config_path}")
 
 
 # ============================================================================

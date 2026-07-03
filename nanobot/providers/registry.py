@@ -32,6 +32,7 @@ class ProviderSpec:
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
     display_name: str = ""  # shown in `nanobot status`
+    model_catalog: str = "auto"  # WebUI model-list source
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
@@ -221,6 +222,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("skywork", "skyclaw", "apifree"),
         env_key="SKYWORK_API_KEY",
         display_name="Skywork",
+        model_catalog="official",
         backend="openai_compat",
         env_extras=(("APIFREE_API_KEY", "{api_key}"),),
         is_gateway=True,

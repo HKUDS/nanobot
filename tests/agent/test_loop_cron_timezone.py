@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.cron import CronTool
@@ -69,7 +70,7 @@ async def test_agent_loop_errors_on_missing_cron_model_preset(
 
     monkeypatch.setattr(loop, "_process_message", _fail_process_message)
 
-    with pytest.raises(ValueError, match="cron model_preset 'deleted' is not configured"):
+    with pytest.raises(AutomationTurnError, match="cron model_preset 'deleted' is not configured"):
         await loop.submit_cron_turn(
             InboundMessage(
                 channel="cli",
