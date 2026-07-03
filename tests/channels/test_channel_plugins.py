@@ -231,6 +231,23 @@ def test_discover_enabled_imports_only_enabled_builtins():
     assert loaded == ["enabled"]
 
 
+def test_discover_enabled_warns_for_enabled_builtin_import_errors():
+    from nanobot.channels.registry import discover_enabled
+
+    with (
+        patch("nanobot.channels.registry.load_channel_class", side_effect=ImportError("missing sdk")),
+        patch(_EP_TARGET, return_value=[]),
+        patch("nanobot.channels.registry.logger.warning") as warning,
+    ):
+        result = discover_enabled({"matrix"}, _names=["matrix"], warn_import_errors=True)
+
+    assert result == {}
+    warning.assert_called_once()
+    assert warning.call_args.args[0] == "Enabled built-in channel '{}' is not available: {}"
+    assert warning.call_args.args[1] == "matrix"
+    assert "missing sdk" in str(warning.call_args.args[2])
+
+
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
@@ -300,7 +317,7 @@ def test_manager_loads_websocket_from_default_config():
 
     seen_enabled: set[str] = set()
 
-    def _discover_enabled(enabled_names: set[str], _names=None):
+    def _discover_enabled(enabled_names: set[str], _names=None, warn_import_errors: bool = False):
         seen_enabled.update(enabled_names)
         return {"websocket": _FakeWebSocket} if "websocket" in enabled_names else {}
 
@@ -320,7 +337,7 @@ def test_manager_respects_explicitly_disabled_websocket_config():
 
     seen_enabled: set[str] = set()
 
-    def _discover_enabled(enabled_names: set[str], _names=None):
+    def _discover_enabled(enabled_names: set[str], _names=None, warn_import_errors: bool = False):
         seen_enabled.update(enabled_names)
         return {}
 

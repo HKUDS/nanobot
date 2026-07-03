@@ -631,7 +631,8 @@ async def test_nanobot_feature_routes_require_token_and_enable(
             headers=auth,
         )
         assert disabled_websocket.status_code == 400
-        assert disabled_websocket.text == "Channel 'websocket' cannot be disabled from WebUI"
+        assert "cannot be disabled from WebUI" in disabled_websocket.text
+        assert "websocket" not in json.loads(config_path.read_text(encoding="utf-8"))["channels"]
 
         disabled = await _http_get(
             "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=matrix",

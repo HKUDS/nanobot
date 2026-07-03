@@ -58,6 +58,7 @@ def discover_enabled(
     *,
     _names: list[str] | None = None,
     _include_all_external: bool = False,
+    warn_import_errors: bool = False,
 ) -> dict[str, type[BaseChannel]]:
     """Return channels whose module names are in *enabled_names*.
 
@@ -73,7 +74,11 @@ def discover_enabled(
         try:
             result[modname] = load_channel_class(modname)
         except ImportError as e:
-            logger.debug("Skipping built-in channel '{}': {}", modname, e)
+            message = "Enabled built-in channel '{}' is not available: {}"
+            if warn_import_errors:
+                logger.warning(message, modname, e)
+            else:
+                logger.debug(message, modname, e)
 
     external = discover_plugins(None if _include_all_external else enabled_names)
     shadowed = set(external) & set(names)

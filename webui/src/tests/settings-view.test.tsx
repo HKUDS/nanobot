@@ -424,7 +424,7 @@ describe("SettingsView Apps catalog", () => {
   });
 
   it("does not offer to disable the websocket channel", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
       if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
@@ -446,7 +446,8 @@ describe("SettingsView Apps catalog", () => {
         });
       }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     renderSettingsView();
 
@@ -454,6 +455,10 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByText("Required for WebUI")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Required for WebUI" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/disable?name=websocket",
+      expect.anything(),
+    );
   });
 
   it("publishes the latest settings payload to the shell", async () => {
