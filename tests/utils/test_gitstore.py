@@ -135,6 +135,13 @@ class TestSummarizeWorkingTree:
         assert summary  # a removal is still a change
         assert "deletion" in summary
 
+    def test_non_utf8_file_marked_binary_without_replacement_chars(self, git, tmp_path):
+        # Invalid UTF-8 must not leak replacement chars into the audit record.
+        (tmp_path / "MEMORY.md").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x01")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: binary or non-UTF-8 file changed" in summary
+        assert "\ufffd" not in summary  # no U+FFFD replacement chars leaked
+
 
 class TestNestedRepoProtection:
     """Regression tests for GitHub issue #2980: nested repo protection."""

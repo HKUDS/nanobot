@@ -354,11 +354,20 @@ class GitStore:
                     if head_text is None:
                         head_text = ""
                     wt_path = self._workspace / path
-                    wt_text = (
-                        wt_path.read_text(encoding="utf-8", errors="replace")
-                        if wt_path.exists()
-                        else ""
-                    )
+                    try:
+                        wt_text = (
+                            wt_path.read_text(encoding="utf-8")
+                            if wt_path.exists()
+                            else ""
+                        )
+                    except UnicodeDecodeError:
+                        # Non-UTF-8 (binary/corrupt) working-tree file: record
+                        # the change without a unified diff, which would
+                        # otherwise be polluted with replacement characters and
+                        # misrepresent the audit record.
+                        changed += 1
+                        summary_lines.append(f"{path}: binary or non-UTF-8 file changed")
+                        continue
                     if head_text == wt_text:
                         continue
                     changed += 1
@@ -392,7 +401,8 @@ class GitStore:
             f"{total_added} insertion{'s' if total_added != 1 else ''}(+), "
             f"{total_removed} deletion{'s' if total_removed != 1 else ''}(-)"
         )
-        body += f"\n\n```diff\n{diff_text}\n```"
+        if diff_lines:
+            body += f"\n\n```diff\n{diff_text}\n```"
         return body
 
     @staticmethod
