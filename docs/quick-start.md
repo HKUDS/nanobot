@@ -329,7 +329,7 @@ nanobot --version
 If you use WhatsApp from a source checkout, keep the optional dependencies installed:
 
 ```bash
-python -m pip install -e ".[whatsapp]"
+nanobot plugins enable whatsapp
 ```
 
 ## First-Run Troubleshooting

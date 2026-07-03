@@ -141,7 +141,11 @@ class ChannelManager:
             if _channel_config_enabled(name, section):
                 enabled_names.add(name)
 
-        for name, cls in discover_enabled(enabled_names, _names=names).items():
+        for name, cls in discover_enabled(
+            enabled_names,
+            _names=names,
+            warn_import_errors=True,
+        ).items():
             section = section_for(name)
             if section is None:
                 continue

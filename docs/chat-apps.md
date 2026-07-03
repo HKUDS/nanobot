@@ -335,9 +335,7 @@ nanobot gateway
 Requires the WhatsApp optional dependencies:
 
 ```bash
-pip install "nanobot-ai[whatsapp]"
-# Source checkout:
-python -m pip install -e ".[whatsapp]"
+nanobot plugins enable whatsapp
 ```
 
 **1. Link device with QR**

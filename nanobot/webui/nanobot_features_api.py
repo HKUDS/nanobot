@@ -31,6 +31,10 @@ def nanobot_features_action(
         return enable_optional_feature(name, allow_install=allow_install)
     if action == "disable":
         if name == "websocket":
-            raise OptionalFeatureError("Channel 'websocket' cannot be disabled from WebUI", status=400)
+            raise OptionalFeatureError(
+                "The WebUI websocket channel cannot be disabled from WebUI. "
+                "Use `nanobot plugins disable websocket` from a terminal if you need to disable it.",
+                status=400,
+            )
         return disable_optional_feature(name)
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)
