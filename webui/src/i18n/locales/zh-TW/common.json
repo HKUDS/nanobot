@@ -458,18 +458,36 @@
       "thirdPartyBrands": "產品名稱、標誌與品牌均屬於其各自擁有者。使用僅為識別用途，並不代表背書。"
     },
     "apps": {
-      "description": "新增 nanobot 可在聊天中使用的 App CLI 和 MCP 服務。",
+      "description": "啟用插件、本機應用適配器和已連接的工具服務。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "通道",
+      "featureLabel": "能力",
       "filterAll": "全部",
+      "filterPlugins": "插件",
       "filterCli": "CLI 應用",
       "filterMcp": "MCP 服務",
       "enabledSummary": "已啟用 {{count}} 個",
-      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP",
+      "caption": "{{plugins}} 個插件 · {{cli}} 個 CLI · {{mcp}} 個 MCP",
       "searchPlaceholder": "搜尋應用",
-      "featured": "精選",
+      "featured": "應用目錄",
       "loading": "正在載入應用...",
-      "empty": "沒有符合的應用。"
+      "empty": "沒有符合的應用。",
+      "restartRequired": "重新啟動 nanobot 以套用更新後的應用和能力。"
+    },
+    "nanobotFeatures": {
+      "enabled": "已啟用",
+      "enable": "啟用",
+      "disable": "停用",
+      "ready": "就緒",
+      "missingDependency": "缺少支援套件",
+      "installSupport": "安裝支援套件",
+      "installConfirmTitle": "安裝 {{name}} 支援？",
+      "installConfirmDescription": "將安裝並啟用 {{name}} 支援。是否繼續？",
+      "installConfirmAction": "安裝並啟用",
+      "websocketRequired": "WebUI 必需",
+      "channelDisabled": "通道已停用",
+      "notEnabled": "未啟用"
     },
     "automations": {
       "filters": {
@@ -910,6 +928,10 @@
           "dream_restore": {
             "title": "恢復記憶",
             "description": "將記憶恢復到之前的 Dream 快照。"
+          },
+          "dream_prompt": {
+            "title": "Dream 記憶",
+            "description": "設定 Dream 如何整理目前工作區的記憶。"
           },
           "goal": {
             "title": "長期目標",

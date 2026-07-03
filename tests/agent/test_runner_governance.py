@@ -550,7 +550,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     def estimate(_provider, _model, msgs, _tools):
         return sum(
             100 if (content := msg.get("content")) == long_content
-            else 1 if isinstance(content, str) and "omitted from context" in content
+            else 1 if isinstance(content, str) and "compacted to fit context" in content
             else 0
             for msg in msgs
             if msg.get("role") == "tool"
@@ -564,7 +564,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
         set(),
     )
     tool_msgs = [m for m in result if m.get("role") == "tool"]
-    compacted = [m for m in tool_msgs if "omitted from context" in str(m.get("content", ""))]
+    compacted = [m for m in tool_msgs if "compacted to fit context" in str(m.get("content", ""))]
     preserved = [m for m in tool_msgs if m.get("content") == long_content]
 
     assert len(compacted) == 8
@@ -609,7 +609,7 @@ def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
     )
 
     tool_msg = next(m for m in result if m.get("role") == "tool")
-    assert "omitted from context" in tool_msg["content"]
+    assert "compacted to fit context" in tool_msg["content"]
     assert compacted_tool_call_ids == {"c0"}
 
 

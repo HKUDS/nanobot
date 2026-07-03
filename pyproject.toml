@@ -37,16 +37,6 @@ dependencies = [
     "lxml-html-clean>=0.4.0,<1.0.0",
     "rich>=14.0.0,<15.0.0",
     "croniter>=6.0.0,<7.0.0",
-    "dingtalk-stream>=0.24.0,<1.0.0",
-    "python-telegram-bot[socks,webhooks]>=22.6,<23.0",
-    "lark-oapi>=1.5.0,<2.0.0",
-    "socksio>=1.0.0,<2.0.0",
-    "python-socketio>=5.16.0,<6.0.0",
-    "msgpack>=1.1.0,<2.0.0",
-    "slack-sdk>=3.39.0,<4.0.0",
-    "slackify-markdown>=0.2.0,<1.0.0",
-    "qq-botpy>=1.2.0,<2.0.0",
-    "python-socks[asyncio]>=2.8.0,<3.0.0; sys_platform != 'win32'",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "questionary>=2.0.0,<3.0.0",
     "mcp>=1.26.0,<2.0.0",
@@ -57,12 +47,8 @@ dependencies = [
     "jinja2>=3.1.0,<4.0.0",
     "dulwich>=0.22.0,<1.0.0",
     "pyyaml>=6.0,<7.0.0",
-    "pypdf>=5.0.0,<6.0.0",
-    "python-docx>=1.1.0,<2.0.0",
-    "openpyxl>=3.1.0,<4.0.0",
-    "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
-    "boto3>=1.43.0",
+    "packaging>=24.0",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +57,41 @@ api = [
 ]
 azure = [
     "azure-identity>=1.19.0,<2.0.0",
+]
+bedrock = [
+    "boto3>=1.43.0",
+]
+dingtalk = [
+    "dingtalk-stream>=0.24.0,<1.0.0",
+]
+documents = [
+    "pypdf>=5.0.0,<6.0.0",
+    "python-docx>=1.1.0,<2.0.0",
+    "openpyxl>=3.1.0,<4.0.0",
+    "python-pptx>=1.0.0,<2.0.0",
+]
+feishu = [
+    "lark-oapi>=1.5.0,<2.0.0",
+]
+mochat = [
+    "python-socketio>=5.16.0,<6.0.0",
+    "msgpack>=1.1.0,<2.0.0",
+]
+napcat = [
+    "aiohttp>=3.9.0,<4.0.0",
+]
+qq = [
+    "aiohttp>=3.9.0,<4.0.0",
+    "qq-botpy>=1.2.0,<2.0.0",
+]
+slack = [
+    "slack-sdk>=3.39.0,<4.0.0",
+    "slackify-markdown>=0.2.0,<1.0.0",
+]
+telegram = [
+    "python-telegram-bot[socks,webhooks]>=22.6,<23.0",
+    "socksio>=1.0.0,<2.0.0",
+    "python-socks[asyncio]>=2.8.0,<3.0.0; sys_platform != 'win32'",
 ]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
@@ -86,6 +107,7 @@ msteams = [
 
 matrix = [
     "matrix-nio[e2e]>=0.25.2; sys_platform != 'win32'",
+    "matrix-nio>=0.25.2; sys_platform == 'win32'",
     "aiohttp>=3.9.0,<4.0.0",
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
@@ -113,6 +135,12 @@ dev = [
     "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.1.0",
     "pymupdf>=1.25.0",
+    "pypdf>=5.0.0,<6.0.0",
+    "python-docx>=1.1.0,<2.0.0",
+    "openpyxl>=3.1.0,<4.0.0",
+    "python-pptx>=1.0.0,<2.0.0",
+    "python-socketio>=5.16.0,<6.0.0",
+    "msgpack>=1.1.0,<2.0.0",
 ]
 
 [project.scripts]
