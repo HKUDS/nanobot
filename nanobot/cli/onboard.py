@@ -1590,10 +1590,9 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
 
 def _get_quick_start_provider_choices() -> dict[str, str]:
     """Return Quick Start provider display choices."""
-    choices = {
-        info.display_name: provider_name
-        for provider_name, info in _get_quick_start_provider_info().items()
-    }
+    choices: dict[str, str] = {}
+    for provider_name, info in _get_quick_start_provider_info().items():
+        choices.setdefault(info.display_name, provider_name)
     choices[_QUICK_START_CUSTOM_PROVIDER_CHOICE] = "custom"
     return choices
 
