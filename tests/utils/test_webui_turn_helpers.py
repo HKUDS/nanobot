@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import GoalStatusEvent
 from nanobot.session import webui_turns as wth
 
 
@@ -28,7 +29,8 @@ async def test_publish_turn_run_status_running_records_wall_clock() -> None:
     assert isinstance(t0, float)
     call = bus.publish_outbound.await_args[0][0]
     assert call.chat_id == "chat-a"
-    assert call.metadata.get("started_at") == t0
+    assert isinstance(call.event, GoalStatusEvent)
+    assert call.event.started_at == t0
 
 
 @pytest.mark.asyncio
@@ -41,7 +43,8 @@ async def test_publish_turn_run_status_reuses_explicit_wall_clock() -> None:
 
     assert wth.websocket_turn_wall_started_at("chat-a") == 1234.5
     call = bus.publish_outbound.await_args[0][0]
-    assert call.metadata.get("started_at") == 1234.5
+    assert isinstance(call.event, GoalStatusEvent)
+    assert call.event.started_at == 1234.5
 
 
 @pytest.mark.asyncio

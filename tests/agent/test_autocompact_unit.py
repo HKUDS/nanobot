@@ -200,8 +200,11 @@ class TestCheckExpired:
         """Expired session should trigger schedule_background."""
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
-        old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
-        mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_ts}]
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_dt.isoformat()}]
+        mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
 
         scheduled = []
@@ -272,6 +275,24 @@ class TestCheckExpired:
 
         scheduler.assert_not_called()
         assert "dream:20260602-155256" not in ac._archiving
+
+    def test_already_trimmed_session_skips(self):
+        """Expired session with no removable tail should not be re-scheduled."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        last_active = datetime(2026, 1, 1, 10, 0, 0)
+        session = _make_session("cli:done", updated_at=last_active)
+        _add_turns(session, 2)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:done", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+
+        scheduler = MagicMock()
+        ac.check_expired(scheduler)
+
+        scheduler.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

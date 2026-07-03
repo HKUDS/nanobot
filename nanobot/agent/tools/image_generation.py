@@ -7,14 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.schema import (
     ArraySchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.providers.image_generation import (
@@ -22,6 +21,7 @@ from nanobot.providers.image_generation import (
     ImageGenerationProvider,
     get_image_gen_provider,
 )
+from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 from nanobot.utils.artifacts import (
     ArtifactError,
@@ -172,11 +172,11 @@ class ImageGenerationTool(Tool):
     ) -> str:
         client = self._provider_client()
         if client is None:
-            return f"Error: unsupported image generation provider '{self.config.provider}'"
+            return ToolResult.error(f"Error: unsupported image generation provider '{self.config.provider}'")
 
         requested = count or 1
         if requested > self.config.max_images_per_turn:
-            return (
+            return ToolResult.error(
                 "Error: count exceeds tools.imageGeneration.maxImagesPerTurn "
                 f"({self.config.max_images_per_turn})"
             )
@@ -206,4 +206,4 @@ class ImageGenerationTool(Tool):
                         break
             return generated_image_tool_result(artifacts)
         except (ArtifactError, ImageGenerationError, OSError) as exc:
-            return f"Error: {exc}"
+            return ToolResult.error(f"Error: {exc}")

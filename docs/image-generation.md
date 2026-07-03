@@ -272,7 +272,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
   "providers": {
     "stepfun": {
       "apiKey": "${STEPFUN_API_KEY}",
-      "apiBase": "https://api.stepfun.com/step_plan/v1"
+      "apiBase": "https://api.stepfun.ai/step_plan/v1"
     }
   },
   "tools": {
@@ -285,7 +285,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
 }
 ```
 
-`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.com/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
+`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.ai/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
 
 ### Zhipu
 

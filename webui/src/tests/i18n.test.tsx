@@ -20,7 +20,9 @@ const SLASH_COMMAND_KEYS = [
   "dream",
   "dream_log",
   "dream_restore",
+  "dream_prompt",
   "goal",
+  "trigger",
   "help",
   "pairing",
 ];
@@ -62,6 +64,18 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.webuiSafety",
   "settings.sections.capabilities",
   "settings.sections.apps",
+  "settings.apps.description",
+  "settings.apps.filterPlugins",
+  "settings.apps.caption",
+  "settings.apps.restartRequired",
+  "settings.nanobotFeatures.disable",
+  "settings.nanobotFeatures.ready",
+  "settings.nanobotFeatures.missingDependency",
+  "settings.nanobotFeatures.installConfirmTitle",
+  "settings.nanobotFeatures.installConfirmDescription",
+  "settings.nanobotFeatures.installConfirmAction",
+  "settings.nanobotFeatures.channelDisabled",
+  "settings.nanobotFeatures.notEnabled",
   "settings.sections.about",
   "settings.rows.theme",
   "settings.rows.language",
@@ -102,6 +116,16 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.about.checkForUpdates",
   "settings.about.upToDate",
   "settings.about.updateAvailable",
+];
+const LOCALIZED_WORKSPACE_COPY_KEYS = [
+  "thread.composer.workspace.accessAria",
+  "thread.composer.workspace.default",
+  "thread.composer.workspace.full",
+  "errors.workspaceScopeRejected.title",
+  "errors.workspaceScopeRejected.body",
+  "workspace.dialog.defaultProject",
+  "workspace.dialog.usePath",
+  "workspace.dialog.absolutePathRequired",
 ];
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -269,7 +293,7 @@ describe("webui i18n", () => {
     for (const [locale, resource] of Object.entries(resources)) {
       if (locale === "en") continue;
       const current = flattenResource(resource.common);
-      const leaked = LOCALIZED_SETTINGS_COPY_KEYS.filter(
+      const leaked = [...LOCALIZED_SETTINGS_COPY_KEYS, ...LOCALIZED_WORKSPACE_COPY_KEYS].filter(
         (key) => current.get(key) === english.get(key),
       );
 

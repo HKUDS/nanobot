@@ -5,6 +5,7 @@ import {
   assistantCopyFlags,
   buildDisplayUnits,
   ThreadMessages,
+  unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
 import type { UIMessage } from "@/lib/types";
 
@@ -70,6 +71,42 @@ describe("ThreadMessages", () => {
     );
 
     expect(screen.getByText("Forked from history")).toBeInTheDocument();
+  });
+
+  it("keeps turn unit keys stable across replayed ids and mutable turn sequence", () => {
+    const liveUnits = buildDisplayUnits([
+      { id: "optimistic-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 0, createdAt: 1 },
+      {
+        id: "live-a1",
+        role: "assistant",
+        content: "first answer slice",
+        turnId: "turn-1",
+        turnPhase: "answer",
+        turnSeq: 2,
+        createdAt: 2,
+      },
+      {
+        id: "live-a2",
+        role: "assistant",
+        content: "second answer slice",
+        turnId: "turn-1",
+        turnPhase: "answer",
+        turnSeq: 20,
+        createdAt: 3,
+      },
+    ]);
+    const replayUnits = buildDisplayUnits([
+      { id: "replayed-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 10, createdAt: 10 },
+      { id: "replayed-a1", role: "assistant", content: "first answer slice", turnId: "turn-1", turnPhase: "answer", turnSeq: 11, createdAt: 11 },
+      { id: "replayed-a2", role: "assistant", content: "second answer slice", turnId: "turn-1", turnPhase: "answer", turnSeq: 99, createdAt: 12 },
+    ]);
+
+    expect(unitKeysForDisplay(liveUnits)).toEqual(unitKeysForDisplay(replayUnits));
+    expect(unitKeysForDisplay(liveUnits)).toEqual([
+      "turn-turn-1-user",
+      "turn-turn-1-answer-1",
+      "turn-turn-1-answer-2",
+    ]);
   });
 
   it("keeps file edits as their own activity row inside a turn", () => {

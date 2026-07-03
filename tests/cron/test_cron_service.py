@@ -52,6 +52,18 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     assert job.state.next_run_at_ms is not None
 
 
+def test_write_run_record_uses_cron_runs_dir(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    service.write_run_record("job:1", {"status": "queued"})
+
+    record_path = tmp_path / "cron" / "runs" / "job_1.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["run_id"] == "job:1"
+    assert record["status"] == "queued"
+    assert record["updated_at_ms"] > 0
+
+
 @pytest.mark.asyncio
 async def test_unbound_agent_jobs_are_disabled_on_add(tmp_path) -> None:
     called: list[str] = []
@@ -685,6 +697,36 @@ async def test_external_update_preserves_run_history_records(tmp_path):
 
     fresh._running = True
     fresh._save_store()
+
+
+def test_stale_instance_remove_preserves_external_add(tmp_path) -> None:
+    """A stopped instance must not save a stale snapshot over another instance's job."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    schedule = CronSchedule(kind="every", every_ms=60_000)
+    service_a = CronService(store_path)
+    service_b = CronService(store_path)
+
+    first = service_a.add_job(
+        name="first",
+        schedule=schedule,
+        message="first",
+        **_bound_chat("first"),
+    )
+
+    # Prime service_b with a view that does not include later external changes.
+    assert [job.name for job in service_b.list_jobs(include_disabled=True)] == ["first"]
+
+    service_a.add_job(
+        name="second",
+        schedule=schedule,
+        message="second",
+        **_bound_chat("second"),
+    )
+
+    assert service_b.remove_job(first.id) == "removed"
+
+    reloaded = CronService(store_path)
+    assert [job.name for job in reloaded.list_jobs(include_disabled=True)] == ["second"]
 
 
 # ── timer race regression tests ──

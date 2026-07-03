@@ -5,8 +5,8 @@ import functools
 import json
 import random
 import socket
-import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -15,14 +15,36 @@ from urllib.parse import quote, urlencode
 import httpx
 import pytest
 
+from nanobot.bus.events import OutboundMessage
+from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.optional_features import InstallResult
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
+from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
+
+
+class _MatrixChannel(BaseChannel):
+    name = "matrix"
+    display_name = "Matrix"
+
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return {"enabled": False, "allowFrom": []}
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send(self, msg: OutboundMessage) -> None:
+        pass
 
 
 def _free_port() -> int:
@@ -46,7 +68,9 @@ def _make_handler(
     workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
+    local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
+    local_trigger_pending_ids: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -61,7 +85,9 @@ def _make_handler(
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
         cron_service=cron_service,
+        local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
+        local_trigger_pending_ids=local_trigger_pending_ids,
     )
 
 
@@ -74,7 +100,9 @@ def _ch(
     port: int = _PORT,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
+    local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
+    local_trigger_pending_ids: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -93,7 +121,9 @@ def _ch(
         workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
         cron_service=cron_service,
+        local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
+        local_trigger_pending_ids=local_trigger_pending_ids,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -109,7 +139,7 @@ async def _http_get(
     url: str, headers: dict[str, str] | None = None
 ) -> httpx.Response:
     return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
+        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -129,6 +159,35 @@ def _seed_many(workspace: Path, keys: list[str]) -> SessionManager:
         s.add_message("user", f"hi from {k}")
         sm.save(s)
     return sm
+
+
+def _stub_matrix_feature(
+    monkeypatch: pytest.MonkeyPatch,
+    config_path: Path,
+    *,
+    deps: list[str] | None = None,
+    installed: bool = True,
+    install_calls: list[str] | None = None,
+    channels: list[str] | None = None,
+) -> None:
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names",
+        lambda: channels or ["matrix"],
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": deps if deps is not None else []},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: installed)
+    if install_calls is not None:
+        monkeypatch.setattr(
+            "nanobot.optional_features.install_extra",
+            lambda name, _deps, *, runner: install_calls.append(name)
+            or InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name]),
+        )
 
 
 @pytest.mark.asyncio
@@ -320,6 +379,54 @@ async def test_session_automations_route_ignores_unified_owner(
 
 
 @pytest.mark.asyncio
+async def test_session_automations_route_lists_local_triggers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    trigger_store = LocalTriggerStore(tmp_path)
+    trigger = trigger_store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="abc",
+        session_key="websocket:abc",
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        local_trigger_store=trigger_store,
+        local_trigger_pending_ids=lambda key: (
+            {trigger.id} if key == "websocket:abc" else set()
+        ),
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        resp = await _http_get(
+            f"{base_url}/api/sessions/websocket%3Aabc/automations",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [job["id"] for job in body["jobs"]] == [trigger.id]
+        job = body["jobs"][0]
+        assert job["kind"] == "local_trigger"
+        assert job["schedule"]["kind"] == "local"
+        assert job["payload"]["kind"] == "local_trigger"
+        assert job["payload"]["command"] == f'nanobot trigger {trigger.id} "message"'
+        assert job["state"]["pending"] is True
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_skills_route_requires_token_and_hides_paths(
     bus: MagicMock, tmp_path: Path
 ) -> None:
@@ -415,9 +522,8 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.cli_apps_payload",
-        lambda: {
+    async def payload(*, installed_only: bool = False) -> dict[str, Any]:
+        return {
             "apps": [
                 {
                     "name": "gimp",
@@ -438,7 +544,11 @@ async def test_cli_apps_routes_require_token_and_return_payload(
             ],
             "installed_count": 0,
             "catalog_updated_at": "2026-04-18",
-        },
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.cli_apps_payload",
+        payload,
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.cli_apps_action",
@@ -479,17 +589,285 @@ async def test_cli_apps_routes_require_token_and_return_payload(
 
 
 @pytest.mark.asyncio
+async def test_nanobot_feature_routes_require_token_and_enable(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    _stub_matrix_feature(monkeypatch, config_path, channels=["matrix", "websocket"])
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29916)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29916/api/settings/nanobot-features")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29916/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        catalog = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features",
+            headers=auth,
+        )
+        assert catalog.status_code == 200
+        features = {feature["name"]: feature for feature in catalog.json()["features"]}
+        assert features["matrix"]["status"] == "not_enabled"
+        assert features["websocket"]["enabled"] is True
+        assert features["websocket"]["ready"] is True
+
+        enabled = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features/enable?name=matrix",
+            headers=auth,
+        )
+        assert enabled.status_code == 200
+        body = enabled.json()
+        assert body["last_action"]["message"] == "Enabled channel 'matrix'"
+        assert body["restart_required_sections"] == ["runtime"]
+
+        disabled_websocket = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=websocket",
+            headers=auth,
+        )
+        assert disabled_websocket.status_code == 400
+        assert "cannot be disabled from WebUI" in disabled_websocket.text
+        assert "websocket" not in json.loads(config_path.read_text(encoding="utf-8"))["channels"]
+
+        disabled = await _http_get(
+            "http://127.0.0.1:29916/api/settings/nanobot-features/disable?name=matrix",
+            headers=auth,
+        )
+        assert disabled.status_code == 200
+        body = disabled.json()
+        assert body["last_action"]["message"] == "Disabled channel 'matrix'"
+        assert body["restart_required_sections"] == ["runtime"]
+        assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
+            "enabled"
+        ] is False
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_remote_install_requires_opt_in(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    install_calls: list[str] = []
+    _stub_matrix_feature(
+        monkeypatch,
+        config_path,
+        deps=["matrix-nio>=0.25.2"],
+        installed=False,
+        install_calls=install_calls,
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    path = "/api/settings/nanobot-features/enable?name=matrix"
+    request = _FakeReq({"Authorization": f"Bearer {token}"}, path=path)
+
+    blocked = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert blocked is not None
+    assert blocked.status_code == 403
+    assert "remote WebUI is disabled" in blocked.body.decode()
+    assert install_calls == []
+
+    config_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+
+    allowed = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert allowed is not None
+    assert allowed.status_code == 200
+    assert install_calls == ["matrix"]
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_local_install_allowed_by_default(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    install_calls: list[str] = []
+    _stub_matrix_feature(
+        monkeypatch,
+        config_path,
+        deps=["matrix-nio>=0.25.2"],
+        installed=False,
+        install_calls=install_calls,
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert install_calls == ["matrix"]
+    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
+        "enabled"
+    ] is True
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    install_calls: list[str] = []
+    _stub_matrix_feature(
+        monkeypatch,
+        config_path,
+        deps=["matrix-nio>=0.25.2"],
+        installed=False,
+        install_calls=install_calls,
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {
+            "Authorization": f"Bearer {token}",
+            "Host": "nanobot.example",
+            "X-Forwarded-For": "203.0.113.42",
+        },
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    blocked = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert blocked is not None
+    assert blocked.status_code == 403
+    assert install_calls == []
+
+    config_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+
+    allowed = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert allowed is not None
+    assert allowed.status_code == 200
+    assert install_calls == ["matrix"]
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_remote_enable_without_install_is_allowed(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    install_calls: list[str] = []
+    _stub_matrix_feature(
+        monkeypatch,
+        config_path,
+        deps=["matrix-nio>=0.25.2"],
+        installed=True,
+        install_calls=install_calls,
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}"},
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    assert install_calls == []
+    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
+        "enabled"
+    ] is True
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_remote_disable_does_not_need_install_policy(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
+        encoding="utf-8",
+    )
+    _stub_matrix_feature(monkeypatch, config_path, deps=["matrix-nio>=0.25.2"], installed=False)
+
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}"},
+        path="/api/settings/nanobot-features/disable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _REMOTE,
+        request,
+        "/api/settings/nanobot-features/disable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["enabled"] is False
+    assert data["channels"]["matrix"]["homeserver"] == "keep"
+
+
+@pytest.mark.asyncio
 async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     bus: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entered = threading.Event()
-    release = threading.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
 
-    def slow_payload() -> dict[str, Any]:
+    async def slow_payload(*, installed_only: bool = False) -> dict[str, Any]:
+        assert installed_only is False
         entered.set()
-        release.wait(2.0)
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(release.wait(), 2.0)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 
     monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", slow_payload)
@@ -501,12 +879,11 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
         token = boot.json()["token"]
         auth = {"Authorization": f"Bearer {token}"}
 
-        started = time.perf_counter()
         catalog_task = asyncio.create_task(
             _http_get("http://127.0.0.1:29935/api/settings/cli-apps", headers=auth)
         )
-        assert await asyncio.to_thread(entered.wait, 2.0)
-        assert time.perf_counter() - started < 1.0
+        assert await asyncio.wait_for(entered.wait(), 2.0)
+        assert not catalog_task.done()
 
         workspaces_started = time.perf_counter()
         workspaces = await _http_get("http://127.0.0.1:29935/api/workspaces", headers=auth)
@@ -531,7 +908,7 @@ async def test_cli_apps_route_supports_installed_only_payload(
 ) -> None:
     calls: list[bool] = []
 
-    def payload(*, installed_only: bool = False) -> dict[str, Any]:
+    async def payload(*, installed_only: bool = False) -> dict[str, Any]:
         calls.append(installed_only)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 
@@ -1077,6 +1454,93 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
 
 
 @pytest.mark.asyncio
+async def test_webui_automations_route_manages_local_triggers(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    trigger_store = LocalTriggerStore(tmp_path)
+    trigger = trigger_store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="abc",
+        session_key="websocket:abc",
+    )
+    delivery = trigger_store.enqueue(trigger.id, "Review queued PR")
+    assert delivery.path is not None
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        local_trigger_store=trigger_store,
+        local_trigger_pending_ids=lambda key: (
+            {trigger.id} if key == "websocket:abc" else set()
+        ),
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        listed = await _http_get(f"{base_url}/api/webui/automations", headers=auth)
+        assert listed.status_code == 200
+        by_id = {job["id"]: job for job in listed.json()["jobs"]}
+        assert by_id[trigger.id]["kind"] == "local_trigger"
+        assert by_id[trigger.id]["state"]["pending"] is True
+        assert by_id[trigger.id]["trigger"]["command"] == f'nanobot trigger {trigger.id} "message"'
+
+        disabled = await _http_get(
+            f"{base_url}/api/webui/automations/disable?id={trigger.id}",
+            headers=auth,
+        )
+        assert disabled.status_code == 200
+        stored = trigger_store.get(trigger.id)
+        assert stored is not None
+        assert stored.enabled is False
+
+        run = await _http_get(
+            f"{base_url}/api/webui/automations/run?id={trigger.id}",
+            headers=auth,
+        )
+        assert run.status_code == 409
+        assert "CLI message" in run.text
+
+        renamed = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={trigger.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"name": "Release review"}),
+            },
+        )
+        assert renamed.status_code == 200
+        stored = trigger_store.get(trigger.id)
+        assert stored is not None
+        assert stored.name == "Release review"
+
+        bad_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={trigger.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"message": "coupled"}),
+            },
+        )
+        assert bad_update.status_code == 400
+
+        deleted = await _http_get(
+            f"{base_url}/api/webui/automations/delete?id={trigger.id}",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert trigger_store.get(trigger.id) is None
+        assert not delivery.path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_delete_blocks_when_bound_automation_exists(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1112,6 +1576,54 @@ async def test_session_delete_blocks_when_bound_automation_exists(
         assert [job["name"] for job in body["automations"]] == ["Daily check"]
         assert path.exists()
         assert cron.list_bound_cron_jobs_for_session("websocket:doomed")
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_blocks_and_cascades_local_triggers(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    sm = _seed_session(tmp_path, key="websocket:doomed")
+    trigger_store = LocalTriggerStore(tmp_path)
+    trigger = trigger_store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="doomed",
+        session_key="websocket:doomed",
+    )
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        local_trigger_store=trigger_store,
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        blocked = await _http_get(
+            f"{base_url}/api/sessions/websocket:doomed/delete",
+            headers=auth,
+        )
+        assert blocked.status_code == 200
+        assert blocked.json()["blocked_by_automations"] is True
+        assert trigger_store.get(trigger.id) is not None
+
+        deleted = await _http_get(
+            f"{base_url}/api/sessions/websocket:doomed/delete?delete_automations=true",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert trigger_store.get(trigger.id) is None
     finally:
         await channel.stop()
         await server_task
@@ -1472,13 +1984,51 @@ class _FakeConn:
 class _FakeReq:
     """Minimal request stub with configurable headers."""
 
-    def __init__(self, headers: dict[str, str] | None = None):
+    def __init__(self, headers: dict[str, str] | None = None, *, path: str = "/"):
         self.headers = headers or {}
+        self.path = path
 
 
 _REMOTE = _FakeConn(("192.168.1.5", 12345))
 _LOCAL = _FakeConn(("127.0.0.1", 12345))
 _NO_HEADERS = _FakeReq()
+
+
+def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> None:
+    from nanobot.webui.http_utils import is_local_browser_request
+
+    assert is_local_browser_request(_LOCAL, {"Host": "127.0.0.1:8765"}) is True
+    assert is_local_browser_request(_LOCAL, {"Host": "localhost:8765"}) is True
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "localhost:8765", "X-Forwarded-For": "127.0.0.1"},
+        )
+        is True
+    )
+    assert is_local_browser_request(_REMOTE, {"Host": "127.0.0.1:8765"}) is False
+    assert is_local_browser_request(_LOCAL, {"Host": "nanobot.example"}) is False
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "127.0.0.1:8765", "X-Forwarded-For": "203.0.113.42"},
+        )
+        is False
+    )
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "127.0.0.1:8765", "X-Forwarded-Host": "nanobot.example"},
+        )
+        is False
+    )
+    assert (
+        is_local_browser_request(
+            _LOCAL,
+            {"Host": "127.0.0.1:8765", "Forwarded": "for=203.0.113.42;host=nanobot.example"},
+        )
+        is False
+    )
 
 
 def test_wildcard_host_without_auth_raises_on_startup(bus: MagicMock) -> None:

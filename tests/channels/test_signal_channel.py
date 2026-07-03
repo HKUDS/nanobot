@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.signal import (
     SignalChannel,
@@ -1341,7 +1342,7 @@ class TestSend:
             channel="signal",
             chat_id="+19995550001",
             content="working...",
-            metadata={"_progress": True},
+            event=ProgressEvent(content="working..."),
         )
         await ch.send(msg)
         # Progress messages should NOT stop the typing indicator

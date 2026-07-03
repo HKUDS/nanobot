@@ -18,6 +18,7 @@ import httpx
 from pydantic import Field, computed_field, field_validator
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -539,7 +540,7 @@ class SignalChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Signal."""
-        is_progress_message = bool(msg.metadata.get("_progress"))
+        is_progress_message = isinstance(msg.event, ProgressEvent)
         try:
             plain_text, text_styles = _markdown_to_signal(msg.content)
             if not plain_text and not msg.media:
