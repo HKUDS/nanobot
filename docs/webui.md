@@ -1,28 +1,44 @@
 # WebUI
 
-The WebUI is nanobot's browser workbench. Use it after a basic CLI reply already
-works, when you want a persistent chat workspace, visible agent activity,
-workspace controls, Apps, Skills, settings, and Automations in one place.
+The WebUI is nanobot's browser workbench for persistent chat sessions, visible
+agent activity, workspace controls, Apps, Skills, settings, and Automations in
+one place.
 
 The published `nanobot-ai` wheel already includes the WebUI bundle. You only need
 the `webui/` source directory when you are changing the frontend itself.
 
 ## Open the WebUI
 
-First confirm your provider and model can answer:
+Use the launcher:
 
 ```bash
-nanobot agent -m "Hello!"
+nanobot webui
 ```
 
-The local WebSocket channel is enabled by default because it serves the bundled
-WebUI. To require a browser login password, merge `tokenIssueSecret` into your
-existing `~/.nanobot/config.json`:
+`nanobot webui` creates the config/workspace when needed, checks provider setup,
+offers Quick Start when the model provider is not ready, enables the local
+WebSocket channel after confirmation, starts the gateway, and opens the browser.
+The first-run path binds the WebUI to `127.0.0.1` by default, so it is not
+available from other devices on your LAN.
+
+Run it in the background when you do not want to keep a terminal open:
+
+```bash
+nanobot webui --background
+```
+
+Manage the background gateway with `nanobot gateway status`, `nanobot gateway
+logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
+
+Manual config still works. Set `tokenIssueSecret` when you intentionally expose
+the WebUI beyond localhost or want a browser password:
 
 ```json
 {
   "channels": {
     "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
       "tokenIssueSecret": "your-webui-password",
       "websocketRequiresToken": true
     }
@@ -30,20 +46,8 @@ existing `~/.nanobot/config.json`:
 }
 ```
 
-If you are new to JSON snippets, see
-[`start-without-technical-background.md#how-to-merge-json-snippets`](./start-without-technical-background.md#how-to-merge-json-snippets).
-
-Start the gateway:
-
-```bash
-nanobot gateway
-```
-
-Leave the gateway running and open
-[`http://127.0.0.1:8765`](http://127.0.0.1:8765). The WebUI is served by the
-WebSocket channel on port `8765` by default. The gateway health endpoint,
-`18790` by default, is not the browser UI.
-Enter `tokenIssueSecret` when the WebUI asks for a password.
+The WebUI is served by the WebSocket channel on port `8765` by default. The
+gateway health endpoint, `18790` by default, is not the browser UI.
 
 ## What It Is For
 

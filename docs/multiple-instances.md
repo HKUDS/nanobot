@@ -22,6 +22,9 @@ Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. w
 **Run instances:**
 
 ```bash
+# Check one instance before starting it
+nanobot status --config ~/.nanobot-telegram/config.json
+
 # Instance A - Telegram bot
 nanobot gateway --config ~/.nanobot-telegram/config.json
 
@@ -41,6 +44,9 @@ To open a CLI session against one of these instances locally:
 ```bash
 nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
 nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
+
+# Open the browser workbench for a specific instance
+nanobot webui -c ~/.nanobot-telegram/config.json
 
 # Optional one-off workspace override
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
@@ -94,6 +100,7 @@ The copied base config can keep using the same `modelPresets` and `agents.defaul
 Start separate instances:
 
 ```bash
+nanobot status --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-discord/config.json
 ```
