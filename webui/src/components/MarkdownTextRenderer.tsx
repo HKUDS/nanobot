@@ -34,6 +34,9 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  streamRevealFrom?: number;
+  streamVisibleUntil?: number;
+  streamRevealKey?: number;
 }
 
 type MarkdownAstNode = {
@@ -44,6 +47,20 @@ type MarkdownAstNode = {
     hName?: string;
   };
 };
+
+type HastNode = {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+  position?: {
+    start?: { offset?: number };
+    end?: { offset?: number };
+  };
+};
+
+type SourceRange = { start: number; end: number };
 
 type InlineLinkPreview = {
   href: string;
@@ -196,9 +213,137 @@ const remarkPlugins: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [
 ];
 const rehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [rehypeKatex];
 
+function rehypeStreamingReveal(
+  from: number,
+  until: number,
+  revealKey: number,
+  source: string,
+) {
+  return (tree: HastNode) => {
+    revealTextNodes(tree, from, until, revealKey, source);
+  };
+}
+
+function revealTextNodes(
+  node: HastNode,
+  from: number,
+  until: number,
+  revealKey: number,
+  source: string,
+): void {
+  const tagName = node.tagName?.toLowerCase();
+  if (tagName === "script" || tagName === "style" || !node.children) return;
+
+  const nextChildren: HastNode[] = [];
+  for (const child of node.children) {
+    if (child.type === "text") {
+      nextChildren.push(
+        ...revealTextNode(
+          child,
+          from,
+          until,
+          revealKey,
+          inferTextRangeFromParent(source, node, child),
+        ),
+      );
+      continue;
+    }
+    revealTextNodes(child, from, until, revealKey, source);
+    nextChildren.push(child);
+  }
+  node.children = nextChildren;
+}
+
+function revealTextNode(
+  node: HastNode,
+  from: number,
+  until: number,
+  revealKey: number,
+  inferredRange?: SourceRange,
+): HastNode[] {
+  const value = node.value ?? "";
+  if (!value) return [node];
+  const start = node.position?.start?.offset ?? inferredRange?.start;
+  const end = node.position?.end?.offset ?? inferredRange?.end;
+  if (typeof start !== "number" || typeof end !== "number" || end <= Math.min(from, until)) {
+    return [node];
+  }
+
+  const pieces: HastNode[] = [];
+  const stableUntil = Math.min(end, Math.min(from, until));
+  if (start < stableUntil) {
+    pieces.push({ ...node, value: value.slice(0, stableUntil - start) });
+  }
+
+  const revealStart = Math.max(start, Math.min(from, until));
+  const revealEnd = Math.min(end, until);
+  if (revealStart < revealEnd) {
+    pieces.push(streamRevealSpan(value.slice(revealStart - start, revealEnd - start), revealKey));
+  }
+
+  const hiddenStart = Math.max(start, until);
+  if (hiddenStart < end) {
+    pieces.push(streamHiddenSpan(value.slice(hiddenStart - start)));
+  }
+
+  return pieces.length ? pieces : [node];
+}
+
+function inferTextRangeFromParent(
+  source: string,
+  parent: HastNode,
+  node: HastNode,
+): SourceRange | undefined {
+  if (node.position?.start?.offset !== undefined && node.position?.end?.offset !== undefined) {
+    return undefined;
+  }
+  const value = node.value;
+  const parentStart = parent.position?.start?.offset;
+  const parentEnd = parent.position?.end?.offset;
+  if (!value || typeof parentStart !== "number" || typeof parentEnd !== "number") {
+    return undefined;
+  }
+  const start = source.indexOf(value, parentStart);
+  if (start < parentStart || start > parentEnd) return undefined;
+  const end = start + value.length;
+  if (end > parentEnd) return undefined;
+  return { start, end };
+}
+
+function streamRevealSpan(value: string, revealKey: number): HastNode {
+  return {
+    type: "element",
+    tagName: "span",
+    properties: {
+      className: ["streaming-reveal-segment"],
+      "data-testid": "streaming-reveal-segment",
+      "data-stream-reveal-key": String(revealKey),
+    },
+    children: [{ type: "text", value }],
+  };
+}
+
+function streamHiddenSpan(value: string): HastNode {
+  return {
+    type: "element",
+    tagName: "span",
+    properties: {
+      className: ["streaming-hidden-tail"],
+      "aria-hidden": "true",
+      "data-testid": "streaming-hidden-tail",
+    },
+    children: [{ type: "text", value }],
+  };
+}
+
 function nodeText(value: ReactNode): string {
   return Children.toArray(value)
-    .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child);
+      if (!isValidElement(child)) return "";
+      const props = child.props as { children?: ReactNode };
+      return nodeText(props.children);
+    })
     .join("");
 }
 
@@ -391,11 +536,42 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   onOpenFilePreview,
+  streamRevealFrom,
+  streamVisibleUntil,
+  streamRevealKey = 0,
 }: MarkdownTextRendererProps) {
+  const streamingRevealActive = streamRevealFrom !== undefined && streamVisibleUntil !== undefined;
+  const activeRehypePlugins = useMemo<NonNullable<ReactMarkdownOptions["rehypePlugins"]>>(
+    () => {
+      if (!streamingRevealActive) {
+        return rehypePlugins;
+      }
+      return [
+        ...rehypePlugins,
+        () => rehypeStreamingReveal(streamRevealFrom, streamVisibleUntil, streamRevealKey, children),
+      ];
+    },
+    [children, streamRevealFrom, streamVisibleUntil, streamRevealKey, streamingRevealActive],
+  );
   const components = useMemo<Components>(
     () => ({
       code({ className: cls, children: kids, ...props }) {
         const match = /language-(\w+)/.exec(cls || "");
+        if (streamingRevealActive) {
+          return (
+            <code
+              className={cn(
+                match
+                  ? "bg-transparent p-0 font-mono text-[0.8125rem] leading-snug text-inherit"
+                  : "rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]",
+                cls,
+              )}
+              {...props}
+            >
+              {kids}
+            </code>
+          );
+        }
         if (match) {
           const code = String(kids).replace(/\n$/, "");
           return (
@@ -440,6 +616,19 @@ export default function MarkdownTextRenderer({
         );
       },
       pre({ children: markdownChildren }) {
+        if (streamingRevealActive) {
+          return (
+            <pre
+              className={cn(
+                "my-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/35",
+                "p-3 font-mono text-[0.8125rem] leading-snug text-foreground/90",
+                "whitespace-pre [overflow-wrap:normal]",
+              )}
+            >
+              {markdownChildren}
+            </pre>
+          );
+        }
         const kids = Children.toArray(markdownChildren);
         const lone = kids.length === 1 ? kids[0] : null;
         /** Highlighted fences render ``CodeBlock`` (block shell); skip invalid ``<pre><div>``. */
@@ -575,7 +764,7 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview],
+    [highlightCode, onOpenFilePreview, streamingRevealActive],
   );
 
   return (
@@ -599,7 +788,7 @@ export default function MarkdownTextRenderer({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        rehypePlugins={activeRehypePlugins}
         components={components}
       >
         {children}

@@ -115,6 +115,12 @@ import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
 import {
+  useLocalPreferences,
+  type LocalActivityMode,
+  type LocalDensity,
+  type LocalPreferences,
+} from "@/lib/localPreferences";
+import {
   logoFallbackUrls,
   providerBrand,
   providerDisplayLabel,
@@ -155,8 +161,6 @@ export type SettingsSectionKey =
   | "runtime"
   | "advanced";
 
-type LocalDensity = "comfortable" | "compact";
-type LocalActivityMode = "auto" | "expanded";
 type AppsKindFilter = "all" | "nanobot" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
 type AutomationSort = "next" | "last" | "updated" | "name";
@@ -165,13 +169,6 @@ type AppsCatalogItem =
   | { id: string; kind: "nanobot"; feature: NanobotFeatureInfo }
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
-
-interface LocalPreferences {
-  density: LocalDensity;
-  activityMode: LocalActivityMode;
-  codeWrap: boolean;
-  brandLogos: boolean;
-}
 
 interface AgentSettingsDraft {
   model: string;
@@ -259,14 +256,6 @@ interface CustomMcpForm {
   toolTimeout: string;
 }
 
-const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
-
-const DEFAULT_LOCAL_PREFS: LocalPreferences = {
-  density: "comfortable",
-  activityMode: "auto",
-  codeWrap: true,
-  brandLogos: false,
-};
 const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
   { value: "auto", label: "Auto" },
   { value: "chat_completions", label: "Chat Completions" },
@@ -316,22 +305,6 @@ interface SettingsViewProps {
   onNativeEngineRestart?: () => Promise<string>;
   isRestarting?: boolean;
   hostChromeInset?: boolean;
-}
-
-function readLocalPreferences(): LocalPreferences {
-  try {
-    const raw = window.localStorage.getItem(LOCAL_PREFS_STORAGE_KEY);
-    if (!raw) return DEFAULT_LOCAL_PREFS;
-    const parsed = JSON.parse(raw) as Partial<LocalPreferences>;
-    return {
-      density: parsed.density === "compact" ? "compact" : "comfortable",
-      activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
-      codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos === true,
-    };
-  } catch {
-    return DEFAULT_LOCAL_PREFS;
-  }
 }
 
 function modelPresetValue(payload: SettingsPayload): string {
@@ -599,7 +572,7 @@ export function SettingsView({
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
     EMPTY_PENDING_RESTART_SECTIONS,
   );
-  const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
+  const [localPrefs, setLocalPrefs] = useLocalPreferences();
   const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>(() =>
     initialSettings ? webSearchFormFromPayload(initialSettings) : DEFAULT_WEB_SEARCH_FORM,
   );
@@ -835,14 +808,6 @@ export function SettingsView({
       document.removeEventListener("visibilitychange", refreshOnFocus);
     };
   }, [activeSection, token]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(localPrefs));
-    } catch {
-      // Browser-only preferences should never block settings.
-    }
-  }, [localPrefs]);
 
   useEffect(() => {
     if (!settings) return;
@@ -2346,6 +2311,26 @@ function AppearanceSettings({
               onChange={(codeWrap) => onChangeLocalPrefs((prev) => ({ ...prev, codeWrap }))}
               ariaLabel={tx("settings.rows.codeWrap", "Code wrapping")}
               label={localPrefs.codeWrap ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.streamingNaturalPacing", "Streaming pace")}
+            description={tx(
+              "settings.help.streamingNaturalPacing",
+              "Match streaming text to natural reading speed.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.streamingNaturalPacing}
+              onChange={(streamingNaturalPacing) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, streamingNaturalPacing }))
+              }
+              ariaLabel={tx("settings.rows.streamingNaturalPacing", "Streaming pace")}
+              label={
+                localPrefs.streamingNaturalPacing
+                  ? tx("settings.values.on", "On")
+                  : tx("settings.values.off", "Off")
+              }
             />
           </SettingsRow>
           <SettingsRow
