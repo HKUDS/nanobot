@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.registry import ToolRegistry
+from blackcat.agent.tools.base import Tool
+from blackcat.agent.tools.filesystem import ReadFileTool
+from blackcat.agent.tools.registry import ToolRegistry
 
 
 class _FakeTool(Tool):

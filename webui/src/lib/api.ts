@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "./http";
 import type {
   AutomationsPayload,
   AutomationUpdatePayload,
@@ -11,8 +12,8 @@ import type {
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
-  SessionDeleteResult,
   SessionAutomationsPayload,
+  SessionDeleteResult,
   SettingsPayload,
   SettingsUpdate,
   SidebarStatePayload,
@@ -21,11 +22,10 @@ import type {
   SlashCommand,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
-  WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
+  WorkspacesPayload,
 } from "./types";
-import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
 
@@ -93,9 +93,6 @@ function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
   return { "X-Blackcat-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
 }
 
-function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
-  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
-}
 
 function splitKey(key: string): { channel: string; chatId: string } {
   const idx = key.indexOf(":");

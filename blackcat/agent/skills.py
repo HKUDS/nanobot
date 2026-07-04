@@ -233,7 +233,7 @@ class SkillsLoader:
             return {}
         if not isinstance(data, dict):
             return {}
-        payload = data.get("blackcat", data.get("openclaw", {}))
+        payload = data.get("blackcat", data.get("openclaw", data.get("blackcat", {})))
         return payload if isinstance(payload, dict) else {}
 
     def _check_requirements(self, skill_meta: dict) -> bool:

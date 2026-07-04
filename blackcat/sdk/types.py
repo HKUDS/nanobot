@@ -59,7 +59,7 @@ class RunResult:
 
 @dataclass(slots=True)
 class StreamEvent:
-    """A typed event emitted by ``Nanobot.stream()`` and ``RunStream``."""
+    """A typed event emitted by ``Blackcat.stream()`` and ``RunStream``."""
 
     type: StreamEventType
     delta: str = ""
@@ -77,7 +77,7 @@ class StreamEvent:
 
 @dataclass(slots=True)
 class SessionSnapshot:
-    """A durable snapshot of one nanobot session."""
+    """A durable snapshot of one blackcat session."""
 
     key: str
     messages: list[dict[str, Any]]

@@ -171,7 +171,7 @@ class TestRestartCommand:
         loop.sessions.get_or_create.return_value = session
         loop._start_time = time.time() - 125
         loop._last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = AsyncMock(
             return_value=(20500, "tiktoken")
         )
         loop.subagents.get_running_count_by_session.return_value = 0
@@ -195,7 +195,7 @@ class TestRestartCommand:
         session = MagicMock()
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.get_or_create.return_value = session
-        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = AsyncMock(
             return_value=(1000, "tiktoken")
         )
 
@@ -245,7 +245,7 @@ class TestRestartCommand:
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.get_or_create.return_value = session
         loop._last_usage = {"prompt_tokens": 1200, "completion_tokens": 34}
-        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = AsyncMock(
             return_value=(0, "none")
         )
         loop.subagents.get_running_count_by_session.return_value = 0

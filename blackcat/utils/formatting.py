@@ -130,6 +130,10 @@ def strip_think(text: str) -> str:
     text = re.sub(r"^\s*<think>[\s\S]*$", "", text)
     text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
     text = re.sub(r"^\s*<thought>[\s\S]*$", "", text)
+    text = re.sub(r"<thinking>[\s\S]*?</thinking>", "", text)
+    text = re.sub(r"^\s*<thinking>[\s\S]*$", "", text)
+    # Self-closing thinking markers
+    text = re.sub(r"<thinking\s*/>", "", text)
     # Malformed opening tags: `<think` / `<thought` where the next char is
     # NOT one that could continue a valid tag / identifier name. Explicitly
     # listing ASCII tag-name chars (letters, digits, `_`, `-`, `:`) plus
@@ -137,6 +141,7 @@ def strip_think(text: str) -> str:
     # Unicode regex mode it matches CJK characters too, which would defeat
     # the primary fix for `<think广场…` leaks.
     text = re.sub(r"<think(?![A-Za-z0-9_\-:>/])", "", text)
+    text = re.sub(r"<thinking(?![A-Za-z0-9_\-:>/])", "", text)
     text = re.sub(r"<thought(?![A-Za-z0-9_\-:>/])", "", text)
     # Edge-only orphan closing tags (start or end of text).
     text = re.sub(r"^\s*</think>\s*", "", text)
@@ -148,7 +153,7 @@ def strip_think(text: str) -> str:
     # Stream chunks may end in the middle of a control tag. Strip only known
     # control-token prefixes at the very end.
     partial_control_tag = (
-        r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought)>?"
+        r"</?(?:t|th|thi|thin|think|thinking|tho|thou|thoug|though|thought)>?"
         r"|<\|?(?:c|ch|cha|chan|chann|channe|channel)(?:\|?>?)?"
     )
     text = re.sub(rf"(?:{partial_control_tag})$", "", text)
@@ -167,6 +172,8 @@ def extract_think(text: str) -> tuple[str | None, str]:
     for m in re.finditer(r"<think>([\s\S]*?)</think>", text):
         parts.append(m.group(1).strip())
     for m in re.finditer(r"<thought>([\s\S]*?)</thought>", text):
+        parts.append(m.group(1).strip())
+    for m in re.finditer(r"<thinking>([\s\S]*?)</thinking>", text):
         parts.append(m.group(1).strip())
     thinking = "\n\n".join(parts) if parts else None
     return thinking, strip_think(text)
@@ -229,7 +236,7 @@ def extract_reasoning(
     final answer.
     """
     if reasoning_content:
-        return reasoning_content, strip_think(content) if content else content
+        return strip_reasoning_tags(reasoning_content), strip_think(content) if content else content
     if thinking_blocks:
         parts = [
             tb.get("thinking", "")
@@ -250,9 +257,12 @@ def strip_reasoning_tags(text: object) -> str:
     # Well-formed wrappers
     text = re.sub(r"^\s*<think>\s*", "", text)
     text = re.sub(r"\s*</think>\s*$", "", text)
+    text = re.sub(r"^\s*<thinking>\s*", "", text)
+    text = re.sub(r"\s*</thinking>\s*$", "", text)
+    text = re.sub(r"^\s*<thinking/>\s*", "", text)
     text = re.sub(r"^\s*<thought>\s*", "", text)
     text = re.sub(r"\s*</thought>\s*$", "", text)
     # Partial trailing tags
-    partial = r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought)>?"
+    partial = r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought|thinking)>?"
     text = re.sub(rf"\s*(?:{partial})$", "", text)
     return text.strip()

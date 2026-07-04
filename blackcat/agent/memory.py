@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
-from nanobot.session.manager import Session
-from nanobot.utils.gitstore import GitStore
-from nanobot.utils.helpers import (
+from blackcat.session.manager import Session
+from blackcat.utils.gitstore import GitStore
+from blackcat.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -27,11 +27,11 @@ from nanobot.utils.helpers import (
     truncate_text,
     truncate_text_to_tokens,
 )
-from nanobot.utils.prompt_templates import render_template
+from blackcat.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from nanobot.providers.base import LLMProvider
-    from nanobot.session.manager import SessionManager
+    from blackcat.providers.base import LLMProvider
+    from blackcat.session.manager import SessionManager
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +487,7 @@ class MemoryStore:
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
         """
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from blackcat.agent.skills import BUILTIN_SKILLS_DIR
 
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
@@ -508,11 +508,11 @@ class MemoryStore:
 
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-        from nanobot.agent.tools.apply_patch import ApplyPatchTool
-        from nanobot.agent.tools.file_state import FileStates
-        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
-        from nanobot.agent.tools.registry import ToolRegistry
+        from blackcat.agent.skills import BUILTIN_SKILLS_DIR
+        from blackcat.agent.tools.apply_patch import ApplyPatchTool
+        from blackcat.agent.tools.file_state import FileStates
+        from blackcat.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+        from blackcat.agent.tools.registry import ToolRegistry
 
         tools = ToolRegistry()
         file_states = FileStates()
@@ -668,6 +668,7 @@ class Consolidator:
         self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._estimate_tokens = estimate_message_tokens
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -705,7 +706,7 @@ class Consolidator:
                 last_boundary = (idx, removed_tokens)
                 if removed_tokens >= tokens_to_remove:
                     return last_boundary
-            removed_tokens += estimate_message_tokens(message)
+            removed_tokens += self._estimate_tokens(message)
 
         return last_boundary
 
@@ -792,7 +793,7 @@ class Consolidator:
             }
             self.sessions.save(session)
 
-    def estimate_session_prompt_tokens(
+    async def estimate_session_prompt_tokens(
         self,
         session: Session,
     ) -> tuple[int, str]:
@@ -802,7 +803,7 @@ class Consolidator:
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
         summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
-        probe_messages = self._build_messages(
+        probe_messages = await self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
@@ -913,7 +914,7 @@ class Consolidator:
                 replay_max_messages,
             )
             try:
-                estimated, source = self.estimate_session_prompt_tokens(
+                estimated, source = await self.estimate_session_prompt_tokens(
                     session,
                 )
             except Exception:
@@ -978,7 +979,7 @@ class Consolidator:
                     break
 
                 try:
-                    estimated, source = self.estimate_session_prompt_tokens(
+                    estimated, source = await self.estimate_session_prompt_tokens(
                         session,
                     )
                 except Exception:

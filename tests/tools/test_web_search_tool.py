@@ -3,8 +3,8 @@
 import httpx
 import pytest
 
-from nanobot.agent.tools.web import WebSearchTool
-from nanobot.config.schema import WebSearchConfig
+from blackcat.agent.tools.web import WebSearchTool
+from blackcat.config.schema import WebSearchConfig
 
 
 def _tool(
@@ -53,15 +53,15 @@ async def test_brave_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "brave" in url
         assert kw["headers"]["X-Subscription-Token"] == "brave-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         return _response(json={
-            "web": {"results": [{"title": "NanoBot", "url": "https://example.com", "description": "AI assistant"}]}
+            "web": {"results": [{"title": "Blackcat", "url": "https://example.com", "description": "AI assistant"}]}
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="brave", api_key="brave-key", user_agent="nanobot-search-test")
-    result = await tool.execute(query="nanobot", count=1)
-    assert "NanoBot" in result
+    tool = _tool(provider="brave", api_key="brave-key", user_agent="blackcat-search-test")
+    result = await tool.execute(query="blackcat", count=1)
+    assert "Blackcat" in result
     assert "https://example.com" in result
 
 
@@ -81,11 +81,11 @@ async def test_brave_search_retries_rate_limit_once(monkeypatch):
             "web": {"results": [{"title": "Recovered", "url": "https://example.com", "description": "ok"}]}
         })
 
-    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("blackcat.agent.tools.web.asyncio.sleep", mock_sleep)
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
 
     tool = _tool(provider="brave", api_key="brave-key")
-    result = await tool.execute(query="nanobot", count=1)
+    result = await tool.execute(query="blackcat", count=1)
 
     assert calls["n"] == 2
     assert "Recovered" in result
@@ -103,11 +103,11 @@ async def test_brave_search_returns_clear_rate_limit_after_retries(monkeypatch):
         calls["n"] += 1
         return _response(status=429, json={"error": "rate limit"})
 
-    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr("blackcat.agent.tools.web.asyncio.sleep", mock_sleep)
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
 
     tool = _tool(provider="brave", api_key="brave-key")
-    result = await tool.execute(query="nanobot", count=1)
+    result = await tool.execute(query="blackcat", count=1)
 
     assert calls["n"] == 2
     assert "Brave search rate limited" in result
@@ -119,13 +119,13 @@ async def test_tavily_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "tavily" in url
         assert kw["headers"]["Authorization"] == "Bearer tavily-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         return _response(json={
             "results": [{"title": "OpenClaw", "url": "https://openclaw.io", "content": "Framework"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="tavily", api_key="tavily-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="tavily", api_key="tavily-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="openclaw")
     assert "OpenClaw" in result
     assert "https://openclaw.io" in result
@@ -143,14 +143,14 @@ async def test_keenable_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "keenable" in url
         assert kw["headers"]["X-API-Key"] == "keen-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
-        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
+        assert kw["headers"]["X-Keenable-Title"] == "blackcat"
         return _response(json={
             "results": [{"title": "Keen", "url": "https://keenable.ai", "description": "short", "snippet": "longer excerpt"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="keenable", api_key="keen-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="keenable", api_key="keen-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="keenable", count=1)
     assert "Keen" in result
     assert "https://keenable.ai" in result
@@ -162,7 +162,7 @@ async def test_keenable_without_api_key_uses_public_endpoint(monkeypatch):
     async def mock_post(self, url, **kw):
         assert url == "https://api.keenable.ai/v1/search/public"
         assert "X-API-Key" not in kw["headers"]
-        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        assert kw["headers"]["X-Keenable-Title"] == "blackcat"
         return _response(json={
             "results": [{"title": "Public", "url": "https://keenable.ai/pub", "description": "ok"}]
         })
@@ -206,7 +206,7 @@ async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert url == "https://api.bochaai.com/v1/web-search"
         assert kw["headers"]["Authorization"] == "Bearer bocha-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         assert kw["json"] == {
             "query": "MAI-THINKING-1 model",
             "freshness": "noLimit",
@@ -227,7 +227,7 @@ async def test_bocha_search(monkeypatch):
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="bocha", api_key="bocha-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="bocha", api_key="bocha-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="MAI-THINKING-1 model", count=2)
 
     assert "MAI-THINKING-1" in result
@@ -270,8 +270,8 @@ async def test_volcengine_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert url == "https://open.feedcoopapi.com/search_api/web_search"
         assert kw["headers"]["Authorization"] == "Bearer volc-key"
-        assert kw["headers"]["X-Traffic-Tag"] == "nanobot"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["X-Traffic-Tag"] == "blackcat"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         assert kw["json"] == {
             "Query": "北京周边游",
             "SearchType": "web",
@@ -295,7 +295,7 @@ async def test_volcengine_search(monkeypatch):
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="volcengine", api_key="volc-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="volcengine", api_key="volc-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="北京周边游", count=2, timeRange="OneWeek", authLevel=1, queryRewrite=True)
 
     assert "北京周边游攻略" in result
@@ -334,13 +334,13 @@ async def test_volcengine_invalid_time_range_returns_error():
 async def test_searxng_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "searx.example" in url
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         return _response(json={
             "results": [{"title": "Result", "url": "https://example.com", "content": "SearXNG result"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="searxng", base_url="https://searx.example", user_agent="nanobot-search-test")
+    tool = _tool(provider="searxng", base_url="https://searx.example", user_agent="blackcat-search-test")
     result = await tool.execute(query="test")
     assert "Result" in result
 
@@ -354,8 +354,8 @@ async def test_duckduckgo_search(monkeypatch):
         def text(self, query, max_results=5):
             return [{"title": "DDG Result", "href": "https://ddg.example", "body": "From DuckDuckGo"}]
 
-    monkeypatch.setattr("nanobot.agent.tools.web.DDGS", MockDDGS, raising=False)
-    import nanobot.agent.tools.web as web_mod
+    monkeypatch.setattr("blackcat.agent.tools.web.DDGS", MockDDGS, raising=False)
+    import blackcat.agent.tools.web as web_mod
     monkeypatch.setattr(web_mod, "DDGS", MockDDGS, raising=False)
 
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
@@ -412,13 +412,13 @@ async def test_jina_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "s.jina.ai" in str(url)
         assert kw["headers"]["Authorization"] == "Bearer jina-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         return _response(json={
             "data": [{"title": "Jina Result", "url": "https://jina.ai", "content": "AI search"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="jina", api_key="jina-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="jina", api_key="jina-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="test")
     assert "Jina Result" in result
     assert "https://jina.ai" in result
@@ -429,7 +429,7 @@ async def test_kagi_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "kagi.com/api/v1/search" in url
         assert kw["headers"]["Authorization"] == "Bearer kagi-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         assert kw["json"] == {"query": "test", "limit": 2}
         return _response(json={
             "data": {
@@ -443,7 +443,7 @@ async def test_kagi_search(monkeypatch):
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="kagi", api_key="kagi-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="kagi", api_key="kagi-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="test", count=2)
     assert "Kagi Result" in result
     assert "https://kagi.com" in result
@@ -455,7 +455,7 @@ async def test_exa_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert url == "https://api.exa.ai/search"
         assert kw["headers"]["x-api-key"] == "exa-key"
-        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
         assert kw["json"] == {
             "query": "test",
             "numResults": 2,
@@ -472,7 +472,7 @@ async def test_exa_search(monkeypatch):
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="exa", api_key="exa-key", user_agent="nanobot-search-test")
+    tool = _tool(provider="exa", api_key="exa-key", user_agent="blackcat-search-test")
     result = await tool.execute(query="test", count=2)
 
     assert "Exa Result" in result

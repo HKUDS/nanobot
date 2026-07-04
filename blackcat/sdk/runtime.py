@@ -7,11 +7,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
+from blackcat.config.schema import Config, ModelPresetConfig
+from blackcat.providers.factory import ProviderSnapshot, build_provider_snapshot
 
 if TYPE_CHECKING:
-    from nanobot.agent.loop import AgentLoop
+    from blackcat.agent.loop import AgentLoop
 
 
 def ensure_single_model_selector(
@@ -167,7 +167,7 @@ class SDKRuntimeController:
             temperature=getattr(generation, "temperature", 0.1),
             reasoning_effort=getattr(generation, "reasoning_effort", None),
         )
-        from nanobot.agent.model_presets import build_static_preset_snapshot
+        from blackcat.agent.model_presets import build_static_preset_snapshot
 
         return build_static_preset_snapshot(self._loop.provider, "sdk:override", preset)
 

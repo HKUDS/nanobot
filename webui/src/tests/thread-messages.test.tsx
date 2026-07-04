@@ -2,10 +2,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
-  assistantCopyFlags,
-  buildDisplayUnits,
-  ThreadMessages,
-  unitKeysForDisplay,
+    assistantCopyFlags,
+    buildDisplayUnits,
+    ThreadMessages,
+    unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
 import type { UIMessage } from "@/lib/types";
 
@@ -225,8 +225,8 @@ describe("ThreadMessages", () => {
         id: "t1",
         role: "tool",
         kind: "trace",
-        content: "Searching query: HKUDS/nanobot GitHub stars",
-        traces: ["Searching query: HKUDS/nanobot GitHub stars"],
+        content: "Searching query: HKUDS/blackcat GitHub stars",
+        traces: ["Searching query: HKUDS/blackcat GitHub stars"],
         activitySegmentId: "seg-2",
         createdAt: 3,
       },

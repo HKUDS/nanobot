@@ -7,12 +7,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Package = "nanobot-ai"
-$MainSource = "https://github.com/HKUDS/nanobot/archive/refs/heads/main.zip"
+$Package = "blackcat-ai"
+$MainSource = "https://github.com/HKUDS/blackcat/archive/refs/heads/main.zip"
 $InstallTarget = $Package
 $InstallSource = "PyPI"
-$script:NanobotRunner = $null
-$script:NanobotPython = $null
+$script:BlackcatRunner = $null
+$script:BlackcatPython = $null
 $script:LastInstallSucceeded = $false
 
 function Write-Info {
@@ -26,21 +26,21 @@ function Fail {
 }
 
 function Show-InstallFailureHint {
-    [Console]::Error.WriteLine("Error: could not install nanobot from $InstallSource.")
+    [Console]::Error.WriteLine("Error: could not install blackcat from $InstallSource.")
     [Console]::Error.WriteLine("If pip mentioned externally-managed-environment, use uv, pipx, or a virtual environment instead of system pip.")
     [Console]::Error.WriteLine("You can also run manually:")
     [Console]::Error.WriteLine("  uv tool install --force --upgrade $InstallTarget")
-    [Console]::Error.WriteLine("  $Python -m venv `$HOME\.nanobot\venv")
-    [Console]::Error.WriteLine("  `$HOME\.nanobot\venv\Scripts\python.exe -m pip install --upgrade $InstallTarget")
+    [Console]::Error.WriteLine("  $Python -m venv `$HOME\.blackcat\venv")
+    [Console]::Error.WriteLine("  `$HOME\.blackcat\venv\Scripts\python.exe -m pip install --upgrade $InstallTarget")
     [Console]::Error.WriteLine("Then start setup with:")
-    [Console]::Error.WriteLine("  nanobot onboard --wizard")
-    throw "could not install nanobot from $InstallSource"
+    [Console]::Error.WriteLine("  blackcat onboard --wizard")
+    throw "could not install blackcat from $InstallSource"
 }
 
 function Show-Usage {
     Write-Host "Usage: install.ps1 [-Dev|--dev] [-DryRun|--dry-run]"
     Write-Host ""
-    Write-Host "By default this installs or upgrades nanobot-ai from PyPI."
+    Write-Host "By default this installs or upgrades blackcat-ai from PyPI."
     Write-Host "Use --dev to install from the current main branch on GitHub."
     Write-Host "Use --dry-run to print what would happen without installing or starting the wizard."
 }
@@ -105,31 +105,31 @@ function Ensure-Pip {
     }
 }
 
-function Invoke-Nanobot {
-    param([string[]]$NanobotArgs)
+function Invoke-Blackcat {
+    param([string[]]$BlackcatArgs)
 
-    switch ($script:NanobotRunner) {
+    switch ($script:BlackcatRunner) {
         "uv" {
-            & uv tool run --from $InstallTarget nanobot @NanobotArgs
+            & uv tool run --from $InstallTarget blackcat @BlackcatArgs
         }
         "pipx" {
-            & pipx run --spec $InstallTarget nanobot @NanobotArgs
+            & pipx run --spec $InstallTarget blackcat @BlackcatArgs
         }
         "python" {
-            & $script:NanobotPython -m nanobot @NanobotArgs
+            & $script:BlackcatPython -m blackcat @BlackcatArgs
         }
         default {
-            Fail "nanobot was installed, but no runner was configured."
+            Fail "blackcat was installed, but no runner was configured."
         }
     }
 }
 
-function Get-NanobotCommand {
-    switch ($script:NanobotRunner) {
-        "uv" { return "uv tool run --from $InstallTarget nanobot" }
-        "pipx" { return "pipx run --spec $InstallTarget nanobot" }
-        "python" { return "$script:NanobotPython -m nanobot" }
-        default { return "nanobot" }
+function Get-BlackcatCommand {
+    switch ($script:BlackcatRunner) {
+        "uv" { return "uv tool run --from $InstallTarget blackcat" }
+        "pipx" { return "pipx run --spec $InstallTarget blackcat" }
+        "python" { return "$script:BlackcatPython -m blackcat" }
+        default { return "blackcat" }
     }
 }
 
@@ -140,29 +140,29 @@ function Install-WithActivePython {
     if ($LASTEXITCODE -ne 0) {
         Show-InstallFailureHint
     }
-    $script:NanobotRunner = "python"
-    $script:NanobotPython = $Python
+    $script:BlackcatRunner = "python"
+    $script:BlackcatPython = $Python
 }
 
 function Install-WithUv {
     $script:LastInstallSucceeded = $false
-    Write-Info "Installing or upgrading nanobot from $InstallSource with uv tool..."
+    Write-Info "Installing or upgrading blackcat from $InstallSource with uv tool..."
     & uv tool install --python $Python --force --upgrade $InstallTarget
     if ($LASTEXITCODE -ne 0) {
         return
     }
-    $script:NanobotRunner = "uv"
+    $script:BlackcatRunner = "uv"
     $script:LastInstallSucceeded = $true
 }
 
 function Install-WithPipx {
     $script:LastInstallSucceeded = $false
-    Write-Info "Installing or upgrading nanobot from $InstallSource with pipx..."
+    Write-Info "Installing or upgrading blackcat from $InstallSource with pipx..."
     & pipx install --python $Python --force $InstallTarget
     if ($LASTEXITCODE -ne 0) {
         return
     }
-    $script:NanobotRunner = "pipx"
+    $script:BlackcatRunner = "pipx"
     $script:LastInstallSucceeded = $true
 }
 
@@ -172,7 +172,7 @@ function Install-WithManagedVenv {
         Fail "HOME is not set; cannot create a managed virtual environment."
     }
 
-    $VenvDir = if ($env:NANOBOT_VENV) { $env:NANOBOT_VENV } else { Join-Path $HomeDir ".nanobot\venv" }
+    $VenvDir = if ($env:BLACKCAT_VENV) { $env:BLACKCAT_VENV } else { Join-Path $HomeDir ".blackcat\venv" }
     $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
     if (-not (Test-Path $VenvPython)) {
@@ -188,18 +188,18 @@ function Install-WithManagedVenv {
     }
 
     if (-not (Test-Python $VenvPython)) {
-        Fail "The managed venv uses Python older than 3.11. Remove it or set NANOBOT_VENV to a new path."
+        Fail "The managed venv uses Python older than 3.11. Remove it or set BLACKCAT_VENV to a new path."
     }
 
-    Write-Info "Installing or upgrading nanobot from $InstallSource in $VenvDir..."
+    Write-Info "Installing or upgrading blackcat from $InstallSource in $VenvDir..."
     Ensure-Pip $VenvPython
     & $VenvPython -m pip install --upgrade $InstallTarget
     if ($LASTEXITCODE -ne 0) {
         Show-InstallFailureHint
     }
 
-    $script:NanobotRunner = "python"
-    $script:NanobotPython = $VenvPython
+    $script:BlackcatRunner = "python"
+    $script:BlackcatPython = $VenvPython
 }
 
 foreach ($Arg in $RemainingArgs) {
@@ -234,25 +234,25 @@ $Version = & $Python --version
 Write-Info "Using Python: $Version"
 
 if ($DryRun) {
-    Write-Info "Dry run: would install or upgrade nanobot from $InstallSource."
+    Write-Info "Dry run: would install or upgrade blackcat from $InstallSource."
     if (Test-VirtualEnv $Python) {
         Write-Info "Dry run: active virtual environment detected; would run: $Python -m pip install --upgrade $InstallTarget"
-        Write-Info "Dry run: would run nanobot as: $Python -m nanobot"
+        Write-Info "Dry run: would run blackcat as: $Python -m blackcat"
     } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
         Write-Info "Dry run: would run: uv tool install --python $Python --force --upgrade $InstallTarget"
-        Write-Info "Dry run: would run nanobot as: uv tool run --from $InstallTarget nanobot"
+        Write-Info "Dry run: would run blackcat as: uv tool run --from $InstallTarget blackcat"
     } elseif (Get-Command pipx -ErrorAction SilentlyContinue) {
         Write-Info "Dry run: would run: pipx install --python $Python --force $InstallTarget"
-        Write-Info "Dry run: would run nanobot as: pipx run --spec $InstallTarget nanobot"
+        Write-Info "Dry run: would run blackcat as: pipx run --spec $InstallTarget blackcat"
     } else {
         $HomeDir = if ($env:HOME) { $env:HOME } elseif ($env:USERPROFILE) { $env:USERPROFILE } else { "~" }
-        $VenvDir = if ($env:NANOBOT_VENV) { $env:NANOBOT_VENV } else { Join-Path $HomeDir ".nanobot\venv" }
+        $VenvDir = if ($env:BLACKCAT_VENV) { $env:BLACKCAT_VENV } else { Join-Path $HomeDir ".blackcat\venv" }
         Write-Info "Dry run: would create or reuse a dedicated virtual environment: $VenvDir"
         Write-Info "Dry run: would run: $VenvDir\Scripts\python.exe -m pip install --upgrade $InstallTarget"
-        Write-Info "Dry run: would run nanobot as: $VenvDir\Scripts\python.exe -m nanobot"
+        Write-Info "Dry run: would run blackcat as: $VenvDir\Scripts\python.exe -m blackcat"
     }
-    if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
-        Write-Info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
+    if ($env:BLACKCAT_SKIP_WIZARD -eq "1") {
+        Write-Info "Dry run: would skip setup wizard because BLACKCAT_SKIP_WIZARD=1."
     } else {
         Write-Info "Dry run: would run the setup wizard."
     }
@@ -287,22 +287,22 @@ if (Test-VirtualEnv $Python) {
     }
 }
 
-Write-Info "Installed nanobot:"
-Invoke-Nanobot @("--version")
+Write-Info "Installed blackcat:"
+Invoke-Blackcat @("--version")
 if ($LASTEXITCODE -ne 0) {
-    Fail "nanobot was installed, but the command could not be started."
+    Fail "blackcat was installed, but the command could not be started."
 }
 
-if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
-    Write-Info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
-    Write-Info "Run this later: $(Get-NanobotCommand) onboard --wizard"
+if ($env:BLACKCAT_SKIP_WIZARD -eq "1") {
+    Write-Info "Skipping setup wizard because BLACKCAT_SKIP_WIZARD=1."
+    Write-Info "Run this later: $(Get-BlackcatCommand) onboard --wizard"
     return
 }
 
 Write-Info "Starting setup wizard..."
-Invoke-Nanobot @("onboard", "--wizard")
+Invoke-Blackcat @("onboard", "--wizard")
 if ($LASTEXITCODE -ne 0) {
     Fail "Setup wizard did not complete."
 }
 
-Write-Info "Done. Try: $(Get-NanobotCommand) agent -m `"Hello!`""
+Write-Info "Done. Try: $(Get-BlackcatCommand) agent -m `"Hello!`""

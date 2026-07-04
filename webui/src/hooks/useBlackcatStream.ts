@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useClient } from "@/providers/ClientProvider";
+import { hasPendingAgentActivity } from "@/lib/activity-timeline";
+import type { StreamError } from "@/lib/blackcat-client";
 import { toMediaAttachment } from "@/lib/media";
 import {
   mergeToolProgressEvents,
@@ -8,22 +9,21 @@ import {
   normalizeToolProgressEvents,
   toolTraceLinesFromEvents,
 } from "@/lib/tool-traces";
-import { hasPendingAgentActivity } from "@/lib/activity-timeline";
-import type { StreamError } from "@/lib/nanobot-client";
 import type {
+  GoalStateWsPayload,
   InboundEvent,
   OutboundCliAppMention,
   OutboundImageGeneration,
   OutboundMcpPresetMention,
   OutboundMedia,
-  GoalStateWsPayload,
   ToolProgressEvent,
-  UIImage,
   UIFileEdit,
+  UIImage,
   UIMessage,
   UITurnPhase,
   WorkspaceScopePayload,
 } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas (cleared on ``stream_end``). */
@@ -448,7 +448,7 @@ export interface SendOptions {
   workspaceScope?: WorkspaceScopePayload | null;
 }
 
-export function useNanobotStream(
+export function useBlackcatStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,

@@ -177,14 +177,7 @@ def _migrate_config(data: dict) -> dict:
     agents = data.get("agents", {})
     defaults = agents.get("defaults", {})
     if "memoryWindow" in defaults:
-        # Remove legacy key
+        # Remove legacy key; let AgentDefaults provide the default context_window_tokens
         defaults.pop("memoryWindow")
-        # Set default context window tokens if not already set
-        if "contextWindowTokens" not in defaults:
-            defaults["contextWindowTokens"] = 65_536
-
-    # Ensure contextWindowTokens has a default value if missing or null
-    if "contextWindowTokens" not in defaults or defaults.get("contextWindowTokens") is None:
-        defaults["contextWindowTokens"] = 65_536
 
     return data

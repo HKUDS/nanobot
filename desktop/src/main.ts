@@ -6,24 +6,24 @@ import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  net as electronNet,
-  protocol,
-  session,
-  shell,
-  systemPreferences,
-} from "electron";
 import type { IpcMainInvokeEvent, WebContents } from "electron";
-
-import { UnixWebSocketClient } from "./unixWebSocket.js";
 import {
-  clearDesktopNotificationBadge,
-  handleDesktopNotificationFrame,
+    app,
+    BrowserWindow,
+    dialog,
+    net as electronNet,
+    ipcMain,
+    protocol,
+    session,
+    shell,
+    systemPreferences,
+} from "electron";
+
+import {
+    clearDesktopNotificationBadge,
+    handleDesktopNotificationFrame,
 } from "./notifications.js";
+import { UnixWebSocketClient } from "./unixWebSocket.js";
 
 type EngineStatus = "starting" | "ready" | "restarting" | "stopped" | "crashed";
 
@@ -65,8 +65,8 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 function repoRoot(): string {
-  return process.env.NANOBOT_DESKTOP_REPO_ROOT
-    ? path.resolve(process.env.NANOBOT_DESKTOP_REPO_ROOT)
+  return process.env.BLACKCAT_DESKTOP_REPO_ROOT
+    ? path.resolve(process.env.BLACKCAT_DESKTOP_REPO_ROOT)
     : path.resolve(app.getAppPath(), "..");
 }
 
@@ -77,8 +77,8 @@ function bundledResourcePath(name: string): string {
 }
 
 function webDistPath(root: string): string {
-  if (process.env.NANOBOT_DESKTOP_WEB_DIST) {
-    return path.resolve(process.env.NANOBOT_DESKTOP_WEB_DIST);
+  if (process.env.BLACKCAT_DESKTOP_WEB_DIST) {
+    return path.resolve(process.env.BLACKCAT_DESKTOP_WEB_DIST);
   }
   const bundled = path.join(process.resourcesPath, "blackcat-webui");
   if (app.isPackaged && existsSync(path.join(bundled, "index.html"))) {
@@ -88,7 +88,7 @@ function webDistPath(root: string): string {
 }
 
 function webDevUrl(): string | null {
-  const value = process.env.NANOBOT_DESKTOP_WEB_DEV_URL?.trim();
+  const value = process.env.BLACKCAT_DESKTOP_WEB_DEV_URL?.trim();
   return value ? value.replace(/\/+$/, "") : null;
 }
 
@@ -242,8 +242,8 @@ function engineSocketPath(): string {
 }
 
 function pythonExecutable(): string {
-  if (process.env.NANOBOT_DESKTOP_PYTHON) {
-    return path.resolve(process.env.NANOBOT_DESKTOP_PYTHON);
+  if (process.env.BLACKCAT_DESKTOP_PYTHON) {
+    return path.resolve(process.env.BLACKCAT_DESKTOP_PYTHON);
   }
   const bundled = path.join(bundledResourcePath("blackcat-engine"), "bin", "python3");
   if (existsSync(bundled)) return bundled;
@@ -474,7 +474,7 @@ async function bootstrapFromGateway(current: HostRuntime): Promise<Record<string
   const response = await fetchGateway(current, "/webui/bootstrap", {
     method: "GET",
     headers: {
-      "X-Nanobot-Auth": current.secret,
+      "X-Blackcat-Auth": current.secret,
     },
   });
   if (!response.ok) {
@@ -556,7 +556,7 @@ async function proxyToGateway(request: Request): Promise<Response> {
   const headers = new Headers(request.headers);
   headers.delete("host");
   if (requestUrl.pathname === "/webui/bootstrap") {
-    headers.set("X-Nanobot-Auth", runtime.secret);
+    headers.set("X-Blackcat-Auth", runtime.secret);
   }
   const init: {
     body?: ArrayBuffer;

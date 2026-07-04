@@ -93,7 +93,7 @@ class WhatsAppChannel(BaseChannel):
            ``lid-mapping-<lid>_reverse.json`` and containing the phone number string.
         2. Static ``lid_mappings`` from the channel config (takes precedence).
         """
-        from nanobot.config.paths import get_runtime_subdir
+        from blackcat.config.paths import get_runtime_subdir
 
         mapping: dict[str, str] = {}
         auth_dir = get_runtime_subdir("whatsapp-auth")

@@ -13,11 +13,11 @@ from typing import Any
 import httpx
 from pydantic import Field
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_runtime_subdir
-from nanobot.config.schema import Base
+from blackcat.bus.events import OutboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.channels.base import BaseChannel
+from blackcat.config.paths import get_runtime_subdir
+from blackcat.config.schema import Base
 
 try:
     import socketio

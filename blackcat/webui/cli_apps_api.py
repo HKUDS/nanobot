@@ -7,8 +7,8 @@ import re
 import time
 from typing import Any
 
-from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.loader import load_config
+from blackcat.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from blackcat.config.loader import load_config
 
 QueryParams = dict[str, list[str]]
 

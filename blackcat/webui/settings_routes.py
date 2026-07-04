@@ -15,12 +15,12 @@ from typing import Any
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.agent.tools.mcp import request_mcp_reload
-from nanobot.bus.queue import MessageBus
-from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
-from nanobot.webui.http_utils import query_first as _query_first
-from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
-from nanobot.webui.settings_api import (
+from blackcat.agent.tools.mcp import request_mcp_reload
+from blackcat.bus.queue import MessageBus
+from blackcat.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from blackcat.webui.http_utils import query_first as _query_first
+from blackcat.webui.mcp_presets_api import mcp_presets_settings_action
+from blackcat.webui.settings_api import (
     WebUISettingsError,
     create_model_configuration,
     decorate_settings_payload,
@@ -37,11 +37,11 @@ from nanobot.webui.settings_api import (
     update_transcription_settings,
     update_web_search_settings,
 )
-from nanobot.webui.version_check import check_for_update
+from blackcat.webui.version_check import check_for_update
 
 QueryParams = dict[str, list[str]]
 
-_MCP_VALUES_HEADER = "X-Nanobot-MCP-Values"
+_MCP_VALUES_HEADER = "X-Blackcat-MCP-Values"
 _MCP_VALUES_HEADER_MAX_BYTES = 64 * 1024
 
 _MCP_PRESET_ACTIONS_BY_PATH = {

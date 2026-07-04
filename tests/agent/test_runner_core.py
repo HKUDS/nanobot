@@ -154,7 +154,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     }
     assert len(calls) == 3
     assert calls[-1]["tools"] is None
-    assert "tool-call budget" in calls[-1]["messages"][-1]["content"]
+    assert "maximum allowed tool rounds" in calls[-1]["messages"][-1]["content"]
     assert tools.execute.await_count == 2
 
 

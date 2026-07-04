@@ -475,7 +475,7 @@ def test_lid_mappings_from_bridge_reverse_files(tmp_path, monkeypatch):
     (auth_dir / "lid-mapping-empty_reverse.json").write_text(json.dumps(""), encoding="utf-8")
 
     monkeypatch.setattr(
-        "nanobot.config.paths.get_runtime_subdir", lambda name: auth_dir
+        "blackcat.config.paths.get_runtime_subdir", lambda name: auth_dir
     )
 
     ch = WhatsAppChannel({"enabled": True}, MagicMock())
@@ -489,7 +489,7 @@ def test_lid_mappings_config_takes_precedence_over_files(tmp_path, monkeypatch):
         json.dumps("from-file"), encoding="utf-8"
     )
     monkeypatch.setattr(
-        "nanobot.config.paths.get_runtime_subdir", lambda name: auth_dir
+        "blackcat.config.paths.get_runtime_subdir", lambda name: auth_dir
     )
 
     ch = WhatsAppChannel(
@@ -501,7 +501,7 @@ def test_lid_mappings_config_takes_precedence_over_files(tmp_path, monkeypatch):
 def test_lid_mappings_empty_when_no_auth_dir(tmp_path, monkeypatch):
     missing = tmp_path / "does-not-exist"
     monkeypatch.setattr(
-        "nanobot.config.paths.get_runtime_subdir", lambda name: missing
+        "blackcat.config.paths.get_runtime_subdir", lambda name: missing
     )
     ch = WhatsAppChannel({"enabled": True}, MagicMock())
     assert ch._lid_to_phone == {}

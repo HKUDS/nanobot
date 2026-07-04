@@ -14,7 +14,7 @@ def _run_import_probe(source: str) -> str:
 
 def test_feishu_module_import_does_not_import_lark_oapi():
     out = _run_import_probe(
-        "import sys; import nanobot.channels.feishu; print('lark_oapi' in sys.modules)"
+        "import sys; import blackcat.channels.feishu; print('lark_oapi' in sys.modules)"
     )
 
     assert out == "False"
@@ -23,8 +23,8 @@ def test_feishu_module_import_does_not_import_lark_oapi():
 def test_feishu_channel_constructor_does_not_import_lark_oapi():
     out = _run_import_probe(
         "import sys; "
-        "from nanobot.bus.queue import MessageBus; "
-        "from nanobot.channels.feishu import FeishuChannel; "
+        "from blackcat.bus.queue import MessageBus; "
+        "from blackcat.channels.feishu import FeishuChannel; "
         "FeishuChannel({'enabled': True}, MessageBus()); "
         "print('lark_oapi' in sys.modules)"
     )
@@ -38,7 +38,7 @@ def test_lark_runtime_thread_import_clears_sdk_import_loop():
         "import sys\n"
         "import tempfile\n"
         "from pathlib import Path\n"
-        "from nanobot.channels.feishu import _load_lark_runtime\n"
+        "from blackcat.channels.feishu import _load_lark_runtime\n"
         "root = Path(tempfile.mkdtemp())\n"
         "pkg = root / 'lark_oapi'\n"
         "(pkg / 'ws').mkdir(parents=True)\n"

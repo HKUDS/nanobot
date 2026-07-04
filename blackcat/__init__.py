@@ -1,5 +1,5 @@
 """
-nanobot - A lightweight AI agent framework
+blackcat - A lightweight AI agent framework
 """
 
 import tomllib
@@ -19,9 +19,9 @@ def _read_pyproject_version() -> str | None:
 
 def _resolve_version() -> str:
     try:
-        return _pkg_version("nanobot-ai")
+        return _pkg_version("blackcat-ai")
     except PackageNotFoundError:
-        # Source checkouts often import nanobot without installed dist-info.
+        # Source checkouts often import blackcat without installed dist-info.
         return _read_pyproject_version() or "0.2.2"
 
 
@@ -29,24 +29,24 @@ __version__ = _resolve_version()
 __logo__ = "🐈"
 
 _LAZY_EXPORTS = {
-    "Nanobot": ".nanobot",
-    "RunStream": ".nanobot",
-    "RunResult": ".nanobot",
-    "SessionInfo": ".nanobot",
-    "SessionSnapshot": ".nanobot",
-    "STREAM_EVENT_REASONING_COMPLETED": ".nanobot",
-    "STREAM_EVENT_REASONING_DELTA": ".nanobot",
-    "STREAM_EVENT_RUN_COMPLETED": ".nanobot",
-    "STREAM_EVENT_RUN_FAILED": ".nanobot",
-    "STREAM_EVENT_RUN_STARTED": ".nanobot",
-    "STREAM_EVENT_TEXT_COMPLETED": ".nanobot",
-    "STREAM_EVENT_TEXT_DELTA": ".nanobot",
-    "STREAM_EVENT_TOOL_COMPLETED": ".nanobot",
-    "STREAM_EVENT_TOOL_FAILED": ".nanobot",
-    "STREAM_EVENT_TOOL_STARTED": ".nanobot",
-    "STREAM_EVENT_TYPES": ".nanobot",
-    "StreamEvent": ".nanobot",
-    "StreamEventType": ".nanobot",
+    "Blackcat": ".blackcat",
+    "RunStream": ".blackcat",
+    "RunResult": ".blackcat",
+    "SessionInfo": ".blackcat",
+    "SessionSnapshot": ".blackcat",
+    "STREAM_EVENT_REASONING_COMPLETED": ".blackcat",
+    "STREAM_EVENT_REASONING_DELTA": ".blackcat",
+    "STREAM_EVENT_RUN_COMPLETED": ".blackcat",
+    "STREAM_EVENT_RUN_FAILED": ".blackcat",
+    "STREAM_EVENT_RUN_STARTED": ".blackcat",
+    "STREAM_EVENT_TEXT_COMPLETED": ".blackcat",
+    "STREAM_EVENT_TEXT_DELTA": ".blackcat",
+    "STREAM_EVENT_TOOL_COMPLETED": ".blackcat",
+    "STREAM_EVENT_TOOL_FAILED": ".blackcat",
+    "STREAM_EVENT_TOOL_STARTED": ".blackcat",
+    "STREAM_EVENT_TYPES": ".blackcat",
+    "StreamEvent": ".blackcat",
+    "StreamEventType": ".blackcat",
 }
 
 
@@ -62,7 +62,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    "Nanobot",
+    "Blackcat",
     "RunResult",
     "RunStream",
     "SessionInfo",

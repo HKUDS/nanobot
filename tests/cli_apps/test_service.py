@@ -277,7 +277,7 @@ def test_payload_cache_only_does_not_fetch_catalog(tmp_path: Path, monkeypatch: 
     def fail_get(*args, **kwargs):
         raise AssertionError("network should not be used")
 
-    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+    monkeypatch.setattr("blackcat.apps.cli.service.httpx.get", fail_get)
 
     payload = manager.payload(cache_only=True)
 
@@ -307,7 +307,7 @@ def test_payload_cache_only_without_cache_returns_empty(tmp_path: Path, monkeypa
     def fail_get(*args, **kwargs):
         raise AssertionError("network should not be used")
 
-    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+    monkeypatch.setattr("blackcat.apps.cli.service.httpx.get", fail_get)
 
     payload = manager.payload(cache_only=True)
 

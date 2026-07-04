@@ -86,7 +86,7 @@ def test_delete_session_cleans_legacy_file(tmp_path: Path, monkeypatch) -> None:
     """A session that only exists at the legacy location must also be deleted."""
     legacy = tmp_path / "legacy_sessions"
     monkeypatch.setattr(
-        "nanobot.session.manager.get_legacy_sessions_dir",
+        "blackcat.session.manager.get_legacy_sessions_dir",
         lambda: legacy,
     )
     key = "telegram:only-legacy"
@@ -105,7 +105,7 @@ def test_delete_session_cleans_both_locations(tmp_path: Path, monkeypatch) -> No
     """When files exist at both the new and legacy paths, both must be removed."""
     legacy = tmp_path / "legacy_sessions"
     monkeypatch.setattr(
-        "nanobot.session.manager.get_legacy_sessions_dir",
+        "blackcat.session.manager.get_legacy_sessions_dir",
         lambda: legacy,
     )
     workspace = tmp_path / "workspace"
@@ -130,7 +130,7 @@ def test_delete_session_prevents_legacy_revival(tmp_path: Path, monkeypatch) -> 
     """After delete_session, a subsequent get_or_create must not resurrect history."""
     legacy = tmp_path / "legacy_sessions"
     monkeypatch.setattr(
-        "nanobot.session.manager.get_legacy_sessions_dir",
+        "blackcat.session.manager.get_legacy_sessions_dir",
         lambda: legacy,
     )
     workspace = tmp_path / "workspace"

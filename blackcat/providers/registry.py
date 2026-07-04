@@ -31,7 +31,7 @@ class ProviderSpec:
     name: str  # config field name, e.g. "dashscope"
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
-    display_name: str = ""  # shown in `nanobot status`
+    display_name: str = ""  # shown in `blackcat status`
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
@@ -534,6 +534,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_local=True,
         detect_by_base_keyword="11434",
         default_api_base="http://localhost:11434/v1",
+        strip_model_prefix=True,
     ),
     # LM Studio (local, OpenAI-compatible)
     ProviderSpec(

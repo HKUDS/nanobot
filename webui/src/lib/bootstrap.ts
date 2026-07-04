@@ -1,7 +1,7 @@
-import type { BootstrapResponse } from "./types";
 import { fetchWithTimeout } from "./http";
+import type { BootstrapResponse } from "./types";
 
-const SECRET_STORAGE_KEY = "nanobot-webui.bootstrap-secret";
+const SECRET_STORAGE_KEY = "blackcat-webui.bootstrap-secret";
 
 /** Read a previously saved bootstrap secret from localStorage. */
 export function loadSavedSecret(): string {
@@ -42,7 +42,7 @@ export async function fetchBootstrap(
 ): Promise<BootstrapResponse> {
   const headers: Record<string, string> = {};
   if (secret) {
-    headers["X-Nanobot-Auth"] = secret;
+    headers["X-Blackcat-Auth"] = secret;
   }
   const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
     method: "GET",
@@ -79,7 +79,7 @@ export function deriveWsUrl(
       : window.location.hostname;
     return `ws://${host}:8765${path}${query}`;
   }
-  if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
+  if (wsUrl && /^(wss?|blackcat-host):\/\//i.test(wsUrl)) {
     const join = wsUrl.includes("?") ? "&" : "?";
     return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
   }

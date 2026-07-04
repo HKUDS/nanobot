@@ -23,72 +23,72 @@ from loguru import logger
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.command.builtin import builtin_command_palette
-from nanobot.cron.session_turns import is_bound_cron_job
-from nanobot.cron.types import CronJob, CronSchedule
-from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
-from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
-from nanobot.webui.http_utils import (
+from blackcat.command.builtin import builtin_command_palette
+from blackcat.cron.session_turns import is_bound_cron_job
+from blackcat.cron.types import CronJob, CronSchedule
+from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from blackcat.webui.gateway_tokens import GatewayTokenStore, token_response_payload
+from blackcat.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     host_for_url as _host_for_url,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     http_error as _http_error,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     http_json_response as _http_json_response,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     http_response as _http_response,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     is_localhost as _is_localhost,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     parse_query as _parse_query,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     query_first as _query_first,
 )
-from nanobot.webui.http_utils import (
+from blackcat.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
-from nanobot.webui.media_gateway import WebUIMediaGateway
-from nanobot.webui.session_automations import (
+from blackcat.webui.media_gateway import WebUIMediaGateway
+from blackcat.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
     session_automation_jobs,
     session_automations_payload,
 )
-from nanobot.webui.session_list_index import list_webui_sessions
-from nanobot.webui.sidebar_state import (
+from blackcat.webui.session_list_index import list_webui_sessions
+from blackcat.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
-from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
-from nanobot.webui.thread_disk import delete_webui_thread
-from nanobot.webui.transcript import build_webui_thread_response
-from nanobot.webui.workspaces import WebUIWorkspaceController
+from blackcat.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
+from blackcat.webui.thread_disk import delete_webui_thread
+from blackcat.webui.transcript import build_webui_thread_response
+from blackcat.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
-_AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
+_AUTOMATION_VALUES_HEADER = "X-Blackcat-Automation-Values"
 
 if TYPE_CHECKING:
-    from nanobot.bus.queue import MessageBus
-    from nanobot.cron.service import CronService
-    from nanobot.session.manager import SessionManager
+    from blackcat.bus.queue import MessageBus
+    from blackcat.cron.service import CronService
+    from blackcat.session.manager import SessionManager
 
 
 def _decode_api_key(raw_key: str) -> str | None:
@@ -101,7 +101,7 @@ def _decode_api_key(raw_key: str) -> str | None:
 
 def _default_model_name_from_config() -> str | None:
     try:
-        from nanobot.config.loader import load_config
+        from blackcat.config.loader import load_config
         model = load_config().resolve_preset().model.strip()
         return model or None
     except Exception as e:
@@ -171,8 +171,8 @@ class GatewayHTTPHandler:
         self._log = log
         self._runtime_surface = runtime_surface
 
-        from nanobot.webui.settings_api import runtime_capabilities as _rc
-        from nanobot.webui.settings_routes import WebUISettingsRouter
+        from blackcat.webui.settings_api import runtime_capabilities as _rc
+        from blackcat.webui.settings_routes import WebUISettingsRouter
 
         self._capabilities = _rc(runtime_surface, runtime_capabilities_overrides or {})
         self.settings_routes = WebUISettingsRouter(
@@ -376,7 +376,7 @@ class GatewayHTTPHandler:
     def _sessions_list_payload(self) -> dict[str, Any]:
         assert self.session_manager is not None
         sessions = list_webui_sessions(self.session_manager)
-        from nanobot.session.webui_turns import websocket_turn_wall_started_at
+        from blackcat.session.webui_turns import websocket_turn_wall_started_at
 
         cleaned = []
         for s in sessions:

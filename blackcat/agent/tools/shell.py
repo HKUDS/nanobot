@@ -15,9 +15,9 @@ from typing import Any
 from loguru import logger
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
-from nanobot.agent.tools.exec_session import (
+from blackcat.agent.tools.base import Tool, tool_parameters
+from blackcat.agent.tools.context import current_request_session_key
+from blackcat.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
@@ -26,17 +26,17 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.sandbox import wrap_command
-from nanobot.agent.tools.schema import (
+from blackcat.agent.tools.sandbox import wrap_command
+from blackcat.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.paths import get_media_dir
-from nanobot.config_base import Base
-from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
-from nanobot.security.workspace_policy import is_path_within
+from blackcat.config.paths import get_media_dir
+from blackcat.config_base import Base
+from blackcat.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
+from blackcat.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -186,7 +186,7 @@ class ExecTool(Tool):
             r">\s*/dev/sd",                  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
-            # Block writes to nanobot internal state files (#2989).
+            # Block writes to blackcat internal state files (#2989).
             # history.jsonl / .dream_cursor are managed by append_history();
             # direct writes corrupt the cursor format and crash /dream.
             r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
@@ -448,12 +448,12 @@ class ExecTool(Tool):
     def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
         segments = []
         if self.path_prepend:
-            env["NANOBOT_PATH_PREPEND"] = self.path_prepend
-            segments.append("$NANOBOT_PATH_PREPEND")
+            env["BLACKCAT_PATH_PREPEND"] = self.path_prepend
+            segments.append("$BLACKCAT_PATH_PREPEND")
         segments.append("$PATH")
         if self.path_append:
-            env["NANOBOT_PATH_APPEND"] = self.path_append
-            segments.append("$NANOBOT_PATH_APPEND")
+            env["BLACKCAT_PATH_APPEND"] = self.path_append
+            segments.append("$BLACKCAT_PATH_APPEND")
         path_expr = os.pathsep.join(segments)
         return f'export PATH="{path_expr}"; {command}'
 
@@ -612,7 +612,7 @@ class ExecTool(Tool):
             if self.allow_patterns:
                 return "Error: Command blocked by allowlist filter (not in allowlist)"
 
-        from nanobot.security.network import contains_internal_url
+        from blackcat.security.network import contains_internal_url
         if contains_internal_url(
             cmd,
             allow_loopback=current_scope_allows_loopback(

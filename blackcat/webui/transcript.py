@@ -16,10 +16,10 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
-from nanobot.config.paths import get_webui_dir
-from nanobot.cron.session_turns import CRON_HISTORY_META
-from nanobot.session.manager import SessionManager
-from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from blackcat.config.paths import get_webui_dir
+from blackcat.cron.session_turns import CRON_HISTORY_META
+from blackcat.session.manager import SessionManager
+from blackcat.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -1220,7 +1220,7 @@ def replay_transcript_to_ui_messages(
 ) -> list[dict[str, Any]]:
     """Fold JSONL records into ``UIMessage``-shaped dicts for the WebUI.
 
-    Mirrors the core fold in ``useNanobotStream.ts`` (delta, reasoning,
+    Mirrors the core fold in ``useBlackcatStream.ts`` (delta, reasoning,
     message+kind, turn_end). ``augment_user_media`` maps persisted filesystem
     paths to ``{url, name?}`` / attachment dicts the client expects. Assistant
     media gets a separate hook so replay can re-sign outbound attachments after

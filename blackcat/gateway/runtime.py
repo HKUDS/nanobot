@@ -1,4 +1,4 @@
-"""Background process control for ``nanobot gateway``.
+"""Background process control for ``blackcat gateway``.
 
 This module intentionally stays small: the CLI owns command wording, while this
 runtime owns process state, log files, and platform-specific detach/stop details.
@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from nanobot.config.paths import get_data_dir
+from blackcat.config.paths import get_data_dir
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,7 @@ def build_gateway_command(python_executable: str, options: GatewayStartOptions) 
     command = [
         python_executable,
         "-m",
-        "nanobot",
+        "blackcat",
         "gateway",
         "--foreground",
         "--port",
@@ -108,7 +108,7 @@ class GatewayRuntimePaths:
 
 
 class GatewayRuntime:
-    """Manage a background ``nanobot gateway`` process."""
+    """Manage a background ``blackcat gateway`` process."""
 
     def __init__(
         self,

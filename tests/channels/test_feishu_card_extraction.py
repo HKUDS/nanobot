@@ -1,6 +1,6 @@
 import json
 
-from nanobot.channels.feishu import _extract_share_card_content
+from blackcat.channels.feishu import _extract_share_card_content
 
 
 def test_extract_interactive_card_reads_user_dsl_body_elements() -> None:

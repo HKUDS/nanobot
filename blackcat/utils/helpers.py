@@ -318,8 +318,10 @@ from blackcat.utils.formatting import (  # noqa: E402, F401
     IncrementalThinkExtractor,
     build_assistant_message,
     extract_reasoning,
+    extract_think,
     split_message,
     stringify_text_blocks,
+    strip_reasoning_tags,
     strip_think,
     truncate_text,
 )

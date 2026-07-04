@@ -10,23 +10,23 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.file_state import FileStates
-from nanobot.agent.tools.loader import ToolLoader
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
-from nanobot.security.workspace_access import (
+from blackcat.agent.hook import AgentHook, AgentHookContext
+from blackcat.agent.runner import AgentRunner, AgentRunSpec
+from blackcat.agent.tools.context import ToolContext
+from blackcat.agent.tools.file_state import FileStates
+from blackcat.agent.tools.loader import ToolLoader
+from blackcat.agent.tools.registry import ToolRegistry
+from blackcat.bus.events import InboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.config.schema import AgentDefaults, ToolsConfig
+from blackcat.providers.base import LLMProvider
+from blackcat.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.utils.prompt_templates import render_template
+from blackcat.utils.prompt_templates import render_template
 
 
 @dataclass(slots=True)
@@ -162,6 +162,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_sender_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
     ) -> str:
@@ -361,8 +362,8 @@ class SubagentManager:
 
     def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
-        from nanobot.agent.context import ContextBuilder
-        from nanobot.agent.skills import SkillsLoader
+        from blackcat.agent.context import ContextBuilder
+        from blackcat.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
         root = workspace or self.workspace

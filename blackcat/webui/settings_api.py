@@ -15,23 +15,23 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from nanobot import __version__
-from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
-from nanobot.audio.transcription import resolve_transcription_config
-from nanobot.audio.transcription_registry import (
+from blackcat import __version__
+from blackcat.agent.tools.web import SEARCH_PROVIDER_OPTIONS
+from blackcat.audio.transcription import resolve_transcription_config
+from blackcat.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
-from nanobot.config.loader import get_config_path, load_config, save_config
-from nanobot.config.schema import ModelPresetConfig, ProviderConfig
-from nanobot.providers.image_generation import (
+from blackcat.config.loader import get_config_path, load_config, save_config
+from blackcat.config.schema import ModelPresetConfig, ProviderConfig
+from blackcat.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
 )
-from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
-from nanobot.security.workspace_access import workspace_sandbox_status
-from nanobot.webui.token_usage import token_usage_payload
-from nanobot.webui.workspaces import (
+from blackcat.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
+from blackcat.security.workspace_access import workspace_sandbox_status
+from blackcat.webui.token_usage import token_usage_payload
+from blackcat.webui.workspaces import (
     read_webui_default_access_mode,
     write_webui_default_access_mode,
 )
@@ -301,7 +301,7 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 
     if spec.name == "github_copilot":
         try:
-            from nanobot.providers.github_copilot_provider import get_github_copilot_login_status
+            from blackcat.providers.github_copilot_provider import get_github_copilot_login_status
         except Exception:
             return {
                 "configured": False,
@@ -1181,7 +1181,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
 
     if spec.name == "github_copilot":
         try:
-            from nanobot.providers.github_copilot_provider import (
+            from blackcat.providers.github_copilot_provider import (
                 get_github_copilot_login_status,
                 login_github_copilot,
             )
@@ -1215,7 +1215,7 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
     elif spec.name == "github_copilot":
         try:
-            from nanobot.providers.github_copilot_provider import get_storage
+            from blackcat.providers.github_copilot_provider import get_storage
         except ImportError:
             raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
         token_path = get_storage().get_token_path()

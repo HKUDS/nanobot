@@ -312,8 +312,8 @@ class AgentLoop:
             dispatch=self._dispatch,
             is_running=lambda: self._running,
         )
-        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
-        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
+        # BLACKCAT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
+        _max = int(os.environ.get("BLACKCAT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
@@ -610,7 +610,7 @@ class AgentLoop:
             return True
         return False
 
-    def _build_initial_messages(
+    async def _build_initial_messages(
         self,
         msg: InboundMessage,
         session: Session,
@@ -620,7 +620,7 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        return self.context.build_messages(
+        return await self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
             media=msg.media if msg.media else None,
@@ -837,8 +837,8 @@ class AgentLoop:
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
-                # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
-                # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
+                # Sustained goals may legitimately exceed BLACKCAT_LLM_TIMEOUT_S; idle stall
+                # is still capped by BLACKCAT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
                     self.sessions,
                     session.key if session is not None else session_key,
@@ -1191,7 +1191,7 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
-        messages = self.context.build_messages(
+        messages = await self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
             channel=channel,
@@ -1473,7 +1473,7 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = self._build_initial_messages(
+        ctx.initial_messages = await self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,

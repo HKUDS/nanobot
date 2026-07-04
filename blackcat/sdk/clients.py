@@ -7,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.sdk.types import (
+from blackcat.sdk.types import (
     SessionInfo,
     SessionSnapshot,
     snapshot_from_payload,
@@ -15,7 +15,7 @@ from nanobot.sdk.types import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.agent.loop import AgentLoop
+    from blackcat.agent.loop import AgentLoop
 
 
 class SessionClient:

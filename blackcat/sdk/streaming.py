@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 from contextlib import suppress
 from copy import deepcopy
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.sdk.types import (
+from blackcat.agent.hook import AgentHook, AgentHookContext
+from blackcat.sdk.types import (
     STREAM_EVENT_REASONING_COMPLETED,
     STREAM_EVENT_REASONING_DELTA,
     STREAM_EVENT_TEXT_COMPLETED,

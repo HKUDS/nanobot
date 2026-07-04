@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from nanobot.webui import cli_apps_api
+from blackcat.webui import cli_apps_api
 
 
 class _FakeManager:

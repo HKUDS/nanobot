@@ -630,13 +630,13 @@ class FeishuChannel(BaseChannel):
             _LOGIN_CONSOLE.print("Use --force to re-authenticate with a new bot.\n")
             return True
 
-        _LOGIN_CONSOLE.print("Authorize with the mobile app. nanobot will save the new bot credentials.\n")
+        _LOGIN_CONSOLE.print("Authorize with the mobile app. blackcat will save the new bot credentials.\n")
 
         result = qr_register(initial_domain=self.config.domain or "feishu")
         if not result:
             _LOGIN_CONSOLE.print(
                 "[yellow]Login was not completed.[/yellow] "
-                "Run 'nanobot channels login feishu --force' to retry."
+                "Run 'blackcat channels login feishu --force' to retry."
             )
             return False
 
@@ -645,7 +645,7 @@ class FeishuChannel(BaseChannel):
         self.config.domain = result.get("domain", "feishu")
 
         # Write credentials back to config.json
-        from nanobot.config.loader import load_config, save_config
+        from blackcat.config.loader import load_config, save_config
 
         full_config = load_config()
         feishu_cfg = getattr(full_config.channels, "feishu", None) or {}
@@ -677,7 +677,7 @@ class FeishuChannel(BaseChannel):
         if not self.config.app_id or not self.config.app_secret:
             self.logger.error(
                 "app_id and app_secret not configured. "
-                "Run 'nanobot channels login feishu' to set up via QR code."
+                "Run 'blackcat channels login feishu' to set up via QR code."
             )
             return
 

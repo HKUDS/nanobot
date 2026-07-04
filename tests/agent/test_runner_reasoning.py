@@ -373,7 +373,7 @@ async def test_runner_streams_native_thinking_deltas_without_post_hoc_dup():
 
 @pytest.mark.asyncio
 async def test_runner_strips_thinking_tags_from_native_thinking_deltas():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -409,7 +409,7 @@ async def test_runner_strips_thinking_tags_from_native_thinking_deltas():
 
 @pytest.mark.asyncio
 async def test_runner_ignores_empty_thinking_marker_before_final_reasoning():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 

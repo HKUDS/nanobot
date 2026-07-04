@@ -3,10 +3,10 @@ import json
 import httpx
 import pytest
 
-from nanobot.channels import feishu as feishu_module
-from nanobot.channels.feishu import FeishuChannel
-from nanobot.config import loader
-from nanobot.config.schema import Config
+from blackcat.channels import feishu as feishu_module
+from blackcat.channels.feishu import FeishuChannel
+from blackcat.config import loader
+from blackcat.config.schema import Config
 
 
 @pytest.mark.asyncio

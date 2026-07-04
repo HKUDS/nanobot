@@ -25,12 +25,12 @@ from blackcat.security.workspace_policy import is_path_within
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
-NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main/registry.json"
-NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main"
+BLACKCAT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main/registry.json"
+BLACKCAT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main"
 _CATALOG_SOURCES = (
     ("harness", CLI_ANYTHING_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
     ("public", CLI_ANYTHING_PUBLIC_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
-    ("extensions", NANOBOT_EXTENSION_REGISTRY_URL, NANOBOT_EXTENSION_RAW_BASE, False),
+    ("extensions", BLACKCAT_EXTENSION_REGISTRY_URL, BLACKCAT_EXTENSION_RAW_BASE, False),
 )
 
 _MAX_TOOL_OUTPUT_CHARS = 12_000

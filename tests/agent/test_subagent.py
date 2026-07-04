@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.runner import AgentRunResult
-from nanobot.agent.subagent import SubagentManager, SubagentStatus
-from nanobot.agent.tools.filesystem import FileToolsConfig
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ToolsConfig
-from nanobot.providers.base import LLMProvider
+from blackcat.agent.runner import AgentRunResult
+from blackcat.agent.subagent import SubagentManager, SubagentStatus
+from blackcat.agent.tools.filesystem import FileToolsConfig
+from blackcat.bus.queue import MessageBus
+from blackcat.config.schema import ToolsConfig
+from blackcat.providers.base import LLMProvider
 
 
 @pytest.mark.asyncio

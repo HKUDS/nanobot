@@ -1,13 +1,13 @@
 {
   "app": {
-    "brand": "nanobot",
+    "brand": "blackcat",
     "loading": {
-      "connecting": "Menghubungkan ke nanobot…",
-      "boot": "Memuat nanobot…"
+      "connecting": "Menghubungkan ke blackcat…",
+      "boot": "Memuat blackcat…"
     },
     "error": {
-      "title": "Tidak dapat menjangkau nanobot",
-      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
+      "title": "Tidak dapat menjangkau blackcat",
+      "gatewayHint": "Pastikan gateway sedang berjalan (`blackcat gateway`) dan halaman ini dibuka pada mesin yang sama."
     },
     "auth": {
       "title": "Autentikasi diperlukan",
@@ -23,8 +23,8 @@
     },
     "system": {
       "section": "Sistem",
-      "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
-      "restart": "Mulai ulang nanobot",
+      "restartHint": "Mulai ulang blackcat untuk menerapkan perubahan runtime.",
+      "restart": "Mulai ulang blackcat",
       "restarting": "Memulai ulang...",
       "restartEngine": "Mulai ulang engine",
       "restartingEngine": "Memulai ulang engine..."
@@ -33,11 +33,11 @@
       "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
     },
     "documentTitle": {
-      "base": "nanobot",
-      "chat": "{{title}} · nanobot"
+      "base": "blackcat",
+      "chat": "{{title}} · blackcat"
     },
     "meta": {
-      "description": "UI web nanobot — ngobrol dengan workspace nanobot Anda."
+      "description": "UI web blackcat — ngobrol dengan workspace blackcat Anda."
     }
   },
   "sidebar": {
@@ -112,7 +112,7 @@
       "language": "Bahasa",
       "provider": "Penyedia",
       "model": "Model",
-      "restart": "Mulai ulang nanobot",
+      "restart": "Mulai ulang blackcat",
       "configPath": "Path konfigurasi",
       "activePreset": "Preset aktif",
       "gateway": "Gerbang",
@@ -160,7 +160,7 @@
       "theme": "Beralih antara tampilan terang dan gelap.",
       "language": "Pilih bahasa yang digunakan WebUI.",
       "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
-      "model": "Define el nombre de modelo predeterminado de nanobot.",
+      "model": "Define el nombre de modelo predeterminado de blackcat.",
       "configPath": "Archivo de configuración que usa actualmente el gateway.",
       "selectedPreset": "Los preajustes con nombre son de solo lectura aquí; edítalos en config.json.",
       "presetModel": "Beralih ke Default untuk mengedit model dan penyedia dari WebUI.",
@@ -177,7 +177,7 @@
       "defaultAspectRatio": "Se usa cuando el prompt no elige una proporción.",
       "defaultImageSize": "Petunjuk ukuran yang dikirim ke penyedia yang mendukungnya.",
       "maxImagesPerTurn": "Batas atas untuk satu permintaan generate_image.",
-      "botName": "Se muestra donde nanobot usa un nombre visible.",
+      "botName": "Se muestra donde blackcat usa un nombre visible.",
       "botIcon": "Emoji o texto corto junto al nombre del bot.",
       "timezone": "Se usa para horarios y respuestas con conciencia temporal.",
       "localServiceAccess": "Izinkan perintah shell Full Access menjangkau layanan localhost.",
@@ -187,7 +187,7 @@
       "selectedModelProvider": "Definido por el modelo seleccionado.",
       "selectedModelValue": "Definido por el modelo seleccionado.",
       "brandLogos": "Tampilkan logo penyedia pihak ketiga dan CLI di Pengaturan.",
-      "cliAppsCatalog": "Instala solo adaptadores CLI de apps que nanobot puede ejecutar localmente; las apps nativas no se modifican.",
+      "cliAppsCatalog": "Instala solo adaptadores CLI de apps que blackcat puede ejecutar localmente; las apps nativas no se modifican.",
       "cliAppsFilter": "Busca por app, categoría o capacidad.",
       "logs": "Abre la carpeta de registros del motor nativo.",
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
@@ -229,11 +229,11 @@
       "loadError": "Tidak dapat memuat pengaturan",
       "unsaved": "Perubahan belum disimpan.",
       "upToDate": "Sudah terbaru.",
-      "savedRestart": "Guardado. Reinicia nanobot para aplicar.",
+      "savedRestart": "Guardado. Reinicia blackcat para aplicar.",
       "restartAfterSaving": "Guarda los cambios y reinicia cuando puedas.",
       "savedRestartApply": "Guardado. Reinicia cuando puedas.",
       "imageProviderRestart": "Cambios del proveedor de imagen guardados. Reinicia cuando puedas.",
-      "hostRestartAfterSaving": "Al guardar, nanobot reiniciará su motor.",
+      "hostRestartAfterSaving": "Al guardar, blackcat reiniciará su motor.",
       "hostRestartPending": "Guardado. El motor se reiniciará cuando esté listo.",
       "hostApiUnavailable": "Las acciones del host solo están disponibles en la app nativa.",
       "logsOpened": "Carpeta de registros abierta.",
@@ -252,7 +252,7 @@
       "exporting": "Mengekspor..."
     },
     "byok": {
-      "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
+      "description": "Gunakan kunci provider Anda sendiri. Blackcat membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
       "configured": "Terkonfigurasi",
       "notConfigured": "Belum dikonfigurasi",
       "configuredSection": "Terkonfigurasi",
@@ -428,7 +428,7 @@
       "saveCustom": "Simpan MCP",
       "configImport": "Impor mcp.json",
       "importConfig": "Impor",
-      "restartRequired": "Mulai ulang nanobot untuk menyambungkan alat MCP yang diperbarui.",
+      "restartRequired": "Mulai ulang blackcat untuk menyambungkan alat MCP yang diperbarui.",
       "toolsFound": "{{count}} alat",
       "loading": "Memuat preset MCP...",
       "empty": "Tidak ada preset MCP yang cocok dengan filter ini.",
@@ -459,7 +459,7 @@
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
     },
     "apps": {
-      "description": "Tambahkan CLI aplikasi dan layanan MCP yang dapat digunakan nanobot dari chat.",
+      "description": "Tambahkan CLI aplikasi dan layanan MCP yang dapat digunakan blackcat dari chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Semua",
@@ -491,7 +491,7 @@
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
       "empty": "Belum ada otomasi.",
-      "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
+      "emptyHint": "Buat dari tempat tugas ini berjalan agar blackcat menyimpan konteks yang tepat.",
       "oneShot": "Satu kali",
       "systemTask": "Automasi yang dikelola sistem",
       "labels": {
@@ -747,7 +747,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "Desain ikon aplikasi",
-          "prompt": "Buat ikon aplikasi 1:1 yang bersih untuk nanobot: robot ramah, gaya vektor sederhana, palet biru dan putih lembut, tanpa teks."
+          "prompt": "Buat ikon aplikasi 1:1 yang bersih untuk blackcat: robot ramah, gaya vektor sederhana, palet biru dan putih lembut, tanpa teks."
         },
         "sticker": {
           "title": "Buat stiker",
@@ -878,7 +878,7 @@
             "description": "Batalkan giliran agent yang sedang aktif di chat ini."
           },
           "restart": {
-            "title": "Mulai ulang nanobot",
+            "title": "Mulai ulang blackcat",
             "description": "Mulai ulang proses bot di tempat."
           },
           "status": {
@@ -1020,7 +1020,7 @@
     "close": "Tutup pratinjau file",
     "loading": "Memuat pratinjau...",
     "failed": "Tidak dapat mempratinjau file ini.",
-    "routeMissing": "Pratinjau file memerlukan gateway terbaru. Mulai ulang nanobot gateway lalu coba lagi.",
+    "routeMissing": "Pratinjau file memerlukan gateway terbaru. Mulai ulang blackcat gateway lalu coba lagi.",
     "resize": "Ubah ukuran pratinjau file",
     "truncated": "Pratinjau dipotong karena file ini besar."
   },
@@ -1040,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

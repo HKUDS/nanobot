@@ -1,4 +1,4 @@
-"""CLI commands for nanobot."""
+"""CLI commands for blackcat."""
 
 import asyncio
 import os
@@ -23,7 +23,7 @@ if sys.platform == "win32":
 import typer  # noqa: E402
 from loguru import logger  # noqa: E402
 
-# Remove default handler and re-add with unified nanobot format
+# Remove default handler and re-add with unified blackcat format
 logger.remove()
 _log_handler_id = logger.add(
     sys.stderr,
@@ -48,20 +48,20 @@ from rich.markdown import Markdown  # noqa: E402
 from rich.table import Table  # noqa: E402
 from rich.text import Text  # noqa: E402
 
-from nanobot import __logo__, __version__  # noqa: E402
-from nanobot.agent.loop import AgentLoop  # noqa: E402
-from nanobot.cli.gateway import create_gateway_app  # noqa: E402
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
-from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
-from nanobot.config.schema import Config  # noqa: E402
-from nanobot.utils.evaluator import evaluate_response  # noqa: E402
-from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
-from nanobot.utils.restart import (  # noqa: E402
+from blackcat import __logo__, __version__  # noqa: E402
+from blackcat.agent.loop import AgentLoop  # noqa: E402
+from blackcat.cli.gateway import create_gateway_app  # noqa: E402
+from blackcat.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
+from blackcat.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
+from blackcat.config.schema import Config  # noqa: E402
+from blackcat.utils.evaluator import evaluate_response  # noqa: E402
+from blackcat.utils.helpers import sync_workspace_templates  # noqa: E402
+from blackcat.utils.restart import (  # noqa: E402
     consume_restart_notice_from_env,
     format_restart_completed_message,
     should_show_cli_restart_notice,
 )
-from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
+from blackcat.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -173,9 +173,9 @@ class SafeFileHistory(FileHistory):
 
 
 app = typer.Typer(
-    name="nanobot",
+    name="blackcat",
     context_settings={"help_option_names": ["-h", "--help"]},
-    help=f"{__logo__} nanobot - Personal AI Assistant",
+    help=f"{__logo__} blackcat - Personal AI Assistant",
     no_args_is_help=True,
 )
 
@@ -292,7 +292,7 @@ def _init_prompt_session() -> None:
 
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
 
-    from nanobot.config.paths import get_cli_history_path
+    from blackcat.config.paths import get_cli_history_path
 
     history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -332,7 +332,7 @@ def _print_agent_response(
     body = _response_renderable(content, render_markdown, metadata)
     if show_header:
         console.print()
-        console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+        console.print(f"[cyan]{__logo__} blackcat[/cyan]")
     console.print(body)
     console.print()
 
@@ -368,7 +368,7 @@ async def _print_interactive_response(
         ansi = _render_interactive_ansi(
             lambda c: (
                 c.print(),
-                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+                c.print(f"[cyan]{__logo__} blackcat[/cyan]"),
                 c.print(_response_renderable(content, render_markdown, metadata)),
                 c.print(),
             )
@@ -523,7 +523,7 @@ async def _read_interactive_input_async() -> str:
 
 def version_callback(value: bool):
     if value:
-        console.print(f"{__logo__} nanobot v{__version__}")
+        console.print(f"{__logo__} blackcat v{__version__}")
         raise typer.Exit()
 
 
@@ -533,7 +533,7 @@ def main(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
-    """nanobot - Personal AI Assistant."""
+    """blackcat - Personal AI Assistant."""
     pass
 
 
@@ -548,9 +548,9 @@ def onboard(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
-    """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
-    from nanobot.config.schema import Config
+    """Initialize blackcat configuration and workspace."""
+    from blackcat.config.loader import get_config_path, load_config, save_config, set_config_path
+    from blackcat.config.schema import Config
 
     if config:
         config_path = Path(config).expanduser().resolve()
@@ -595,7 +595,7 @@ def onboard(
 
     # Run interactive wizard if enabled
     if wizard:
-        from nanobot.cli.onboard import run_onboard
+        from blackcat.cli.onboard import run_onboard
 
         try:
             result = run_onboard(initial_config=config)
@@ -608,7 +608,7 @@ def onboard(
             console.print(f"[green]✓[/green] Config saved at {config_path}")
         except Exception as e:
             console.print(f"[red]✗[/red] Error during configuration: {e}")
-            console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
+            console.print("[yellow]Please run 'blackcat onboard' again to complete setup.[/yellow]")
             raise typer.Exit(1)
     _onboard_plugins(config_path)
 
@@ -620,13 +620,13 @@ def onboard(
 
     sync_workspace_templates(workspace_path)
 
-    agent_cmd = 'nanobot agent -m "Hello!"'
-    gateway_cmd = "nanobot gateway"
+    agent_cmd = 'blackcat agent -m "Hello!"'
+    gateway_cmd = "blackcat gateway"
     if config:
         agent_cmd += f" --config {config_path}"
         gateway_cmd += f" --config {config_path}"
 
-    console.print(f"\n{__logo__} nanobot is ready!")
+    console.print(f"\n{__logo__} blackcat is ready!")
     console.print("\nNext steps:")
     if wizard:
         console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
@@ -636,7 +636,7 @@ def onboard(
         console.print("     Get one at: https://openrouter.ai/keys")
         console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
     console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
+        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/blackcat#-chat-apps[/dim]"
     )
 
 
@@ -658,7 +658,7 @@ def _onboard_plugins(config_path: Path) -> None:
     """Inject default config for all discovered channels (built-in + plugins)."""
     import json
 
-    from nanobot.channels.registry import discover_all
+    from blackcat.channels.registry import discover_all
 
     all_channels = discover_all()
     if not all_channels:
@@ -688,7 +688,7 @@ def _model_display(config: Config) -> tuple[str, str]:
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+    from blackcat.config.loader import load_config, resolve_config_env_vars, set_config_path
 
     config_path = None
     if config:
@@ -714,7 +714,7 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
 
-    from nanobot.config.loader import get_config_path
+    from blackcat.config.loader import get_config_path
 
     path = config_path or get_config_path()
     try:
@@ -730,7 +730,7 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
 
 def _migrate_cron_store(config: "Config") -> None:
     """One-time migration: move legacy global cron store into the workspace."""
-    from nanobot.config.paths import get_cron_dir
+    from blackcat.config.paths import get_cron_dir
 
     legacy_path = get_cron_dir() / "jobs.json"
     new_path = config.workspace_path / "cron" / "jobs.json"
@@ -751,7 +751,7 @@ def serve(
     port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
     timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show blackcat runtime logs"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
@@ -759,20 +759,20 @@ def serve(
     try:
         from aiohttp import web  # noqa: F401
     except ImportError:
-        console.print("[red]aiohttp is required. Install with: pip install 'nanobot-ai[api]'[/red]")
+        console.print("[red]aiohttp is required. Install with: pip install 'blackcat-ai[api]'[/red]")
         raise typer.Exit(1)
 
     from loguru import logger
 
-    from nanobot.api.server import create_app
-    from nanobot.bus.queue import MessageBus
-    from nanobot.providers.image_generation import image_gen_provider_configs
-    from nanobot.session.manager import SessionManager
+    from blackcat.api.server import create_app
+    from blackcat.bus.queue import MessageBus
+    from blackcat.providers.image_generation import image_gen_provider_configs
+    from blackcat.session.manager import SessionManager
 
     if verbose:
-        logger.enable("nanobot")
+        logger.enable("blackcat")
     else:
-        logger.disable("nanobot")
+        logger.disable("blackcat")
 
     runtime_config = _load_runtime_config(config, workspace)
     api_cfg = runtime_config.api
@@ -835,23 +835,23 @@ def _run_gateway(
     health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.tools.message import MessageTool
-    from nanobot.bus.queue import MessageBus
-    from nanobot.bus.runtime_events import RuntimeEventBus
-    from nanobot.channels.manager import ChannelManager
-    from nanobot.cron.bound_runner import run_bound_cron_job
-    from nanobot.cron.service import CronJobSkippedError, CronService
-    from nanobot.cron.session_turns import is_bound_cron_job
-    from nanobot.cron.types import CronJob
-    from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
-    from nanobot.providers.image_generation import image_gen_provider_configs
-    from nanobot.session.manager import SessionManager
-    from nanobot.session.webui_turns import WebuiTurnCoordinator
-    from nanobot.webui.token_usage import TokenUsageHook
+    from blackcat.agent.tools.message import MessageTool
+    from blackcat.bus.queue import MessageBus
+    from blackcat.bus.runtime_events import RuntimeEventBus
+    from blackcat.channels.manager import ChannelManager
+    from blackcat.cron.bound_runner import run_bound_cron_job
+    from blackcat.cron.service import CronJobSkippedError, CronService
+    from blackcat.cron.session_turns import is_bound_cron_job
+    from blackcat.cron.types import CronJob
+    from blackcat.providers.factory import build_provider_snapshot, load_provider_snapshot
+    from blackcat.providers.image_generation import image_gen_provider_configs
+    from blackcat.session.manager import SessionManager
+    from blackcat.session.webui_turns import WebuiTurnCoordinator
+    from blackcat.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
 
-    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    console.print(f"{__logo__} Starting blackcat gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
@@ -890,8 +890,8 @@ def _run_gateway(
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
 
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.session.keys import session_key_for_channel
+    from blackcat.bus.events import OutboundMessage
+    from blackcat.session.keys import session_key_for_channel
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
         return session_key_for_channel(
@@ -944,7 +944,7 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
+            from blackcat.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
             build_dream_commit_message = MemoryStore.build_dream_commit_message
@@ -977,7 +977,7 @@ def _run_gateway(
             except Exception:
                 logger.exception("Dream cron job failed")
             finally:
-                from nanobot.webui.token_usage import record_response_token_usage
+                from blackcat.webui.token_usage import record_response_token_usage
 
                 record_response_token_usage(
                     resp,
@@ -1159,7 +1159,7 @@ def _run_gateway(
         async with server:
             await server.serve_forever()
     # Register Dream system job (idempotent on restart)
-    from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+    from blackcat.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.enabled:
         cron.register_system_job(CronJob(
@@ -1225,23 +1225,23 @@ def _run_gateway(
         try:
             await cron.start()
             tasks = [
-                asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
-                asyncio.create_task(channels.start_all(), name="nanobot-channels"),
+                asyncio.create_task(agent.run(), name="blackcat-agent-loop"),
+                asyncio.create_task(channels.start_all(), name="blackcat-channels"),
             ]
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
-                    name="nanobot-health-server",
+                    name="blackcat-health-server",
                 ))
             if open_browser_url:
                 tasks.append(asyncio.create_task(
                     _open_browser_when_ready(),
-                    name="nanobot-open-browser",
+                    name="blackcat-open-browser",
                 ))
             runtime_tasks = asyncio.gather(*tasks)
             shutdown_task = asyncio.create_task(
                 shutdown_event.wait(),
-                name="nanobot-gateway-shutdown",
+                name="blackcat-gateway-shutdown",
             )
             done, _pending = await asyncio.wait(
                 {runtime_tasks, shutdown_task},
@@ -1311,14 +1311,14 @@ def agent(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show blackcat runtime logs during chat"),
 ):
     """Interact with the agent directly."""
     from loguru import logger
 
-    from nanobot.bus.queue import MessageBus
-    from nanobot.cron.service import CronService
-    from nanobot.providers.image_generation import image_gen_provider_configs
+    from blackcat.bus.queue import MessageBus
+    from blackcat.cron.service import CronService
+    from blackcat.providers.image_generation import image_gen_provider_configs
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
@@ -1334,9 +1334,9 @@ def agent(
     cron = CronService(cron_store_path)
 
     if logs:
-        logger.enable("nanobot")
+        logger.enable("blackcat")
     else:
-        logger.disable("nanobot")
+        logger.disable("blackcat")
 
     try:
         agent_loop = AgentLoop.from_config(
@@ -1415,7 +1415,7 @@ def agent(
         asyncio.run(run_once())
     else:
         # Interactive mode — route through bus like other channels
-        from nanobot.bus.events import InboundMessage
+        from blackcat.bus.events import InboundMessage
         _init_prompt_session()
         _model, _preset_tag = _model_display(config)
         _icon = config.agents.defaults.bot_icon or __logo__
@@ -1579,8 +1579,8 @@ def channels_status(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Show channel status."""
-    from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config, set_config_path
+    from blackcat.channels.registry import discover_all
+    from blackcat.config.loader import load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -1615,8 +1615,8 @@ def channels_login(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
-    from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config, set_config_path
+    from blackcat.channels.registry import discover_all
+    from blackcat.config.loader import load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -1654,8 +1654,8 @@ app.add_typer(plugins_app, name="plugins")
 @plugins_app.command("list")
 def plugins_list():
     """List all discovered channels (built-in and plugins)."""
-    from nanobot.channels.registry import discover_all, discover_channel_names
-    from nanobot.config.loader import load_config
+    from blackcat.channels.registry import discover_all, discover_channel_names
+    from blackcat.config.loader import load_config
 
     config = load_config()
     builtin_names = set(discover_channel_names())
@@ -1692,20 +1692,20 @@ def plugins_list():
 
 @app.command()
 def status():
-    """Show nanobot status."""
-    from nanobot.config.loader import get_config_path, load_config
+    """Show blackcat status."""
+    from blackcat.config.loader import get_config_path, load_config
 
     config_path = get_config_path()
     config = load_config()
     workspace = config.workspace_path
 
-    console.print(f"{__logo__} nanobot Status\n")
+    console.print(f"{__logo__} blackcat Status\n")
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
     if config_path.exists():
-        from nanobot.providers.registry import PROVIDERS
+        from blackcat.providers.registry import PROVIDERS
 
         _model, _preset_tag = _model_display(config)
         console.print(f"Model: {_model}{_preset_tag}")
@@ -1764,7 +1764,7 @@ def _register_logout(name: str):
 
 def _resolve_oauth_provider(provider: str):
     """Resolve and validate an OAuth provider configuration."""
-    from nanobot.providers.registry import PROVIDERS
+    from blackcat.providers.registry import PROVIDERS
 
     key = provider.replace("-", "_")
     spec = next((s for s in PROVIDERS if s.name == key and s.is_oauth), None)
@@ -1848,7 +1848,7 @@ def _logout_openai_codex() -> None:
 def _logout_github_copilot() -> None:
     """Clear local OAuth credentials for GitHub Copilot."""
     try:
-        from nanobot.providers.github_copilot_provider import get_storage
+        from blackcat.providers.github_copilot_provider import get_storage
     except ImportError:
         console.print("[red]GitHub Copilot provider unavailable. Ensure oauth-cli-kit is installed.[/red]")
         raise typer.Exit(1)
@@ -1886,7 +1886,7 @@ def _delete_oauth_files(token_path: Path, provider_label: str) -> None:
 @_register_login("github_copilot")
 def _login_github_copilot() -> None:
     try:
-        from nanobot.providers.github_copilot_provider import login_github_copilot
+        from blackcat.providers.github_copilot_provider import login_github_copilot
 
         console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
         token = login_github_copilot(

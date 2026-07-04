@@ -4,6 +4,17 @@ from typing import Any
 
 import tiktoken
 
+_TOOLS_TOKEN_CACHE: dict[str, int] = {}
+_ENCODING_CACHE: Any | None = None
+
+
+def _get_token_encoding() -> Any:
+    """Get tiktoken encoding, cached to avoid repeated imports."""
+    global _ENCODING_CACHE
+    if _ENCODING_CACHE is None:
+        _ENCODING_CACHE = tiktoken.get_encoding("cl100k_base")
+    return _ENCODING_CACHE
+
 
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
@@ -15,7 +26,7 @@ def estimate_prompt_tokens(
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_token_encoding()
         parts: list[str] = []
         for msg in messages:
             content = msg.get("content")

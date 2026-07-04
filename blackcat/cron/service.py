@@ -14,8 +14,8 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
-from nanobot.cron.session_turns import is_bound_cron_job
-from nanobot.cron.types import (
+from blackcat.cron.session_turns import is_bound_cron_job
+from blackcat.cron.types import (
     CronJob,
     CronJobState,
     CronPayload,
@@ -421,7 +421,7 @@ class CronService:
 
         Uses a temp-file + ``os.replace`` + ``fsync`` pattern so a crash or
         SIGKILL mid-write cannot leave the destination truncated or invalid.
-        Mirrors ``nanobot.session.manager.SessionManager.save`` (see
+        Mirrors ``blackcat.session.manager.SessionManager.save`` (see
         commit 512bf59, ``fix(session): fsync sessions on graceful shutdown
         to prevent data loss``).  Without this, ``jobs.json`` could be
         corrupted on container shutdown and silently re-created empty on

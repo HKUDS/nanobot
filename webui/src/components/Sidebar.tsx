@@ -1,14 +1,14 @@
-import { useState, type ReactNode } from "react";
 import {
-  Archive,
-  Brain,
-  CalendarClock,
-  Menu,
-  Search,
-  Settings,
-  SquarePen,
-  Blocks,
+    Archive,
+    Blocks,
+    Brain,
+    CalendarClock,
+    Menu,
+    Search,
+    Settings,
+    SquarePen,
 } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
@@ -16,8 +16,8 @@ import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type {
-  ChatSummary,
-  SidebarViewState,
+    ChatSummary,
+    SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -115,7 +115,7 @@ export function Sidebar(props: SidebarProps) {
           )}
         >
           <img
-            src="/brand/nanobot_icon.png"
+            src="/brand/blackcat_icon.png"
             alt=""
             className="h-8 w-8 select-none object-contain"
             draggable={false}

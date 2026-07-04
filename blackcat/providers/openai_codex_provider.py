@@ -12,20 +12,20 @@ import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
-from nanobot.providers.base import (
+from blackcat.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
-from nanobot.providers.openai_responses import (
+from blackcat.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
     convert_tools,
 )
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
-DEFAULT_ORIGINATOR = "nanobot"
+DEFAULT_ORIGINATOR = "blackcat"
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -169,7 +169,7 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
         "chatgpt-account-id": account_id,
         "OpenAI-Beta": "responses=experimental",
         "originator": DEFAULT_ORIGINATOR,
-        "User-Agent": "nanobot (python)",
+        "User-Agent": "blackcat (python)",
         "accept": "text/event-stream",
         "content-type": "application/json",
     }

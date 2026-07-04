@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMProvider, LLMResponse
+from blackcat.config.schema import AgentDefaults
+from blackcat.providers.base import LLMProvider, LLMResponse
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -20,7 +20,7 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 @pytest.mark.asyncio
 async def test_runner_exits_normally_without_predicate():
     """Baseline: no predicate, runner exits with completed on final text."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -45,7 +45,7 @@ async def test_runner_exits_normally_without_predicate():
 @pytest.mark.asyncio
 async def test_runner_exits_normally_with_inactive_goal():
     """Predicate returns False, runner should exit normally."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -77,7 +77,7 @@ async def test_runner_forces_continue_when_goal_active():
     "completed". With the fix the runner is forced to continue until
     max_iterations is hit.
     """
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -107,7 +107,7 @@ async def test_runner_forces_continue_when_goal_active():
 @pytest.mark.asyncio
 async def test_runner_respects_max_iterations_even_with_active_goal():
     """A single iteration with active goal still hits max_iterations."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -132,7 +132,7 @@ async def test_runner_respects_max_iterations_even_with_active_goal():
 @pytest.mark.asyncio
 async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
     """Synthetic goal continuation should be governed by max_iterations."""
-    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -160,7 +160,7 @@ async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
 @pytest.mark.asyncio
 async def test_runner_does_not_force_continue_on_error():
     """Even with active goal, an LLM error should exit with stop_reason="error"."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -186,7 +186,7 @@ async def test_runner_does_not_force_continue_on_error():
 @pytest.mark.asyncio
 async def test_runner_uses_custom_goal_continue_message():
     """Custom goal_continue_message should be injected instead of the default."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -215,7 +215,7 @@ async def test_runner_uses_custom_goal_continue_message():
 @pytest.mark.asyncio
 async def test_runner_resolves_goal_continue_message_lazily():
     """The continuation text can depend on goal metadata created during the run."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(

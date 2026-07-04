@@ -88,7 +88,6 @@ class BaseChannel(ABC):
         """Stop the channel and clean up resources."""
         pass
 
-    @abstractmethod
     async def _send_impl(self, msg: OutboundMessage) -> None:
         """
         Send a message through this channel.
@@ -98,8 +97,12 @@ class BaseChannel(ABC):
 
         Implementations should raise on delivery failure so the channel manager
         can apply any retry policy in one place.
+
+        Channels that override ``send`` directly do not need to implement this.
         """
-        pass
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _send_impl or override send"
+        )
 
     async def send(self, msg: OutboundMessage) -> None:
         """Delegate to the channel-specific ``_send_impl``."""

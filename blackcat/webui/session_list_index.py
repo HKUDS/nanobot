@@ -15,9 +15,9 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.config.paths import get_webui_dir
-from nanobot.cron.session_turns import CRON_HISTORY_META
-from nanobot.session.manager import (
+from blackcat.config.paths import get_webui_dir
+from blackcat.cron.session_turns import CRON_HISTORY_META
+from blackcat.session.manager import (
     _SESSION_LIST_PREVIEW_MAX_CHARS,
     _SESSION_LIST_PREVIEW_MAX_RECORDS,
     Session,

@@ -6,13 +6,13 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.context import ContextAware, RequestContext
-from nanobot.agent.tools.path_utils import resolve_workspace_path
-from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
-from nanobot.bus.events import OutboundMessage
-from nanobot.config.paths import get_workspace_path
-from nanobot.security.workspace_access import current_tool_workspace
+from blackcat.agent.tools.base import Tool, tool_parameters
+from blackcat.agent.tools.context import ContextAware, RequestContext
+from blackcat.agent.tools.path_utils import resolve_workspace_path
+from blackcat.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
+from blackcat.bus.events import OutboundMessage
+from blackcat.config.paths import get_workspace_path
+from blackcat.security.workspace_access import current_tool_workspace
 
 
 @tool_parameters(
@@ -189,7 +189,7 @@ class MessageTool(Tool, ContextAware):
         buttons: list[list[str]] | None = None,
         **kwargs: Any,
     ) -> str:
-        from nanobot.utils.helpers import strip_think
+        from blackcat.utils.helpers import strip_think
 
         content = strip_think(content)
 

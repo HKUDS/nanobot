@@ -12,7 +12,7 @@ blocks, fixing Anthropic "content.0.type: Field required" rejections (#3993).
 
 from types import SimpleNamespace
 
-from nanobot.providers.anthropic_provider import AnthropicProvider
+from blackcat.providers.anthropic_provider import AnthropicProvider
 
 
 def test_tool_result_block_converts_image_url_in_list_content():

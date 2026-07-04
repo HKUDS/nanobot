@@ -286,7 +286,7 @@ async def test_handler_richtext_keeps_formatted_segments(monkeypatch) -> None:
         DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
         bus,
     )
-    handler = NanobotDingTalkHandler(channel)
+    handler = BlackcatDingTalkHandler(channel)
 
     fake_msg = _rich_text_message([
         {"type": "bold", "text": "Title"},
@@ -316,7 +316,7 @@ async def test_handler_richtext_all_formatted_not_dropped(monkeypatch) -> None:
         DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
         bus,
     )
-    handler = NanobotDingTalkHandler(channel)
+    handler = BlackcatDingTalkHandler(channel)
 
     fake_msg = _rich_text_message([{"type": "bold", "text": "Important"}])
     monkeypatch.setattr(dingtalk_module, "ChatbotMessage", fake_msg)
@@ -342,14 +342,14 @@ async def test_handler_richtext_item_with_text_and_download(monkeypatch) -> None
         DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
         bus,
     )
-    handler = NanobotDingTalkHandler(channel)
+    handler = BlackcatDingTalkHandler(channel)
 
     fake_msg = _rich_text_message([
         {"text": "see attached", "downloadCode": "abc123", "fileName": "report.xlsx"},
     ])
 
     async def fake_download(download_code, filename, sender_id):
-        return f"/tmp/nanobot_dingtalk/{sender_id}/{filename}"
+        return f"/tmp/blackcat_dingtalk/{sender_id}/{filename}"
 
     monkeypatch.setattr(dingtalk_module, "ChatbotMessage", fake_msg)
     monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
@@ -363,7 +363,7 @@ async def test_handler_richtext_item_with_text_and_download(monkeypatch) -> None
 
     assert (status, body) == ("OK", "OK")
     assert "see attached" in msg.content
-    assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
+    assert "/tmp/blackcat_dingtalk/user1/report.xlsx" in msg.content
 
 
 @pytest.mark.asyncio

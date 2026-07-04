@@ -1,6 +1,6 @@
 """Shared Pydantic base model for configuration DTOs.
 
-This module intentionally lives outside the ``nanobot.config`` package so
+This module intentionally lives outside the ``blackcat.config`` package so
 runtime modules can define local config DTOs without importing the full root
 configuration schema.
 """

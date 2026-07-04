@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from blackcat.providers.base import LLMProvider, LLMResponse
 
 __all__ = [
     "LLMProvider",
@@ -28,12 +28,12 @@ _LAZY_IMPORTS = {
 }
 
 if TYPE_CHECKING:
-    from nanobot.providers.anthropic_provider import AnthropicProvider
-    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
-    from nanobot.providers.bedrock_provider import BedrockProvider
-    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
-    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-    from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+    from blackcat.providers.anthropic_provider import AnthropicProvider
+    from blackcat.providers.azure_openai_provider import AzureOpenAIProvider
+    from blackcat.providers.bedrock_provider import BedrockProvider
+    from blackcat.providers.github_copilot_provider import GitHubCopilotProvider
+    from blackcat.providers.openai_codex_provider import OpenAICodexProvider
+    from blackcat.providers.openai_compat_provider import OpenAICompatProvider
 
 
 def __getattr__(name: str):

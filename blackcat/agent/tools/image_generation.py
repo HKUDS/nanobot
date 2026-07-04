@@ -7,31 +7,31 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import (
+from blackcat.agent.tools.base import Tool, tool_parameters
+from blackcat.agent.tools.schema import (
     ArraySchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.paths import get_media_dir
-from nanobot.config_base import Base
-from nanobot.providers.image_generation import (
+from blackcat.config.paths import get_media_dir
+from blackcat.config_base import Base
+from blackcat.providers.image_generation import (
     ImageGenerationError,
     ImageGenerationProvider,
     get_image_gen_provider,
 )
-from nanobot.security.workspace_access import current_tool_workspace
-from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
-from nanobot.utils.artifacts import (
+from blackcat.security.workspace_access import current_tool_workspace
+from blackcat.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
+from blackcat.utils.artifacts import (
     ArtifactError,
     generated_image_tool_result,
     store_generated_image_artifact,
 )
-from nanobot.utils.helpers import detect_image_mime
+from blackcat.utils.helpers import detect_image_mime
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ProviderConfig
+    from blackcat.config.schema import ProviderConfig
 
 
 class ImageGenerationToolConfig(Base):
@@ -145,7 +145,7 @@ class ImageGenerationTool(Tool):
             )
         except WorkspaceBoundaryError as exc:
             raise ImageGenerationError(
-                "reference_images must be inside the workspace or nanobot media directory"
+                "reference_images must be inside the workspace or blackcat media directory"
             ) from exc
         except OSError as exc:
             raise ImageGenerationError(f"reference image not found: {value}") from exc

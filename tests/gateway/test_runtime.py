@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+from blackcat.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
 
 class FakeProcess:
@@ -63,7 +63,7 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     assert calls[0]["command"] == [
         "/python",
         "-m",
-        "nanobot",
+        "blackcat",
         "gateway",
         "--foreground",
         "--port",

@@ -9,11 +9,11 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 
-from nanobot import __version__
-from nanobot.bus.events import OutboundMessage
-from nanobot.command.router import CommandContext, CommandRouter
-from nanobot.utils.helpers import build_status_content
-from nanobot.utils.restart import set_restart_notice_to_env
+from blackcat import __version__
+from blackcat.bus.events import OutboundMessage
+from blackcat.command.router import CommandContext, CommandRouter
+from blackcat.utils.helpers import build_status_content
+from blackcat.utils.restart import set_restart_notice_to_env
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     ),
     BuiltinCommandSpec(
         "/restart",
-        "Restart nanobot",
+        "Restart blackcat",
         "Restart the bot process in place.",
         "rotate-cw",
     ),
@@ -148,7 +148,7 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 
     async def _do_restart():
         await asyncio.sleep(1)
-        os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
+        os.execv(sys.executable, [sys.executable, "-m", "blackcat"] + sys.argv[1:])
 
     asyncio.create_task(_do_restart())
     return OutboundMessage(
@@ -163,7 +163,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     ctx_est = 0
     with suppress(Exception):
-        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(session)
+        ctx_est, _ = await loop.consolidator.estimate_session_prompt_tokens(session)
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
 
@@ -171,7 +171,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     search_usage_text: str | None = None
     # Never let usage fetch break /status
     with suppress(Exception):
-        from nanobot.utils.searchusage import fetch_search_usage
+        from blackcat.utils.searchusage import fetch_search_usage
         web_cfg = getattr(loop, "web_config", None)
         search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
         if search_cfg is not None:
@@ -314,7 +314,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         async def _silent(*_args, **_kwargs):
             pass
 
-        from nanobot.agent.memory import MemoryStore
+        from blackcat.agent.memory import MemoryStore
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
@@ -355,7 +355,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
-            from nanobot.webui.token_usage import record_response_token_usage
+            from blackcat.webui.token_usage import record_response_token_usage
 
             record_response_token_usage(
                 resp,
@@ -666,7 +666,7 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
 
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     """List, approve, deny or revoke pairing requests."""
-    from nanobot.pairing import PAIRING_COMMAND_META_KEY, handle_pairing_command
+    from blackcat.pairing import PAIRING_COMMAND_META_KEY, handle_pairing_command
 
     reply = handle_pairing_command(ctx.msg.channel, ctx.args)
     return OutboundMessage(
@@ -708,7 +708,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = ["🐈 nanobot commands:"]
+    lines = ["🐈 blackcat commands:"]
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:

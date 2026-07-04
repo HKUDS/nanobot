@@ -10,10 +10,10 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus import progress as bus_progress
-from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import (
+from blackcat.bus import progress as bus_progress
+from blackcat.bus.events import InboundMessage, OutboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.bus.runtime_events import (
     GoalStateChanged,
     RuntimeEventBus,
     RuntimeEventContext,
@@ -22,12 +22,12 @@ from nanobot.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
-from nanobot.cron.session_turns import CRON_HISTORY_META
-from nanobot.providers.base import LLMProvider
-from nanobot.session.goal_state import goal_state_ws_blob
-from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import strip_think, truncate_text
-from nanobot.utils.llm_runtime import LLMRuntime
+from blackcat.cron.session_turns import CRON_HISTORY_META
+from blackcat.providers.base import LLMProvider
+from blackcat.session.goal_state import goal_state_ws_blob
+from blackcat.session.manager import Session, SessionManager
+from blackcat.utils.helpers import strip_think, truncate_text
+from blackcat.utils.llm_runtime import LLMRuntime
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"

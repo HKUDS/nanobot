@@ -1,4 +1,4 @@
-"""Interactive onboarding questionnaire for nanobot."""
+"""Interactive onboarding questionnaire for blackcat."""
 
 import asyncio
 import json
@@ -17,13 +17,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from nanobot.cli.models import (
+from blackcat.cli.models import (
     format_token_count,
     get_model_context_limit,
     get_model_suggestions,
 )
-from nanobot.config.loader import get_config_path, load_config
-from nanobot.config.schema import Config, ModelPresetConfig
+from blackcat.config.loader import get_config_path, load_config
+from blackcat.config.schema import Config, ModelPresetConfig
 
 console = Console()
 
@@ -451,12 +451,12 @@ def _show_config_panel(display_name: str, model: BaseModel, fields: list) -> Non
 
 def _show_main_menu_header() -> None:
     """Display the main menu header."""
-    from nanobot import __logo__, __version__
+    from blackcat import __logo__, __version__
 
     console.print()
     body = Table.grid(expand=True)
     body.add_column(ratio=1)
-    body.add_row(f"{__logo__} [bold {_UI_TEXT}]nanobot[/] [{_UI_MUTED}]v{__version__}[/]")
+    body.add_row(f"{__logo__} [bold {_UI_TEXT}]blackcat[/] [{_UI_MUTED}]v{__version__}[/]")
     body.add_row(f"[{_UI_ACCENT}]Quick Start asks for the provider, credentials, and model.[/]")
     body.add_row(
         f"[{_UI_MUTED}]Use Advanced later for chat apps, tools, or provider-specific details.[/]"
@@ -787,7 +787,7 @@ def _handle_fallback_models_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
     """Handle the 'fallback_models' field with preset-aware list management."""
-    from nanobot.config.schema import InlineFallbackConfig
+    from blackcat.config.schema import InlineFallbackConfig
 
     items: list[Any] = list(current_value) if isinstance(current_value, list) else []
     preset_names = sorted(_MODEL_PRESET_CACHE)
@@ -847,7 +847,7 @@ def _handle_search_provider_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
     """Handle the web-search 'provider' field with the search-engine list."""
-    from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
+    from blackcat.agent.tools.web import SEARCH_PROVIDER_OPTIONS
 
     choices = [opt["name"] for opt in SEARCH_PROVIDER_OPTIONS]
     default_choice = current_value if current_value in choices else choices[0]
@@ -867,7 +867,7 @@ def _resolve_field_handler(model: BaseModel, field_name: str) -> Any:
     """Resolve the handler for a field. WebSearchConfig shares the bare "provider"
     name with LLM configs but needs the search-engine picker, not the LLM list."""
     if field_name == "provider":
-        from nanobot.agent.tools.web import WebSearchConfig
+        from blackcat.agent.tools.web import WebSearchConfig
         if isinstance(model, WebSearchConfig):
             return _handle_search_provider_field
     return _FIELD_HANDLERS.get(field_name)
@@ -1011,7 +1011,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
     """Try to auto-fill context_window_tokens if it's at default value.
 
     Note:
-        This function imports AgentDefaults from nanobot.config.schema to get
+        This function imports AgentDefaults from blackcat.config.schema to get
         the default context_window_tokens value. If the schema changes, this
         coupling needs to be updated accordingly.
     """
@@ -1023,7 +1023,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
 
     # Check if current value is the default
     # We only auto-fill if the user hasn't changed it from default
-    from nanobot.config.schema import AgentDefaults
+    from blackcat.config.schema import AgentDefaults
 
     default_context = AgentDefaults.model_fields["context_window_tokens"].default
 
@@ -1166,7 +1166,7 @@ def _configure_model_presets(config: Config) -> None:
 @lru_cache(maxsize=1)
 def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
     """Get provider info from registry (cached)."""
-    from nanobot.providers.registry import PROVIDERS
+    from blackcat.providers.registry import PROVIDERS
 
     return {
         spec.name: (
@@ -1267,12 +1267,12 @@ def _get_channel_info() -> dict[str, tuple[str, type[BaseModel]]]:
     """Get channel info (display name + config class) from channel modules."""
     import importlib
 
-    from nanobot.channels.registry import discover_all
+    from blackcat.channels.registry import discover_all
 
     result: dict[str, tuple[str, type[BaseModel]]] = {}
     for name, channel_cls in discover_all().items():
         try:
-            mod = importlib.import_module(f"nanobot.channels.{name}")
+            mod = importlib.import_module(f"blackcat.channels.{name}")
             config_name = channel_cls.__name__.replace("Channel", "Config")
             config_cls = getattr(mod, config_name, None)
             if config_cls and isinstance(config_cls, type) and issubclass(config_cls, BaseModel):
@@ -1296,7 +1296,7 @@ def _get_channel_config_class(channel: str) -> type[BaseModel] | None:
 
 def _get_channel_class(channel: str) -> type[Any] | None:
     """Get channel implementation class."""
-    from nanobot.channels.registry import discover_all
+    from blackcat.channels.registry import discover_all
 
     return discover_all().get(channel)
 
@@ -1305,7 +1305,7 @@ def _channel_supports_login(channel_cls: type[Any] | None) -> bool:
     """Return True when a channel overrides BaseChannel.login."""
     if channel_cls is None:
         return False
-    from nanobot.channels.base import BaseChannel
+    from blackcat.channels.base import BaseChannel
 
     return getattr(channel_cls, "login", None) is not BaseChannel.login
 
@@ -1572,7 +1572,7 @@ def _show_quick_start_progress(active_step: int) -> None:
 @lru_cache(maxsize=1)
 def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
     """Return chat-capable providers supported by Quick Start."""
-    from nanobot.providers.registry import PROVIDERS
+    from blackcat.providers.registry import PROVIDERS
 
     result: dict[str, _QuickStartProviderInfo] = {}
     for spec in PROVIDERS:
@@ -1742,7 +1742,7 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
         f"[{_UI_ACCENT}]Quick Start will enable the WebSocket channel for the local WebUI.[/]"
     )
     console.print(
-        f"[{_UI_MUTED}]This lets the browser UI at http://127.0.0.1:8765 connect to nanobot.[/]"
+        f"[{_UI_MUTED}]This lets the browser UI at http://127.0.0.1:8765 connect to blackcat.[/]"
     )
     console.print()
     while True:
@@ -1793,7 +1793,7 @@ def _show_quick_start_summary(config: Config) -> None:
         )
         has_api_key = is_local or bool(provider_config and provider_config.api_key)
 
-    start_command = "`nanobot gateway`"
+    start_command = "`blackcat gateway`"
     next_step = f"Run {start_command}"
     status = "Ready"
     if not has_api_key:

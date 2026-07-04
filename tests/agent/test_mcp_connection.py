@@ -159,7 +159,7 @@ async def test_agent_loop_run_closes_mcp_from_connection_owner_task(
         connected.set()
         return stacks
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("blackcat.agent.tools.mcp.connect_mcp_servers", _fake_connect)
 
     task = asyncio.create_task(loop.run())
     await asyncio.wait_for(connected.wait(), timeout=1)

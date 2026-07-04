@@ -374,7 +374,7 @@ class TestFailoverOnEmptyChoices:
     @pytest.mark.asyncio
     async def test_empty_choices_text_fallback(self) -> None:
         """_should_fallback should return True for 'API returned empty choices'."""
-        from nanobot.providers.fallback_provider import FallbackProvider
+        from blackcat.providers.fallback_provider import FallbackProvider
 
         response = _make_response(
             "Error: API returned empty choices.",
@@ -387,7 +387,7 @@ class TestFailoverOnEmptyChoices:
     @pytest.mark.asyncio
     async def test_empty_choices_no_error_kind_text_fallback(self) -> None:
         """_should_fallback should also match via text token when error_kind is None."""
-        from nanobot.providers.fallback_provider import FallbackProvider
+        from blackcat.providers.fallback_provider import FallbackProvider
 
         response = _make_response(
             "Error: API returned empty choices.",

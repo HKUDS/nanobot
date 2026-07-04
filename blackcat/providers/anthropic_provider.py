@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.providers.base import (
+from blackcat.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
