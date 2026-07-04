@@ -2050,6 +2050,34 @@ Subagents also stop immediately when one of their tools returns an execution err
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
+### Specialist subagents (MCP inheritance)
+
+By default, spawned subagents only get the built-in exec/web/file tools and do **not** inherit any of the main agent's MCP servers. You can promote certain subagents to "specialists" that inherit a filtered subset of your configured MCP servers, so they can use native MCP tools (for example a database or search MCP) instead of re-implementing access through raw shell calls.
+
+Declare a map of specialist slug → list of MCP server names under `tools.subagentSpecialists`:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "db": { "type": "stdio", "command": "..." },
+      "search": { "type": "stdio", "command": "..." }
+    },
+    "subagentSpecialists": {
+      "analyst": ["db"],
+      "researcher": ["search"],
+      "reporter": ["db", "search"]
+    }
+  }
+}
+```
+
+The specialist for a spawned subagent is derived from the **first word** of its spawn `label` (the slug before any space or colon), matched case-insensitively. For example, a subagent spawned with label `analyst monthly revenue` inherits the `db` MCP; `researcher: competitors` inherits `search`. A subagent whose label prefix is not a declared specialist inherits no MCP servers (previous default behavior). Only MCP servers listed for that specialist **and** already present in `tools.mcpServers` are inherited.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `tools.subagentSpecialists` | `{}` | Map of specialist slug → list of MCP server names those subagents inherit. Empty means no subagent inherits MCP servers. |
+
 
 ## Auto Compact
 

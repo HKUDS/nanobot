@@ -385,6 +385,12 @@ class ToolsConfig(Base):
         ),
     )  # allow non-local WebUI clients to install optional Python packages
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    subagent_specialists: dict[str, list[str]] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("subagentSpecialists", "subagent_specialists"),
+    )  # map of specialist slug -> list of MCP server names that specialist subagents inherit.
+    # The specialist is derived from the spawn label prefix (slug before any space/colon).
+    # Empty (default) = subagents get no inherited MCP servers (previous behavior).
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 

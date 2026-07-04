@@ -119,21 +119,60 @@ class SubagentManager:
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
-    def _subagent_tools_config(self) -> ToolsConfig:
-        """Build a ToolsConfig scoped for subagent use."""
+    def _specialist_mcps(self) -> dict[str, set[str]]:
+        """Config-driven map of specialist slug -> inherited MCP server names.
+
+        Read from ``tools.subagent_specialists`` so the mapping stays out of
+        the code and each deployment declares its own specialists/MCPs.
+        """
+        raw = getattr(self.tools_config, "subagent_specialists", None) or {}
+        return {
+            str(slug).strip().lower(): {str(m) for m in (mcps or [])}
+            for slug, mcps in raw.items()
+        }
+
+    def _specialist_from_label(self, label: str | None) -> str | None:
+        """Derive the specialist slug from a spawn label prefix."""
+        if not label:
+            return None
+        slug = label.strip().lower().split()[0].split(":")[0] if label.strip() else ""
+        return slug if slug in self._specialist_mcps() else None
+
+    def _subagent_tools_config(self, specialist: str | None = None) -> ToolsConfig:
+        """Build a ToolsConfig scoped for subagent use.
+
+        Specialist subagents inherit a filtered subset of the main agent's
+        configured MCP servers (declared in ``tools.subagent_specialists``)
+        so they can use native tools (e.g. a database MCP) instead of
+        fragile direct connections.
+        """
+        inherited_mcps: dict[str, Any] = {}
+        allowed = self._specialist_mcps().get(specialist or "", set())
+        if allowed:
+            inherited_mcps = {
+                name: cfg
+                for name, cfg in (self.tools_config.mcp_servers or {}).items()
+                if name in allowed
+            }
         return ToolsConfig(
             exec=self.tools_config.exec,
             web=self.tools_config.web,
             file=self.tools_config.file,
             restrict_to_workspace=self.restrict_to_workspace,
+            mcp_servers=inherited_mcps,
         )
 
-    def _build_tools(
+    async def _build_tools(
         self,
         workspace: Path | None = None,
         tools_config: ToolsConfig | None = None,
-    ) -> ToolRegistry:
-        """Build an isolated subagent tool registry via ToolLoader."""
+    ) -> tuple[ToolRegistry, dict[str, Any]]:
+        """Build an isolated subagent tool registry via ToolLoader.
+
+        Also connects any inherited MCP servers and registers their tools.
+        Returns the registry plus a dict of per-server AsyncExitStacks that
+        the caller MUST close when the subagent finishes.
+        """
         root = self.workspace if workspace is None else workspace
         registry = ToolRegistry()
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
@@ -147,7 +186,15 @@ class SubagentManager:
             ),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
-        return registry
+        mcp_stacks: dict[str, Any] = {}
+        if cfg.mcp_servers:
+            from nanobot.agent.tools.mcp import connect_mcp_servers
+            try:
+                mcp_stacks = await connect_mcp_servers(cfg.mcp_servers, registry)
+            except Exception:
+                logger.exception("Subagent MCP connection failed for %s", list(cfg.mcp_servers))
+                mcp_stacks = {}
+        return registry, mcp_stacks
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         self.provider = provider
@@ -225,13 +272,19 @@ class SubagentManager:
             status.phase = payload.get("phase", status.phase)
             status.iteration = payload.get("iteration", status.iteration)
 
+        mcp_stacks: dict[str, Any] = {}
         try:
             root = workspace_scope.project_path if workspace_scope is not None else self.workspace
-            cfg = None
+            specialist = self._specialist_from_label(label)
+            cfg = self._subagent_tools_config(specialist)
             if workspace_scope is not None:
-                cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
-            tools = self._build_tools(workspace=root, tools_config=cfg)
+            if specialist:
+                logger.info(
+                    "Subagent [{}] specialist='{}' inheriting MCPs: {}",
+                    task_id, specialist, sorted(cfg.mcp_servers),
+                )
+            tools, mcp_stacks = await self._build_tools(workspace=root, tools_config=cfg)
             system_prompt = self._build_subagent_prompt(workspace=root)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
@@ -292,6 +345,12 @@ class SubagentManager:
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
             await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+        finally:
+            for name, stack in mcp_stacks.items():
+                try:
+                    await stack.aclose()
+                except Exception:
+                    logger.warning("Subagent [{}] failed to close MCP stack '{}'", task_id, name)
 
     async def _announce_result(
         self,
