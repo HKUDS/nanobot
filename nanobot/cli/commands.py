@@ -2401,7 +2401,7 @@ def _logout_github_copilot() -> None:
     try:
         from nanobot.providers.github_copilot_provider import get_storage
     except ImportError:
-        console.print("[red]GitHub Copilot provider unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
 
     storage = get_storage()
