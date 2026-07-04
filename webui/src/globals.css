@@ -523,4 +523,51 @@
   .scrollbar-track-transparent::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /*
+   * Mobile responsive safety net — keep the chat viewport + composer inside a
+   * narrow viewport (see #4693). These are containment rules: long markdown
+   * (URLs, branch names, file paths, code, tables) wraps or scrolls inside its
+   * own box instead of forcing the whole column — and thus the page — wider
+   * than 100vw. Desktop layout is unchanged; the rules only engage when content
+   * would otherwise overflow. Fenced code blocks keep their own internal
+   * horizontal scroll (CodeBlock and the markdown <pre> wrappers already set
+   * overflow-x: auto), so clipping the thread column horizontally is safe.
+   */
+
+  /* Prose container: allow it to shrink within its column and break long words
+     so long URLs / paths never stretch the conversation wider than 100vw. */
+  .markdown-content {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Long links and inline code break rather than stretch the column. */
+  .markdown-content a,
+  .markdown-content code {
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Fenced / pre blocks scroll inside their own box, never the page. */
+  .markdown-content pre,
+  .not-prose pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Wide markdown tables scroll horizontally within the conversation column. */
+  .markdown-content table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Clip any residual horizontal bleed at the thread column edge. Vertical
+     scrolling and internal code-block scroll are unaffected. */
+  .thread-viewport-scrollbar {
+    overflow-x: hidden;
+  }
 }
