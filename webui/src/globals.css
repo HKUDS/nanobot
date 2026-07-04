@@ -558,12 +558,10 @@
     overflow-x: auto;
   }
 
-  /* Wide markdown tables scroll horizontally within the conversation column. */
-  .markdown-content table {
-    display: block;
-    max-width: 100%;
-    overflow-x: auto;
-  }
+  /* Wide markdown tables scroll horizontally within the conversation column.
+     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
+     custom `table` component (see MarkdownTextRenderer); min-w-max on the
+     <table> keeps natural column widths so it scrolls instead of shrinking. */
 
   /* Clip any residual horizontal bleed at the thread column edge. Vertical
      scrolling and internal code-block scroll are unaffected. */
