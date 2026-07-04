@@ -513,6 +513,122 @@ async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_rejects_sanitized_wrapped_name_for_raw_tool(
+    fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo/read"])
+    registry = ToolRegistry()
+    warnings: list[str] = []
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["mcp_test_demo_read"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == []
+    assert any("enabledTools entries not found: mcp_test_demo_read" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_rejects_ambiguous_wrapped_names(
+    fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo.read", "demo/read"])
+    registry = ToolRegistry()
+    warnings: list[str] = []
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["mcp_test_demo_read"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == []
+    assert any("ambiguous sanitized tool names" in warning for warning in warnings)
+    assert any("enabledTools entries not found: mcp_test_demo_read" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_all_skips_ambiguous_wrapped_names(
+    fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo.read", "demo/read", "safe"])
+    registry = ToolRegistry()
+    warnings: list[str] = []
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == ["mcp_test_safe"]
+    assert any("skipping ambiguous tool 'demo.read'" in warning for warning in warnings)
+    assert any("skipping ambiguous tool 'demo/read'" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_raw_name_can_select_collision_uniquely(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo.read", "demo/read"])
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["demo.read"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == ["mcp_test_demo_read"]
+    assert getattr(registry.get("mcp_test_demo_read"), "_original_name", None) == "demo.read"
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_rejects_multiple_colliding_raw_names(
+    fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo.read", "demo/read"])
+    registry = ToolRegistry()
+    warnings: list[str] = []
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["demo.read", "demo/read"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == []
+    assert any("enabledTools lists multiple raw MCP names" in warning for warning in warnings)
+    assert any("enabledTools entries not found: demo.read, demo/read" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
@@ -1257,7 +1373,7 @@ async def test_connect_mcp_servers_sanitizes_resource_names(
 
 
 @pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
+async def test_connect_mcp_servers_enabled_tools_rejects_sanitized_name_for_lossy_raw_name(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
@@ -1271,7 +1387,7 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
     for stack in stacks.values():
         await stack.aclose()
 
-    assert registry.tool_names == ["mcp_test_My_Tool"]
+    assert registry.tool_names == []
 
 
 @pytest.mark.parametrize(
