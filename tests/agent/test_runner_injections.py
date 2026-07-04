@@ -921,6 +921,43 @@ async def test_submitted_local_trigger_turn_reports_pending_until_completed(tmp_
 
 
 @pytest.mark.asyncio
+async def test_local_trigger_turn_cancellation_reports_agent_failure(tmp_path):
+    """A cancelled agent turn should not cancel the local-trigger worker."""
+    from nanobot.agent.automation_turns import AutomationTurnError
+    from nanobot.bus.events import InboundMessage
+    from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._running = True
+
+    session_key = "websocket:chat-1"
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="trigger",
+        chat_id="chat-1",
+        content="review failed CI",
+        metadata={
+            LOCAL_TRIGGER_META: {
+                "trigger_id": "trg_123",
+                "trigger_name": "CI review",
+                "delivery_id": "tdl_123",
+            },
+        },
+        session_key_override=session_key,
+    )
+
+    submit_task = asyncio.create_task(loop.submit_local_trigger_turn(msg))
+    assert await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5) is msg
+
+    loop._local_trigger_turns.complete(msg, error=asyncio.CancelledError())
+
+    with pytest.raises(AutomationTurnError, match="CancelledError"):
+        await asyncio.wait_for(submit_task, timeout=0.5)
+    assert not submit_task.cancelled()
+    assert loop.pending_local_trigger_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
 async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_path):
     """Pending queue should leave overflow messages queued for later drains."""
     from nanobot.agent.loop import AgentLoop

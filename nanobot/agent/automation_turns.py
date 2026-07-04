@@ -79,6 +79,8 @@ class AutomationTurnCoordinator:
                 return await future
             except asyncio.CancelledError:
                 raise
+            except AutomationTurnError:
+                raise
             except Exception as exc:
                 raise AutomationTurnError(str(exc) or exc.__class__.__name__) from exc
         finally:
@@ -118,6 +120,8 @@ class AutomationTurnCoordinator:
         if future is None or future.done():
             return
         if error is not None:
+            if isinstance(error, asyncio.CancelledError):
+                error = AutomationTurnError(str(error) or error.__class__.__name__)
             future.set_exception(error)
         else:
             future.set_result(response)
