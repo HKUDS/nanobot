@@ -174,6 +174,7 @@ def test_stop_keeps_state_when_process_survives_timeout(tmp_path, monkeypatch):
 
 def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monkeypatch):
     taskkill_calls: list[dict] = []
+    wait_timeouts: list[int | float] = []
 
     def fake_run(command, **kwargs):
         taskkill_calls.append({"command": command, "kwargs": kwargs})
@@ -193,12 +194,14 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
     monkeypatch.setattr("nanobot.gateway.runtime.os.kill", fake_kill)
 
     def fake_wait_for_exit(_pid, _timeout_s):
+        wait_timeouts.append(_timeout_s)
         # Simulate a process that only exits after the taskkill fallback runs.
         return bool(taskkill_calls)
 
     monkeypatch.setattr(runtime, "_wait_for_exit", fake_wait_for_exit)
 
     assert runtime._terminate_windows(12345, timeout_s=20) is True
+    assert wait_timeouts == [2]
     assert taskkill_calls == [
         {
             "command": ["taskkill", "/PID", "12345", "/T"],

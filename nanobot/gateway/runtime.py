@@ -295,9 +295,16 @@ class GatewayRuntime:
         if ctrl_break is not None:
             # Detached Windows children can reject CTRL_BREAK_EVENT with WinError 87;
             # keep the existing taskkill fallback for that process shape.
-            with suppress(ProcessLookupError, OSError):
+            ctrl_break_sent = False
+            try:
                 os.kill(pid, ctrl_break)
-            if self._wait_for_exit(pid, timeout_s):
+            except ProcessLookupError:
+                return True
+            except OSError:
+                pass
+            else:
+                ctrl_break_sent = True
+            if ctrl_break_sent and self._wait_for_exit(pid, timeout_s):
                 return True
         self._subprocess_run(
             ["taskkill", "/PID", str(pid), "/T"],
