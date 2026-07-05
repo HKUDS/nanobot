@@ -16,6 +16,7 @@ from nanobot.agent.tools.mcp import (
     MCPResourceWrapper,
     MCPToolWrapper,
     _normalize_windows_stdio_command,
+    _sanitize_mcp_tool_name,
     _sanitize_name,
     connect_mcp_servers,
 )
@@ -1319,3 +1320,15 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
 )
 def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
     assert mcp_mod._redact_url(url) == expected
+
+def test_mcp_tool_name_keeps_short_name():
+    name = _sanitize_mcp_tool_name("mcp_myserver_resource_myres")
+    assert name == "mcp_myserver_resource_myres"
+
+
+def test_mcp_tool_name_limits_long_name():
+    long_name = "mcp_" + "a" * 100
+    name = _sanitize_mcp_tool_name(long_name)
+
+    assert len(name) <= 64
+    assert name.startswith("mcp_")

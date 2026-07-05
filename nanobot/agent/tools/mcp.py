@@ -1,6 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -120,6 +121,25 @@ def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: 
 def _sanitize_name(name: str) -> str:
     """Sanitize an MCP-derived name for model API compatibility."""
     return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
+
+
+_MAX_TOOL_NAME_LENGTH = 64
+_HASH_LENGTH = 8
+
+
+def _limit_tool_name(name: str, max_length: int = _MAX_TOOL_NAME_LENGTH) -> str:
+    """Limit a tool name while keeping short names unchanged."""
+    if len(name) <= max_length:
+        return name
+
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
+    prefix_length = max_length - _HASH_LENGTH - 1
+    return f"{name[:prefix_length]}_{digest}"
+
+
+def _sanitize_mcp_tool_name(name: str) -> str:
+    """Sanitize and limit an MCP-derived tool name."""
+    return _limit_tool_name(_sanitize_name(name))
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -389,7 +409,7 @@ class MCPToolWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
-        self._name = _sanitize_name(f"mcp_{server_name}_{tool_def.name}")
+        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
@@ -548,7 +568,7 @@ class MCPResourceWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._uri = resource_def.uri
-        self._name = _sanitize_name(f"mcp_{server_name}_resource_{resource_def.name}")
+        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_resource_{resource_def.name}")
         desc = resource_def.description or resource_def.name
         self._description = f"[MCP Resource] {desc}\nURI: {self._uri}"
         self._parameters: dict[str, Any] = {
@@ -649,7 +669,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._prompt_name = prompt_def.name
-        self._name = _sanitize_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
+        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
         desc = prompt_def.description or prompt_def.name
         self._description = (
             f"[MCP Prompt] {desc}\n"
