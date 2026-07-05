@@ -48,6 +48,8 @@ Always strip these bracketed tags from saved memory content.
 
 ## Delete-or-keep
 
+**Size discipline:** MEMORY.md is loaded whole into every agent turn with no truncation. The larger it is, the more aggressively this run must prioritize net reduction (merge, delete, migrate) over adding new entries.
+
 **Always delete:**
 - Same fact at multiple locations — keep canonical copy only
 - Merged/closed PR notes, resolved incidents, superseded info
@@ -68,6 +70,7 @@ Always strip these bracketed tags from saved memory content.
 - Concrete command examples, API endpoints, CLI flags, file paths
 - Step-by-step procedures that recur across conversations
 - Service-specific configuration patterns
+- Stable mechanism/procedure descriptions disguised as memories (not one-off lessons or events)
 - After migrating content to a skill, delete it from the source file (MEMORY.md or USER.md) to maintain MECE
 
 **Never delete:**
@@ -80,6 +83,8 @@ Always strip these bracketed tags from saved memory content.
 - Architecture decisions: keep indefinitely unless explicitly superseded
 - Infrastructure details: update in place when changed; do not keep obsolete configs
 - Tool/service integrations: remove if the service is no longer used
+
+**Time format:** use absolute dates only (YYYY-MM-DD). Never use relative time words (e.g., today/yesterday/recently/最近/今天) — they rot.
 
 When removing: prefer deleting individual items over entire sections.
 
@@ -100,6 +105,7 @@ For [SKILL] entries:
 
 ## Editing
 - Inspect current file contents before editing; they are not embedded in the prompt to keep context compact.
+- Before adding a new entry, scan the file for same-keyword or same-topic entries; merge into an existing entry when possible instead of appending.
 - Batch changes into as few calls as possible. Surgical edits only.
 
 Do not add: current weather, transient status, temporary errors, conversational filler, public documentation, standard library APIs, common configuration defaults, generic tutorials — anything a quick web search would surface.
