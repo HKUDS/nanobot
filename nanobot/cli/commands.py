@@ -1397,6 +1397,11 @@ def _run_gateway(
 
             store = agent.context.memory
             resp = None
+            # Apply Dream model override when configured.
+            dream_model = dream_cfg.model_override.strip() if dream_cfg.model_override else ""
+            saved_model = agent.model
+            if dream_model:
+                agent.model = dream_model
             try:
                 result = store.build_dream_prompt()
                 if result is None:
@@ -1422,6 +1427,8 @@ def _run_gateway(
             except Exception:
                 logger.exception("Dream cron job failed")
             finally:
+                if dream_model:
+                    agent.model = saved_model
                 from nanobot.webui.token_usage import record_response_token_usage
 
                 record_response_token_usage(
