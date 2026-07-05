@@ -12,6 +12,21 @@ If that fails, fix installation, config, provider, or model setup first with [`q
 
 Most examples below are snippets to merge into `~/.nanobot/config.json`.
 
+> [!NOTE]
+> If you are upgrading from a version where chat app SDKs were installed by default,
+> install the channel extra in the same Python environment before enabling or
+> restarting that channel:
+>
+> ```bash
+> nanobot plugins enable <channel>
+> ```
+>
+> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
+> `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
+> To turn a channel off later, run `nanobot plugins disable <channel>`.
+> nanobot keeps the saved settings, but stops loading that channel after the
+> next restart.
+
 ## Common Setup Pattern
 
 Every chat app uses the same shape:
@@ -58,6 +73,12 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 
 <details>
 <summary><b>Telegram</b></summary>
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable telegram
+```
 
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
@@ -122,6 +143,14 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 <summary><b>Mochat (Claw IM)</b></summary>
 
 Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
+
+**Install the optional realtime dependency**
+
+```bash
+nanobot plugins enable mochat
+```
+
+Without this extra, Mochat still works through HTTP polling.
 
 **1. Ask nanobot to set up Mochat for you**
 
@@ -233,14 +262,14 @@ nanobot gateway
 <details>
 <summary><b>Matrix (Element)</b></summary>
 
-Install Matrix dependencies first:
+Enable Matrix support first:
 
 ```bash
-python -m pip install "nanobot-ai[matrix]"
+nanobot plugins enable matrix
 ```
 
 > [!NOTE]
-> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel and is skipped by the `matrix` extra on `sys_platform == 'win32'`. The command above will still succeed on Windows but without `matrix-nio` installed, so enabling the Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
+> Matrix encryption is disabled by default on Windows because `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel. Use macOS, Linux, or WSL2 if you need Matrix E2EE.
 
 **1. Create/choose a Matrix account**
 
@@ -306,9 +335,7 @@ nanobot gateway
 Requires the WhatsApp optional dependencies:
 
 ```bash
-pip install "nanobot-ai[whatsapp]"
-# Source checkout:
-python -m pip install -e ".[whatsapp]"
+nanobot plugins enable whatsapp
 ```
 
 **1. Link device with QR**
@@ -384,6 +411,7 @@ Uses **WebSocket** long connection — no public IP required.
 **Quick setup: QR login**
 
 ```bash
+nanobot plugins enable feishu
 nanobot channels login feishu
 # Use --force to create/sign in with a new bot
 ```
@@ -454,6 +482,12 @@ nanobot gateway
 
 Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
 
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable qq
+```
+
 **1. Register & create bot**
 - Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
 - Create a new bot application
@@ -506,6 +540,12 @@ Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **
 - Copy the forward websocket server's token
 - (Optional) In the webui, follow "系统配置" -> "登陆配置" -> "快速登录QQ" to automatically login after restarts
 
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable napcat
+```
+
 **2. Configure**
 
 ```json
@@ -542,6 +582,12 @@ Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **
 <summary><b>DingTalk (钉钉)</b></summary>
 
 Uses **Stream Mode** — no public IP required.
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable dingtalk
+```
 
 **1. Create a DingTalk bot**
 - Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
@@ -584,6 +630,12 @@ nanobot gateway
 <summary><b>Slack</b></summary>
 
 Uses **Socket Mode** — no public URL required.
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable slack
+```
 
 **1. Create a Slack app**
 - Go to [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"
@@ -695,10 +747,10 @@ nanobot gateway
 
 Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. No local WeChat desktop client is required.
 
-**1. Install with WeChat support**
+**1. Enable WeChat support**
 
 ```bash
-python -m pip install "nanobot-ai[weixin]"
+nanobot plugins enable weixin
 ```
 
 **2. Configure**
@@ -747,10 +799,10 @@ nanobot gateway
 >
 > Uses **WebSocket** long connection — no public IP required.
 
-**1. Install the optional dependency**
+**1. Enable WeCom support**
 
 ```bash
-python -m pip install "nanobot-ai[wecom]"
+nanobot plugins enable wecom
 ```
 
 **2. Create a WeCom AI Bot**
@@ -786,10 +838,10 @@ nanobot gateway
 > Direct-message text in/out, tenant-aware OAuth, conversation reference persistence.
 > Uses a public HTTPS webhook — no WebSocket; you need a tunnel or reverse proxy.
 
-**1. Install the optional dependency**
+**1. Enable Microsoft Teams support**
 
 ```bash
-python -m pip install "nanobot-ai[msteams]"
+nanobot plugins enable msteams
 ```
 
 **2. Create a Teams / Azure bot app registration**

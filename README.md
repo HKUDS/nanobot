@@ -42,7 +42,7 @@
 |---|---|
 | Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
 | Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
-| Open the bundled browser UI after the CLI works | [WebUI](#-webui) |
+| Open the bundled browser UI | [WebUI](#-webui) |
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
@@ -237,7 +237,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes and you enabled the WebSocket channel, skip the manual initialize/configure steps below and go straight to **Open the WebUI**.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps below and go straight to **Open the WebUI**.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -358,14 +358,13 @@ For another provider, the same config shape still applies:
 
 **3. Open the WebUI**
 
-If Quick Start enabled the WebSocket channel, start the gateway:
+Start the browser workbench:
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
-Prefer not to keep a terminal open? Use `nanobot gateway --background`, then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+`nanobot webui` prepares the local WebSocket channel if needed, starts the gateway, and opens `http://127.0.0.1:8765`. It binds the first-run WebUI to `127.0.0.1` by default, so it is not exposed to your LAN. Prefer not to keep a terminal open? Use `nanobot webui --background`, then manage the gateway with `nanobot gateway status`, `logs`, `restart`, and `stop`.
 
 For manual or terminal-only setup, test one CLI message:
 
@@ -399,33 +398,13 @@ The WebUI ships **inside the published wheel** — no extra build step. It is th
   <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
 </p>
 
-**1. Enable the WebSocket channel in `~/.nanobot/config.json`**
-
-Merge this block into your existing config:
-
-```json
-{
-  "channels": {
-    "websocket": {
-      "enabled": true,
-      "tokenIssueSecret": "your-webui-password",
-      "websocketRequiresToken": true
-    }
-  }
-}
-```
-
-**2. Start the gateway**
+**Open it**
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Use `nanobot gateway --background` for a local background process you can manage later with `nanobot gateway status`, `logs`, `restart`, and `stop`.
-
-**3. Open the WebUI**
-
-Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
+The command enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
 
 The WebUI is served by the WebSocket channel on port `8765` by default. The gateway's `18790` port is for the health endpoint, not the browser UI.
 

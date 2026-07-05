@@ -41,7 +41,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Make the first model reply work | `providers.<name>.apiKey`, optional `providers.<name>.apiBase`, `modelPresets.<preset>`, `agents.defaults.modelPreset` | `nanobot status`, then `nanobot agent -m "Hello!"` | [Providers](#providers), [Model Presets](#model-presets) |
 | Add fallback models | `modelPresets.<fallback>`, `agents.defaults.fallbackModels` | `nanobot status`, then a normal agent run | [Model Fallbacks](#model-fallbacks) |
 | Keep secrets out of the config file | `${ENV_VAR}` placeholders inside any string value | Start nanobot from the same environment that sets the variable | [Environment Variables for Secrets](#environment-variables-for-secrets) |
-| Open the bundled WebUI | `channels.websocket.enabled`, optional `channels.websocket.port`, `channels.websocket.tokenIssueSecret` | `nanobot gateway`, then open `http://127.0.0.1:8765` | [Channel Settings](#channel-settings), [WebSocket docs](./websocket.md) |
+| Open the bundled WebUI | `channels.websocket.enabled`, optional `channels.websocket.port`, `channels.websocket.tokenIssueSecret` | `nanobot webui` | [Channel Settings](#channel-settings), [WebSocket docs](./websocket.md) |
 | Connect one chat app | `channels.<channel>.enabled`, channel credentials, `channels.<channel>.allowFrom` | `nanobot channels status`, then `nanobot gateway --verbose` | [Channel Settings](#channel-settings), [Chat Apps](./chat-apps.md) |
 | Enable voice transcription | `transcription.enabled`, `transcription.provider`, matching `providers.<name>.apiKey` | Send or upload a short voice message through a configured surface | [Transcription Settings](#transcription-settings) |
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
@@ -49,7 +49,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
 | Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
-| Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Start each process with explicit paths and run `nanobot status` for the default instance only | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
+| Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Use the same explicit paths with `nanobot status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
 | Observe model calls | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` environment variables | Run one model call, then check the matching Langfuse project | [Langfuse Observability](#langfuse-observability) |
 
 ## Environment Variables for Secrets
@@ -380,7 +380,7 @@ Omit `apiKey` (or leave it empty / unset). The provider falls back to [`DefaultA
 Install the optional dependency:
 
 ```bash
-python -m pip install 'nanobot-ai[azure]'
+nanobot plugins enable azure
 ```
 
 `DefaultAzureCredential` walks this chain in order and uses the first identity that succeeds:
@@ -395,7 +395,7 @@ python -m pip install 'nanobot-ai[azure]'
 
 The identity that ends up signing the request **must be assigned the `Cognitive Services OpenAI User` RBAC role** (or higher) on the Azure OpenAI resource. Without that role you will see `401`/`403` errors at the first request.
 
-> `apiBase` remains mandatory in both modes — it's your Azure resource endpoint and cannot be inferred. If neither `apiKey` is set nor `azure-identity` is installed, the provider raises a clear error pointing you at `python -m pip install 'nanobot-ai[azure]'`.
+> `apiBase` remains mandatory in both modes — it's your Azure resource endpoint and cannot be inferred. If neither `apiKey` is set nor `azure-identity` is installed, the provider raises a clear error pointing you at `nanobot plugins enable azure`.
 
 </details>
 
@@ -438,6 +438,17 @@ You can also reference `${APIFREE_API_KEY}` in `apiKey` if that is how your envi
 Bedrock uses the native `bedrock-runtime` Converse API, so it can call Bedrock model IDs such as Claude Opus 4.7, Claude Sonnet, Amazon Nova, Meta Llama, Mistral, Qwen, and other models that support Converse. It supports normal chat, streaming, tool calling, tool results, token usage, and Bedrock error metadata.
 
 This provider is for Bedrock's native Converse API, not Bedrock's OpenAI-compatible `/openai/v1` endpoint. For OpenAI-compatible Bedrock models, you can still use `custom` if you specifically want that API surface.
+
+Install Bedrock support first:
+
+```bash
+nanobot plugins enable bedrock
+```
+
+> [!NOTE]
+> If you configured Bedrock before `boto3` became an optional dependency, run
+> `nanobot plugins enable bedrock` after upgrading. Otherwise the provider will
+> fail when it first tries to create a Bedrock client.
 
 **1. Configure credentials**
 
@@ -1511,7 +1522,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
-| `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
+| `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. Install parser dependencies with `nanobot plugins enable documents`. If you used document parsing before those parsers became optional, run that command after upgrading. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 
 `channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
@@ -1906,6 +1917,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
+| `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install missing optional packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin is allowed to install Python packages into this nanobot environment. |
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 

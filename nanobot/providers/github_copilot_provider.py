@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import webbrowser
@@ -174,6 +175,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
 
         self._copilot_access_token: str | None = None
         self._copilot_expires_at: float = 0.0
+        self._copilot_token_lock: asyncio.Lock = asyncio.Lock()
         super().__init__(
             api_key="no-key",
             api_base=_resolve("NANOBOT_COPILOT_BASE_URL", DEFAULT_COPILOT_BASE_URL),
@@ -191,31 +193,40 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         if self._copilot_access_token and now < self._copilot_expires_at - _EXPIRY_SKEW_SECONDS:
             return self._copilot_access_token
 
-        github_token = _load_github_token()
-        if not github_token or not github_token.access:
-            raise RuntimeError("GitHub Copilot is not logged in. Run: nanobot provider login github-copilot")
+        async with self._copilot_token_lock:
+            # Re-check after acquiring the lock: another task may have refreshed
+            # the token while we were waiting.
+            now = time.time()
+            if self._copilot_access_token and now < self._copilot_expires_at - _EXPIRY_SKEW_SECONDS:
+                return self._copilot_access_token
 
-        timeout = httpx.Timeout(20.0, connect=20.0)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=True) as client:
-            response = await client.get(
-                _resolve("NANOBOT_COPILOT_TOKEN_URL", DEFAULT_COPILOT_TOKEN_URL),
-                headers=_copilot_headers(github_token.access),
-            )
-            response.raise_for_status()
-            payload = response.json()
+            github_token = _load_github_token()
+            if not github_token or not github_token.access:
+                raise RuntimeError(
+                    "GitHub Copilot is not logged in. Run: nanobot provider login github-copilot"
+                )
 
-        token = payload.get("token")
-        if not token:
-            raise RuntimeError("GitHub Copilot token exchange returned no token.")
+            timeout = httpx.Timeout(20.0, connect=20.0)
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=True) as client:
+                response = await client.get(
+                    _resolve("NANOBOT_COPILOT_TOKEN_URL", DEFAULT_COPILOT_TOKEN_URL),
+                    headers=_copilot_headers(github_token.access),
+                )
+                response.raise_for_status()
+                payload = response.json()
 
-        expires_at = payload.get("expires_at")
-        if isinstance(expires_at, (int, float)):
-            self._copilot_expires_at = float(expires_at)
-        else:
-            refresh_in = payload.get("refresh_in") or 1500
-            self._copilot_expires_at = time.time() + int(refresh_in)
-        self._copilot_access_token = str(token)
-        return self._copilot_access_token
+            token = payload.get("token")
+            if not token:
+                raise RuntimeError("GitHub Copilot token exchange returned no token.")
+
+            expires_at = payload.get("expires_at")
+            if isinstance(expires_at, (int, float)):
+                self._copilot_expires_at = float(expires_at)
+            else:
+                refresh_in = payload.get("refresh_in") or 1500
+                self._copilot_expires_at = time.time() + int(refresh_in)
+            self._copilot_access_token = str(token)
+            return self._copilot_access_token
 
     async def _refresh_client_api_key(self) -> str:
         token = await self._get_copilot_access_token()
