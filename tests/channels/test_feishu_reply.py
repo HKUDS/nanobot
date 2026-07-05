@@ -550,6 +550,64 @@ async def test_on_message_no_extra_api_call_when_no_parent_id() -> None:
     assert len(captured) == 1
 
 
+@pytest.mark.parametrize(("chat_type", "group_policy", "should_send"), [
+    ("p2p", "mention", True),
+    ("group", "open", False),
+])
+@pytest.mark.asyncio
+async def test_on_message_new_system_divider_only_in_p2p(
+    chat_type: str,
+    group_policy: str,
+    should_send: bool,
+) -> None:
+    channel = _make_feishu_channel(group_policy=group_policy)
+    channel._processed_message_ids.clear()
+    channel._send_message_sync = MagicMock(return_value="om_system")
+    channel._handle_message = AsyncMock()
+
+    with patch.object(channel, "_add_reaction", return_value=None):
+        await channel._on_message(_make_feishu_event(
+            chat_type=chat_type,
+            content='{"text": "/new"}',
+        ))
+
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.call_args.kwargs["content"] == "/new"
+    if not should_send:
+        channel._send_message_sync.assert_not_called()
+        return
+    _, receive_id, msg_type, content = channel._send_message_sync.call_args.args
+    assert receive_id == "ou_alice"
+    assert msg_type == "system"
+    assert json.loads(content)["type"] == "divider"
+
+
+@pytest.mark.asyncio
+async def test_send_new_session_text_suppressed_in_p2p_only() -> None:
+    p2p = _make_feishu_channel()
+    p2p._send_message_sync = MagicMock()
+
+    await p2p.send(OutboundMessage(
+        channel="feishu",
+        chat_id="ou_alice",
+        content="New session started.",
+        metadata={"chat_type": "p2p"},
+    ))
+
+    group = _make_feishu_channel()
+    group._send_message_sync = MagicMock(return_value="om_text")
+
+    await group.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_group",
+        content="New session started.",
+        metadata={"chat_type": "group"},
+    ))
+
+    p2p._send_message_sync.assert_not_called()
+    assert group._send_message_sync.call_args.args[2] == "text"
+
+
 @pytest.mark.asyncio
 async def test_on_message_strips_required_leading_bot_mention_for_commands() -> None:
     channel = _make_feishu_channel(group_policy="mention")
