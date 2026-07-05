@@ -289,6 +289,7 @@ def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
     assert "Error" not in result
     assert loop._active_preset is None
     assert loop.model == "anthropic/claude-opus-4-5"
+    assert loop.subagents.model == "anthropic/claude-opus-4-5"
 
 
 def test_from_config_injects_default_preset(tmp_path) -> None:

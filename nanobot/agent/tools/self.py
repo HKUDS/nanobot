@@ -438,6 +438,8 @@ class MyTool(Tool, ContextAware):
         setattr(self._runtime_state, key, value)
         if key == "model":
             self._runtime_state._active_preset = None
+            if hasattr(self._runtime_state, "subagents"):
+                self._runtime_state.subagents.model = value
         if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
             self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
