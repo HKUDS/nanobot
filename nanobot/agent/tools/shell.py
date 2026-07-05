@@ -491,14 +491,17 @@ class ExecTool(Tool):
             program = shell_program or default_program
             program_name = PureWindowsPath(program).name.lower()
             if program_name in ("cmd", "cmd.exe"):
-                return await asyncio.create_subprocess_exec(
-                    program, "/c", command,
+                cmd_env = {**env, "COMSPEC": program}
+                return await asyncio.create_subprocess_shell(
+                    command,
                     stdin=stdin,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
-                    env=env,
+                    env=cmd_env,
                 )
+            command = ExecTool._normalize_powershell_command(command)
+            command = f"{command}\nif ($LASTEXITCODE -ne $null) {{ exit $LASTEXITCODE }}"
             return await asyncio.create_subprocess_exec(
                 program, "-NoProfile", "-NonInteractive", "-Command", command,
                 stdin=stdin,
@@ -521,6 +524,29 @@ class ExecTool(Tool):
             cwd=cwd,
             env=env,
         )
+
+    @staticmethod
+    def _normalize_powershell_command(command: str) -> str:
+        stripped = command.lstrip()
+        if not stripped or stripped[0] not in {"'", '"'}:
+            return command
+
+        quote = stripped[0]
+        end = stripped.find(quote, 1)
+        if end == -1 or end + 1 >= len(stripped) or not stripped[end + 1].isspace():
+            return command
+
+        executable = stripped[1:end]
+        looks_like_windows_executable = (
+            bool(re.match(r"^[A-Za-z]:[\\/]", executable))
+            or executable.startswith(r"\\")
+            or executable.lower().endswith((".exe", ".cmd", ".bat", ".ps1"))
+        )
+        if not looks_like_windows_executable:
+            return command
+
+        leading = command[: len(command) - len(stripped)]
+        return f"{leading}& {stripped}"
 
     @staticmethod
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:

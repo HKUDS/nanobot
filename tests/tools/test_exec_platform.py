@@ -175,23 +175,57 @@ class TestSpawnWindows:
         assert kwargs["env"] == env
 
     @pytest.mark.asyncio
-    async def test_explicit_cmd_shell_uses_cmd_c(self):
-        """Explicit shell='cmd' should launch the resolved cmd.exe with /c."""
+    async def test_explicit_cmd_shell_uses_raw_shell_string(self):
+        """Explicit shell='cmd' should preserve raw cmd.exe quoting semantics."""
         env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
+        ):
+            mock_shell.return_value = AsyncMock()
+            await ExecTool._spawn(
+                'echo "a & b"', r"C:\work", env,
+                shell_program=r"C:\Windows\system32\cmd.exe",
+            )
+
+        args = mock_shell.call_args[0]
+        assert args == ('echo "a & b"',)
+        kwargs = mock_shell.call_args[1]
+        assert kwargs["cwd"] == r"C:\work"
+        assert kwargs["env"] == {
+            "COMSPEC": r"C:\Windows\system32\cmd.exe",
+            "PATH": "",
+        }
+
+    @pytest.mark.asyncio
+    async def test_powershell_preserves_last_native_exit_code(self):
+        """PowerShell -Command should forward native process exit codes."""
+        env = {"PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
         ):
             mock_exec.return_value = AsyncMock()
-            await ExecTool._spawn(
-                "dir", r"C:\work", env,
-                shell_program=r"C:\Windows\system32\cmd.exe",
-            )
+            await ExecTool._spawn("cmd /c exit 7", r"C:\work", env)
 
-        args = mock_exec.call_args[0]
-        assert args[:3] == (r"C:\Windows\system32\cmd.exe", "/c", "dir")
-        kwargs = mock_exec.call_args[1]
-        assert kwargs["cwd"] == r"C:\work"
+        command = mock_exec.call_args[0][-1]
+        assert "cmd /c exit 7" in command
+        assert "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }" in command
+
+    @pytest.mark.asyncio
+    async def test_powershell_invokes_quoted_windows_executable_path(self):
+        """PowerShell needs & before quoted executable paths with arguments."""
+        env = {"PATH": ""}
+        command = r'"D:\Program Files\Python\python.exe" -u -c "print(1)"'
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn(command, r"C:\work", env)
+
+        powershell_command = mock_exec.call_args[0][-1]
+        assert powershell_command.startswith("& " + command)
 
     @pytest.mark.asyncio
     async def test_prefers_pwsh_when_available(self):
@@ -645,23 +679,23 @@ class TestResolveShellWindows:
 
     @pytest.mark.asyncio
     async def test_shell_cmd_accepted(self):
-        """shell='cmd' should use the resolved cmd.exe with /c."""
+        """shell='cmd' should preserve the command string for cmd.exe parsing."""
         mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (b"hello\n", b"")
+        mock_proc.communicate.return_value = (b'"a & b"\n', b"")
         mock_proc.returncode = 0
 
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
-            mock_exec.return_value = mock_proc
+            mock_shell.return_value = mock_proc
             tool = ExecTool()
-            result = await tool.execute(command="echo hello", shell="cmd")
+            result = await tool.execute(command='echo "a & b"', shell="cmd")
 
-        assert "hello" in result
-        args = mock_exec.call_args[0]
-        assert args[1:3] == ("/c", "echo hello")
+        assert '"a & b"' in result
+        args = mock_shell.call_args[0]
+        assert args == ('echo "a & b"',)
 
     @pytest.mark.asyncio
     async def test_shell_bash_rejected_on_windows(self):
@@ -675,11 +709,12 @@ class TestResolveShellWindows:
 
 
 @pytest.mark.skipif(
-    sys.platform != "win32" or shutil.which("pwsh") is None,
-    reason="requires Windows with PowerShell 7",
+    sys.platform != "win32",
+    reason="requires Windows",
 )
 class TestWindowsRealExec:
 
+    @pytest.mark.skipif(shutil.which("pwsh") is None, reason="requires PowerShell 7")
     @pytest.mark.asyncio
     async def test_single_line_and_separator_uses_pwsh(self):
         result = await ExecTool(timeout=10).execute(command="echo before && echo after")
@@ -687,3 +722,17 @@ class TestWindowsRealExec:
         assert "before" in result
         assert "after" in result
         assert "Exit code: 0" in result
+
+    @pytest.mark.asyncio
+    async def test_explicit_cmd_preserves_embedded_quotes(self):
+        result = await ExecTool(timeout=10).execute(command='echo "a & b"', shell="cmd")
+
+        assert '"a & b"' in result
+        assert r'\"a & b\"' not in result
+        assert "Exit code: 0" in result
+
+    @pytest.mark.asyncio
+    async def test_default_powershell_preserves_native_exit_code(self):
+        result = await ExecTool(timeout=10).execute(command="cmd /c exit 7")
+
+        assert "Exit code: 7" in result
