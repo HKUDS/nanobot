@@ -546,6 +546,26 @@ async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_supports_limited_wrapped_names(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    long_tool_name = "tool-" + "very-long-name-" * 8
+    wrapped_name = _sanitize_mcp_tool_name(f"mcp_test_{long_tool_name}")
+    assert len(wrapped_name) == 64
+
+    fake_mcp_runtime["session"] = _make_fake_session([long_tool_name, "other"])
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=[wrapped_name])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == [wrapped_name]
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
