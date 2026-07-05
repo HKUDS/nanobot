@@ -146,6 +146,7 @@ class SubagentManager:
         self._pending_aggregated_results: dict[str, list[_SubagentResult]] = {}
         self._pending_aggregated_omitted_counts: dict[str, int] = {}
         self._pending_aggregated_omitted_statuses: dict[str, set[SubagentResultStatus]] = {}
+        self._cancelled_aggregated_sessions: set[str] = set()
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -234,7 +235,9 @@ class SubagentManager:
                 ids.discard(task_id)
                 if not ids:
                     del self._session_tasks[session_key]
-                    should_flush = self.result_mode == "aggregated"
+                    was_cancelled = session_key in self._cancelled_aggregated_sessions
+                    should_flush = self.result_mode == "aggregated" and not was_cancelled
+                    self._cancelled_aggregated_sessions.discard(session_key)
             if should_flush and session_key:
                 asyncio.create_task(self._flush_aggregated_results(session_key))
 
@@ -350,6 +353,9 @@ class SubagentManager:
                 task_id, label, task, result, origin, status, origin_message_id
             )
             return
+        if session_key in self._cancelled_aggregated_sessions:
+            self._discard_aggregated_results(session_key)
+            return
 
         pending_results = self._pending_aggregated_results.setdefault(session_key, [])
         if len(pending_results) < _AGGREGATED_RESULT_MAX_ITEMS:
@@ -371,6 +377,12 @@ class SubagentManager:
         active_task_ids = self._session_tasks.get(session_key)
         if not active_task_ids or task_id not in active_task_ids:
             await self._flush_aggregated_results(session_key)
+
+    def _discard_aggregated_results(self, session_key: str) -> None:
+        """Drop buffered aggregate output for a session that is being cancelled."""
+        self._pending_aggregated_results.pop(session_key, None)
+        self._pending_aggregated_omitted_counts.pop(session_key, None)
+        self._pending_aggregated_omitted_statuses.pop(session_key, None)
 
     async def _flush_aggregated_results(self, session_key: str) -> None:
         """Publish one combined result for all completed subagents in a session."""
@@ -562,6 +574,11 @@ class SubagentManager:
         """Cancel all subagents for the given session. Returns count cancelled."""
         tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
                  if tid in self._running_tasks and not self._running_tasks[tid].done()]
+        if self.result_mode == "aggregated" and (
+            tasks or session_key in self._pending_aggregated_results
+        ):
+            self._discard_aggregated_results(session_key)
+            self._cancelled_aggregated_sessions.add(session_key)
         for t in tasks:
             t.cancel()
         if tasks:

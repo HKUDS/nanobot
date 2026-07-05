@@ -429,6 +429,49 @@ class TestAggregatedResultMode:
         assert "result 2" in msg.content
 
     @pytest.mark.asyncio
+    async def test_cancel_discards_buffered_aggregated_results(self, tmp_path):
+        sm = _manager(tmp_path, max_concurrent_subagents=2, result_mode="aggregated")
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+
+        async def _run(spec):
+            task = spec.initial_messages[-1]["content"]
+            if task == "task 1":
+                await first_release.wait()
+                return AgentRunResult(
+                    final_content="result 1", messages=[], stop_reason="completed"
+                )
+            await second_release.wait()
+            return AgentRunResult(final_content="result 2", messages=[], stop_reason="completed")
+
+        sm.runner.run = _run
+
+        await sm.spawn("task 1", label="A", session_key="s1")
+        await sm.spawn("task 2", label="B", session_key="s1")
+
+        first_release.set()
+        for _ in range(10):
+            if sm._pending_aggregated_results.get("s1"):
+                break
+            await asyncio.sleep(0)
+
+        assert len(sm._pending_aggregated_results["s1"]) == 1
+
+        count = await sm.cancel_by_session("s1")
+        assert count == 1
+        second_release.set()
+        await _drain_subagent_tasks(sm)
+
+        assert published == []
+        assert sm._pending_aggregated_results == {}
+        assert sm._pending_aggregated_omitted_counts == {}
+        assert sm._pending_aggregated_omitted_statuses == {}
+        assert sm._cancelled_aggregated_sessions == set()
+
+    @pytest.mark.asyncio
     async def test_aggregated_mode_announces_immediately_without_session(self, tmp_path):
         sm = _manager(tmp_path, result_mode="aggregated")
 
