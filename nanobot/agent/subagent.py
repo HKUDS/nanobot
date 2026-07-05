@@ -131,12 +131,45 @@ class SubagentManager:
             for slug, mcps in raw.items()
         }
 
+    def _normalize_specialist(self, specialist: str | None) -> str | None:
+        """Validate a trusted specialist slug against the configured mapping.
+
+        ``specialist`` comes from a trusted caller (e.g. deployment code or a
+        cron/policy layer), NOT from the prompt-controllable spawn label.
+        """
+        if not specialist:
+            return None
+        slug = str(specialist).strip().lower()
+        return slug if slug in self._specialist_mcps() else None
+
     def _specialist_from_label(self, label: str | None) -> str | None:
-        """Derive the specialist slug from a spawn label prefix."""
+        """Derive the specialist slug from a spawn label prefix.
+
+        INSECURE: the spawn label is a model/user-facing display field, so this
+        path is only consulted when ``tools.subagent_allow_label_specialist`` is
+        explicitly enabled by the operator. See :meth:`_resolve_specialist`.
+        """
         if not label:
             return None
         slug = label.strip().lower().split()[0].split(":")[0] if label.strip() else ""
         return slug if slug in self._specialist_mcps() else None
+
+    def _resolve_specialist(
+        self, specialist: str | None, label: str | None
+    ) -> str | None:
+        """Resolve the effective specialist slug from trusted inputs.
+
+        Precedence:
+        1. The explicit, trusted ``specialist`` argument (never prompt-derived).
+        2. The spawn ``label`` prefix — ONLY if the operator opted in via
+           ``tools.subagent_allow_label_specialist`` (off by default, insecure).
+        """
+        resolved = self._normalize_specialist(specialist)
+        if resolved is not None:
+            return resolved
+        if getattr(self.tools_config, "subagent_allow_label_specialist", False):
+            return self._specialist_from_label(label)
+        return None
 
     def _subagent_tools_config(self, specialist: str | None = None) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use.
@@ -211,8 +244,15 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        specialist: str | None = None,
     ) -> str:
-        """Spawn a subagent to execute a task in the background."""
+        """Spawn a subagent to execute a task in the background.
+
+        ``specialist`` is a TRUSTED selector for MCP inheritance. It must come
+        from a non-prompt-controlled source (deployment/policy code). The spawn
+        tool deliberately does NOT expose it, so a model cannot grant itself
+        MCP tools by choosing a task label.
+        """
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
@@ -235,6 +275,7 @@ class SubagentManager:
                 origin_message_id,
                 temperature,
                 workspace_scope,
+                specialist,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -264,6 +305,7 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        specialist: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -275,7 +317,7 @@ class SubagentManager:
         mcp_stacks: dict[str, Any] = {}
         try:
             root = workspace_scope.project_path if workspace_scope is not None else self.workspace
-            specialist = self._specialist_from_label(label)
+            specialist = self._resolve_specialist(specialist, label)
             cfg = self._subagent_tools_config(specialist)
             if workspace_scope is not None:
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace

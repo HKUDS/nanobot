@@ -2072,11 +2072,14 @@ Declare a map of specialist slug → list of MCP server names under `tools.subag
 }
 ```
 
-The specialist for a spawned subagent is derived from the **first word** of its spawn `label` (the slug before any space or colon), matched case-insensitively. For example, a subagent spawned with label `analyst monthly revenue` inherits the `db` MCP; `researcher: competitors` inherits `search`. A subagent whose label prefix is not a declared specialist inherits no MCP servers (previous default behavior). Only MCP servers listed for that specialist **and** already present in `tools.mcpServers` are inherited.
+The specialist is selected through a **trusted** channel: `SubagentManager.spawn()` accepts an explicit `specialist` argument that deployment/policy code passes in. The built-in `spawn` tool deliberately does **not** expose `specialist` in its schema, so the model cannot grant a subagent MCP tools by choosing a task label. Only MCP servers listed for that specialist **and** already present in `tools.mcpServers` are inherited; an unknown/absent specialist inherits nothing (default behavior).
+
+> **Security note.** MCP inheritance is a capability boundary. Never drive it from the spawn `label`, which is a model/user-facing display field — a prompt that influences the label could otherwise self-select a privileged specialist. Keep specialist selection in trusted code.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.subagentSpecialists` | `{}` | Map of specialist slug → list of MCP server names those subagents inherit. Empty means no subagent inherits MCP servers. |
+| `tools.subagentAllowLabelSpecialist` | `false` | **Opt-in, insecure.** Also derive the specialist from the spawn `label` prefix (first word before a space/colon). Only enable when the label is a trusted, non-prompt-controlled value in your setup. Leave `false` to keep specialist selection purely on the trusted `specialist` argument. |
 
 
 ## Auto Compact

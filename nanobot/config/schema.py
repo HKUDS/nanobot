@@ -389,8 +389,19 @@ class ToolsConfig(Base):
         default_factory=dict,
         validation_alias=AliasChoices("subagentSpecialists", "subagent_specialists"),
     )  # map of specialist slug -> list of MCP server names that specialist subagents inherit.
-    # The specialist is derived from the spawn label prefix (slug before any space/colon).
-    # Empty (default) = subagents get no inherited MCP servers (previous behavior).
+    # The specialist is selected via the trusted `specialist` argument to
+    # SubagentManager.spawn() (NOT exposed on the spawn tool schema, so it is not
+    # prompt-controllable). Empty (default) = subagents get no inherited MCP servers.
+    subagent_allow_label_specialist: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "subagentAllowLabelSpecialist",
+            "subagent_allow_label_specialist",
+        ),
+    )  # OPT-IN, INSECURE: also derive the specialist from the spawn label prefix.
+    # The spawn label is a model/user-facing display field, so enabling this lets a
+    # prompt that influences the label grant a subagent the mapped MCP tools. Leave
+    # False unless the label is a trusted, non-prompt-controlled value in your setup.
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
