@@ -12,7 +12,7 @@ from nanobot.agent.tools.exec_session import (
     ListExecSessionsTool,
     WriteStdinTool,
 )
-from nanobot.agent.tools.registry import is_tool_error_result
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
 
 
@@ -51,6 +51,38 @@ def test_exec_accepts_command_aliases(tmp_path):
     result = asyncio.run(run())
 
     assert str(tmp_path) in result
+    assert "Exit code: 0" in result
+
+
+def test_exec_schema_hides_compatibility_aliases():
+    props = ExecTool().parameters["properties"]
+
+    assert "command" in props
+    assert "working_dir" in props
+    assert "max_output_chars" in props
+    assert "cmd" not in props
+    assert "workdir" not in props
+    assert "max_output_tokens" not in props
+
+
+def test_exec_registry_accepts_hidden_compatibility_aliases(tmp_path):
+    async def run() -> str:
+        registry = ToolRegistry()
+        registry.register(ExecTool(working_dir="/", timeout=5))
+        command = _python_command("import os; print(os.getcwd()); print('A' * 2000)")
+        return await registry.execute(
+            "exec",
+            {
+                "cmd": command,
+                "workdir": str(tmp_path),
+                "max_output_tokens": 1000,
+            },
+        )
+
+    result = asyncio.run(run())
+
+    assert str(tmp_path) in result
+    assert "chars truncated" in result
     assert "Exit code: 0" in result
 
 

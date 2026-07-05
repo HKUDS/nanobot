@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from typing import Any
 from loguru import logger
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.base import Schema, Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
@@ -73,51 +74,55 @@ class _PreparedCommand:
     login: bool
 
 
-@tool_parameters(
-    tool_parameters_schema(
-        command=StringSchema("The shell command to execute"),
-        cmd=StringSchema("Compatibility alias for command"),
-        working_dir=StringSchema("Optional working directory for the command"),
-        workdir=StringSchema("Compatibility alias for working_dir"),
-        timeout=IntegerSchema(
-            60,
-            description=(
-                "Timeout in seconds. Increase for long-running commands "
-                "like compilation or installation (default 60, max 600)."
-            ),
-            minimum=1,
-            maximum=600,
+_EXEC_TOOL_PARAMETERS = tool_parameters_schema(
+    command=StringSchema("The shell command to execute"),
+    working_dir=StringSchema("Optional working directory for the command"),
+    timeout=IntegerSchema(
+        60,
+        description=(
+            "Timeout in seconds. Increase for long-running commands "
+            "like compilation or installation (default 60, max 600)."
         ),
-        shell=StringSchema(
-            "Optional shell binary to launch. On Unix, supports sh, bash, or zsh.",
-            nullable=True,
+        minimum=1,
+        maximum=600,
+    ),
+    shell=StringSchema(
+        "Optional shell binary to launch. On Unix, supports sh, bash, or zsh.",
+        nullable=True,
+    ),
+    login=BooleanSchema(
+        description="Whether to run bash/zsh with login shell semantics (default false).",
+        default=False,
+        nullable=True,
+    ),
+    yield_time_ms=IntegerSchema(
+        description=(
+            "Optional milliseconds to wait before returning output. "
+            "When set, a still-running command returns a session_id that "
+            "can be polled or written to with write_stdin. Omit this field "
+            "to keep one-shot exec behavior."
         ),
-        login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default false).",
-            default=False,
-            nullable=True,
+        minimum=0,
+        maximum=MAX_YIELD_MS,
+        nullable=True,
+    ),
+    max_output_chars=IntegerSchema(
+        description=(
+            "Maximum output characters to return when yield_time_ms is used "
+            "(default 10000, max 50000)."
         ),
-        yield_time_ms=IntegerSchema(
-            description=(
-                "Optional milliseconds to wait before returning output. "
-                "When set, a still-running command returns a session_id that "
-                "can be polled or written to with write_stdin. Omit this field "
-                "to keep one-shot exec behavior."
-            ),
-            minimum=0,
-            maximum=MAX_YIELD_MS,
-            nullable=True,
-        ),
-        max_output_chars=IntegerSchema(
-            description=(
-                "Maximum output characters to return when yield_time_ms is used "
-                "(default 10000, max 50000)."
-            ),
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
-            nullable=True,
-        ),
-        max_output_tokens=IntegerSchema(
+        minimum=1000,
+        maximum=MAX_OUTPUT_CHARS,
+        nullable=True,
+    ),
+)
+
+_EXEC_TOOL_COMPAT_PARAMETERS = deepcopy(_EXEC_TOOL_PARAMETERS)
+_EXEC_TOOL_COMPAT_PARAMETERS["properties"].update(
+    {
+        "cmd": StringSchema("Compatibility alias for command").to_json_schema(),
+        "workdir": StringSchema("Compatibility alias for working_dir").to_json_schema(),
+        "max_output_tokens": IntegerSchema(
             description=(
                 "Compatibility alias for max_output_chars. The current runtime "
                 "uses a character budget."
@@ -125,9 +130,12 @@ class _PreparedCommand:
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
             nullable=True,
-        ),
-    )
+        ).to_json_schema(),
+    }
 )
+
+
+@tool_parameters(_EXEC_TOOL_PARAMETERS)
 class ExecTool(Tool):
     """Tool to execute shell commands."""
     _scopes = {"core", "subagent"}
@@ -243,6 +251,18 @@ class ExecTool(Tool):
     @property
     def exclusive(self) -> bool:
         return True
+
+    def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._cast_object(params, _EXEC_TOOL_COMPAT_PARAMETERS)
+
+    def validate_params(self, params: dict[str, Any]) -> list[str]:
+        if not isinstance(params, dict):
+            return [f"parameters must be an object, got {type(params).__name__}"]
+        return Schema.validate_json_schema_value(
+            params,
+            {**_EXEC_TOOL_COMPAT_PARAMETERS, "type": "object"},
+            "",
+        )
 
     async def execute(
         self, command: str | None = None, cmd: str | None = None,
