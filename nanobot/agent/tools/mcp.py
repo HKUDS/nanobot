@@ -24,7 +24,6 @@ from nanobot.bus.events import (
 )
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
-    pin_resolved_url_dns,
     resolve_url_target,
     validate_url_target,
 )
@@ -164,11 +163,11 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     if not ok:
         return False
     try:
-        with pin_resolved_url_dns(url, resolved_ips):
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port),
-                timeout=timeout,
-            )
+        target_host = resolved_ips[0] if resolved_ips else host
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(target_host, port),
+            timeout=timeout,
+        )
         writer.close()
         with suppress(OSError, asyncio.TimeoutError):
             await asyncio.wait_for(writer.wait_closed(), timeout=0.2)

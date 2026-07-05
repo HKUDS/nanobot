@@ -148,6 +148,19 @@ async def test_safe_redirect_requests_use_independent_pinned_dns_concurrently(mo
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_rejects_proxy_because_upstream_dns_cannot_be_pinned():
+    tool = WebFetchTool(proxy="http://proxy.example:8080")
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page")
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "proxy" in data["error"].lower()
+    assert "dns-pinned" in data["error"].lower()
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
     tool = WebFetchTool(
         config=WebFetchConfig(use_jina_reader=False),

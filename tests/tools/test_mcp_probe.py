@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,6 +40,15 @@ async def test_probe_returns_false_for_closed_port():
 async def test_probe_uses_default_port_for_http():
     """When no port in URL, should default to 80 (will fail -> False)."""
     assert await _probe_http_url("http://unreachable-host.test/mcp") is False
+
+
+@pytest.mark.asyncio
+async def test_probe_rejects_public_name_resolving_to_loopback():
+    def _resolver(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
+        assert await _probe_http_url("http://example.com:8765/mcp") is False
 
 
 # ---------------------------------------------------------------------------

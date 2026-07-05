@@ -118,10 +118,10 @@ def _resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
     return resolve_url_target(url)
 
 
-def _pinned_dns_transport(proxy: str | None = None) -> httpx.AsyncBaseTransport:
+def _pinned_dns_transport() -> httpx.AsyncBaseTransport:
     from nanobot.security.network import PinnedDNSAsyncTransport
 
-    return PinnedDNSAsyncTransport(proxy=proxy)
+    return PinnedDNSAsyncTransport()
 
 
 async def _get_with_safe_redirects(
@@ -921,11 +921,16 @@ class WebFetchTool(Tool):
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+        if self.proxy:
+            return json.dumps({
+                "error": "web_fetch proxy is incompatible with DNS-pinned SSRF protection",
+                "url": url,
+            }, ensure_ascii=False)
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
             async with httpx.AsyncClient(
-                transport=_pinned_dns_transport(self.proxy),
+                transport=_pinned_dns_transport(),
                 timeout=15.0,
             ) as client:
                 r, stream, redirect_error = await _stream_with_safe_redirects(
@@ -998,7 +1003,7 @@ class WebFetchTool(Tool):
         try:
             async with httpx.AsyncClient(
                 timeout=30.0,
-                transport=_pinned_dns_transport(self.proxy),
+                transport=_pinned_dns_transport(),
             ) as client:
                 r, redirect_error = await _get_with_safe_redirects(
                     client,

@@ -161,11 +161,10 @@ class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
         self,
         *,
         allow_loopback: bool = False,
-        proxy: httpx.ProxyTypes | None = None,
         inner: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._allow_loopback = allow_loopback
-        self._inner = inner or httpx.AsyncHTTPTransport(proxy=proxy)
+        self._inner = inner or httpx.AsyncHTTPTransport()
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
