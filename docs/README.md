@@ -2,7 +2,7 @@
 
 For published release documentation, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview). The pages in this directory track the current repository and may describe features that have not reached the published site yet.
 
-If you have never used a terminal or edited a config file before, start with [`start-without-technical-background.md`](./start-without-technical-background.md). Otherwise, start with [`quick-start.md`](./quick-start.md) and get one local `nanobot agent -m "Hello!"` reply working before connecting chat apps, WebUI, Docker, or custom tools.
+If you have never used a terminal or edited a config file before, start with [`start-without-technical-background.md`](./start-without-technical-background.md). Otherwise, start with [`quick-start.md`](./quick-start.md), open the browser workbench with `nanobot webui`, and use terminal checks when you need lower-level diagnosis.
 
 Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.json`, not full replacement files.
 
@@ -38,7 +38,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 
 | Next goal | Read | First check |
 |---|---|---|
-| Use nanobot in a browser | [`webui.md`](./webui.md) | Enable WebSocket, run `nanobot gateway`, open `http://127.0.0.1:8765` |
+| Use nanobot in a browser | [`webui.md`](./webui.md) | Run `nanobot webui` and open the local browser workbench |
 | Talk through a chat app | [`chat-apps.md`](./chat-apps.md) | Merge one channel snippet, run `nanobot channels status`, keep `nanobot gateway` running |
 | Change provider or add fallbacks | [`provider-cookbook.md`](./provider-cookbook.md) | Keep `modelPresets` named and set `agents.defaults.modelPreset` |
 | Call nanobot from Python | [`python-sdk.md`](./python-sdk.md) | Reuse the same config/workspace from code, then run or stream one agent turn |
@@ -49,9 +49,9 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 
 | Goal | Read | Outcome |
 |---|---|---|
-| Open the bundled browser UI | [`webui.md`](./webui.md) | WebUI on port `8765`, chat workspace, Apps, Skills, Automations, and settings |
+| Open the bundled browser UI | [`webui.md`](./webui.md) | `nanobot webui`, chat workspace, Apps, Skills, Automations, and settings |
 | Connect Telegram, Discord, WeChat, Slack, and other apps | [`chat-apps.md`](./chat-apps.md) | A gateway-backed chat channel with access control |
-| Use slash commands and periodic tasks | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, heartbeat tasks, and chat-side controls |
+| Use slash commands and automations | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, local triggers, heartbeat tasks, and chat-side controls |
 | Generate images | [`image-generation.md`](./image-generation.md) | Image provider config, WebUI image mode, and artifact behavior |
 | Run several isolated bots | [`multiple-instances.md`](./multiple-instances.md) | Separate configs, workspaces, ports, and sessions |
 | Deploy outside a terminal | [`deployment.md`](./deployment.md) | Docker, systemd user services, and macOS LaunchAgent setup |

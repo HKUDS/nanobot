@@ -36,6 +36,23 @@ COMPACTABLE_TOOLS = frozenset({
 # read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+PLACEHOLDER_TEXTS = frozenset({
+    "[Previous assistant message omitted.]",
+})
+
+
+def _tool_call_name_is_valid(tool_call: Any) -> bool:
+    """Whether a persisted OpenAI-style tool_call carries a usable name.
+
+    Mirrors ``ToolCallRequest.has_valid_name`` for the dict shape stored in
+    message history: a degenerate call with ``name=None`` / ``""`` cannot be
+    executed and is rejected by upstream APIs if replayed.
+    """
+    if not isinstance(tool_call, dict):
+        return False
+    fn = tool_call.get("function")
+    name = fn.get("name") if isinstance(fn, dict) else tool_call.get("name")
+    return isinstance(name, str) and bool(name)
 
 
 @dataclass(slots=True)
@@ -61,7 +78,9 @@ class ContextGovernor:
         messages: list[dict[str, Any]],
         compacted_tool_call_ids: set[str],
     ) -> list[dict[str, Any]]:
-        updated = self.drop_orphan_tool_results(messages)
+        updated = self.strip_placeholder_assistant_messages(messages)
+        updated = self.strip_malformed_tool_calls(updated)
+        updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
         updated = self.apply_tool_result_budget(config, updated)
         updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
@@ -115,6 +134,99 @@ class ContextGovernor:
         if isinstance(content, str) and len(content) > config.max_tool_result_chars:
             return truncate_text(content, config.max_tool_result_chars)
         return content
+
+    @staticmethod
+    def strip_placeholder_assistant_messages(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove assistant messages that are compaction placeholders.
+
+        Messages like ``[Previous assistant message omitted.]`` carry no useful
+        context for the model and can cause it to repeatedly attempt tool calls
+        that previously failed, producing malformed responses in a loop.
+        Consecutive same-role messages that result from removal are handled
+        downstream by the provider's merge-consecutive logic. Only the
+        model-facing copy is repaired; the persisted transcript is untouched
+        (a copy is returned, or the same list object when nothing changes).
+        """
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            if msg.get("role") != "assistant":
+                if updated is not None:
+                    updated.append(msg)
+                continue
+            content = msg.get("content", "")
+            text = content if isinstance(content, str) else ""
+            is_placeholder = text.strip() in PLACEHOLDER_TEXTS
+            has_tool_calls = bool(msg.get("tool_calls"))
+            if is_placeholder and not has_tool_calls:
+                if updated is None:
+                    updated = list(messages[:idx])
+                logger.debug(
+                    "Stripping placeholder assistant message from history: {!r}",
+                    text[:60],
+                )
+                continue
+            if updated is not None:
+                updated.append(msg)
+        if updated is None:
+            return messages
+        return updated
+
+    @staticmethod
+    def strip_malformed_tool_calls(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Drop persisted assistant tool_calls whose name is missing/non-string.
+
+        A degenerate tool call (``name=None`` or ``""``) that slipped into the
+        saved history before this guard existed gets replayed on every turn and
+        makes upstream APIs reject the whole request
+        (``messages.content.N.tool_use.name: Input should be a valid string``),
+        permanently wedging the session. Removing the bad call here lets the
+        existing orphan-result cleanup drop its now-dangling tool result, so a
+        polluted session self-heals on its next turn. The persisted transcript
+        is left untouched; only the model-facing copy is repaired (a copy is
+        returned, or the same list object when nothing changes).
+        """
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            if msg.get("role") != "assistant":
+                if updated is not None:
+                    updated.append(msg)
+                continue
+            calls = msg.get("tool_calls")
+            if not calls:
+                if updated is not None:
+                    updated.append(msg)
+                continue
+            kept = [tc for tc in calls if _tool_call_name_is_valid(tc)]
+            if len(kept) == len(calls):
+                if updated is not None:
+                    updated.append(msg)
+                continue
+            if updated is None:
+                updated = [dict(m) for m in messages[:idx]]
+            logger.warning(
+                "Stripping {} malformed tool_call(s) with missing/non-string "
+                "name from assistant history before request",
+                len(calls) - len(kept),
+            )
+            repaired = dict(msg)
+            if kept:
+                repaired["tool_calls"] = kept
+            else:
+                repaired.pop("tool_calls", None)
+            # An assistant turn with neither content nor any valid tool call is
+            # itself invalid upstream; drop it entirely in that case.
+            has_content = bool(repaired.get("content"))
+            if not kept and not has_content:
+                continue
+            updated.append(repaired)
+
+        if updated is None:
+            return messages
+        return updated
 
     @staticmethod
     def drop_orphan_tool_results(
@@ -315,7 +427,7 @@ class ContextGovernor:
     @staticmethod
     def _summary_for(message: dict[str, Any]) -> str:
         name = message.get("name", "tool")
-        return f"[{name} result omitted from context]"
+        return f"[Prior {name} result compacted to fit context; the tool call already completed.]"
 
     def _legal_history_tail(
         self,

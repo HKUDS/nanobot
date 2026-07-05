@@ -17,9 +17,13 @@ from websockets.http11 import Response
 
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.bus.queue import MessageBus
+from nanobot.config.loader import load_config
+from nanobot.optional_features import OptionalFeatureError
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.http_utils import query_first as _query_first
 from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
+from nanobot.webui.nanobot_features_api import nanobot_features_action, nanobot_features_payload
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     create_model_configuration,
@@ -80,7 +84,7 @@ class WebUISettingsRouter:
         self._runtime_capabilities = runtime_capabilities
         self._restart_sections: set[str] = set()
 
-    async def dispatch(self, request: WsRequest, path: str) -> Response | None:
+    async def dispatch(self, connection: Any, request: WsRequest, path: str) -> Response | None:
         if path == "/api/settings":
             return self._handle_settings(request)
         if path == "/api/settings/usage":
@@ -117,6 +121,12 @@ class WebUISettingsRouter:
             return await self._handle_settings_cli_apps_action(request, "uninstall")
         if path == "/api/settings/cli-apps/test":
             return await self._handle_settings_cli_apps_action(request, "test")
+        if path == "/api/settings/nanobot-features":
+            return await self._handle_settings_nanobot_features(request)
+        if path == "/api/settings/nanobot-features/enable":
+            return await self._handle_settings_nanobot_features_action(connection, request, "enable")
+        if path == "/api/settings/nanobot-features/disable":
+            return await self._handle_settings_nanobot_features_action(connection, request, "disable")
         if path == "/api/settings/mcp-presets":
             return await self._handle_settings_mcp_presets(request)
         if path == "/api/settings/version-check":
@@ -333,6 +343,51 @@ class WebUISettingsRouter:
                 self.logger.exception("CLI Apps action '{}' failed", action)
             return self._error_response(status, message)
         return self._json_response(payload)
+
+    async def _handle_settings_nanobot_features(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = await asyncio.to_thread(nanobot_features_payload)
+        except Exception:
+            self.logger.exception("failed to load nanobot features")
+            return self._error_response(500, "failed to load nanobot features")
+        return self._json_response(payload)
+
+    async def _handle_settings_nanobot_features_action(
+        self,
+        connection: Any,
+        request: WsRequest,
+        action: str,
+    ) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = await asyncio.to_thread(
+                nanobot_features_action,
+                action,
+                self._query(request),
+                allow_install=action != "enable"
+                or self._allow_feature_package_install(connection, request),
+            )
+        except OptionalFeatureError as e:
+            return self._error_response(e.status, e.message)
+        except Exception as e:
+            status = getattr(e, "status", 500)
+            message = getattr(e, "message", str(e))
+            if status >= 500:
+                self.logger.exception("nanobot feature action '{}' failed", action)
+            return self._error_response(status, message)
+        return self._json_response(self._with_restart_state(payload, section="runtime"))
+
+    def _allow_feature_package_install(self, connection: Any, request: WsRequest) -> bool:
+        if _is_local_browser_request(connection, request.headers):
+            return True
+        try:
+            return bool(load_config().tools.webui_allow_remote_package_install)
+        except Exception:
+            self.logger.exception("failed to load remote package install policy")
+            return False
 
     async def _handle_settings_mcp_presets(
         self,

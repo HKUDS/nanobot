@@ -18,8 +18,9 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.file_edit_events import (
     StreamingFileEditTracker,
     build_file_edit_end_event,
@@ -155,6 +156,8 @@ class AgentRunner:
                 messages
                 and injection.get("role") == "user"
                 and messages[-1].get("role") == "user"
+                and not is_hidden_history_message(injection)
+                and not is_hidden_history_message(messages[-1])
             ):
                 merged = dict(messages[-1])
                 merged["content"] = cls._merge_message_content(
@@ -389,7 +392,15 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = ContextGovernor.drop_orphan_tool_results(messages)
+                    messages_for_model = ContextGovernor.strip_placeholder_assistant_messages(
+                        messages
+                    )
+                    messages_for_model = ContextGovernor.strip_malformed_tool_calls(
+                        messages_for_model
+                    )
+                    messages_for_model = ContextGovernor.drop_orphan_tool_results(
+                        messages_for_model
+                    )
                     messages_for_model = ContextGovernor.backfill_missing_tool_results(
                         messages_for_model
                     )
@@ -725,6 +736,8 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         hook: AgentHook,
         context: AgentHookContext,
+        *,
+        malformed_retry: bool = False,
     ):
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
@@ -867,7 +880,93 @@ class AgentRunner:
             )
         if progress_state and progress_state.get("reasoning_open"):
             await hook.emit_reasoning_end()
+        dropped, all_dropped, original_finish_reason = (
+            self._drop_malformed_tool_calls(response)
+        )
+        if (
+            all_dropped
+            and original_finish_reason in ("tool_calls", "function_call")
+            and not malformed_retry
+        ):
+            logger.warning(
+                "Retrying LLM request after all {} malformed tool call(s) were dropped",
+                dropped,
+            )
+            retry_messages = self._malformed_tool_call_retry_messages(
+                messages, response.content,
+            )
+            return await self._request_model(
+                spec, retry_messages, hook, context,
+                malformed_retry=True,
+            )
+        if (
+            all_dropped
+            and original_finish_reason in ("tool_calls", "function_call")
+            and malformed_retry
+        ):
+            logger.warning(
+                "Malformed tool calls persisted after retry; falling back to no-tools request",
+            )
+            fallback_messages = self._malformed_tool_call_retry_messages(
+                messages, response.content,
+            )
+            return await self._request_no_tools(spec, fallback_messages)
         return response
+
+    @staticmethod
+    def _drop_malformed_tool_calls(
+        response: LLMResponse,
+    ) -> tuple[int, bool, str | None]:
+        """Strip tool calls whose name is missing/non-string from the response.
+
+        Returns (dropped_count, all_dropped, original_finish_reason).
+
+        A degenerate call (name=None or "") cannot be executed, and if it were
+        persisted into the assistant message it would be replayed on every
+        subsequent turn, causing upstream validation errors
+        (``tool_use.name: Input should be a valid string``) that permanently
+        wedge the session. Dropping it here keeps it out of execution, the
+        assistant message, and the saved history in one place.
+        """
+        calls = getattr(response, "tool_calls", None)
+        if not calls:
+            return (0, False, getattr(response, "finish_reason", None))
+        valid = [tc for tc in calls if tc.has_valid_name()]
+        if len(valid) == len(calls):
+            return (0, False, getattr(response, "finish_reason", None))
+        dropped = len(calls) - len(valid)
+        original_finish_reason = getattr(response, "finish_reason", None)
+        logger.warning(
+            "Dropped {} malformed tool call(s) with missing/non-string name "
+            "from LLM response (finish_reason={!r})",
+            dropped,
+            original_finish_reason,
+        )
+        response.tool_calls = valid
+        if not valid:
+            response.finish_reason = "stop"
+        return (dropped, not valid, original_finish_reason)
+
+    @staticmethod
+    def _malformed_tool_call_retry_messages(
+        messages: list[dict[str, Any]],
+        assistant_text: str | None,
+    ) -> list[dict[str, Any]]:
+        retry_messages = list(messages)
+        note = (
+            "The previous model response attempted to call tools, but every tool call "
+            "was malformed: the tool_use blocks had missing or non-string tool names. "
+            "Do not answer with a promise to use tools. Either call the required tools again "
+            "using valid tool names from the provided tool list and JSON object inputs, or give "
+            "a final answer only if no tool is required."
+        )
+        if assistant_text:
+            note += (
+                f"\n\nPrevious assistant text before the malformed calls:\n"
+                f"{assistant_text}"
+            )
+        retry_messages.append({"role": "user", "content": note})
+        return retry_messages
 
     async def _request_finalization_retry(
         self,
@@ -1170,7 +1269,7 @@ class AgentRunner:
                 return payload, event, exc
             return payload, event, None
 
-        if isinstance(result, str) and result.startswith("Error"):
+        if is_tool_error_result(tool_call.name, result):
             if file_edit_trackers and progress_callback is not None:
                 await invoke_file_edit_progress(
                     progress_callback,

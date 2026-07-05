@@ -15,7 +15,7 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.runner import AgentRunSpec
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -550,7 +550,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     def estimate(_provider, _model, msgs, _tools):
         return sum(
             100 if (content := msg.get("content")) == long_content
-            else 1 if isinstance(content, str) and "omitted from context" in content
+            else 1 if isinstance(content, str) and "compacted to fit context" in content
             else 0
             for msg in msgs
             if msg.get("role") == "tool"
@@ -564,7 +564,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
         set(),
     )
     tool_msgs = [m for m in result if m.get("role") == "tool"]
-    compacted = [m for m in tool_msgs if "omitted from context" in str(m.get("content", ""))]
+    compacted = [m for m in tool_msgs if "compacted to fit context" in str(m.get("content", ""))]
     preserved = [m for m in tool_msgs if m.get("content") == long_content]
 
     assert len(compacted) == 8
@@ -609,7 +609,7 @@ def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
     )
 
     tool_msg = next(m for m in result if m.get("role") == "tool")
-    assert "omitted from context" in tool_msg["content"]
+    assert "compacted to fit context" in tool_msg["content"]
     assert compacted_tool_call_ids == {"c0"}
 
 
@@ -877,3 +877,162 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
         assert non_system[0]["role"] in ("user", "tool"), (
             f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Malformed tool_call name guard (missing/non-string name wedges the session
+# upstream: messages.content.N.tool_use.name: Input should be a valid string)
+# ---------------------------------------------------------------------------
+
+
+def test_drop_malformed_tool_calls_trims_response():
+    """LLM response tool_calls with a missing/empty name are dropped in place."""
+    from nanobot.agent.runner import AgentRunner
+
+    response = LLMResponse(
+        content=None,
+        tool_calls=[
+            ToolCallRequest(id="1", name=None, arguments={}),
+            ToolCallRequest(id="2", name="", arguments={}),
+            ToolCallRequest(id="3", name="read_file", arguments={}),
+        ],
+        finish_reason="tool_calls",
+    )
+    dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
+    assert [tc.name for tc in response.tool_calls] == ["read_file"]
+    assert response.finish_reason == "tool_calls"
+    assert response.should_execute_tools is True
+    assert dropped == 2
+    assert all_dropped is False
+    assert orig == "tool_calls"
+
+
+def test_drop_malformed_tool_calls_all_bad_disables_execution():
+    """If every tool call is malformed, execution is disabled (no empty exec)."""
+    from nanobot.agent.runner import AgentRunner
+
+    response = LLMResponse(
+        content="some text",
+        tool_calls=[ToolCallRequest(id="1", name=None, arguments={})],
+        finish_reason="tool_calls",
+    )
+    dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
+    assert response.tool_calls == []
+    assert response.finish_reason == "stop"
+    assert response.should_execute_tools is False
+    assert dropped == 1
+    assert all_dropped is True
+    assert orig == "tool_calls"
+
+
+def test_drop_malformed_returns_tuple_no_calls():
+    """No tool calls returns (0, False, current_finish_reason)."""
+    from nanobot.agent.runner import AgentRunner
+
+    response = LLMResponse(content="hi", finish_reason="stop")
+    dropped, all_dropped, orig = AgentRunner._drop_malformed_tool_calls(response)
+    assert dropped == 0
+    assert all_dropped is False
+    assert orig == "stop"
+
+
+def test_strip_malformed_tool_calls_keeps_valid_calls_in_history():
+    """A mixed assistant turn keeps only its valid tool_calls."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "bad", "type": "function", "function": {"name": None, "arguments": "{}"}},
+                {"id": "ok", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
+    ]
+    result = ContextGovernor.strip_malformed_tool_calls(messages)
+    assert result is not messages  # copied, original untouched
+    assert len(messages[1]["tool_calls"]) == 2  # original preserved
+    kept = result[1]["tool_calls"]
+    assert [tc["function"]["name"] for tc in kept] == ["exec"]
+
+
+def test_strip_malformed_tool_calls_drops_empty_assistant_turn():
+    """An assistant turn that is only a malformed call is removed entirely;
+    the existing orphan-result cleanup then drops its dangling tool result,
+    so a polluted session self-heals."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "bad", "type": "function", "function": {"name": None, "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "bad", "name": "", "content": "r"},
+    ]
+    stripped = ContextGovernor.strip_malformed_tool_calls(messages)
+    assert [m["role"] for m in stripped] == ["user", "tool"]
+    healed = ContextGovernor.drop_orphan_tool_results(stripped)
+    assert [m["role"] for m in healed] == ["user"]
+
+
+def test_strip_malformed_tool_calls_noop_when_clean():
+    """Clean history is returned unchanged (same object)."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "ok", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
+    ]
+    assert ContextGovernor.strip_malformed_tool_calls(messages) is messages
+
+
+def test_strip_placeholder_assistant_messages_removes_omitted():
+    """Placeholder assistant messages are removed; real messages kept."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "real response"},
+        {"role": "user", "content": "ok"},
+        {"role": "assistant", "content": "[Previous assistant message omitted.]"},
+        {"role": "user", "content": "?"},
+        {"role": "assistant", "content": "[Previous assistant message omitted.]"},
+        {"role": "user", "content": "hello"},
+    ]
+    result = ContextGovernor.strip_placeholder_assistant_messages(messages)
+    assert [m["role"] for m in result] == [
+        "user", "assistant", "user", "user", "user",
+    ]
+    assert result[1]["content"] == "real response"
+
+
+def test_strip_placeholder_noop_when_clean():
+    """Clean history is returned unchanged (same object)."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello back"},
+    ]
+    assert ContextGovernor.strip_placeholder_assistant_messages(messages) is messages
+
+
+def test_strip_placeholder_keeps_assistant_with_tool_calls():
+    """A placeholder assistant that also carries tool_calls is kept."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "[Previous assistant message omitted.]",
+            "tool_calls": [
+                {"id": "1", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "1", "name": "exec", "content": "done"},
+    ]
+    result = ContextGovernor.strip_placeholder_assistant_messages(messages)
+    assert result is messages

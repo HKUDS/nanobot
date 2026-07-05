@@ -2,6 +2,8 @@ import json
 import socket
 from unittest.mock import patch
 
+import pytest
+
 from nanobot.config.loader import load_config, save_config
 from nanobot.security.network import validate_url_target
 
@@ -91,6 +93,41 @@ def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch)
     result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("field_name", ["maxMessages", "max_messages"])
+def test_load_config_warns_and_ignores_legacy_max_messages(tmp_path, field_name) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {field_name: 25, "maxTokens": 1234}}}),
+        encoding="utf-8",
+    )
+
+    with patch("nanobot.config.loader.logger.warning") as warning:
+        config = load_config(config_path)
+
+    assert config.agents.defaults.max_tokens == 1234
+    assert not hasattr(config.agents.defaults, "max_messages")
+    warning.assert_called_once()
+    message = warning.call_args.args[0]
+    assert "legacy and ignored" in message
+    assert "next version" in message
+
+
+def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"maxMessages": 25}}}),
+        encoding="utf-8",
+    )
+
+    with patch("nanobot.config.loader.logger.warning"):
+        config = load_config(config_path)
+    save_config(config, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert "maxMessages" not in saved["agents"]["defaults"]
+    assert "max_messages" not in saved["agents"]["defaults"]
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
@@ -246,3 +283,28 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
     config = load_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is False
+
+
+def test_load_config_defaults_remote_package_install_to_disabled(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.tools.webui_allow_remote_package_install is False
+
+
+def test_load_config_accepts_remote_package_install_aliases(tmp_path) -> None:
+    camel_path = tmp_path / "camel.json"
+    camel_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+    snake_path = tmp_path / "snake.json"
+    snake_path.write_text(
+        json.dumps({"tools": {"webui_allow_remote_package_install": True}}),
+        encoding="utf-8",
+    )
+
+    assert load_config(camel_path).tools.webui_allow_remote_package_install is True
+    assert load_config(snake_path).tools.webui_allow_remote_package_install is True
