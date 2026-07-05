@@ -3,6 +3,7 @@
 import httpx
 import pytest
 
+from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.config.schema import WebSearchConfig
 
@@ -271,6 +272,7 @@ async def test_serper_search_http_error(monkeypatch):
     tool = _tool(provider="serper", api_key="bad-serper-key")
     result = await tool.execute(query="serper")
     assert "Error: Serper search failed (403)" in result
+    assert is_tool_error_result(tool.name, result)
 
 
 @pytest.mark.asyncio
@@ -282,6 +284,7 @@ async def test_serper_search_rate_limited(monkeypatch):
     tool = _tool(provider="serper", api_key="serper-key")
     result = await tool.execute(query="serper")
     assert "Serper search rate limited" in result
+    assert is_tool_error_result(tool.name, result)
 
 
 @pytest.mark.asyncio

@@ -705,10 +705,10 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return "Error: Serper search rate limited. Try again later or reduce search frequency."
-            return f"Error: Serper search failed ({e.response.status_code}): {e}"
+                return ToolResult.error("Error: Serper search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Serper search failed ({e.response.status_code}): {e}")
         except Exception as e:
-            return f"Error: Serper search failed: {e}"
+            return ToolResult.error(f"Error: Serper search failed: {e}")
 
     async def _search_volcengine(
         self,
