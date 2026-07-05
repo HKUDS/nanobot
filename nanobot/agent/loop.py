@@ -1189,9 +1189,14 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        for name, stack in self._mcp_stacks.items():
+        for name, stack in list(self._mcp_stacks.items()):
             try:
                 await stack.aclose()
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling() > 0:
+                    raise
+                logger.debug("MCP server '{}' cleanup cancelled by SDK (can be ignored)", name)
             except (RuntimeError, BaseExceptionGroup):
                 logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
         self._mcp_stacks.clear()

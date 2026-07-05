@@ -7,8 +7,8 @@ import os
 import re
 import shutil
 import urllib.parse
-from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack, suppress
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from typing import Any, Mapping
 from weakref import WeakKeyDictionary
 
@@ -168,6 +168,19 @@ def _is_session_terminated(exc: BaseException) -> bool:
     )
 
 
+def _is_mcp_cancel_scope_cancellation(exc: asyncio.CancelledError) -> bool:
+    """Return True when ``exc`` was injected by an anyio cancel scope."""
+    return str(exc).startswith("Cancelled via cancel scope")
+
+
+def _clear_task_cancellation(task: asyncio.Task[Any] | None) -> None:
+    """Acknowledge all pending asyncio cancellation requests on ``task``."""
+    if task is None:
+        return
+    while task.cancelling() > 0:
+        task.uncancel()
+
+
 async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     """Quick TCP probe to check if an HTTP MCP server is reachable.
 
@@ -198,7 +211,99 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
             return True
         except (OSError, asyncio.TimeoutError):
             continue
+        except asyncio.CancelledError as exc:
+            # Swallow MCP SDK anyio cancel-scope leaks during probing so reconnect
+            # can proceed; re-raise genuine external cancellation.
+            if not _is_mcp_cancel_scope_cancellation(exc):
+                raise
+            _clear_task_cancellation(asyncio.current_task())
+            logger.debug(
+                "MCP URL probe for {} cancelled by SDK cancel scope, retrying",
+                _redact_url(url),
+            )
     return False
+
+
+async def _force_close_async_gen(agen: AsyncGenerator[Any, Any]) -> None:
+    """Close an async generator, swallowing every possible cleanup error.
+
+    MCP SDK transports use anyio task groups whose teardown can raise
+    ``RuntimeError`` / ``BaseExceptionGroup`` / ``CancelledError``.  We must
+    ensure the generator object reaches a closed state so Python's GC
+    finalizer does not try to close it again and crash the event loop.
+    """
+    with suppress(BaseException):
+        await agen.aclose()
+
+
+@asynccontextmanager
+async def _safe_streamable_http_client(*args: Any, **kwargs: Any) -> AsyncGenerator[
+    tuple[Any, Any, Callable[[], str | None]],
+    None,
+]:
+    """Wrap ``streamable_http_client`` to isolate anyio cleanup leaks.
+
+    The MCP SDK's ``streamable_http_client`` creates an anyio cancel scope
+    bound to the task that enters it.  If the AsyncExitStack is later closed
+    from a different task (e.g. nanobot's reconnect path), the cancel scope
+    teardown cancels the original host task and leaks ``CancelledError`` into
+    unrelated awaits.  We avoid that by running the transport context in a
+    dedicated worker task so the cancel scope is never bound to the caller.
+    """
+    from mcp.client.streamable_http import streamable_http_client
+
+    cm = streamable_http_client(*args, **kwargs)
+    loop = asyncio.get_running_loop()
+    enter_future: asyncio.Future[Any] = loop.create_future()
+    exit_event = asyncio.Event()
+
+    async def _suppress_exit_cm() -> None:
+        with suppress(BaseException):
+            await cm.__aexit__(None, None, None)
+
+    async def _worker() -> None:
+        try:
+            result = await cm.__aenter__()
+        except BaseException as exc:
+            if not enter_future.done():
+                enter_future.set_exception(exc)
+            return
+
+        if enter_future.done():
+            await _suppress_exit_cm()
+            return
+
+        enter_future.set_result(result)
+        try:
+            await exit_event.wait()
+        except BaseException:
+            pass
+        finally:
+            await _suppress_exit_cm()
+
+    worker = asyncio.create_task(_worker())
+    try:
+        done, _ = await asyncio.wait(
+            {enter_future, worker},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if worker in done:
+            await worker
+            if not enter_future.done():
+                raise RuntimeError("streamable_http_client worker exited unexpectedly")
+        result = enter_future.result()
+    except BaseException:
+        worker.cancel()
+        with suppress(BaseException):
+            await worker
+        raise
+
+    try:
+        yield result
+    finally:
+        exit_event.set()
+        with suppress(BaseException):
+            await worker
 
 
 def _redact_url(url: str) -> str:
@@ -812,19 +917,19 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 return "\n".join(parts) or "(no output)"
 
 
-async def connect_mcp_servers(
+async def _connect_mcp_servers_impl(
     mcp_servers: dict, registry: ToolRegistry
 ) -> dict[str, AsyncExitStack]:
-    """Connect to configured MCP servers and register their tools, resources, prompts.
+    """Implementation of ``connect_mcp_servers``.
 
-    Returns a dict mapping server name -> its dedicated AsyncExitStack.
-    Each server gets its own stack to prevent cancel scope conflicts
-    when multiple MCP servers are configured.
+    This runs inside a dedicated transient task so that any anyio cancel
+    scopes entered by the MCP SDK are bound to that task.  Once the task
+    completes, the live AsyncExitStacks are handed back to the caller; later
+    cleanup from a different task can no longer cancel the caller.
     """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamable_http_client
 
     async def connect_single_server(name: str, cfg) -> tuple[str, AsyncExitStack | None]:
         server_stack = AsyncExitStack()
@@ -913,7 +1018,7 @@ async def connect_mcp_servers(
                     )
                 )
                 read, write, _ = await server_stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
+                    _safe_streamable_http_client(cfg.url, http_client=http_client)
                 )
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
@@ -1057,6 +1162,26 @@ async def connect_mcp_servers(
             server_stacks[result[0]] = result[1]
 
     return server_stacks
+
+
+async def connect_mcp_servers(
+    mcp_servers: dict, registry: ToolRegistry
+) -> dict[str, AsyncExitStack]:
+    """Connect to configured MCP servers and register their tools, resources, prompts.
+
+    Returns a dict mapping server name -> its dedicated AsyncExitStack.
+    The actual connection work runs in a dedicated transient task so that the
+    MCP SDK's anyio cancel scopes are bound to that task, not the caller.
+    """
+    task = asyncio.create_task(_connect_mcp_servers_impl(mcp_servers, registry))
+    try:
+        return await task
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        raise
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -1384,5 +1509,10 @@ async def _close_server(state: Any, server_name: str) -> None:
         return
     try:
         await stack.aclose()
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling() > 0:
+            raise
+        logger.debug("MCP server '{}' cleanup cancelled by SDK (can be ignored)", server_name)
     except (RuntimeError, BaseExceptionGroup):
         logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)

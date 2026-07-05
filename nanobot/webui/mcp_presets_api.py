@@ -904,8 +904,16 @@ def _test_timeout(cfg: MCPServerConfig) -> int:
 
 async def _close_mcp_stacks(stacks: Mapping[str, Any]) -> None:
     for stack in stacks.values():
-        with suppress(Exception):
+        try:
             await stack.aclose()
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+        except (RuntimeError, BaseExceptionGroup):
+            pass
+        except Exception:
+            pass
 
 
 async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
