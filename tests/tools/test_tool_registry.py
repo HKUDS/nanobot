@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 
 
@@ -233,6 +235,62 @@ def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
         'Use named parameters like tool_name(param1="value1", param2="value2") '
         "matching the tool schema."
     )
+
+
+async def test_registry_rejects_unknown_builtin_tool_parameters(tmp_path) -> None:
+    (tmp_path / "sample.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(
+        ReadFileTool(
+            workspace=tmp_path,
+            allowed_dir=tmp_path,
+            restrict_to_workspace=True,
+        )
+    )
+
+    result = await registry.execute(
+        "read_file",
+        {"path": "sample.txt", "line_limit": 1},
+    )
+
+    assert "Invalid parameters" in result
+    assert "unexpected parameter line_limit" in result
+    assert "one" not in result
+
+
+async def test_registry_preserves_successful_exec_output_that_starts_with_error() -> None:
+    registry = ToolRegistry()
+    output = "Error: generated report successfully\n\nExit code: 0"
+    tool = _FakeTool("exec")
+    tool.execute = AsyncMock(return_value=output)
+    registry.register(tool)
+
+    result = await registry.execute("exec", {})
+
+    assert result == output
+
+
+async def test_registry_uses_structured_tool_result_for_errors() -> None:
+    registry = ToolRegistry()
+    output = "Error: plain tool output, not a structured failure"
+    raw_tool = _FakeTool("raw_output")
+    raw_tool.execute = AsyncMock(return_value=output)
+    registry.register(raw_tool)
+
+    raw_result = await registry.execute("raw_output", {})
+
+    assert raw_result == output
+
+    failing_tool = _FakeTool("failing_tool")
+    failing_tool.execute = AsyncMock(return_value=ToolResult.error("Error: real failure"))
+    registry.register(failing_tool)
+
+    error_result = await registry.execute("failing_tool", {})
+
+    assert isinstance(error_result, ToolResult)
+    assert error_result.is_error
+    assert error_result.startswith("Error: real failure")
+    assert "[Analyze the error above" in error_result
 
 
 def test_get_definitions_returns_cached_result() -> None:

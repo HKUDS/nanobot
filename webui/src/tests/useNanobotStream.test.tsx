@@ -596,6 +596,62 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].toolEvents).toBeUndefined();
   });
 
+  it("keeps every file from one apply_patch call", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-apply-patch-many", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-apply-patch-many", {
+        event: "message",
+        chat_id: "chat-apply-patch-many",
+        text: "apply_patch()",
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-patch",
+          name: "apply_patch",
+          arguments: { edits: [] },
+        }],
+      });
+      fake.emit("chat-apply-patch-many", {
+        event: "file_edit",
+        chat_id: "chat-apply-patch-many",
+        edits: [
+          {
+            call_id: "call-patch",
+            tool: "apply_patch",
+            path: "USER.md",
+            phase: "end",
+            added: 0,
+            deleted: 3,
+            approximate: false,
+            status: "done",
+          },
+          {
+            call_id: "call-patch",
+            tool: "apply_patch",
+            path: "MEMORY.md",
+            phase: "end",
+            added: 0,
+            deleted: 4,
+            approximate: false,
+            status: "done",
+          },
+        ],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].traces).toEqual([]);
+    expect(result.current.messages[0].toolEvents).toBeUndefined();
+    expect(result.current.messages[0].fileEdits?.map((edit) => edit.path)).toEqual([
+      "USER.md",
+      "MEMORY.md",
+    ]);
+  });
+
   it("upgrades pending file_edit placeholders when the path arrives", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-file-edit-pending", EMPTY_MESSAGES), {

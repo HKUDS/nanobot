@@ -259,6 +259,205 @@ async def test_handler_processes_file_message(monkeypatch) -> None:
     assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
 
 
+def _rich_text_message(rich_text_list):
+    class _FakeRichTextChatbotMessage:
+        text = None
+        extensions = {}
+        image_content = None
+        rich_text_content = SimpleNamespace(rich_text_list=rich_text_list)
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "richText"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeRichTextChatbotMessage()
+
+    return _FakeRichTextChatbotMessage
+
+
+@pytest.mark.asyncio
+async def test_handler_richtext_keeps_formatted_segments(monkeypatch) -> None:
+    """richText segments with non-'text' types (bold/italic/code/pre) must be kept
+    and mapped to Markdown, not dropped (issue #4497)."""
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+
+    fake_msg = _rich_text_message([
+        {"type": "bold", "text": "Title"},
+        {"type": "text", "text": "plain"},
+        {"type": "italic", "text": "em"},
+        {"type": "inlineCode", "text": "x = 1"},
+        {"type": "pre", "text": "block"},
+    ])
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", fake_msg)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+
+    status, body = await handler.process(
+        SimpleNamespace(data={"conversationType": "1", "text": {"content": ""}})
+    )
+    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2.0)
+
+    assert (status, body) == ("OK", "OK")
+    assert msg.content == "**Title** plain *em* `x = 1` ```\nblock\n```"
+
+
+@pytest.mark.asyncio
+async def test_handler_richtext_all_formatted_not_dropped(monkeypatch) -> None:
+    """A richText message made only of formatted segments must not end up with empty
+    content and fall through to the 'unsupported message type' path (issue #4497)."""
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+
+    fake_msg = _rich_text_message([{"type": "bold", "text": "Important"}])
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", fake_msg)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+
+    status, body = await handler.process(
+        SimpleNamespace(data={"conversationType": "1", "text": {"content": ""}})
+    )
+    # Before the fix this message produced empty content and never reached the bus,
+    # so consume_inbound would block here.
+    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2.0)
+
+    assert (status, body) == ("OK", "OK")
+    assert msg.content == "**Important**"
+
+
+@pytest.mark.asyncio
+async def test_handler_richtext_item_with_text_and_download(monkeypatch) -> None:
+    """A rich-text item carrying both text and a downloadCode must yield both the
+    text and the downloaded file, not drop the attachment (issue #4497)."""
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+
+    fake_msg = _rich_text_message([
+        {"text": "see attached", "downloadCode": "abc123", "fileName": "report.xlsx"},
+    ])
+
+    async def fake_download(download_code, filename, sender_id):
+        return f"/tmp/nanobot_dingtalk/{sender_id}/{filename}"
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", fake_msg)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_download_dingtalk_file", fake_download)
+
+    status, body = await handler.process(
+        SimpleNamespace(data={"conversationType": "1", "text": {"content": ""}})
+    )
+    await asyncio.gather(*list(channel._background_tasks))
+    msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2.0)
+
+    assert (status, body) == ("OK", "OK")
+    assert "see attached" in msg.content
+    assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_start_configures_http_timeout(monkeypatch) -> None:
+    """The shared httpx client must be created with an explicit timeout so file/image
+    downloads don't hit httpx's 5s default and ConnectTimeout (issue #4497)."""
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    class _FakeStreamClient:
+        def __init__(self, _credential):
+            pass
+
+        def register_callback_handler(self, _topic, _handler):
+            pass
+
+        async def start(self):
+            # Exit the reconnect loop after one iteration.
+            channel._running = False
+
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_AVAILABLE", True)
+    monkeypatch.setattr(dingtalk_module, "Credential", lambda *a, **k: object())
+    monkeypatch.setattr(dingtalk_module, "DingTalkStreamClient", _FakeStreamClient)
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", SimpleNamespace(TOPIC="topic"))
+
+    await channel.start()
+
+    assert channel._http is not None
+    timeout = channel._http.timeout
+    assert timeout.connect == 10.0
+    assert timeout.read == 30.0
+    assert timeout.write == 30.0
+    assert timeout.pool == 10.0
+
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_stream_client_after_sdk_swallows_first_cancel(monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    created: dict[str, object] = {}
+
+    class _FakeWebsocket:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class _CancelSwallowingStreamClient:
+        def __init__(self, _credential):
+            self.websocket = _FakeWebsocket()
+            self.started = asyncio.Event()
+            self.cancelled_once = asyncio.Event()
+            created["client"] = self
+
+        def register_callback_handler(self, _topic, _handler):
+            pass
+
+        async def start(self):
+            self.started.set()
+            while True:
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    self.cancelled_once.set()
+                    await asyncio.sleep(3600)
+
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_AVAILABLE", True)
+    monkeypatch.setattr(dingtalk_module, "Credential", lambda *a, **k: object())
+    monkeypatch.setattr(dingtalk_module, "DingTalkStreamClient", _CancelSwallowingStreamClient)
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", SimpleNamespace(TOPIC="topic"))
+
+    start_task = asyncio.create_task(channel.start())
+    while "client" not in created:
+        await asyncio.sleep(0)
+    client = created["client"]
+    await asyncio.wait_for(client.started.wait(), timeout=0.5)
+
+    start_task.cancel()
+    await asyncio.wait_for(client.cancelled_once.wait(), timeout=0.5)
+    assert not start_task.done()
+
+    await asyncio.wait_for(channel.stop(), timeout=0.5)
+
+    assert client.websocket.closed is True
+    assert start_task.cancelled()
+
+
 @pytest.mark.asyncio
 async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
     """Test the two-step file download flow (get URL then download content)."""

@@ -411,7 +411,7 @@ export default function App() {
           if (cancelled) return;
           const msg = (e as Error).message;
           if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
-            setState({ status: "auth", failed: true });
+            setState({ status: "auth", failed: !!secret });
           } else {
             setState({ status: "error", message: msg });
           }
@@ -433,7 +433,7 @@ export default function App() {
       } catch (e) {
         const msg = (e as Error).message;
         if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
-          setState({ status: "auth", failed: true });
+          setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
       }
     }, tokenRefreshDelayMs(state.tokenExpiresAt));
@@ -1586,6 +1586,7 @@ function Shell({
                 onWorkspaceScopeChange={applyWorkspaceScope}
                 settingsSnapshot={settingsSnapshot}
                 onOpenModelSettings={onOpenModelSettings}
+                skills={skills}
               />
             </div>
             {view !== "chat" && (

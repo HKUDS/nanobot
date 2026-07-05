@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import httpx
 
+import nanobot.providers.openai_compat_provider as openai_compat_provider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 
@@ -54,3 +55,32 @@ class TestCloudEndpointProxyEnabled:
         client = provider._client._client
         # trust_env should be True so httpx reads HTTP_PROXY etc.
         assert client._trust_env is True
+
+    async def test_explicit_provider_proxy_overrides_env(self, monkeypatch):
+        spec = _make_spec(is_local=False)
+        spec.env_key = ""
+        spec.default_api_base = "https://api.openai.com/v1"
+        proxy = "http://127.0.0.1:23458"
+        monkeypatch.delenv("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", raising=False)
+
+        http_client = MagicMock()
+        async_client = MagicMock(return_value=http_client)
+        openai_client = MagicMock(return_value=object())
+        monkeypatch.setattr(httpx, "AsyncClient", async_client)
+        monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", openai_client)
+
+        provider = OpenAICompatProvider(
+            api_key="test",
+            api_base=None,
+            spec=spec,
+            proxy=proxy,
+        )
+        provider._build_client()
+
+        async_client.assert_called_once_with(
+            timeout=120.0,
+            proxy=proxy,
+            trust_env=False,
+            follow_redirects=True,
+        )
+        assert openai_client.call_args.kwargs["http_client"] is http_client

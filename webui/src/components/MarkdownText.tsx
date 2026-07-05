@@ -1,4 +1,5 @@
 import {
+  Component,
   Suspense,
   lazy,
   memo,
@@ -8,6 +9,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 
 import { cn } from "@/lib/utils";
@@ -49,6 +51,21 @@ const MEDIUM_STREAM_COMMIT_MS = 140;
 const LONG_STREAM_COMMIT_MS = 220;
 const STREAMING_HIGHLIGHT_CHAR_LIMIT = 16_000;
 
+class MarkdownRendererBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 export function preloadMarkdownText(): void {
   void loadMarkdownRenderer();
 }
@@ -73,26 +90,28 @@ export function MarkdownText({
     if (streaming) preloadMarkdownText();
   }, [streaming]);
 
-  return (
-    <Suspense
-      fallback={
-        <div
-          className={cn(
-            "whitespace-pre-wrap break-words leading-relaxed text-foreground/92",
-            className,
-          )}
-        >
-          {renderedSource}
-        </div>
-      }
+  const plainFallback = (
+    <div
+      className={cn(
+        "whitespace-pre-wrap break-words leading-relaxed text-foreground/92",
+        className,
+      )}
     >
-      <MemoizedMarkdownRenderer
-        source={renderedSource}
-        className={className}
-        highlightCode={highlightCode}
-        onOpenFilePreview={onOpenFilePreview}
-      />
-    </Suspense>
+      {renderedSource}
+    </div>
+  );
+
+  return (
+    <MarkdownRendererBoundary fallback={plainFallback}>
+      <Suspense fallback={plainFallback}>
+        <MemoizedMarkdownRenderer
+          source={renderedSource}
+          className={className}
+          highlightCode={highlightCode}
+          onOpenFilePreview={onOpenFilePreview}
+        />
+      </Suspense>
+    </MarkdownRendererBoundary>
   );
 }
 

@@ -18,7 +18,7 @@ from nanobot.agent.tools.self import MyTool
 def _make_mock_loop(**overrides):
     """Build a lightweight mock AgentLoop with the attributes MyTool reads."""
     loop = MagicMock()
-    loop.model = "anthropic/claude-sonnet-4-20250514"
+    loop.model = "anthropic/claude-sonnet-4-6"
     loop.max_iterations = 40
     loop.context_window_tokens = 65_536
     loop.workspace = Path("/tmp/workspace")
@@ -236,10 +236,12 @@ class TestModifyRestricted:
 
     @pytest.mark.asyncio
     async def test_modify_context_window_valid(self):
-        tool = _make_tool()
+        loop = _make_mock_loop(_sync_replay_max_messages=MagicMock())
+        tool = _make_tool(runtime_state=loop)
         result = await tool.execute(action="set", key="context_window_tokens", value=131072)
         assert "Set context_window_tokens" in result
-        assert tool._runtime_state.context_window_tokens == 131072
+        assert loop.context_window_tokens == 131072
+        loop._sync_replay_max_messages.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_modify_none_value_for_restricted_int(self):

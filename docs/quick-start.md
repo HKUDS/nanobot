@@ -9,7 +9,7 @@ If you have never used a terminal or edited a config file before, use [`start-wi
 You need:
 
 - Python 3.11 or newer.
-- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use OpenRouter only so the snippets are concrete; any supported provider works when the key, provider name, and model ID match.
+- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service; any supported provider works when the key, provider name, and model ID match.
 - Git only if you install from source.
 - Node.js or Bun only if you are developing the WebUI itself.
 
@@ -32,7 +32,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, go straight to [Open the WebUI](#5-open-the-webui).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -96,7 +96,7 @@ The docs use `python` in commands. If your system exposes Python 3.11+ as `pytho
 
 ## 2. Initialize
 
-Skip this section if the one-command setup already started the wizard and you saved the config there.
+Skip this section if the one-command setup already started the wizard and Quick Start finished there.
 
 ```bash
 nanobot onboard
@@ -128,8 +128,9 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
@@ -142,8 +143,8 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
   "modelPresets": {
     "primary": {
       "label": "Primary",
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4.5",
+      "provider": "custom",
+      "model": "model-id-from-your-provider",
       "maxTokens": 8192,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -161,7 +162,7 @@ The provider and model inside a preset must match. The snippet above is only an 
 
 | Replace | Where |
 |---|---|
-| Provider config key, such as `openrouter` | `providers.<provider>` |
+| Provider config key, such as `custom` | `providers.<provider>` |
 | API key or environment variable | `providers.<provider>.apiKey` |
 | Preset provider name | `modelPresets.primary.provider` |
 | Model ID | `modelPresets.primary.model` |
@@ -207,8 +208,9 @@ If you prefer not to store secrets in `config.json`, reference an environment va
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "${OPENROUTER_API_KEY}"
+    "custom": {
+      "apiKey": "${PROVIDER_API_KEY}",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
@@ -231,7 +233,19 @@ Read it like this:
 | `Model` | The model or preset you expect. |
 | Provider list | Most providers can say `not set`; the provider used by the active preset should show a check mark, OAuth status, or local URL. |
 
-## 5. Test One Message
+## 5. Open the WebUI
+
+Start the browser workbench:
+
+```bash
+nanobot webui
+```
+
+`nanobot webui` prepares the local WebSocket channel if needed, starts the gateway, and opens `http://127.0.0.1:8765`. First-run WebUI setup binds to `127.0.0.1` by default, so it is not exposed to your LAN. Use `nanobot webui --background` when you want the gateway to keep running without an open terminal.
+
+## 6. Test One CLI Message
+
+Use this path if you skipped Quick Start, declined the WebSocket channel, or want a terminal-only check.
 
 Run a one-shot CLI message:
 
@@ -260,13 +274,13 @@ Example prompt:
 
 ```text
 Read docs/quick-start.md, docs/providers.md, and docs/configuration.md in this checkout.
-Then update ~/.nanobot/config.json to add an OpenRouter model preset named "primary".
+Then update ~/.nanobot/config.json to add a model preset named "primary" for my provider.
 Tell me exactly what changed and whether I need to run /restart.
 ```
 
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
-## 6. Choose Your Next Step
+## 7. Choose Your Next Step
 
 | Want to... | Go to |
 |---|---|
@@ -312,11 +326,10 @@ python -m pip install -e .
 nanobot --version
 ```
 
-If you use WhatsApp, rebuild the local bridge after upgrading:
+If you use WhatsApp from a source checkout, keep the optional dependencies installed:
 
 ```bash
-rm -rf ~/.nanobot/bridge
-nanobot channels login whatsapp
+nanobot plugins enable whatsapp
 ```
 
 ## First-Run Troubleshooting
@@ -329,6 +342,6 @@ nanobot channels login whatsapp
 | Authentication or 401 errors | Check that the API key is valid, copied without spaces, and placed under the provider you selected. |
 | Provider/model errors | Make sure the active preset uses the provider that owns your API key and that the model exists there. |
 | The CLI works but a chat app does not reply | First keep `nanobot gateway` running, then follow [`chat-apps.md`](./chat-apps.md). |
-| WebUI does not open | Enable the WebSocket channel and open port `8765`, not the gateway health port `18790`. |
+| WebUI does not open | Run `nanobot webui`; the browser UI uses port `8765`, not the gateway health port `18790`. |
 
 For a fuller diagnosis flow, see [`troubleshooting.md`](./troubleshooting.md).

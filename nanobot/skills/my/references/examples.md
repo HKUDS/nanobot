@@ -23,7 +23,7 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ### "What model are you running?"
 ```
 → my(action="check", key="model")
-  → 'anthropic/claude-sonnet-4-20250514'
+  → 'anthropic/claude-sonnet-4-6'
 → my(action="check", key="model_preset")
   → 'deep'
 ```
@@ -33,9 +33,9 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ### Large codebase analysis
 ```
 → my(action="check")
-  → context_window_tokens: 65536
-→ my(action="set", key="context_window_tokens", value=131072)
-  → "Set context_window_tokens = 131072 (was 65536)"
+  → context_window_tokens: 200000
+→ my(action="set", key="context_window_tokens", value=262144)
+  → "Set context_window_tokens = 262144 (was 200000)"
 → "I've expanded my context window to handle this large codebase."
 ```
 
@@ -49,7 +49,7 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ### Switching to a raw model when no preset exists
 ```
 → my(action="set", key="model", value="anthropic/claude-haiku-4-5-20251001")
-  → "Set model = 'anthropic/claude-haiku-4-5-20251001' (was 'anthropic/claude-sonnet-4-20250514')"
+  → "Set model = 'anthropic/claude-haiku-4-5-20251001' (was 'anthropic/claude-sonnet-4-6')"
 → "Switched to a faster model for these batch tasks."
 ```
 

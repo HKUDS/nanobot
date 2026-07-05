@@ -42,7 +42,7 @@
 |---|---|
 | Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
 | Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
-| Open the bundled browser UI after the CLI works | [WebUI](#-webui) |
+| Open the bundled browser UI | [WebUI](#-webui) |
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
@@ -56,6 +56,30 @@
 
 ## 📢 News
 
+- **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
+- **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
+- **2026-06-20** 💬 Telegram rich messages, safer SDK concurrency, smoother Quick Start.
+- **2026-06-19** 🔎 Firecrawl app, OpenAI image edits, safer session deletion.
+- **2026-06-18** 💬 Feishu recovery, Keenable search, Mistral polish, workspace-aware git.
+- **2026-06-17** 🧠 Default idle auto-compact, clearer `/dream`, macOS installer fixes.
+- **2026-06-16** 🎯 Fresher goal context, Kimi K2.7 thinking, cleaner API retries.
+- **2026-06-15** 📱 Mobile WebUI polish, optional file tools, real API usage.
+- **2026-06-14** 🖼️ Themed cover, partner links, stronger Codex image streaming.
+- **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
+
+<details>
+<summary>Earlier news</summary>
+
+- **2026-06-12** 💬 Slack allowlisted channels can require mentions.
+- **2026-06-11** ✂️ Fenced-code message splitting.
+- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
+- **2026-06-09** 🎙️ Shared voice input, more STT providers, TeX and email polish.
+- **2026-06-08** 🧮 Token heatmap fix, safer MCP HTTP probing, docs cleanup.
+- **2026-06-06** 🧰 SDK MCP cleanup, removable OpenAI image defaults.
+- **2026-06-05** 🖼️ Azure AAD, custom image providers, `/skill`, steadier pairing.
+- **2026-06-04** 🔌 MCP reconnects, `uv pip` install fallback, QQ pairing.
+- **2026-06-03** 🧠 Hidden-history recovery, quieter email progress handling.
+- **2026-06-02** 📬 Email attachments, Napcat QQ, Volcengine search, simpler Dream.
 - **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
 - **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
 - **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
@@ -66,10 +90,6 @@
 - **2026-05-24** 🧰 MCP presets, richer slash actions, configurable OpenAI-compatible requests.
 - **2026-05-23** 🖼️ Zhipu image generation, longer exec windows, cleaner transcription config.
 - **2026-05-22** 🛠️ CLI Apps, more image providers, safer web redirects and edits.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
 - **2026-05-20** 📶 Signal channel, faster gateway startup, multilingual README links.
 - **2026-05-19** 🎨 Image provider registry, StepFun and Skywork, stronger WebUI controls.
@@ -217,7 +237,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps below and go straight to **Test one message**.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps below and go straight to **Open the WebUI**.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -273,7 +293,7 @@ nanobot --version
 
 **1. Initialize**
 
-Skip this step if the one-command setup already started the wizard and you saved the config there.
+Skip this step if the one-command setup already started the wizard and Quick Start finished there.
 
 ```bash
 nanobot onboard
@@ -287,15 +307,16 @@ Skip this step if you already configured provider and model settings in the wiza
 
 `nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
 
-The example below uses [OpenRouter](https://openrouter.ai/keys) only so the JSON has concrete names. Provider examples are recipes, not rankings or endorsements. If you use another provider, replace the provider config key, API key, preset provider name, and model ID together.
+The example below uses a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service. Provider examples are recipes, not rankings or endorsements. For copyable provider-specific setup, see [Provider Cookbook](./docs/provider-cookbook.md).
 
 *Set your API key*:
 
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
@@ -308,10 +329,10 @@ The example below uses [OpenRouter](https://openrouter.ai/keys) only so the JSON
   "modelPresets": {
     "primary": {
       "label": "Primary",
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4.5",
+      "provider": "custom",
+      "model": "model-id-from-your-provider",
       "maxTokens": 8192,
-      "contextWindowTokens": 65536,
+      "contextWindowTokens": 200000,
       "temperature": 0.1
     }
   },
@@ -335,7 +356,17 @@ For another provider, the same config shape still applies:
 | Model ID | `modelPresets.primary.model` |
 | Endpoint URL, only when needed | `providers.<provider>.apiBase` |
 
-**3. Test one message**
+**3. Open the WebUI**
+
+Start the browser workbench:
+
+```bash
+nanobot webui
+```
+
+`nanobot webui` prepares the local WebSocket channel if needed, starts the gateway, and opens `http://127.0.0.1:8765`. It binds the first-run WebUI to `127.0.0.1` by default, so it is not exposed to your LAN. Prefer not to keep a terminal open? Use `nanobot webui --background`, then manage the gateway with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+
+For manual or terminal-only setup, test one CLI message:
 
 ```bash
 nanobot status
@@ -367,23 +398,13 @@ The WebUI ships **inside the published wheel** — no extra build step. It is th
   <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
 </p>
 
-**1. Enable the WebSocket channel in `~/.nanobot/config.json`**
-
-Merge this block into your existing config:
-
-```json
-{ "channels": { "websocket": { "enabled": true } } }
-```
-
-**2. Start the gateway**
+**Open it**
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-**3. Open the WebUI**
-
-Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
+The command enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
 
 The WebUI is served by the WebSocket channel on port `8765` by default. The gateway's `18790` port is for the health endpoint, not the browser UI.
 

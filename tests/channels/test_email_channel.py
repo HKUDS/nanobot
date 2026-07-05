@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.email import EmailChannel, EmailConfig
 
@@ -868,10 +869,7 @@ async def test_send_skips_progress_messages_before_smtp(monkeypatch) -> None:
             channel="email",
             chat_id="alice@example.com",
             content="",
-            metadata={
-                "_progress": True,
-                "_tool_events": [{"phase": "end", "name": "exec"}],
-            },
+            event=ProgressEvent(tool_events=[{"phase": "end", "name": "exec"}]),
         )
     )
 

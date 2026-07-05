@@ -156,7 +156,7 @@ def test_init_explicit_key_does_not_construct_credential(monkeypatch):
 
 
 def test_init_missing_key_without_azure_identity_raises(monkeypatch):
-    """Clear RuntimeError with pip-install hint when azure-identity is missing."""
+    """Clear RuntimeError with install hint when azure-identity is missing."""
     # Force the import inside _AzureTokenProvider to fail.
     real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
 
@@ -166,7 +166,7 @@ def test_init_missing_key_without_azure_identity_raises(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     with patch("builtins.__import__", side_effect=fake_import):
-        with pytest.raises(RuntimeError, match=r"pip install 'nanobot-ai\[azure\]'"):
+        with pytest.raises(RuntimeError, match=r"nanobot plugins enable azure"):
             AzureOpenAIProvider(api_key="", api_base="https://res.openai.azure.com")
 
 
