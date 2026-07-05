@@ -6,6 +6,8 @@ import mimetypes
 import os
 import time
 import zipfile
+from contextlib import suppress
+from inspect import isawaitable
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -94,11 +96,23 @@ class NanobotDingTalkHandler(CallbackHandler):
                 for item in rich_list:
                     if not isinstance(item, dict):
                         continue
-                    if item.get("type") == "text":
-                        t = item.get("text", "").strip()
-                        if t:
-                            content = (content + " " + t).strip() if content else t
-                    elif item.get("downloadCode"):
+                    # A rich-text item may carry text and/or a downloadCode; the
+                    # DingTalk SDK treats them independently, so handle both.
+                    t = item.get("text", "").strip()
+                    if t:
+                        fmt = item.get("type", "")
+                        if fmt == "bold":
+                            formatted = f"**{t}**"
+                        elif fmt == "italic":
+                            formatted = f"*{t}*"
+                        elif fmt == "inlineCode":
+                            formatted = f"`{t}`"
+                        elif fmt == "pre":
+                            formatted = f"```\n{t}\n```"
+                        else:
+                            formatted = t
+                        content = (content + " " + formatted).strip() if content else formatted
+                    if item.get("downloadCode"):
                         dc = item["downloadCode"]
                         fname = item.get("fileName") or "file"
                         sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
@@ -192,6 +206,7 @@ class DingTalkChannel(BaseChannel):
         self.config: DingTalkConfig = config
         self._client: Any = None
         self._http: httpx.AsyncClient | None = None
+        self._start_task: asyncio.Task | None = None
 
         # Access Token management for sending messages
         self._access_token: str | None = None
@@ -202,10 +217,12 @@ class DingTalkChannel(BaseChannel):
 
     async def start(self) -> None:
         """Start the DingTalk bot with Stream Mode."""
+        current_task = asyncio.current_task()
+        self._start_task = current_task
         try:
             if not DINGTALK_AVAILABLE:
                 self.logger.error(
-                    "Stream SDK not installed. Run: pip install dingtalk-stream"
+                    "Stream SDK not installed. Run: nanobot plugins enable dingtalk"
                 )
                 return
 
@@ -214,7 +231,9 @@ class DingTalkChannel(BaseChannel):
                 return
 
             self._running = True
-            self._http = httpx.AsyncClient()
+            self._http = httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=10.0, read=30.0, write=30.0, pool=10.0)
+            )
 
             self.logger.info(
                 "Initializing Stream Client with Client ID: {}...",
@@ -241,10 +260,25 @@ class DingTalkChannel(BaseChannel):
 
         except Exception:
             self.logger.exception("Failed to start channel")
+        finally:
+            self._running = False
+            if self._start_task is current_task:
+                self._start_task = None
 
     async def stop(self) -> None:
         """Stop the DingTalk bot."""
         self._running = False
+        await self._close_stream_client()
+        start_task = self._start_task
+        if start_task and start_task is not asyncio.current_task() and not start_task.done():
+            start_task.cancel()
+            await asyncio.sleep(0)
+            if not start_task.done():
+                start_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await start_task
+        self._client = None
+
         # Close the shared HTTP client
         if self._http:
             await self._http.aclose()
@@ -253,6 +287,23 @@ class DingTalkChannel(BaseChannel):
         for task in self._background_tasks:
             task.cancel()
         self._background_tasks.clear()
+
+    async def _close_stream_client(self) -> None:
+        client = self._client
+        if client is None:
+            return
+        close = getattr(client, "close", None)
+        if close is None:
+            websocket = getattr(client, "websocket", None)
+            close = getattr(websocket, "close", None)
+        if close is None:
+            return
+        try:
+            result = close()
+            if isawaitable(result):
+                await result
+        except Exception:
+            self.logger.debug("DingTalk stream client close failed", exc_info=True)
 
     async def _get_access_token(self) -> str | None:
         """Get or refresh Access Token."""

@@ -22,7 +22,7 @@ function settingsPayload(): SettingsPayload {
       has_api_key: true,
       model_preset: "default",
       max_tokens: 8192,
-      context_window_tokens: 65536,
+      context_window_tokens: 200000,
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
@@ -38,7 +38,7 @@ function settingsPayload(): SettingsPayload {
       model: "openai/gpt-4o",
       provider: "auto",
       max_tokens: 8192,
-      context_window_tokens: 65536,
+      context_window_tokens: 200000,
       temperature: 0.1,
       reasoning_effort: null,
     }],
@@ -159,7 +159,7 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models";
+    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models" | "browser";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -263,6 +263,204 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
   });
 
+  it("shows nanobot optional features and enables one", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: false,
+            installed: false,
+            ready: false,
+            status: "missing_dependency",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+        });
+      }
+      if (url === "/api/settings/nanobot-features/enable?name=matrix") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+          last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
+        });
+      }
+      if (url === "/api/settings/nanobot-features/disable?name=matrix") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: false,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+          requires_restart: true,
+          last_action: { ok: true, message: "Disabled channel 'matrix'", enabled: false },
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView();
+
+    expect(await screen.findByText("Matrix")).toBeInTheDocument();
+    expect(screen.queryByText(/Enabling Nanobot features may install Python packages/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
+    expect(screen.getByText("nanobot will add what Matrix needs, then turn it on. Continue?")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/enable?name=matrix",
+      expect.anything(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=matrix",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(await screen.findByText("Enabled channel 'matrix'")).toBeInTheDocument();
+    expect(screen.getByText("Restart nanobot to apply updated apps and features.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/disable?name=matrix",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(await screen.findByText("Disabled channel 'matrix'")).toBeInTheDocument();
+  });
+
+  it("shows enabled nanobot channels with missing support as enabled", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: true,
+            installed: false,
+            ready: false,
+            status: "missing_dependency",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+        });
+      }
+      if (url === "/api/settings/nanobot-features/enable?name=matrix") {
+        return jsonResponse({
+          features: [{
+            name: "matrix",
+            display_name: "Matrix",
+            type: "channel",
+            enabled: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+          last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView();
+
+    expect(await screen.findByText("Matrix")).toBeInTheDocument();
+    expect(screen.getByText("1 Plugin · 0 CLI · 0 MCP")).toBeInTheDocument();
+    expect(screen.getByText("Support missing")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=matrix",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+  });
+
+  it("does not offer to disable the websocket channel", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "websocket",
+            display_name: "Websocket",
+            type: "channel",
+            enabled: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView();
+
+    expect(await screen.findByText("Websocket")).toBeInTheDocument();
+    expect(screen.getByText("Required for WebUI")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Required for WebUI" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/settings/nanobot-features/disable?name=websocket",
+      expect.anything(),
+    );
+  });
+
   it("publishes the latest settings payload to the shell", async () => {
     const payload = settingsPayload();
     const onSettingsChange = vi.fn();
@@ -284,6 +482,33 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ onSettingsChange });
 
     await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
+  });
+
+  it("does not keep Apps loading while an empty CLI catalog refresh is pending", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({
+            apps: [],
+            installed_count: 0,
+            catalog_updated_at: null,
+            catalog_refresh_pending: true,
+          });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView();
+
+    expect(await screen.findByText("No apps match this filter.")).toBeInTheDocument();
+    expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
   });
 
   it("shows token activity on the overview", async () => {
@@ -394,6 +619,7 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
   });
 
@@ -883,6 +1109,60 @@ describe("SettingsView Apps catalog", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+  });
+
+  it("saves optional-key web search providers without an API key", async () => {
+    const payload = {
+      ...settingsPayload(),
+      web_search: {
+        ...settingsPayload().web_search,
+        provider: "duckduckgo",
+        providers: [
+          { name: "duckduckgo", label: "DuckDuckGo", credential: "none" as const },
+          { name: "keenable", label: "Keenable", credential: "optional_api_key" as const },
+        ],
+      },
+    };
+    const updatedPayload = {
+      ...payload,
+      web_search: {
+        ...payload.web_search,
+        provider: "keenable",
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (
+        url ===
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true"
+      ) {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "browser" });
+
+    fireEvent.pointerDown(await screen.findByRole("button", { name: /DuckDuckGo/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keenable" }));
+    const saveButton = screen
+      .getAllByRole("button", { name: "Save" })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    if (!saveButton) throw new Error("enabled Save button was not found");
+    fireEvent.click(saveButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true",
         expect.objectContaining({
           headers: { Authorization: "Bearer tok" },
         }),

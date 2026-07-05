@@ -174,6 +174,39 @@ class TestHandlePairingCommand:
         assert "Pending pairing requests:" in reply
 
 
+class TestNonStringSenderId:
+    def test_numeric_sender_id_round_trip(self) -> None:
+        code = store.generate_code("telegram", 12345)
+        assert store.approve_code(code) == ("telegram", "12345")
+        assert store.is_approved("telegram", 12345) is True
+        assert store.is_approved("telegram", "12345") is True
+        assert store.get_approved("telegram") == ["12345"]
+        assert store.revoke("telegram", 12345) is True
+        assert store.is_approved("telegram", "12345") is False
+
+    def test_hand_edited_numeric_pending_does_not_corrupt_approved_set(self) -> None:
+        store._store_path().write_text(
+            '{"approved": {"telegram": ["111"]}, '
+            '"pending": {"ABCD-EFGH": {"channel": "telegram", "sender_id": 222, '
+            '"created_at": 1000.0, "expires_at": 9999999999.0}}}',
+            encoding="utf-8",
+        )
+        assert store.approve_code("ABCD-EFGH") == ("telegram", "222")
+        assert store.is_approved("telegram", 222) is True
+        store.generate_code("telegram", 333)
+        assert store.get_approved("telegram") == ["111", "222"]
+
+    def test_numeric_id_in_hand_edited_store(self) -> None:
+        store._store_path().write_text(
+            '{"approved": {"telegram": [12345]}, "pending": {}}',
+            encoding="utf-8",
+        )
+        assert store.is_approved("telegram", "12345") is True
+        assert store.is_approved("telegram", 12345) is True
+        assert store.revoke("telegram", 12345) is True
+        assert store.is_approved("telegram", "12345") is False
+
+
 class TestStoreDurability:
     def test_corruption_recovery(self, tmp_path, monkeypatch) -> None:
         path = tmp_path / "pairing.json"

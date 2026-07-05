@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Cloud,
+  Clipboard,
   Cpu,
   Database,
   Eye,
@@ -82,11 +83,14 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
   createModelConfiguration,
+  disableNanobotFeature,
+  enableNanobotFeature,
   fetchAutomations,
   fetchSettings,
   fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
+  fetchNanobotFeatures,
   fetchProviderModels,
   importMcpConfig,
   loginProviderOAuth,
@@ -106,6 +110,7 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
@@ -125,6 +130,8 @@ import type {
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
   McpPresetsPayload,
+  NanobotFeatureInfo,
+  NanobotFeaturesPayload,
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   SessionAutomationJob,
@@ -150,11 +157,12 @@ export type SettingsSectionKey =
 
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
-type AppsKindFilter = "all" | "cli" | "mcp";
+type AppsKindFilter = "all" | "nanobot" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
 type AutomationSort = "next" | "last" | "updated" | "name";
 type AutomationAction = "enable" | "disable" | "delete" | "run";
 type AppsCatalogItem =
+  | { id: string; kind: "nanobot"; feature: NanobotFeatureInfo }
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
 
@@ -195,7 +203,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -213,6 +221,8 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "volcengine_coding_plan",
 ]);
 const DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH = 2;
+const CLI_APPS_REFRESH_RETRY_MS = 2_000;
+const CLI_APPS_REFRESH_MAX_RETRIES = 30;
 
 const FALLBACK_TIMEZONES = [
   "UTC",
@@ -255,7 +265,7 @@ const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
-  brandLogos: true,
+  brandLogos: false,
 };
 const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
   { value: "auto", label: "Auto" },
@@ -317,7 +327,7 @@ function readLocalPreferences(): LocalPreferences {
       density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos !== false,
+      brandLogos: parsed.brandLogos === true,
     };
   } catch {
     return DEFAULT_LOCAL_PREFS;
@@ -333,7 +343,7 @@ function defaultPreset(payload: SettingsPayload): SettingsPayload["model_presets
 }
 
 function normalizeContextWindowTokens(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 65_536;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 200_000;
 }
 
 function editableDefaultProvider(payload: SettingsPayload): string {
@@ -370,7 +380,7 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   provider: "",
   modelPreset: "default",
   presetLabel: "Default",
-  contextWindowTokens: 65_536,
+  contextWindowTokens: 200_000,
   timezone: "UTC",
   botName: "nanobot",
   botIcon: "",
@@ -456,6 +466,16 @@ function webSearchFormFromPayload(
   };
 }
 
+type WebSearchProviderOption = SettingsPayload["web_search"]["providers"][number];
+
+function webSearchProviderAcceptsApiKey(provider?: WebSearchProviderOption): boolean {
+  return provider?.credential === "api_key" || provider?.credential === "optional_api_key";
+}
+
+function webSearchProviderRequiresApiKey(provider?: WebSearchProviderOption): boolean {
+  return provider?.credential === "api_key";
+}
+
 function imageGenerationFormFromPayload(payload: SettingsPayload): ImageGenerationSettingsUpdate {
   return {
     enabled: payload.image_generation.enabled,
@@ -522,10 +542,12 @@ export function SettingsView({
   const { token } = useClient();
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
+  const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [loading, setLoading] = useState(() => initialSettings === null);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
+  const [nanobotFeaturesLoading, setNanobotFeaturesLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
   const [automationsLoading, setAutomationsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -537,6 +559,8 @@ export function SettingsView({
     model: "",
   });
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
+  const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
+  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
@@ -554,6 +578,8 @@ export function SettingsView({
   const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
+  const [nanobotFeaturesMessage, setNanobotFeaturesMessage] = useState<string | null>(null);
+  const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
   const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
@@ -685,19 +711,55 @@ export function SettingsView({
   useEffect(() => {
     if (activeSection !== "apps") return;
     let cancelled = false;
-    setCliAppsLoading(true);
-    fetchCliApps(token)
-      .then((payload) => {
-        if (!cancelled) {
+    let retry: number | null = null;
+    let retryCount = 0;
+    const loadCliApps = (showLoading: boolean) => {
+      if (showLoading) setCliAppsLoading(true);
+      fetchCliApps(token)
+        .then((payload) => {
+          if (cancelled) return;
+          if (payload.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
+            retryCount += 1;
+            retry = window.setTimeout(() => {
+              retry = null;
+              loadCliApps(false);
+            }, CLI_APPS_REFRESH_RETRY_MS);
+          }
           setCliApps(payload);
           setCliAppsError(null);
+          setCliAppsLoading(false);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setCliAppsError((err as Error).message);
+            setCliAppsLoading(false);
+          }
+        });
+    };
+    loadCliApps(true);
+    return () => {
+      cancelled = true;
+      if (retry !== null) window.clearTimeout(retry);
+    };
+  }, [activeSection, token]);
+
+  useEffect(() => {
+    if (activeSection !== "apps") return;
+    let cancelled = false;
+    setNanobotFeaturesLoading(true);
+    fetchNanobotFeatures(token)
+      .then((payload) => {
+        if (!cancelled) {
+          setNanobotFeatures(payload);
+          setNanobotFeaturesError(null);
         }
       })
       .catch((err) => {
-        if (!cancelled) setCliAppsError((err as Error).message);
+        const message = (err as Error).message;
+        if (!cancelled && message !== "HTTP 404") setNanobotFeaturesError(message);
       })
       .finally(() => {
-        if (!cancelled) setCliAppsLoading(false);
+        if (!cancelled) setNanobotFeaturesLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1154,11 +1216,11 @@ export function SettingsView({
     const apiKey = webSearchForm.apiKey?.trim() ?? "";
     const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
     const hasExistingSecret =
-      provider.credential === "api_key" &&
+      webSearchProviderAcceptsApiKey(provider) &&
       webSearchForm.provider === settings.web_search.provider &&
       !!settings.web_search.api_key_hint;
 
-    if (provider.credential === "api_key" && !apiKey && !hasExistingSecret) {
+    if (webSearchProviderRequiresApiKey(provider) && !apiKey && !hasExistingSecret) {
       setError(t("settings.byok.webSearch.apiKeyRequired"));
       return;
     }
@@ -1178,7 +1240,12 @@ export function SettingsView({
         timeout: webSearchForm.timeout,
         useJinaReader: webSearchForm.useJinaReader,
       };
-      if (provider.credential === "api_key" && apiKey) update.apiKey = apiKey;
+      if (
+        webSearchProviderAcceptsApiKey(provider) &&
+        (apiKey || (provider.credential === "optional_api_key" && webSearchKeyEditing))
+      ) {
+        update.apiKey = apiKey;
+      }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(token, update);
       applyPayload(payload);
@@ -1295,6 +1362,42 @@ export function SettingsView({
       setCliAppsError((err as Error).message);
     } finally {
       setCliAppsAction(null);
+    }
+  };
+
+  const handleNanobotFeatureAction = async (
+    action: "enable" | "disable",
+    name: string,
+    confirmed = false,
+  ) => {
+    const feature = nanobotFeatures?.features.find((item) => item.name === name);
+    if (action === "enable" && !confirmed && feature && !feature.installed && feature.install_supported) {
+      setNanobotFeaturesMessage(null);
+      setNanobotFeaturesError(null);
+      setNanobotFeatureConfirm(feature);
+      return;
+    }
+    const key = `${action}:${name}`;
+    setNanobotFeatureAction(key);
+    setNanobotFeatureConfirm(null);
+    setNanobotFeaturesMessage(null);
+    setNanobotFeaturesError(null);
+    try {
+      const payload = action === "enable"
+        ? await enableNanobotFeature(token, name)
+        : await disableNanobotFeature(token, name);
+      setNanobotFeatures(payload);
+      setNanobotFeaturesMessage(payload.last_action?.message ?? null);
+      if (
+        payload.requires_restart ||
+        payload.features.some((feature) => feature.name === name && feature.requires_restart)
+      ) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+    } catch (err) {
+      setNanobotFeaturesError((err as Error).message);
+    } finally {
+      setNanobotFeatureAction(null);
     }
   };
 
@@ -1572,15 +1675,20 @@ export function SettingsView({
         return (
           <AppsCatalogSettings
             cliApps={cliApps}
+            nanobotFeatures={nanobotFeatures}
             mcpPresets={mcpPresets}
             cliAppsLoading={cliAppsLoading}
+            nanobotFeaturesLoading={nanobotFeaturesLoading}
             mcpPresetsLoading={mcpPresetsLoading}
             query={appsQuery}
             filter={appsKindFilter}
             cliActionKey={cliAppsAction}
+            nanobotActionKey={nanobotFeatureAction}
             mcpActionKey={mcpPresetAction}
             cliMessage={cliAppsMessage}
             cliError={cliAppsError}
+            nanobotMessage={nanobotFeaturesMessage}
+            nanobotError={nanobotFeaturesError}
             cliFocusName={cliAppsFocusName}
             mcpMessage={mcpMessage}
             mcpError={mcpError}
@@ -1592,10 +1700,13 @@ export function SettingsView({
             onQueryChange={setAppsQuery}
             onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
+            onNanobotAction={handleNanobotFeatureAction}
             onMcpAction={handleMcpPresetAction}
             onDismissStatus={() => {
               setCliAppsMessage(null);
               setCliAppsError(null);
+              setNanobotFeaturesMessage(null);
+              setNanobotFeaturesError(null);
               setMcpMessage(null);
               setMcpError(null);
             }}
@@ -1699,6 +1810,15 @@ export function SettingsView({
         onOpenChange={setModelConfigurationOpen}
         onChangeDraft={setModelConfigurationForm}
         onSave={handleCreateModelConfiguration}
+      />
+
+      <NanobotFeatureInstallDialog
+        feature={nanobotFeatureConfirm}
+        installing={nanobotFeatureAction === `enable:${nanobotFeatureConfirm?.name ?? ""}`}
+        onOpenChange={(open) => {
+          if (!open) setNanobotFeatureConfirm(null);
+        }}
+        onConfirm={(feature) => handleNanobotFeatureAction("enable", feature.name, true)}
       />
 
       <AutomationDeleteDialog
@@ -1909,6 +2029,10 @@ function OverviewSettings({
   const webSearchCredentialStatus =
     webSearchProvider?.credential === "none"
       ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
+      : webSearchProvider?.credential === "optional_api_key"
+        ? settings.web_search.api_key_hint
+          ? tx("settings.values.configured", "Configured")
+          : tx("settings.byok.webSearch.noCredentialRequired", "No key required")
       : webSearchProvider?.credential === "base_url"
         ? settings.web_search.base_url
           ? tx("settings.values.configured", "Configured")
@@ -2518,7 +2642,8 @@ function ModelsSettings({
               value={String(form.contextWindowTokens)}
               options={CONTEXT_WINDOW_TOKEN_OPTIONS.map((tokens) => ({
                 value: String(tokens),
-                label: tokens === 262_144 ? "256K" : "64K",
+                label:
+                  tokens === 262_144 ? "256K" : tokens === 200_000 ? "200K" : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({
@@ -3218,10 +3343,10 @@ function WebSettings({
     settings.web_search.providers.find((provider) => provider.name === form.provider) ??
     settings.web_search.providers[0];
   const hasExistingSecret =
-    selectedProvider?.credential === "api_key" &&
+    webSearchProviderAcceptsApiKey(selectedProvider) &&
     form.provider === settings.web_search.provider &&
     !!settings.web_search.api_key_hint;
-  const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
+  const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
@@ -3234,7 +3359,7 @@ function WebSettings({
     effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const missingCredential =
-    selectedProvider?.credential === "api_key"
+    webSearchProviderRequiresApiKey(selectedProvider)
       ? !apiKey && !hasExistingSecret
       : selectedProvider?.credential === "base_url"
         ? !baseUrl
@@ -3267,7 +3392,7 @@ function WebSettings({
             </SettingsRow>
           ) : null}
 
-          {selectedProvider?.credential === "api_key" ? (
+          {webSearchProviderAcceptsApiKey(selectedProvider) ? (
             <SettingsRow
               title={t("settings.byok.apiKey")}
               description={t("settings.byok.webSearch.apiKeyHelp")}
@@ -3636,6 +3761,7 @@ function AutomationListItem({
   const status = automationStatus(job, tx);
   const origin = automationOriginLabel(job, tx);
   const nextRun = formatAutomationNext(job, tx);
+  const summary = automationSummary(job, tx);
 
   return (
     <div role="listitem">
@@ -3661,7 +3787,7 @@ function AutomationListItem({
             </span>
           </span>
           <span className="mt-1.5 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
-            {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
+            {summary}
           </span>
           <span className="mt-2.5 flex min-w-0 items-center gap-2 text-[11.5px] leading-none text-muted-foreground">
             <span className="truncate" title={formatAutomationNextTitle(job, locale, tx)}>
@@ -3718,13 +3844,20 @@ function AutomationDetailPanel({
     : null;
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
-  const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+  const localTrigger = isLocalTriggerAutomation(job);
+  const triggerCommand = automationTriggerCommand(job);
+  const message = automationDetailText(job, tx);
+  const messageLabel = localTrigger
+    ? tx("settings.automations.fields.command", "Command")
+    : tx("settings.automations.fields.message", "Message");
   const schedule = formatAutomationSchedule(job, locale, tx);
   const [messageExpanded, setMessageExpanded] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
   const messageNeedsExpansion = automationMessageNeedsExpansion(message);
 
   useEffect(() => {
     setMessageExpanded(false);
+    setCommandCopied(false);
   }, [job.id]);
 
   return (
@@ -3758,12 +3891,37 @@ function AutomationDetailPanel({
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <section className="rounded-[20px] border border-border/35 bg-background/62 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/10 dark:bg-background/24">
-            <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
-              {tx("settings.automations.fields.message", "Message")}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
+                {messageLabel}
+              </div>
+              {localTrigger && triggerCommand ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 rounded-full px-2 text-[11.5px]"
+                  onClick={() => {
+                    void copyTextToClipboard(triggerCommand).then((ok) => {
+                      if (ok) setCommandCopied(true);
+                    });
+                  }}
+                >
+                  {commandCopied ? (
+                    <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {commandCopied
+                    ? tx("settings.automations.commandCopied", "Copied")
+                    : tx("settings.automations.copyCommand", "Copy")}
+                </Button>
+              ) : null}
             </div>
             <div
               className={cn(
                 "mt-3 whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85",
+                localTrigger && "font-mono text-[12.5px]",
                 !messageExpanded && messageNeedsExpansion && "line-clamp-6",
               )}
             >
@@ -3870,7 +4028,8 @@ function AutomationActionGroup({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const canManage = !job.protected;
   const hasLinkedChat = Boolean(job.origin);
-  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending;
+  const localTrigger = isLocalTriggerAutomation(job);
+  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending && !localTrigger;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
   const canToggle = canManage && (job.enabled || hasLinkedChat);
   const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
@@ -3892,14 +4051,16 @@ function AutomationActionGroup({
       >
         <Pencil className="h-4 w-4" aria-hidden />
       </AppsActionButton>
-      <AppsActionButton
-        ariaLabel={tx("settings.automations.runNow", "Run now")}
-        busy={actionKey === `run:${job.id}`}
-        disabled={!canRun}
-        onClick={() => void onAction("run", job)}
-      >
-        <PlayCircle className="h-4 w-4" aria-hidden />
-      </AppsActionButton>
+      {!localTrigger ? (
+        <AppsActionButton
+          ariaLabel={tx("settings.automations.runNow", "Run now")}
+          busy={actionKey === `run:${job.id}`}
+          disabled={!canRun}
+          onClick={() => void onAction("run", job)}
+        >
+          <PlayCircle className="h-4 w-4" aria-hidden />
+        </AppsActionButton>
+      ) : null}
       <AppsActionButton
         ariaLabel={
           job.enabled
@@ -4022,6 +4183,7 @@ function AutomationEditDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [draft, setDraft] = useState<AutomationEditDraft>(() => automationDraftFromJob(null));
+  const localTrigger = isLocalTriggerAutomation(job);
 
   useEffect(() => {
     setDraft(automationDraftFromJob(job));
@@ -4071,34 +4233,38 @@ function AutomationEditDialog({
                 />
               </label>
 
-              <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.automations.fields.message", "Message")}
-                </span>
-                <Textarea
-                  value={draft.message}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
-                  className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
-                />
-              </label>
+              {!localTrigger ? (
+                <label className="block space-y-1.5">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.message", "Message")}
+                  </span>
+                  <Textarea
+                    value={draft.message}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
+                    className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
+                  />
+                </label>
+              ) : null}
 
-              <div className="space-y-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.automations.fields.scheduleType", "Schedule type")}
-                </span>
-                <SegmentedControl
-                  value={draft.scheduleKind}
-                  options={scheduleOptions}
-                  onChange={(value) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      scheduleKind: value as AutomationEditDraft["scheduleKind"],
-                    }))
-                  }
-                />
-              </div>
+              {!localTrigger ? (
+                <div className="space-y-2">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.scheduleType", "Schedule type")}
+                  </span>
+                  <SegmentedControl
+                    value={draft.scheduleKind}
+                    options={scheduleOptions}
+                    onChange={(value) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        scheduleKind: value as AutomationEditDraft["scheduleKind"],
+                      }))
+                    }
+                  />
+                </div>
+              ) : null}
 
-              {draft.scheduleKind === "every" ? (
+              {!localTrigger && draft.scheduleKind === "every" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4139,7 +4305,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {draft.scheduleKind === "cron" ? (
+              {!localTrigger && draft.scheduleKind === "cron" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4166,7 +4332,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {draft.scheduleKind === "at" ? (
+              {!localTrigger && draft.scheduleKind === "at" ? (
                 <label className="block space-y-1.5">
                   <span className="text-[12px] font-medium text-muted-foreground">
                     {tx("settings.automations.fields.runAt", "Run at")}
@@ -4231,7 +4397,7 @@ function AutomationDeleteDialog({
           <DialogDescription>
             {tx(
               "settings.automations.deleteDescription",
-              "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+              "This removes {{name}} from automations. Past chat messages stay in the session.",
               { name: job?.name || job?.id || "" },
             )}
           </DialogDescription>
@@ -4262,6 +4428,92 @@ function AutomationDeleteDialog({
   );
 }
 
+function NanobotFeatureInstallDialog({
+  feature,
+  installing,
+  onOpenChange,
+  onConfirm,
+}: {
+  feature: NanobotFeatureInfo | null;
+  installing: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (feature: NanobotFeatureInfo) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const name = feature?.display_name || feature?.name || "";
+  return (
+    <Dialog open={Boolean(feature)} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="w-[min(calc(100vw-2rem),24rem)] gap-0 rounded-[28px] border border-white/70 bg-card/95 p-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.20)] backdrop-blur-xl sm:rounded-[28px]"
+      >
+        <DialogHeader className="items-center space-y-0 text-center">
+          <DialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
+            {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
+          </DialogTitle>
+          <DialogDescription className="mt-3 max-w-[20rem] text-center text-[14px] leading-6 text-muted-foreground">
+            {tx(
+              "settings.nanobotFeatures.installConfirmDescription",
+              "nanobot will add what {{name}} needs, then turn it on. Continue?",
+              { name },
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-7 !grid grid-cols-1 gap-3 space-x-0 sm:grid-cols-2 sm:space-x-0">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={installing}
+            className="h-11 w-full min-w-0 rounded-full bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+          >
+            {tx("settings.automations.cancel", "Cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => feature && void onConfirm(feature)}
+            disabled={!feature || installing}
+            className="h-11 w-full min-w-0 !whitespace-normal rounded-full px-5 text-center text-[15px] font-semibold"
+          >
+            {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+            {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function isLocalTriggerAutomation(job: SessionAutomationJob | null): boolean {
+  if (!job) return false;
+  return job.kind === "local_trigger"
+    || job.payload.kind === "local_trigger"
+    || job.schedule.kind === "local";
+}
+
+function automationTriggerCommand(job: SessionAutomationJob): string {
+  return job.trigger?.command || job.payload.command || job.payload.message || "";
+}
+
+function automationSummary(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (isLocalTriggerAutomation(job)) {
+    return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
+  }
+  return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+}
+
+function automationDetailText(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  return automationSummary(job, tx);
+}
+
 function automationNeedsAttention(job: SessionAutomationJob): boolean {
   return job.state.last_status === "error";
 }
@@ -4273,6 +4525,7 @@ function automationStatusKey(
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
   if (job.state.last_status === "error") return "failed";
+  if (isLocalTriggerAutomation(job)) return "active";
   if (job.delete_after_run && !job.state.next_run_at_ms && job.state.last_status === "ok") {
     return "completed";
   }
@@ -4336,6 +4589,7 @@ function automationEditDraftError(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
   if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
+  if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
     return tx("settings.automations.validation.messageRequired", "Message is required.");
   }
@@ -4365,6 +4619,10 @@ function automationUpdatePayloadFromDraft(
   job: SessionAutomationJob | null,
 ): AutomationUpdatePayload | string {
   const name = draft.name.trim();
+  if (isLocalTriggerAutomation(job)) {
+    if (!name) return "invalid";
+    return { name };
+  }
   const message = draft.message.trim();
   if (!name || !message) return "invalid";
   const payload: AutomationUpdatePayload = { name, message };
@@ -4482,7 +4740,7 @@ function automationSearchParts(
   const scheduleParts = automationScheduleSearchParts(job);
   if (field === "id") return [job.id];
   if (field === "name") return [job.name, job.id];
-  if (field === "message") return [job.payload.message];
+  if (field === "message") return [job.payload.message, job.payload.command, job.trigger?.command];
   if (field === "chat") return originParts;
   if (field === "cron" || field === "schedule") return scheduleParts;
   if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
@@ -4490,6 +4748,9 @@ function automationSearchParts(
     job.id,
     job.name,
     job.payload.message,
+    job.payload.command,
+    job.trigger?.command,
+    isLocalTriggerAutomation(job) ? "trigger local" : null,
     ...scheduleParts,
     automationStatusKey(job),
     ...originParts,
@@ -4679,6 +4940,9 @@ function formatAutomationSchedule(
         })
       : tx("settings.automations.schedule.cron", "Cron {{expr}}", { expr: job.schedule.expr });
   }
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.schedule.local", "Local trigger");
+  }
   return tx("settings.automations.schedule.custom", "Custom schedule");
 }
 
@@ -4733,6 +4997,9 @@ function formatAutomationNext(
 ): string {
   if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
   if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.next.local", "Waiting for trigger");
+  }
   if (!job.state.next_run_at_ms) return tx("settings.automations.next.none", "No next run");
   return relativeTime(job.state.next_run_at_ms);
 }
@@ -4785,15 +5052,20 @@ function formatAutomationInterval(ms: number, locale: string): string {
 
 function AppsCatalogSettings({
   cliApps,
+  nanobotFeatures,
   mcpPresets,
   cliAppsLoading,
+  nanobotFeaturesLoading,
   mcpPresetsLoading,
   query,
   filter,
   cliActionKey,
+  nanobotActionKey,
   mcpActionKey,
   cliMessage,
   cliError,
+  nanobotMessage,
+  nanobotError,
   cliFocusName,
   mcpMessage,
   mcpError,
@@ -4805,6 +5077,7 @@ function AppsCatalogSettings({
   onQueryChange,
   onFilterChange,
   onCliAction,
+  onNanobotAction,
   onMcpAction,
   onDismissStatus,
   onBackToChat,
@@ -4818,15 +5091,20 @@ function AppsCatalogSettings({
   isRestarting,
 }: {
   cliApps: CliAppsPayload | null;
+  nanobotFeatures: NanobotFeaturesPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
+  nanobotFeaturesLoading: boolean;
   mcpPresetsLoading: boolean;
   query: string;
   filter: AppsKindFilter;
   cliActionKey: string | null;
+  nanobotActionKey: string | null;
   mcpActionKey: string | null;
   cliMessage: string | null;
   cliError: string | null;
+  nanobotMessage: string | null;
+  nanobotError: string | null;
   cliFocusName: string | null;
   mcpMessage: string | null;
   mcpError: string | null;
@@ -4838,6 +5116,7 @@ function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+  onNanobotAction: (action: "enable" | "disable", name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
@@ -4854,11 +5133,17 @@ function AppsCatalogSettings({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
     { value: "all", label: tx("settings.apps.filterAll", "All") },
+    { value: "nanobot", label: tx("settings.apps.filterPlugins", "Plugins") },
     { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
     { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
   const items: AppsCatalogItem[] = [
+    ...(nanobotFeatures?.features ?? []).map((feature) => ({
+      id: `nanobot:${feature.name}`,
+      kind: "nanobot" as const,
+      feature,
+    })),
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
     ...(mcpPresets?.presets ?? []).map((preset) => ({
       id: `mcp:${preset.name}`,
@@ -4875,13 +5160,22 @@ function AppsCatalogSettings({
   const focusedApp = cliFocusName
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
-  const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
-  const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
-  const statusIsError = Boolean(cliError || mcpError);
+  const loading =
+    (cliAppsLoading || nanobotFeaturesLoading || mcpPresetsLoading) &&
+    !cliApps &&
+    !nanobotFeatures &&
+    !mcpPresets;
+  const statusMessage =
+    cliError ||
+    nanobotError ||
+    mcpError ||
+    (!focusedApp ? cliMessage || nanobotMessage || mcpMessage : null);
+  const statusIsError = Boolean(cliError || nanobotError || mcpError);
   const caption = t("settings.apps.caption", {
+    plugins: nanobotFeatures?.enabled_count ?? 0,
     cli: cliApps?.installed_count ?? 0,
     mcp: mcpPresets?.installed_count ?? 0,
-    defaultValue: "{{cli}} CLI · {{mcp}} MCP",
+    defaultValue: "{{plugins}} Plugin · {{cli}} CLI · {{mcp}} MCP",
   });
 
   return (
@@ -4891,7 +5185,7 @@ function AppsCatalogSettings({
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
               "settings.apps.description",
-              "Add local app adapters and connected tool servers that nanobot can use from chat.",
+              "Enable plugins, local app adapters, and connected tool servers.",
             )}
           </p>
           <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
@@ -4947,7 +5241,7 @@ function AppsCatalogSettings({
 
       {requiresRestartPending ? (
         <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-          <span>{tx("settings.mcp.restartRequired", "Restart nanobot to connect updated MCP tools.")}</span>
+          <span>{tx("settings.apps.restartRequired", "Restart nanobot to apply updated apps and features.")}</span>
           {onRestart ? (
             <Button
               type="button"
@@ -4970,7 +5264,7 @@ function AppsCatalogSettings({
 
       <section>
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>{tx("settings.apps.featured", "Featured")}</SettingsSectionTitle>
+          <SettingsSectionTitle>{tx("settings.apps.featured", "Catalog")}</SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
             {items.length}
           </span>
@@ -4983,7 +5277,14 @@ function AppsCatalogSettings({
         ) : items.length ? (
           <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
             {items.map((item) =>
-              item.kind === "cli" ? (
+              item.kind === "nanobot" ? (
+                <NanobotFeatureCatalogRow
+                  key={item.id}
+                  feature={item.feature}
+                  actionKey={nanobotActionKey}
+                  onAction={onNanobotAction}
+                />
+              ) : item.kind === "cli" ? (
                 <CliAppsCatalogRow
                   key={item.id}
                   app={item.app}
@@ -5012,7 +5313,7 @@ function AppsCatalogSettings({
         )}
       </section>
 
-      {filter !== "cli" ? (
+      {filter === "all" || filter === "mcp" ? (
         <McpCustomServerPanel
           form={customMcpForm}
           configImport={mcpConfigImport}
@@ -5026,6 +5327,92 @@ function AppsCatalogSettings({
 
       <ThirdPartyBrandNotice />
     </div>
+  );
+}
+
+function NanobotFeatureCatalogRow({
+  feature,
+  actionKey,
+  onAction,
+}: {
+  feature: NanobotFeatureInfo;
+  actionKey: string | null;
+  onAction: (action: "enable" | "disable", name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const enableBusy = actionKey === `enable:${feature.name}`;
+  const disableBusy = actionKey === `disable:${feature.name}`;
+  const description = nanobotFeatureStatusLabel(feature, tx);
+  const missingSupport = feature.enabled && !feature.installed;
+  const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
+  const enabledLabel =
+    feature.type === "channel" && feature.name === "websocket"
+      ? tx("settings.nanobotFeatures.websocketRequired", "Required for WebUI")
+      : tx("settings.nanobotFeatures.enabled", "Enabled");
+  const enableLabel = feature.installed
+    ? tx("settings.nanobotFeatures.enable", "Enable")
+    : installSupportLabel;
+
+  return (
+    <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/55 bg-card text-muted-foreground shadow-sm">
+        <Bot className="h-4 w-4" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
+            {feature.display_name}
+          </h3>
+          <AppsTypeBadge>
+            {feature.type === "channel"
+              ? tx("settings.apps.channelLabel", "Channel")
+              : tx("settings.apps.featureLabel", "Feature")}
+          </AppsTypeBadge>
+        </div>
+        <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {missingSupport && feature.install_supported ? (
+          <AppsActionButton
+            ariaLabel={installSupportLabel}
+            busy={enableBusy}
+            onClick={() => onAction("enable", feature.name)}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : feature.enabled && feature.type === "channel" && feature.name !== "websocket" ? (
+          <AppsActionButton
+            ariaLabel={tx("settings.nanobotFeatures.disable", "Disable")}
+            busy={disableBusy}
+            tone="danger"
+            onClick={() => onAction("disable", feature.name)}
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : feature.enabled ? (
+          <AppsActionButton
+            ariaLabel={enabledLabel}
+            disabled
+            tone="installed"
+          >
+            <Check className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : feature.install_supported ? (
+          <AppsActionButton
+            ariaLabel={enableLabel}
+            busy={enableBusy}
+            onClick={() => onAction("enable", feature.name)}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : (
+          <AppsActionButton ariaLabel={tx("settings.cliApps.unavailable", "Unavailable")} disabled>
+            <Plus className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -5432,14 +5819,27 @@ const AppsActionButton = forwardRef<HTMLButtonElement, {
 });
 
 function appsTitle(item: AppsCatalogItem): string {
+  if (item.kind === "nanobot") return item.feature.display_name;
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
 }
 
 function appsReady(item: AppsCatalogItem): boolean {
+  if (item.kind === "nanobot") return item.feature.enabled;
   return item.kind === "cli" ? item.app.installed : item.preset.installed && item.preset.configured;
 }
 
 function appsSearchText(item: AppsCatalogItem): string {
+  if (item.kind === "nanobot") {
+    const feature = item.feature;
+    return [
+      feature.display_name,
+      feature.name,
+      feature.type,
+      feature.status,
+    ]
+      .join(" ")
+      .toLowerCase();
+  }
   if (item.kind === "cli") {
     const app = item.app;
     return [
@@ -5466,7 +5866,20 @@ function appsSearchText(item: AppsCatalogItem): string {
     preset.source ?? "",
   ]
     .join(" ")
-    .toLowerCase();
+      .toLowerCase();
+}
+
+function nanobotFeatureStatusLabel(
+  feature: NanobotFeatureInfo,
+  tx: (key: string, fallback: string) => string,
+): string {
+  if (feature.ready && feature.type === "channel" && feature.name === "websocket") {
+    return tx("settings.nanobotFeatures.websocketRequired", "Required for WebUI");
+  }
+  if (feature.ready) return tx("settings.nanobotFeatures.ready", "Ready");
+  if (!feature.installed) return tx("settings.nanobotFeatures.missingDependency", "Support missing");
+  if (feature.type === "channel") return tx("settings.nanobotFeatures.channelDisabled", "Channel is disabled");
+  return tx("settings.nanobotFeatures.notEnabled", "Not enabled");
 }
 
 function McpCustomServerPanel({

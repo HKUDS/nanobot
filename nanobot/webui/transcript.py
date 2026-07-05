@@ -17,7 +17,8 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
-from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.automation_turns import is_automation_kind
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
@@ -598,9 +599,12 @@ def normalize_webui_turn_id(value: Any) -> str:
 
 def webui_message_source(metadata: dict[str, Any] | None) -> dict[str, str] | None:
     raw = (metadata or {}).get(WEBUI_MESSAGE_SOURCE_METADATA_KEY)
-    if not isinstance(raw, dict) or raw.get("kind") != "cron":
+    if not isinstance(raw, dict):
         return None
-    source: dict[str, str] = {"kind": "cron"}
+    kind = raw.get("kind")
+    if not is_automation_kind(kind):
+        return None
+    source: dict[str, str] = {"kind": kind}
     label = raw.get("label")
     if isinstance(label, str) and label.strip():
         source["label"] = label.strip()
@@ -779,6 +783,8 @@ def write_session_messages_as_transcript(
     target_chat_id = _chat_id_from_session_key(target_key)
     rows: list[dict[str, Any]] = []
     for msg in messages:
+        if is_hidden_history_message(msg):
+            continue
         role = msg.get("role")
         content = msg.get("content")
         text = content if isinstance(content, str) else ""
@@ -849,13 +855,28 @@ def build_user_transcript_event(
     return event
 
 
+def _is_legacy_raw_subagent_result(message: dict[str, Any]) -> bool:
+    content = message.get("content")
+    if not isinstance(content, str):
+        return False
+    text = content.replace("\r\n", "\n").strip()
+    return (
+        text.startswith("[Subagent '")
+        and "\n\nTask:" in text
+        and "\n\nResult:" in text
+        and "Summarize this naturally" in text
+    )
+
+
 def _session_user_event(
     session_key: str,
     message: dict[str, Any],
 ) -> dict[str, Any] | None:
     if message.get("role") != "user":
         return None
-    if message.get(CRON_HISTORY_META) is True:
+    if is_hidden_history_message(message):
+        return None
+    if _is_legacy_raw_subagent_result(message):
         return None
     content = message.get("content")
     text = content if isinstance(content, str) else ""
@@ -1087,9 +1108,20 @@ def _merge_tool_events(previous: Any, incoming: list[dict[str, Any]]) -> list[di
 def _file_edit_key(edit: dict[str, Any]) -> str:
     call_id = str(edit.get("call_id") or "")
     tool = str(edit.get("tool") or "")
+    path = str(edit.get("path") or "")
+    if call_id and path:
+        return f"{call_id}|{tool}|{path}"
     if call_id:
         return f"{call_id}|{tool}"
-    return f"{tool}|{edit.get('path') or ''}"
+    return f"{tool}|{path}"
+
+
+def _file_edit_tool_event_key(edit: dict[str, Any]) -> str:
+    call_id = str(edit.get("call_id") or "")
+    tool = str(edit.get("tool") or "")
+    if call_id:
+        return f"{call_id}|{tool}"
+    return _file_edit_key(edit)
 
 
 def _message_has_file_edit_for_tool_event(
@@ -1102,7 +1134,10 @@ def _message_has_file_edit_for_tool_event(
     edits = message.get("fileEdits")
     if not isinstance(edits, list):
         return False
-    return any(isinstance(edit, dict) and _file_edit_key(edit) == key for edit in edits)
+    return any(
+        isinstance(edit, dict) and _file_edit_tool_event_key(edit) == key
+        for edit in edits
+    )
 
 
 def _filter_covered_file_edit_tool_events(
@@ -1123,7 +1158,7 @@ def _strip_covered_file_edit_tool_hints(
     edits: list[dict[str, Any]],
 ) -> dict[str, Any]:
     incoming_keys = {
-        _file_edit_key(edit)
+        _file_edit_tool_event_key(edit)
         for edit in edits
         if isinstance(edit, dict)
     }
@@ -1257,9 +1292,12 @@ def replay_transcript_to_ui_messages(
 
     def _source_fields(rec: dict[str, Any]) -> dict[str, Any]:
         source = rec.get("source")
-        if not isinstance(source, dict) or source.get("kind") != "cron":
+        if not isinstance(source, dict):
             return {}
-        out: dict[str, Any] = {"source": {"kind": "cron"}}
+        kind = source.get("kind")
+        if not is_automation_kind(kind):
+            return {}
+        out: dict[str, Any] = {"source": {"kind": kind}}
         label = source.get("label")
         if isinstance(label, str) and label.strip():
             out["source"]["label"] = label.strip()
@@ -1460,6 +1498,11 @@ def replay_transcript_to_ui_messages(
         edits: list[dict[str, Any]],
     ) -> int | None:
         incoming_keys = {_file_edit_key(edit) for edit in edits if isinstance(edit, dict)}
+        incoming_tool_event_keys = {
+            _file_edit_tool_event_key(edit)
+            for edit in edits
+            if isinstance(edit, dict)
+        }
         for i in range(len(messages) - 1, -1, -1):
             candidate = messages[i]
             if candidate.get("role") == "user":
@@ -1471,7 +1514,16 @@ def replay_transcript_to_ui_messages(
             existing_edits = candidate.get("fileEdits")
             if isinstance(existing_edits, list):
                 for existing in existing_edits:
-                    if isinstance(existing, dict) and _file_edit_key(existing) in incoming_keys:
+                    if not isinstance(existing, dict):
+                        continue
+                    if (
+                        _file_edit_key(existing) in incoming_keys
+                        or (
+                            not existing.get("path")
+                            and existing.get("pending")
+                            and _file_edit_tool_event_key(existing) in incoming_tool_event_keys
+                        )
+                    ):
                         return i
             existing_tool_events = candidate.get("toolEvents")
             if isinstance(existing_tool_events, list):
@@ -1479,7 +1531,7 @@ def replay_transcript_to_ui_messages(
                     if not isinstance(event, dict):
                         continue
                     key = _tool_event_file_edit_key(event)
-                    if key and key in incoming_keys:
+                    if key and key in incoming_tool_event_keys:
                         return i
         return None
 
@@ -1535,12 +1587,24 @@ def replay_transcript_to_ui_messages(
             if not isinstance(edit, dict):
                 continue
             key = _file_edit_key(edit)
-            if key in index_by_key:
-                pos = index_by_key[key]
+            pos = index_by_key.get(key)
+            if pos is None and edit.get("path"):
+                event_key = _file_edit_tool_event_key(edit)
+                for existing_pos, existing_edit in enumerate(existing):
+                    if (
+                        isinstance(existing_edit, dict)
+                        and not existing_edit.get("path")
+                        and existing_edit.get("pending")
+                        and _file_edit_tool_event_key(existing_edit) == event_key
+                    ):
+                        pos = existing_pos
+                        break
+            if pos is not None:
                 merged = {**existing[pos], **edit}
                 if edit.get("path") and not edit.get("pending"):
                     merged.pop("pending", None)
                 existing[pos] = merged
+                index_by_key[key] = pos
             else:
                 index_by_key[key] = len(existing)
                 existing.append(dict(edit))

@@ -2,20 +2,25 @@ import asyncio
 import json
 import re
 import shutil
+import signal
+from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
+from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.cli import commands as cli_commands
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
-from nanobot.providers.factory import ProviderSnapshot, make_provider
+from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.metadata import (
@@ -56,6 +61,98 @@ def _fake_provider():
 
 class _StopGatewayError(RuntimeError):
     pass
+
+
+def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
+    class _FakeLoop:
+        def __init__(self) -> None:
+            self.handlers: dict[int, tuple[object, tuple[object, ...]]] = {}
+            self.removed: list[int] = []
+
+        def add_signal_handler(self, signum, callback, *args) -> None:
+            self.handlers[int(signum)] = (callback, args)
+
+        def remove_signal_handler(self, signum) -> bool:
+            self.removed.append(int(signum))
+            self.handlers.pop(int(signum), None)
+            return True
+
+    async def _run() -> None:
+        loop = _FakeLoop()
+        shutdown_event = asyncio.Event()
+        never = asyncio.Event()
+        task = asyncio.create_task(never.wait())
+        output: list[str] = []
+
+        restore = cli_commands._install_gateway_shutdown_handlers(
+            loop, shutdown_event, [task], output.append,
+        )
+        try:
+            callback, args = loop.handlers[int(signal.SIGINT)]
+            assert callable(callback)
+
+            callback(*args)
+            assert shutdown_event.is_set()
+            assert output == ["\nShutting down... Press Ctrl+C again to force."]
+            assert not task.done()
+
+            callback(*args)
+            await asyncio.sleep(0)
+            assert task.cancelled()
+        finally:
+            restore()
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        assert int(signal.SIGINT) in loop.removed
+        assert int(signal.SIGTERM) in loop.removed
+
+    asyncio.run(_run())
+
+
+def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
+    try:
+        import os
+        import pty
+        import termios
+    except ImportError:  # pragma: no cover - platform without POSIX termios
+        pytest.skip("termios unavailable")
+
+    master_fd, slave_fd = pty.openpty()
+
+    class _Stdin:
+        def fileno(self) -> int:
+            return slave_fd
+
+    try:
+        attrs = termios.tcgetattr(slave_fd)
+        attrs[3] &= ~(termios.ISIG | termios.ICANON | termios.ECHO)
+        termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+
+        monkeypatch.setattr(cli_commands.sys, "stdin", _Stdin())
+        cli_commands._ensure_gateway_tty_signal_mode()
+
+        restored = termios.tcgetattr(slave_fd)
+        assert restored[3] & termios.ISIG
+        assert restored[3] & termios.ICANON
+        assert restored[3] & termios.ECHO
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
+def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.append_history("first")
+    store.append_history("second")
+
+    cli_commands._advance_dream_cursor_if_behind(store)
+    assert store.get_last_dream_cursor() == 2
+
+    store.set_last_dream_cursor(10)
+    cli_commands._advance_dream_cursor_if_behind(store)
+    assert store.get_last_dream_cursor() == 10
 
 
 @pytest.fixture
@@ -167,6 +264,39 @@ def test_onboard_help_shows_workspace_and_config_options():
     assert "--dir" not in stripped_output
 
 
+def test_status_help_shows_workspace_and_config_options():
+    result = runner.invoke(app, ["status", "--help"])
+
+    assert result.exit_code == 0
+    stripped_output = _strip_ansi(result.stdout)
+    assert "--workspace" in stripped_output
+    assert "-w" in stripped_output
+    assert "--config" in stripped_output
+    assert "-c" in stripped_output
+
+
+def test_status_uses_explicit_config_and_workspace(tmp_path: Path):
+    config_path = tmp_path / "instance" / "config.json"
+    config_workspace = tmp_path / "config-workspace"
+    override_workspace = tmp_path / "override-workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(config_workspace)
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(config.model_dump(mode="json", by_alias=True)))
+
+    result = runner.invoke(
+        app,
+        ["status", "--config", str(config_path), "--workspace", str(override_workspace)],
+    )
+
+    assert result.exit_code == 0
+    stripped_output = _strip_ansi(result.stdout)
+    compact_output = stripped_output.replace("\n", "")
+    assert str(config_path.resolve(strict=False)) in compact_output
+    assert str(override_workspace) in compact_output
+    assert str(config_workspace) not in compact_output
+
+
 def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_paths, monkeypatch):
     config_file, workspace_dir, _ = mock_paths
 
@@ -255,6 +385,33 @@ def test_config_dump_excludes_oauth_provider_blocks():
     assert "githubCopilot" not in providers
 
 
+def test_plugins_list_uses_explicit_config(monkeypatch, tmp_path: Path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"example": {"enabled": True}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names",
+        lambda: ["example"],
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {},
+    )
+
+    result = runner.invoke(app, ["plugins", "list", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    stripped_output = _strip_ansi(result.stdout)
+    assert "example" in stripped_output
+    assert "yes" in stripped_output
+
+
 def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkeypatch):
     token_path = tmp_path / "auth" / "codex.json"
     lock_path = token_path.with_suffix(".lock")
@@ -336,6 +493,154 @@ def test_provider_login_rejects_unknown_provider():
 
     assert result.exit_code == 1
     assert "Unknown OAuth provider" in result.stdout
+
+
+def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
+    config_path = tmp_path / "config.json"
+    called = False
+    original = cli_commands._LOGIN_HANDLERS["openai_codex"]
+
+    def fake_login() -> None:
+        nonlocal called
+        called = True
+
+    cli_commands._LOGIN_HANDLERS["openai_codex"] = fake_login
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "provider",
+                "login",
+                "openai-codex",
+                "--set-main",
+                "--config",
+                str(config_path),
+            ],
+        )
+    finally:
+        cli_commands._LOGIN_HANDLERS["openai_codex"] = original
+
+    assert result.exit_code == 0
+    assert called is True
+    assert "Set openai-codex as the main provider" in result.stdout
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.agents.defaults.provider == "openai_codex"
+    assert saved.agents.defaults.model == "openai-codex/gpt-5.4-mini"
+    assert saved.agents.defaults.model_preset is None
+    assert make_provider(saved).__class__.__name__ == "OpenAICodexProvider"
+
+
+def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
+    config_path = tmp_path / "config.json"
+    original = cli_commands._LOGIN_HANDLERS["github_copilot"]
+    cli_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "provider",
+                "login",
+                "github-copilot",
+                "--set-main",
+                "--config",
+                str(config_path),
+            ],
+        )
+    finally:
+        cli_commands._LOGIN_HANDLERS["github_copilot"] = original
+
+    assert result.exit_code == 0
+    assert "Set github-copilot as the main provider" in result.stdout
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.agents.defaults.provider == "github_copilot"
+    assert saved.agents.defaults.model == "github-copilot/gpt-5.4-mini"
+    assert saved.agents.defaults.model_preset is None
+    assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
+
+
+def test_provider_login_model_implies_set_main_provider(tmp_path):
+    config_path = tmp_path / "config.json"
+    original = cli_commands._LOGIN_HANDLERS["github_copilot"]
+    cli_commands._LOGIN_HANDLERS["github_copilot"] = lambda: None
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "provider",
+                "login",
+                "github-copilot",
+                "--model",
+                "github-copilot/gpt-5.4-mini",
+                "--config",
+                str(config_path),
+            ],
+        )
+    finally:
+        cli_commands._LOGIN_HANDLERS["github_copilot"] = original
+
+    assert result.exit_code == 0
+    assert "Set github-copilot as the main provider" in result.stdout
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.agents.defaults.provider == "github_copilot"
+    assert saved.agents.defaults.model == "github-copilot/gpt-5.4-mini"
+    assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
+
+
+def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
+    proxy = "http://127.0.0.1:23458"
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
+    )
+
+    import oauth_cli_kit
+
+    def fake_get_token(**_kwargs):
+        raise RuntimeError("no-token")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+
+    captured: dict[str, str | None] = {}
+
+    def fake_login(*, print_fn, prompt_fn, proxy=None):
+        captured["proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "login_oauth_interactive", fake_login)
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert captured["proxy"] == proxy
+
+
+def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
+    proxy = "http://127.0.0.1:23458"
+    monkeypatch.setenv("CODEX_PROXY_FOR_TEST", proxy)
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config.model_validate(
+            {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
+        ),
+    )
+
+    import oauth_cli_kit
+
+    captured: dict[str, str | None] = {}
+
+    def fake_get_token(*, proxy=None):
+        captured["proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+
+    result = runner.invoke(app, ["provider", "login", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert captured["proxy"] == proxy
 
 
 def test_config_matches_explicit_ollama_prefix_without_api_key():
@@ -589,6 +894,54 @@ def test_make_provider_uses_github_copilot_backend():
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
+def test_openai_codex_proxy_config_affects_provider_and_signature():
+    def config_with_proxy(proxy: str) -> Config:
+        return Config.model_validate(
+            {
+                "agents": {
+                    "defaults": {
+                        "provider": "openai-codex",
+                        "model": "openai-codex/gpt-5.5",
+                    }
+                },
+                "providers": {"openaiCodex": {"proxy": proxy}},
+            }
+        )
+
+    proxy = "http://127.0.0.1:23458"
+    config = config_with_proxy(proxy)
+
+    provider = make_provider(config)
+
+    assert provider.__class__.__name__ == "OpenAICodexProvider"
+    assert provider.proxy == proxy
+    assert provider_signature(config) != provider_signature(
+        config_with_proxy("http://127.0.0.1:23459")
+    )
+
+
+def test_provider_proxy_rejects_unsupported_backend():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "anthropic/claude-opus-4-5",
+                }
+            },
+            "providers": {
+                "anthropic": {
+                    "apiKey": "sk-test",
+                    "proxy": "http://127.0.0.1:23458",
+                }
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"providers\.anthropic\.proxy"):
+        make_provider(config)
+
+
 def test_github_copilot_provider_strips_prefixed_model_name():
     from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
@@ -656,7 +1009,7 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
                         "x-session-affinity": "sticky-session",
                     },
                 }
-            },
+            }
         }
     )
 
@@ -1165,6 +1518,21 @@ def test_heartbeat_skips_bundled_template():
     assert _heartbeat_has_active_tasks(load_bundled_template("HEARTBEAT.md")) is False
 
 
+def test_heartbeat_target_skips_archived_webui_sessions():
+    from nanobot.cli.commands import _pick_heartbeat_target_from_sessions
+
+    target = _pick_heartbeat_target_from_sessions(
+        enabled_channels=["websocket"],
+        archived_keys=["websocket:archived"],
+        sessions=[
+            {"key": "websocket:archived"},
+            {"key": "websocket:active"},
+        ],
+    )
+
+    assert target == ("websocket", "active")
+
+
 def _write_instance_config(tmp_path: Path) -> Path:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -1183,6 +1551,15 @@ def _test_provider_snapshot(provider: object, config: Config) -> ProviderSnapsho
         context_window_tokens=config.agents.defaults.context_window_tokens,
         signature=("test",),
     )
+
+
+def _patch_webui_provider_ready(monkeypatch) -> None:
+    provider = _fake_provider()
+
+    def _snapshot(config: Config, **_kwargs) -> ProviderSnapshot:
+        return _test_provider_snapshot(provider, config)
+
+    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _snapshot)
 
 
 def _patch_cli_command_runtime(
@@ -1232,6 +1609,129 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
 
+def test_webui_yes_creates_config_and_enables_local_websocket(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    workspace = tmp_path / "workspace"
+    seen: dict[str, object] = {}
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr(
+        "nanobot.cli.commands.sync_workspace_templates",
+        lambda path: seen.__setitem__("templates", path),
+    )
+
+    def _fake_run_gateway(config: Config, **kwargs) -> None:
+        seen["gateway_config"] = config
+        seen["gateway_kwargs"] = kwargs
+
+    monkeypatch.setattr("nanobot.cli.commands._run_gateway", _fake_run_gateway)
+
+    result = runner.invoke(
+        app,
+        [
+            "webui",
+            "--config",
+            str(config_file),
+            "--workspace",
+            str(workspace),
+            "--port",
+            "8899",
+            "--gateway-port",
+            "18888",
+            "--yes",
+            "--no-open",
+        ],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(config_file.read_text(encoding="utf-8"))
+    websocket = data["channels"]["websocket"]
+    assert websocket["enabled"] is True
+    assert websocket["host"] == "127.0.0.1"
+    assert websocket["port"] == 8899
+    assert websocket["websocketRequiresToken"] is True
+    assert data["agents"]["defaults"]["workspace"] == str(workspace)
+    assert seen["templates"] == workspace
+    assert seen["gateway_kwargs"] == {"port": 18888, "open_browser_url": None}
+
+
+def test_webui_yes_refuses_missing_provider_setup(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+
+    def _missing_provider(_config: Config, **_kwargs) -> ProviderSnapshot:
+        raise ValueError("No API key configured for provider 'custom'.")
+
+    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _missing_provider)
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+
+    assert result.exit_code == 1
+    assert "provider/model setup is incomplete" in result.stdout
+    assert not config_file.exists()
+
+
+def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.gateway import GatewayStartOptions, GatewayStatus, RuntimeResult
+
+    config_file = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config_file.write_text("{}")
+    seen: dict[str, object] = {}
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+
+    class _FakeRuntime:
+        def __init__(self, **kwargs) -> None:
+            seen["runtime_kwargs"] = kwargs
+
+        def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
+            seen["start_options"] = options
+            status = GatewayStatus(
+                running=True,
+                pid=123,
+                state_path=tmp_path / "gateway.json",
+                log_path=tmp_path / "gateway.log",
+                port=options.port,
+                reason="running",
+            )
+            return RuntimeResult(True, "gateway_started_background", status)
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._open_webui_browser",
+        lambda url: seen.__setitem__("opened_url", url),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "webui",
+            "--config",
+            str(config_file),
+            "--workspace",
+            str(workspace),
+            "--background",
+            "--gateway-port",
+            "18889",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Gateway started in the background" in result.stdout
+    compact_output = _strip_ansi(result.stdout).replace("\n", " ")
+    assert "nanobot gateway status --config" in compact_output
+    assert "--workspace" in compact_output
+    options = seen["start_options"]
+    assert isinstance(options, GatewayStartOptions)
+    assert options.port == 18889
+    assert options.config_path == str(config_file.resolve(strict=False))
+    assert options.workspace == str(workspace.resolve(strict=False))
+    assert seen["opened_url"] == "http://127.0.0.1:8765"
+
+
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
     pytest.importorskip("aiohttp")
 
@@ -1253,10 +1753,16 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         async def close_mcp(self) -> None:
             return None
 
-    def _fake_create_app(agent_loop, model_name: str, request_timeout: float):
+    def _fake_create_app(
+        agent_loop,
+        model_name: str,
+        request_timeout: float,
+        api_key: str = "",
+    ):
         seen["agent_loop"] = agent_loop
         seen["model_name"] = model_name
         seen["request_timeout"] = request_timeout
+        seen["api_key"] = api_key
         return _FakeApiApp()
 
     def _fake_run_app(api_app, host: str, port: int, print):
@@ -1672,6 +2178,122 @@ def test_gateway_bound_cron_runs_as_session_turn(
     assert msg.metadata["thread_id"] == "om_root123"
 
 
+def test_gateway_local_trigger_queue_submits_agent_turns(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    config.agents.defaults.dream.enabled = False
+    config.gateway.heartbeat.enabled = False
+    bus = MagicMock()
+    seen: dict[str, object] = {}
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: bus,
+        session_manager=lambda _workspace: _FakeSessionManager(),
+        cron_service=lambda _store_path: _FakeCronService(),
+    )
+
+    class _FakeMemory:
+        def get_latest_cursor(self) -> int:
+            return 0
+
+        def get_last_dream_cursor(self) -> int:
+            return 0
+
+        def set_last_dream_cursor(self, _cursor: int) -> None:
+            return None
+
+    class _FakeContext:
+        memory = _FakeMemory()
+
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
+        def list_sessions(self) -> list[dict[str, object]]:
+            return []
+
+    class _FakeCronService:
+        def __init__(self) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            seen["agent_from_config_kwargs"] = extra
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = _fake_provider()
+            self.tools = {}
+            self.context = _FakeContext()
+            self.sessions = kwargs["session_manager"]
+            self.submit_local_trigger_turn = AsyncMock()
+            seen["agent"] = self
+
+        def _schedule_background(self, _coro) -> None:
+            return None
+
+        async def run(self) -> None:
+            await asyncio.Event().wait()
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        enabled_channels: list[str] = []
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def start_all(self) -> None:
+            await asyncio.Event().wait()
+
+        async def stop_all(self) -> None:
+            return None
+
+    async def _fake_run_local_trigger_queue(**kwargs):
+        seen["local_trigger_queue_kwargs"] = kwargs
+        raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr(
+        "nanobot.triggers.local_runner.run_local_trigger_queue",
+        _fake_run_local_trigger_queue,
+    )
+
+    cli_commands._run_gateway(config, health_server_enabled=False)
+
+    agent = seen["agent"]
+    agent_kwargs = seen["agent_from_config_kwargs"]
+    kwargs = seen["local_trigger_queue_kwargs"]
+    assert "local_trigger_store" in agent_kwargs
+    assert kwargs["store"] is agent_kwargs["local_trigger_store"]
+    assert "bus" not in kwargs
+    assert kwargs["submit_turn"] is agent.submit_local_trigger_turn
+
+
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -1960,6 +2582,221 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert missing_response.endswith("\r\n\r\nNot Found")
 
 
+def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.gateway.port = 18791
+    seen: dict[str, object] = {}
+
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, **_kwargs) -> None:
+            self.model = "test-model"
+            self.provider = object()
+            self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["agent_task_cleaned_up"] = True
+
+        async def close_mcp(self) -> None:
+            raise AssertionError("gateway must not close MCP from the outer task")
+
+        def stop(self) -> None:
+            seen["agent_stopped"] = True
+
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus, **_kwargs) -> None:
+            self.enabled_channels = ["telegram"]
+
+        async def start_all(self) -> None:
+            await asyncio.Event().wait()
+
+        async def stop_all(self) -> None:
+            seen["channels_stopped"] = True
+
+    class _FakeCronService:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            seen["cron_stopped"] = True
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeServer:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def serve_forever(self) -> None:
+            raise _StopGatewayError("stop")
+
+    async def _fake_start_server(_handler, _host: str, _port: int):
+        return _FakeServer()
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+    monkeypatch.setattr("asyncio.start_server", _fake_start_server)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["agent_stopped"] is True
+    assert seen["agent_task_cleaned_up"] is True
+    assert seen["channels_stopped"] is True
+    assert seen["cron_stopped"] is True
+
+
+def test_gateway_shutdown_event_exits_forever_runtime_tasks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.gateway.port = 18791
+    seen: dict[str, object] = {}
+
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, **_kwargs) -> None:
+            self.model = "test-model"
+            self.provider = object()
+            self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["agent_task_cleaned_up"] = True
+
+        async def close_mcp(self) -> None:
+            raise AssertionError("gateway must not close MCP from the outer task")
+
+        def stop(self) -> None:
+            seen["agent_stopped"] = True
+
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus, **_kwargs) -> None:
+            self.enabled_channels = ["websocket"]
+
+        async def start_all(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["channel_task_cleaned_up"] = True
+
+        async def stop_all(self) -> None:
+            seen["channels_stopped"] = True
+
+    class _FakeCronService:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            seen["cron_stopped"] = True
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeServer:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def serve_forever(self) -> None:
+            await asyncio.Event().wait()
+
+    async def _fake_start_server(_handler, _host: str, _port: int):
+        return _FakeServer()
+
+    def _fake_install_shutdown_handlers(_loop, event, _tasks, _print_status):
+        async def _trigger_shutdown() -> None:
+            await asyncio.sleep(0)
+            event.set()
+
+        asyncio.create_task(_trigger_shutdown())
+
+        def _restore() -> None:
+            seen["shutdown_handlers_restored"] = True
+
+        return _restore
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+    monkeypatch.setattr("asyncio.start_server", _fake_start_server)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._install_gateway_shutdown_handlers",
+        _fake_install_shutdown_handlers,
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["agent_stopped"] is True
+    assert seen["agent_task_cleaned_up"] is True
+    assert seen["channel_task_cleaned_up"] is True
+    assert seen["channels_stopped"] is True
+    assert seen["cron_stopped"] is True
+    assert seen["shutdown_handlers_restored"] is True
+
+
 def test_serve_uses_api_config_defaults_and_workspace_override(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -1984,6 +2821,39 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["host"] == "127.0.0.2"
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0
+    assert seen["api_key"] == ""
+
+
+def test_trigger_cli_queues_message_in_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.triggers.local_store import LocalTriggerStore
+
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    _patch_cli_command_runtime(monkeypatch, config)
+
+    store = LocalTriggerStore(config.workspace_path)
+    trigger = store.create(
+        name="Review hook",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+
+    result = runner.invoke(
+        app,
+        ["trigger", "--config", str(config_file), trigger.id, "Review PR #4502"],
+    )
+
+    assert result.exit_code == 0
+    assert f"Queued {trigger.id}" in result.stdout
+    deliveries = store.claim_deliveries()
+    assert len(deliveries) == 1
+    assert deliveries[0].trigger_id == trigger.id
+    assert deliveries[0].content == "Review PR #4502"
 
 
 def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> None:
@@ -2015,6 +2885,35 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 18901
     assert seen["request_timeout"] == 46.0
+    assert seen["api_key"] == ""
+
+
+def test_serve_passes_configured_api_key(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.api.api_key = " secret "
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["api_key"] == "secret"
+
+
+def test_serve_rejects_wildcard_host_without_api_key(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file), "--host", "0.0.0.0"])
+
+    assert result.exit_code == 1
+    assert "api_key is not set" in result.stdout
+    assert "api_app" not in seen
 
 
 def test_channels_login_requires_channel_name() -> None:

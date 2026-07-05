@@ -256,6 +256,34 @@ describe("App layout", () => {
     vi.useRealTimers();
   });
 
+  it("shows the auth form without an invalid-password error on first load", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
+    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows an invalid-password error after a submitted password is rejected", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    const password = await screen.findByPlaceholderText("Password");
+    fireEvent.change(password, { target: { value: "wrong-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Invalid password. Try again.")).toBeInTheDocument();
+    expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps sidebar layout out of the main thread width contract", async () => {
     const { container } = render(<App />);
 
@@ -1499,6 +1527,10 @@ describe("App layout", () => {
       }),
     );
 
+    localStorage.setItem(
+      "nanobot-webui.settings-preferences",
+      JSON.stringify({ brandLogos: true }),
+    );
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());

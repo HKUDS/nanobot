@@ -31,7 +31,7 @@ If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram,
 
 ## How to Read `nanobot status`
 
-`nanobot status` does not call a model. It only checks whether nanobot can find the default config, default workspace, active model or preset, and provider setup summary.
+`nanobot status` does not call a model. It only checks whether nanobot can find the selected config, selected workspace, active model or preset, and provider setup summary.
 
 The output has this shape:
 
@@ -90,9 +90,10 @@ Default workspace path:
 ~/.nanobot/workspace/
 ```
 
-`nanobot status` reads the default config. Use explicit paths on commands that support them when debugging multiple instances:
+`nanobot status` reads the default config unless you pass explicit paths. Use the same `--config` and `--workspace` across status checks and runtime commands when debugging multiple instances:
 
 ```bash
+nanobot status --config ./bot-a/config.json --workspace ./bot-a/workspace
 nanobot agent --config ./bot-a/config.json --workspace ./bot-a/workspace -m "Hello"
 nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
 ```

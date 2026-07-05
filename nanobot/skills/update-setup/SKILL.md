@@ -58,7 +58,7 @@ If the user selected `source (git clone)`, ask for the local checkout path:
 **Question 2 — Optional dependencies:**
 
 ```
-question: "Which optional dependencies do you need? List names separated by spaces, or reply 'none'. Available: api, wecom, weixin, msteams, matrix, discord, langsmith, pdf"
+question: "Which optional dependencies do you need? List names separated by spaces, or reply 'none'. Available: api, azure, bedrock, dingtalk, discord, documents, feishu, matrix, mochat, msteams, napcat, qq, slack, telegram, wecom, weixin, langsmith, pdf"
 ```
 
 Parse the reply. If the user says "none" or similar, set extras to empty. Otherwise collect the valid names.

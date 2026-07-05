@@ -18,6 +18,7 @@ if not FEISHU_AVAILABLE:
     pytest.skip("Feishu dependencies not installed (lark-oapi)", allow_module_level=True)
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig
 
@@ -332,7 +333,8 @@ async def test_send_skips_reply_for_progress_messages() -> None:
         channel="feishu",
         chat_id="oc_abc",
         content="thinking...",
-        metadata={"message_id": "om_001", "_progress": True},
+        event=ProgressEvent(content="thinking..."),
+        metadata={"message_id": "om_001"},
     ))
 
     channel._client.im.v1.message.create.assert_called_once()

@@ -358,6 +358,7 @@ class OpenAICompatProvider(LLMProvider):
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
+        proxy: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -366,6 +367,7 @@ class OpenAICompatProvider(LLMProvider):
         self._extra_body = extra_body or {}
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
+        self._proxy = proxy or None
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -396,7 +398,14 @@ class OpenAICompatProvider(LLMProvider):
 
         timeout_s = _openai_compat_timeout_s()
         http_client: httpx.AsyncClient | None = None
-        if self._is_local:
+        if self._proxy:
+            http_client = httpx.AsyncClient(
+                timeout=timeout_s,
+                proxy=self._proxy,
+                trust_env=False,
+                follow_redirects=True,
+            )
+        elif self._is_local:
             # Local model servers (Ollama, llama.cpp, vLLM) often close idle
             # HTTP connections before the client-side keepalive expires. When
             # two LLM calls happen seconds apart (e.g. heartbeat _decide then
@@ -1094,7 +1103,11 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
-                return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
+                return LLMResponse(
+                    content="Error: API returned empty choices.",
+                    finish_reason="error",
+                    error_kind="empty",
+                )
 
             choice0 = self._maybe_mapping(choices[0]) or {}
             msg0 = self._maybe_mapping(choice0.get("message")) or {}
@@ -1127,14 +1140,21 @@ class OpenAICompatProvider(LLMProvider):
                 if reasoning_content is None:
                     reasoning_content = m.get("reasoning_content")
 
+            # Deduplicate tool call IDs (same pattern as streaming path)
+            # Some providers reuse the same ID for parallel tool calls.
+            _seen_tc_ids: set[str] = set()
             parsed_tool_calls = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = parse_tool_arguments(fn.get("arguments", {}))
                 ec, prov, fn_prov = _extract_tc_extras(tc)
+                raw_id = str(tc_map.get("id") or _short_tool_id())
+                if not raw_id or raw_id in _seen_tc_ids:
+                    raw_id = _short_tool_id()
+                _seen_tc_ids.add(raw_id)
                 parsed_tool_calls.append(ToolCallRequest(
-                    id=str(tc_map.get("id") or _short_tool_id()),
+                    id=raw_id,
                     name=str(fn.get("name") or ""),
                     arguments=args,
                     extra_content=ec,
@@ -1151,7 +1171,11 @@ class OpenAICompatProvider(LLMProvider):
             )
 
         if not response.choices:
-            return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
+            return LLMResponse(
+                content="Error: API returned empty choices.",
+                finish_reason="error",
+                error_kind="empty",
+            )
 
         choice = response.choices[0]
         msg = choice.message

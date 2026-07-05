@@ -125,6 +125,7 @@ def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
             required=["tag"],
         ),
         required=["query", "count"],
+        additional_properties=None,
     )
     assert built == SampleTool().parameters
 
@@ -193,6 +194,25 @@ def test_validate_params_ignores_unknown_fields() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi", "count": 2, "extra": "x"})
     assert errors == []
+
+
+def test_tool_parameters_schema_rejects_unknown_fields_by_default() -> None:
+    tool = DecoratedSampleTool()
+    errors = tool.validate_params({"query": "hi", "count": 2, "extra": "x"})
+    assert errors == ["unexpected parameter extra"]
+
+
+def test_validate_params_validates_typed_additional_properties() -> None:
+    schema = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {"type": "integer"},
+    }
+    tool = CastTestTool(schema)
+
+    errors = tool.validate_params({"extra": "2"})
+
+    assert errors == ["extra should be integer"]
 
 
 async def test_registry_returns_validation_error() -> None:
