@@ -342,6 +342,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         supports_max_completion_tokens=True,
     ),
+    # Anthropic OAuth: Claude Code-compatible OAuth token
+    ProviderSpec(
+        name="anthropic_oauth",
+        keywords=("anthropic-oauth", "anthropic_oauth"),
+        env_key="",
+        display_name="Anthropic OAuth",
+        backend="anthropic",
+        is_oauth=True,
+        supports_prompt_caching=True,
+    ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
         name="openai_codex",

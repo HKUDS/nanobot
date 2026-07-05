@@ -15,6 +15,7 @@ from nanobot.webui.settings_api import (
     _oauth_provider_status,
     create_model_configuration,
     login_oauth_provider,
+    logout_oauth_provider,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -878,6 +879,26 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     login_oauth_provider({"provider": ["openai-codex"]})
 
     assert captured == {"get_proxy": proxy, "login_proxy": proxy}
+
+
+def test_anthropic_oauth_logout_warns_when_env_token_set(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token_path = tmp_path / "auth" / "anthropic-oauth.json"
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "nanobot.providers.anthropic_provider.get_anthropic_oauth_storage_path",
+        lambda: token_path,
+    )
+
+    payload = logout_oauth_provider({"provider": ["anthropic-oauth"]})
+
+    assert not token_path.exists()
+    assert "CLAUDE_CODE_OAUTH_TOKEN environment variable is still set" in payload["warning"]
+    assert "unset CLAUDE_CODE_OAUTH_TOKEN" in payload["warning"]
 
 
 def test_provider_models_payload_fetches_openai_compatible_models(

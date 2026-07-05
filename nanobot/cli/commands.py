@@ -2233,14 +2233,21 @@ _LOGIN_HANDLERS: dict[str, Callable[[], None]] = {}
 _LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
 
 _PROVIDER_DISPLAY: dict[str, str] = {
+    "anthropic_oauth": "Anthropic OAuth",
     "openai_codex": "OpenAI Codex",
     "github_copilot": "GitHub Copilot",
 }
 
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+    "anthropic_oauth": "anthropic-oauth/claude-sonnet-4-6",
     "openai_codex": "openai-codex/gpt-5.4-mini",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
+
+_CLAUDE_CODE_OAUTH_ENV_WARNING = (
+    "Note: CLAUDE_CODE_OAUTH_TOKEN environment variable is still set. "
+    "Unset it (e.g. `unset CLAUDE_CODE_OAUTH_TOKEN`) to fully log out."
+)
 
 
 def _register_login(name: str):
@@ -2304,7 +2311,10 @@ def _set_oauth_provider_as_main(
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ...,
+        help="OAuth provider (e.g. 'anthropic-oauth', 'openai-codex', 'github-copilot')",
+    ),
     set_main: bool = typer.Option(
         False,
         "--set-main",
@@ -2335,7 +2345,10 @@ def provider_login(
 
 @provider_app.command("logout")
 def provider_logout(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ...,
+        help="OAuth provider (e.g. 'anthropic-oauth', 'openai-codex', 'github-copilot')",
+    ),
 ):
     """Log out from an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -2347,6 +2360,41 @@ def provider_logout(
 
     console.print(f"{__logo__} OAuth Logout - {spec.label}\n")
     handler()
+
+
+@_register_login("anthropic_oauth")
+def _login_anthropic_oauth() -> None:
+    try:
+        from nanobot.providers.anthropic_provider import (
+            CLAUDE_CODE_OAUTH_TOKEN_ENV,
+            login_anthropic_oauth,
+        )
+    except ImportError:
+        console.print("[red]Anthropic OAuth support is unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        raise typer.Exit(1)
+
+    login_anthropic_oauth()
+    if os.environ.get(CLAUDE_CODE_OAUTH_TOKEN_ENV):
+        console.print("[green]Using CLAUDE_CODE_OAUTH_TOKEN from environment (no file stored)[/green]")
+        return
+    console.print("[green]✓ Authenticated with Anthropic OAuth[/green]")
+
+
+@_register_logout("anthropic_oauth")
+def _logout_anthropic_oauth() -> None:
+    """Clear local OAuth credentials for Anthropic OAuth."""
+    try:
+        from nanobot.providers.anthropic_provider import (
+            CLAUDE_CODE_OAUTH_TOKEN_ENV,
+            get_anthropic_oauth_storage_path,
+        )
+    except ImportError:
+        console.print("[red]Anthropic OAuth support is unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        raise typer.Exit(1)
+
+    _delete_oauth_files(get_anthropic_oauth_storage_path(), _PROVIDER_DISPLAY["anthropic_oauth"])
+    if os.environ.get(CLAUDE_CODE_OAUTH_TOKEN_ENV):
+        console.print(f"[yellow]! {_CLAUDE_CODE_OAUTH_ENV_WARNING}[/yellow]")
 
 
 @_register_login("openai_codex")

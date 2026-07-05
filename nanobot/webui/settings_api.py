@@ -98,6 +98,10 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_CLAUDE_CODE_OAUTH_ENV_WARNING = (
+    "Note: CLAUDE_CODE_OAUTH_TOKEN environment variable is still set. "
+    "Unset it (e.g. `unset CLAUDE_CODE_OAUTH_TOKEN`) to fully log out."
+)
 
 class WebUISettingsError(ValueError):
     """User-facing settings validation failure."""
@@ -228,6 +232,24 @@ def _provider_requires_api_base(spec: Any) -> bool:
 def _oauth_provider_status(spec: Any) -> dict[str, Any]:
     if not getattr(spec, "is_oauth", False):
         return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+
+    if spec.name == "anthropic_oauth":
+        try:
+            from nanobot.providers.anthropic_provider import get_anthropic_oauth_login_status
+        except ImportError:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = get_anthropic_oauth_login_status()
+        return {
+            "configured": bool(token and getattr(token, "access", None)),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": getattr(token, "expires", None) if token else None,
+            "login_supported": True,
+        }
 
     if spec.name == "openai_codex":
         try:
@@ -1139,6 +1161,15 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("OAuth login failed", status=401)
         return settings_payload()
 
+    if spec.name == "anthropic_oauth":
+        try:
+            from nanobot.providers.anthropic_provider import login_anthropic_oauth
+        except ImportError:
+            raise WebUISettingsError("Anthropic OAuth support is unavailable", status=500) from None
+
+        login_anthropic_oauth()
+        return settings_payload()
+
     if spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import (
@@ -1173,6 +1204,15 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
         except ImportError:
             raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
+    elif spec.name == "anthropic_oauth":
+        try:
+            from nanobot.providers.anthropic_provider import (
+                CLAUDE_CODE_OAUTH_TOKEN_ENV,
+                get_anthropic_oauth_storage_path,
+            )
+        except ImportError:
+            raise WebUISettingsError("Anthropic OAuth support is unavailable", status=500) from None
+        token_path = get_anthropic_oauth_storage_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
@@ -1185,7 +1225,10 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
     for path in (token_path, token_path.with_suffix(".lock")):
         with suppress(FileNotFoundError):
             path.unlink()
-    return settings_payload()
+    payload = settings_payload()
+    if spec.name == "anthropic_oauth" and os.environ.get(CLAUDE_CODE_OAUTH_TOKEN_ENV):
+        payload["warning"] = _CLAUDE_CODE_OAUTH_ENV_WARNING
+    return payload
 
 
 def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:

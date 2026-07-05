@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import secrets
 import string
 from collections import deque
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from loguru import logger
@@ -23,6 +27,8 @@ from nanobot.providers.base import (
 )
 
 _ALNUM = string.ascii_letters + string.digits
+CLAUDE_CODE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+ANTHROPIC_OAUTH_TOKEN_FILENAME = "anthropic-oauth.json"
 
 
 def _gen_tool_id() -> str:
@@ -45,6 +51,39 @@ def _sanitize_tool_id(tid: str) -> str:
     safe_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", tid)[:48].strip("_") or "toolu"
     digest = hashlib.sha1(tid.encode()).hexdigest()[:8]
     return f"{safe_prefix}_{digest}"
+
+
+def get_anthropic_oauth_storage_path() -> Path:
+    """Return the local storage path used for Anthropic OAuth tokens."""
+    from oauth_cli_kit.storage import FileTokenStorage
+
+    return FileTokenStorage(token_filename=ANTHROPIC_OAUTH_TOKEN_FILENAME).get_token_path()
+
+
+def get_anthropic_oauth_login_status() -> Any | None:
+    """Return Anthropic OAuth status, preferring Claude Code's env token."""
+    env_token = os.environ.get(CLAUDE_CODE_OAUTH_TOKEN_ENV)
+    if env_token:
+        return SimpleNamespace(access=env_token, account_id="environment", expires=None)
+
+    token = None
+    with suppress(Exception):
+        from oauth_cli_kit.storage import FileTokenStorage
+
+        token = FileTokenStorage(token_filename=ANTHROPIC_OAUTH_TOKEN_FILENAME).load()
+    if token and getattr(token, "access", None):
+        return token
+    return None
+
+
+def login_anthropic_oauth() -> Any | None:
+    """Log in to Anthropic OAuth unless Claude Code's env token is already set."""
+    if os.environ.get(CLAUDE_CODE_OAUTH_TOKEN_ENV):
+        return None
+
+    from oauth_cli_kit import login_oauth_interactive
+
+    return login_oauth_interactive()
 
 
 class AnthropicProvider(LLMProvider):

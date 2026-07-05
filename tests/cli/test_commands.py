@@ -464,6 +464,25 @@ def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkey
     assert "No local OAuth credentials found for GitHub Copilot" in result.stdout
 
 
+def test_provider_logout_anthropic_oauth_warns_when_env_token_set(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "anthropic-oauth.json"
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "nanobot.providers.anthropic_provider.get_anthropic_oauth_storage_path",
+        lambda: token_path,
+    )
+
+    result = runner.invoke(app, ["provider", "logout", "anthropic-oauth"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert "Logged out from Anthropic OAuth" in result.stdout
+    assert "CLAUDE_CODE_OAUTH_TOKEN environment variable is still set" in result.stdout
+    assert "unset CLAUDE_CODE_OAUTH_TOKEN" in result.stdout
+
+
 def test_provider_logout_rejects_unknown_provider():
     result = runner.invoke(app, ["provider", "logout", "not-a-real-provider"])
 
@@ -493,6 +512,48 @@ def test_provider_login_rejects_unknown_provider():
 
     assert result.exit_code == 1
     assert "Unknown OAuth provider" in result.stdout
+
+
+def test_provider_login_anthropic_oauth_uses_env_token_message(monkeypatch):
+    called = False
+
+    def fake_login() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "nanobot.providers.anthropic_provider.login_anthropic_oauth",
+        fake_login,
+    )
+
+    result = runner.invoke(app, ["provider", "login", "anthropic-oauth"])
+
+    assert result.exit_code == 0
+    assert called is True
+    assert "Using CLAUDE_CODE_OAUTH_TOKEN from environment (no file stored)" in result.stdout
+    assert "Authenticated with Anthropic OAuth" not in result.stdout
+
+
+def test_provider_login_anthropic_oauth_without_env_token_shows_success(monkeypatch):
+    called = False
+
+    def fake_login() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "nanobot.providers.anthropic_provider.login_anthropic_oauth",
+        fake_login,
+    )
+
+    result = runner.invoke(app, ["provider", "login", "anthropic-oauth"])
+
+    assert result.exit_code == 0
+    assert called is True
+    assert "Authenticated with Anthropic OAuth" in result.stdout
+    assert "CLAUDE_CODE_OAUTH_TOKEN from environment" not in result.stdout
 
 
 def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):

@@ -103,8 +103,14 @@ def _make_provider_core(
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
+        api_key = p.api_key if p else None
+        if spec and spec.name == "anthropic_oauth":
+            from nanobot.providers.anthropic_provider import get_anthropic_oauth_login_status
+
+            token = get_anthropic_oauth_login_status()
+            api_key = getattr(token, "access", None) if token else None
         provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
+            api_key=api_key,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
