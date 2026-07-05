@@ -32,7 +32,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes and you enabled the WebSocket channel, go straight to [Open the WebUI](#5-open-the-webui).
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, go straight to [Open the WebUI](#5-open-the-webui).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -235,13 +235,13 @@ Read it like this:
 
 ## 5. Open the WebUI
 
-If Quick Start enabled the WebSocket channel, start the gateway:
+Start the browser workbench:
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
+`nanobot webui` prepares the local WebSocket channel if needed, starts the gateway, and opens `http://127.0.0.1:8765`. First-run WebUI setup binds to `127.0.0.1` by default, so it is not exposed to your LAN. Use `nanobot webui --background` when you want the gateway to keep running without an open terminal.
 
 ## 6. Test One CLI Message
 
@@ -342,6 +342,6 @@ nanobot plugins enable whatsapp
 | Authentication or 401 errors | Check that the API key is valid, copied without spaces, and placed under the provider you selected. |
 | Provider/model errors | Make sure the active preset uses the provider that owns your API key and that the model exists there. |
 | The CLI works but a chat app does not reply | First keep `nanobot gateway` running, then follow [`chat-apps.md`](./chat-apps.md). |
-| WebUI does not open | Enable the WebSocket channel and open port `8765`, not the gateway health port `18790`. |
+| WebUI does not open | Run `nanobot webui`; the browser UI uses port `8765`, not the gateway health port `18790`. |
 
 For a fuller diagnosis flow, see [`troubleshooting.md`](./troubleshooting.md).

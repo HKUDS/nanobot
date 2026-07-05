@@ -315,10 +315,10 @@ It is normal for most providers to say `not set`. Only the provider you selected
 Start the local browser UI:
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard or the `tokenIssueSecret` value from your manual config.
+This starts nanobot and opens `http://127.0.0.1:8765` in your browser. Leave the terminal open while you use the WebUI. Enter the WebUI password you set in the wizard if the browser asks for one.
 
 Send this first message in the browser:
 
@@ -335,10 +335,10 @@ Hello! How can I help you today?
 If `nanobot` is not found, run:
 
 ```bash
-python -m nanobot gateway
+python -m nanobot webui
 ```
 
-Use `python3 -m nanobot gateway` or `py -m nanobot gateway` if that is the Python command that worked in step 2.
+Use `python3 -m nanobot webui` or `py -m nanobot webui` if that is the Python command that worked in step 2.
 
 Once this works, nanobot can help with its own next setup step. In the browser UI, ask it to read these docs and update your current config for one specific goal, then run `/restart` when nanobot tells you the config is ready. For example, ask it to add one provider preset or configure one chat app.
 
@@ -367,21 +367,21 @@ Skip these until the first local message works:
 
 ## Next Steps
 
-After the first reply works, choose only one next goal. Keep the terminal that runs `nanobot gateway` open whenever you use the WebUI or a chat app.
+After the first reply works, choose only one next goal. Keep the terminal that runs `nanobot webui` open whenever you use the WebUI. Chat apps use the same gateway service underneath.
 
 ### Open the Browser UI Again
 
 Run:
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser.
+Leave that terminal open; the browser should open automatically.
 
 To stop the WebUI later, return to the gateway terminal and press `Ctrl+C`.
 
-If `nanobot` is not found, run `python -m nanobot gateway`, `python3 -m nanobot gateway`, or `py -m nanobot gateway`, matching the Python command that worked earlier. More details are in [`webui.md`](./webui.md).
+If `nanobot` is not found, run `python -m nanobot webui`, `python3 -m nanobot webui`, or `py -m nanobot webui`, matching the Python command that worked earlier. More details are in [`webui.md`](./webui.md).
 
 ### Connect a Chat App
 
