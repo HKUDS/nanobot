@@ -232,7 +232,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **MiniMax thinking mode**: `providers.minimaxAnthropic` is the config block for `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so nanobot keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **Kimi Coding Plan**: Use `providers.kimiCoding` with `provider: "kimi_coding"` for Kimi's dedicated Anthropic Messages API endpoint. The endpoint requires a Claude-compatible `User-Agent`; nanobot sends `claude-code/0.1.0` by default, and you can override it with `extraHeaders.User-Agent` if your account requires a different value.
 > - **VolcEngine / BytePlus Coding Plan**: Subscription endpoints are configured through dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan`, separate from the pay-per-use `volcengine` / `byteplus` providers.
-> - **OpenCode Zen / Go**: `providers.opencodeZen` and `providers.opencodeGo` use the same `OPENCODE_API_KEY`, but route to different OpenCode gateways. These providers use OpenCode's OpenAI-compatible `chat/completions` endpoints; choose model IDs from that endpoint family.
+> - **OpenCode Zen / Go**: `providers.opencode` (canonical Zen), the legacy-compatible `providers.opencodeZen`, and `providers.opencodeGo` use the same `OPENCODE_API_KEY`, but route to different OpenCode gateways. These providers use OpenCode's OpenAI-compatible `chat/completions` endpoints; choose model IDs from that endpoint family.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 > - **StepFun Step Plan**: If you're on StepFun's Step Plan subscription, set `"apiBase": "https://api.stepfun.ai/step_plan/v1"` in your stepfun provider config. Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
@@ -246,7 +246,8 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM gateway for hosted model families + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
-| `opencode_zen` | LLM gateway (OpenCode Zen coding-agent models) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
+| `opencode` | LLM gateway (OpenCode Zen coding-agent models) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
+| `opencode_zen` | LLM gateway (legacy alias for OpenCode Zen) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
 | `opencode_go` | LLM gateway (OpenCode Go low-cost coding models) | [opencode.ai/docs/go](https://opencode.ai/docs/go/) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
@@ -764,6 +765,7 @@ variable, but use separate provider keys and default base URLs:
 
 | Provider | Default API base | Model prefix accepted by nanobot |
 |----------|------------------|-----------------------------------|
+| `opencode` | `https://opencode.ai/zen/v1` | `opencode/<model-id>` |
 | `opencode_zen` | `https://opencode.ai/zen/v1` | `opencode/<model-id>` |
 | `opencode_go` | `https://opencode.ai/zen/go/v1` | `opencode-go/<model-id>` |
 
@@ -772,13 +774,13 @@ OpenCode Zen:
 ```json
 {
   "providers": {
-    "opencodeZen": {
+    "opencode": {
       "apiKey": "${OPENCODE_API_KEY}"
     }
   },
   "modelPresets": {
     "opencodeZen": {
-      "provider": "opencode_zen",
+      "provider": "opencode",
       "model": "opencode/deepseek-v4-pro"
     }
   },
@@ -789,6 +791,8 @@ OpenCode Zen:
   }
 }
 ```
+
+`providers.opencodeZen` / `provider: "opencode_zen"` still work as compatibility aliases for existing configs.
 
 OpenCode Go:
 
