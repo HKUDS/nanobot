@@ -458,18 +458,36 @@
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
     },
     "apps": {
-      "description": "Thêm CLI ứng dụng và dịch vụ MCP mà nanobot có thể dùng trong chat.",
+      "description": "Bật plugin, bộ chuyển đổi ứng dụng cục bộ và máy chủ công cụ đã kết nối.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Kênh",
+      "featureLabel": "Tính năng",
       "filterAll": "Tất cả",
+      "filterPlugins": "Plugin",
       "filterCli": "Ứng dụng CLI",
       "filterMcp": "Dịch vụ MCP",
       "enabledSummary": "{{count}} đã bật",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} plugin · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Tìm ứng dụng",
-      "featured": "Nổi bật",
+      "featured": "Danh mục",
       "loading": "Đang tải ứng dụng...",
-      "empty": "Không có ứng dụng phù hợp."
+      "empty": "Không có ứng dụng phù hợp.",
+      "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật."
+    },
+    "nanobotFeatures": {
+      "enabled": "Đã bật",
+      "enable": "Bật",
+      "disable": "Tắt",
+      "ready": "Sẵn sàng",
+      "missingDependency": "Thiếu gói hỗ trợ",
+      "installSupport": "Cài gói hỗ trợ",
+      "installConfirmTitle": "Cài hỗ trợ cho {{name}}?",
+      "installConfirmDescription": "nanobot sẽ thêm những gì {{name}} cần, rồi bật tính năng này. Tiếp tục?",
+      "installConfirmAction": "Cài và bật",
+      "websocketRequired": "Bắt buộc cho WebUI",
+      "channelDisabled": "Kênh đang tắt",
+      "notEnabled": "Chưa bật"
     },
     "automations": {
       "filters": {
@@ -965,11 +983,11 @@
         "mcpDescription": "Dùng @{{name}} như máy chủ MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Chế độ truy cập workspace",
         "projectAria": "Chọn dự án",
         "projectPlaceholder": "Chọn dự án",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Quyền mặc định",
+        "full": "Toàn quyền truy cập"
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
@@ -1053,17 +1071,17 @@
       "body": "Máy chủ đã từ chối tin nhắn trước vì vượt quá giới hạn kích thước. Hãy bớt ảnh hoặc chọn tệp nhỏ hơn rồi thử lại."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace không thay đổi",
+      "body": "Gateway đã từ chối dự án hoặc chế độ truy cập được yêu cầu, nên Nanobot giữ workspace trước đó."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace mặc định",
       "manual": "Dán đường dẫn",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Dùng đường dẫn",
+      "absolutePathRequired": "Nhập đường dẫn thư mục tuyệt đối trên máy này."
     }
   }
 }

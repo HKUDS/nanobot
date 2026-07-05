@@ -18,7 +18,7 @@ from nanobot.agent.tools.self import MyTool
 def _make_mock_loop(**overrides):
     """Build a lightweight mock AgentLoop with the attributes MyTool reads."""
     loop = MagicMock()
-    loop.model = "anthropic/claude-sonnet-4-20250514"
+    loop.model = "anthropic/claude-sonnet-4-6"
     loop.max_iterations = 40
     loop.context_window_tokens = 65_536
     loop.workspace = Path("/tmp/workspace")

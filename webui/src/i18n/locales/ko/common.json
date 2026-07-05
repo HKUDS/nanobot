@@ -458,18 +458,36 @@
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
     },
     "apps": {
-      "description": "nanobot이 채팅에서 사용할 수 있는 App CLI와 MCP 서비스를 추가합니다.",
+      "description": "플러그인, 로컬 앱 어댑터, 연결된 도구 서버를 활성화합니다.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "채널",
+      "featureLabel": "기능",
       "filterAll": "전체",
+      "filterPlugins": "플러그인",
       "filterCli": "CLI 앱",
       "filterMcp": "MCP 서비스",
       "enabledSummary": "{{count}}개 활성화됨",
-      "caption": "CLI {{cli}}개 · MCP {{mcp}}개",
+      "caption": "플러그인 {{plugins}}개 · CLI {{cli}}개 · MCP {{mcp}}개",
       "searchPlaceholder": "앱 검색",
-      "featured": "추천",
+      "featured": "카탈로그",
       "loading": "앱을 불러오는 중...",
-      "empty": "일치하는 앱이 없습니다."
+      "empty": "일치하는 앱이 없습니다.",
+      "restartRequired": "업데이트된 앱과 기능을 적용하려면 nanobot을 다시 시작하세요."
+    },
+    "nanobotFeatures": {
+      "enabled": "활성화됨",
+      "enable": "활성화",
+      "disable": "비활성화",
+      "ready": "준비됨",
+      "missingDependency": "지원 패키지 없음",
+      "installSupport": "지원 패키지 설치",
+      "installConfirmTitle": "{{name}} 지원을 설치할까요?",
+      "installConfirmDescription": "nanobot이 {{name}}에 필요한 것을 추가한 뒤 활성화합니다. 계속할까요?",
+      "installConfirmAction": "설치하고 활성화",
+      "websocketRequired": "WebUI 필수",
+      "channelDisabled": "채널이 비활성화됨",
+      "notEnabled": "비활성화됨"
     },
     "automations": {
       "filters": {
@@ -965,11 +983,11 @@
         "mcpDescription": "@{{name}}을 MCP 서버로 사용"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "작업공간 접근 모드",
         "projectAria": "프로젝트 선택",
         "projectPlaceholder": "프로젝트 선택",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "기본 권한",
+        "full": "전체 접근 권한"
       }
     },
     "scrollToBottom": "맨 아래로 스크롤",
@@ -1053,17 +1071,17 @@
       "body": "마지막 메시지가 서버의 크기 제한을 초과하여 거부되었습니다. 이미지를 줄이거나 더 작은 파일로 바꿔서 다시 보내 주세요."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "작업공간이 변경되지 않았습니다",
+      "body": "요청한 프로젝트 또는 접근 모드가 게이트웨이에서 거부되어 Nanobot이 이전 작업공간을 계속 사용합니다."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "기본 작업공간",
       "manual": "경로 붙여넣기",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "경로 사용",
+      "absolutePathRequired": "이 머신의 절대 폴더 경로를 입력하세요."
     }
   }
 }

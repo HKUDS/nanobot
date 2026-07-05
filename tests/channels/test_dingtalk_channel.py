@@ -404,6 +404,61 @@ async def test_start_configures_http_timeout(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_cancels_stream_client_after_sdk_swallows_first_cancel(monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    created: dict[str, object] = {}
+
+    class _FakeWebsocket:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class _CancelSwallowingStreamClient:
+        def __init__(self, _credential):
+            self.websocket = _FakeWebsocket()
+            self.started = asyncio.Event()
+            self.cancelled_once = asyncio.Event()
+            created["client"] = self
+
+        def register_callback_handler(self, _topic, _handler):
+            pass
+
+        async def start(self):
+            self.started.set()
+            while True:
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    self.cancelled_once.set()
+                    await asyncio.sleep(3600)
+
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_AVAILABLE", True)
+    monkeypatch.setattr(dingtalk_module, "Credential", lambda *a, **k: object())
+    monkeypatch.setattr(dingtalk_module, "DingTalkStreamClient", _CancelSwallowingStreamClient)
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", SimpleNamespace(TOPIC="topic"))
+
+    start_task = asyncio.create_task(channel.start())
+    while "client" not in created:
+        await asyncio.sleep(0)
+    client = created["client"]
+    await asyncio.wait_for(client.started.wait(), timeout=0.5)
+
+    start_task.cancel()
+    await asyncio.wait_for(client.cancelled_once.wait(), timeout=0.5)
+    assert not start_task.done()
+
+    await asyncio.wait_for(channel.stop(), timeout=0.5)
+
+    assert client.websocket.closed is True
+    assert start_task.cancelled()
+
+
+@pytest.mark.asyncio
 async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
     """Test the two-step file download flow (get URL then download content)."""
     channel = DingTalkChannel(

@@ -405,7 +405,7 @@ class DiscordChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Discord client."""
         if not DISCORD_AVAILABLE:
-            self.logger.error("discord.py not installed. Run: pip install nanobot-ai[discord]")
+            self.logger.error("discord.py not installed. Run: nanobot plugins enable discord")
             return
 
         if not self.config.token:

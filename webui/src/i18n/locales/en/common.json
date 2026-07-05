@@ -458,18 +458,36 @@
       "missingCredential": "Configure this provider before enabling image generation."
     },
     "apps": {
-      "description": "Add app CLIs and MCP services nanobot can use from chat.",
+      "description": "Enable plugins, local app adapters, and connected tool servers.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Channel",
+      "featureLabel": "Feature",
       "filterAll": "All",
+      "filterPlugins": "Plugins",
       "filterCli": "CLI apps",
       "filterMcp": "MCP services",
       "enabledSummary": "{{count}} enabled",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} Plugin · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Search Apps",
-      "featured": "Featured",
+      "featured": "Catalog",
       "loading": "Loading Apps...",
-      "empty": "No apps match this filter."
+      "empty": "No apps match this filter.",
+      "restartRequired": "Restart nanobot to apply updated apps and features."
+    },
+    "nanobotFeatures": {
+      "enabled": "Enabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "ready": "Ready",
+      "missingDependency": "Support missing",
+      "installSupport": "Install support",
+      "installConfirmTitle": "Install support for {{name}}?",
+      "installConfirmDescription": "nanobot will add what {{name}} needs, then turn it on. Continue?",
+      "installConfirmAction": "Install and enable",
+      "websocketRequired": "Required for WebUI",
+      "channelDisabled": "Channel is disabled",
+      "notEnabled": "Not enabled"
     },
     "automations": {
       "filters": {

@@ -1979,3 +1979,12 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
             return OnboardResult(config=original_config, should_save=False)
         if answer == "[A] Advanced Settings":
             _configure_advanced_settings(config)
+
+
+def run_quick_start_onboard(initial_config: Config) -> OnboardResult:
+    """Run the compact provider + local WebUI setup path directly."""
+    _get_questionary()
+    draft = initial_config.model_copy(deep=True)
+    if _configure_quick_start(draft):
+        return OnboardResult(config=draft, should_save=True)
+    return OnboardResult(config=initial_config, should_save=False)

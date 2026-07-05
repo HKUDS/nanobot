@@ -321,6 +321,35 @@ async def test_execute_wraps_mcp_is_error_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_contains_malformed_success_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool returned malformed content: TypeError)"
+    assert is_tool_error_result(wrapper.name, result)
+
+
+@pytest.mark.asyncio
+async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, {})
+
+    assert is_tool_error_result(wrapper.name, result)
+    assert "MCP tool returned malformed content" in result
+    assert "Analyze the error above and try a different approach" in result
+
+
+@pytest.mark.asyncio
 async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
@@ -401,6 +430,7 @@ async def test_execute_returns_timeout_message() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call timed out after 0.01s)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 @pytest.mark.asyncio
@@ -413,6 +443,7 @@ async def test_execute_handles_server_cancelled_error() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call was cancelled)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 @pytest.mark.asyncio
@@ -444,6 +475,7 @@ async def test_execute_handles_generic_exception() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call failed: RuntimeError)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 def _make_tool_def(name: str) -> SimpleNamespace:

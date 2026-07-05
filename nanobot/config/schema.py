@@ -378,6 +378,13 @@ class ToolsConfig(Base):
             "allow_local_preview_access",
         ),
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
+    webui_allow_remote_package_install: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "webuiAllowRemotePackageInstall",
+            "webui_allow_remote_package_install",
+        ),
+    )  # allow non-local WebUI clients to install optional Python packages
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
@@ -395,6 +402,7 @@ class Config(BaseSettings):
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
+        serialization_alias="modelPresets",
     )
 
     def __init__(self, **values: Any) -> None:

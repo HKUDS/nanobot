@@ -458,18 +458,36 @@
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
     },
     "apps": {
-      "description": "Agrega CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
+      "description": "Activa complementos, adaptadores locales de apps y servidores de herramientas conectados.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Canal",
+      "featureLabel": "Función",
       "filterAll": "Todo",
+      "filterPlugins": "Complementos",
       "filterCli": "Apps CLI",
       "filterMcp": "Servicios MCP",
       "enabledSummary": "{{count}} activados",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} complementos · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Buscar apps",
-      "featured": "Destacadas",
+      "featured": "Catálogo",
       "loading": "Cargando apps...",
-      "empty": "Ninguna app coincide con este filtro."
+      "empty": "Ninguna app coincide con este filtro.",
+      "restartRequired": "Reinicia nanobot para aplicar apps y funciones actualizadas."
+    },
+    "nanobotFeatures": {
+      "enabled": "Activado",
+      "enable": "Activar",
+      "disable": "Desactivar",
+      "ready": "Listo",
+      "missingDependency": "Falta soporte",
+      "installSupport": "Instalar soporte",
+      "installConfirmTitle": "¿Instalar soporte para {{name}}?",
+      "installConfirmDescription": "nanobot añadirá lo que {{name}} necesita y luego lo activará. ¿Continuar?",
+      "installConfirmAction": "Instalar y activar",
+      "websocketRequired": "Requerido para WebUI",
+      "channelDisabled": "El canal está desactivado",
+      "notEnabled": "No activado"
     },
     "automations": {
       "filters": {
@@ -965,11 +983,11 @@
         "mcpDescription": "Usar @{{name}} como servidor MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Modo de acceso al espacio de trabajo",
         "projectAria": "Elegir proyecto",
         "projectPlaceholder": "Seleccionar proyecto",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Permiso predeterminado",
+        "full": "Acceso completo"
       }
     },
     "scrollToBottom": "Desplazarse al final",
@@ -1053,17 +1071,17 @@
       "body": "El servidor rechazó tu último mensaje por superar el tamaño permitido. Quita algunas imágenes o usa archivos más pequeños y vuelve a enviarlo."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "El espacio de trabajo no cambió",
+      "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Espacio de trabajo predeterminado",
       "manual": "Pegar ruta",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Usar ruta",
+      "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
     }
   }
 }
