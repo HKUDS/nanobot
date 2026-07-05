@@ -334,6 +334,39 @@ class _MCPWrapperBase(Tool):
         self._session = refreshed_session
         return True
 
+    def _log_call_exception(
+        self,
+        capability_kind: str,
+        action: str,
+        exc: BaseException,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> None:
+        logger.exception(
+            "MCP {} '{}' {} with arguments {}: {}: {}",
+            capability_kind,
+            self._name,
+            action,
+            _format_mcp_arguments(arguments),
+            type(exc).__name__,
+            exc,
+        )
+
+
+def _format_mcp_arguments(arguments: Mapping[str, Any] | None) -> str:
+    if not arguments:
+        return "{}"
+    try:
+        rendered = json.dumps(arguments, ensure_ascii=False, default=repr)
+    except BaseException:
+        rendered = repr(dict(arguments))
+    if len(rendered) > 1000:
+        return rendered[:1000] + "...<truncated>"
+    return rendered
+
+
+def _mcp_error_result(message: str) -> ToolResult:
+    return ToolResult.error(message)
+
 
 def _image_block_data_url(block: Any, types: Any) -> str | None:
     """Return a base64 ``data:`` URL for an MCP image-bearing content block.
@@ -420,7 +453,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
                 )
-                return ToolResult.error(
+                return _mcp_error_result(
                     f"(MCP tool call timed out after {self._tool_timeout}s)"
                 )
             except asyncio.CancelledError:
@@ -430,7 +463,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return ToolResult.error("(MCP tool call was cancelled)")
+                return _mcp_error_result("(MCP tool call was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -450,21 +483,17 @@ class MCPToolWrapper(_MCPWrapperBase):
                         await asyncio.sleep(1)  # Brief backoff before retry
                         continue
                     # Second transient failure — give up with retry-specific message
-                    logger.exception(
-                        "MCP tool '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return ToolResult.error(
+                    self._log_call_exception("tool", "failed after retry", exc, kwargs)
+                    return _mcp_error_result(
                         f"(MCP tool call failed after retry: {type(exc).__name__})"
                     )
-                logger.exception(
-                    "MCP tool '{}' failed: {}: {}",
-                    self._name,
-                    type(exc).__name__,
-                    exc,
+                self._log_call_exception("tool", "failed", exc, kwargs)
+                return _mcp_error_result(
+                    f"(MCP tool call failed: {type(exc).__name__})"
                 )
-                return ToolResult.error(
+            except BaseException as exc:
+                self._log_call_exception("tool", "failed", exc, kwargs)
+                return _mcp_error_result(
                     f"(MCP tool call failed: {type(exc).__name__})"
                 )
             else:
@@ -472,16 +501,16 @@ class MCPToolWrapper(_MCPWrapperBase):
                 try:
                     rendered = self._render_call_result(result.content, kwargs)
                     if getattr(result, "isError", False):
-                        return ToolResult.error(rendered)
+                        return _mcp_error_result(rendered)
                     return rendered
-                except Exception as exc:
-                    logger.exception(
-                        "MCP tool '{}' failed while rendering result: {}: {}",
-                        self._name,
-                        type(exc).__name__,
+                except BaseException as exc:
+                    self._log_call_exception(
+                        "tool",
+                        "failed while rendering result",
                         exc,
+                        kwargs,
                     )
-                    return ToolResult.error(
+                    return _mcp_error_result(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
 
@@ -589,13 +618,15 @@ class MCPResourceWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
                 )
-                return f"(MCP resource read timed out after {self._resource_timeout}s)"
+                return _mcp_error_result(
+                    f"(MCP resource read timed out after {self._resource_timeout}s)"
+                )
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
-                return "(MCP resource read was cancelled)"
+                return _mcp_error_result("(MCP resource read was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -614,29 +645,42 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.exception(
-                        "MCP resource '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
+                    self._log_call_exception(
+                        "resource", "failed after retry", exc, kwargs
                     )
-                    return f"(MCP resource read failed after retry: {type(exc).__name__})"
-                logger.exception(
-                    "MCP resource '{}' failed: {}: {}",
-                    self._name,
-                    type(exc).__name__,
-                    exc,
+                    return _mcp_error_result(
+                        f"(MCP resource read failed after retry: {type(exc).__name__})"
+                    )
+                self._log_call_exception("resource", "failed", exc, kwargs)
+                return _mcp_error_result(
+                    f"(MCP resource read failed: {type(exc).__name__})"
                 )
-                return f"(MCP resource read failed: {type(exc).__name__})"
+            except BaseException as exc:
+                self._log_call_exception("resource", "failed", exc, kwargs)
+                return _mcp_error_result(
+                    f"(MCP resource read failed: {type(exc).__name__})"
+                )
             else:
-                parts: list[str] = []
-                for block in result.contents:
-                    if isinstance(block, types.TextResourceContents):
-                        parts.append(block.text)
-                    elif isinstance(block, types.BlobResourceContents):
-                        parts.append(f"[Binary resource: {len(block.blob)} bytes]")
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
+                try:
+                    parts: list[str] = []
+                    for block in result.contents:
+                        if isinstance(block, types.TextResourceContents):
+                            parts.append(block.text)
+                        elif isinstance(block, types.BlobResourceContents):
+                            parts.append(f"[Binary resource: {len(block.blob)} bytes]")
+                        else:
+                            parts.append(str(block))
+                    return "\n".join(parts) or "(no output)"
+                except BaseException as exc:
+                    self._log_call_exception(
+                        "resource",
+                        "failed while rendering result",
+                        exc,
+                        kwargs,
+                    )
+                    return _mcp_error_result(
+                        f"(MCP resource returned malformed content: {type(exc).__name__})"
+                    )
 
         return "(MCP resource read failed)"  # Unreachable
 
@@ -705,13 +749,15 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
                 )
-                return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+                return _mcp_error_result(
+                    f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+                )
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
-                return "(MCP prompt call was cancelled)"
+                return _mcp_error_result("(MCP prompt call was cancelled)")
             except McpError as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -720,13 +766,10 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 ):
                     refreshed_session = True
                     continue
-                logger.exception(
-                    "MCP prompt '{}' failed: code={} message={}",
-                    self._name,
-                    exc.error.code,
-                    exc.error.message,
+                self._log_call_exception("prompt", "failed", exc, kwargs)
+                return _mcp_error_result(
+                    f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
                 )
-                return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -745,34 +788,45 @@ class MCPPromptWrapper(_MCPWrapperBase):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.exception(
-                        "MCP prompt '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
+                    self._log_call_exception("prompt", "failed after retry", exc, kwargs)
+                    return _mcp_error_result(
+                        f"(MCP prompt call failed after retry: {type(exc).__name__})"
                     )
-                    return f"(MCP prompt call failed after retry: {type(exc).__name__})"
-                logger.exception(
-                    "MCP prompt '{}' failed: {}: {}",
-                    self._name,
-                    type(exc).__name__,
-                    exc,
+                self._log_call_exception("prompt", "failed", exc, kwargs)
+                return _mcp_error_result(
+                    f"(MCP prompt call failed: {type(exc).__name__})"
                 )
-                return f"(MCP prompt call failed: {type(exc).__name__})"
+            except BaseException as exc:
+                self._log_call_exception("prompt", "failed", exc, kwargs)
+                return _mcp_error_result(
+                    f"(MCP prompt call failed: {type(exc).__name__})"
+                )
             else:
-                parts: list[str] = []
-                for message in result.messages:
-                    content = message.content
-                    if isinstance(content, types.TextContent):
-                        parts.append(content.text)
-                    elif isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, types.TextContent):
-                                parts.append(block.text)
-                            else:
-                                parts.append(str(block))
-                    else:
-                        parts.append(str(content))
-                return "\n".join(parts) or "(no output)"
+                try:
+                    parts: list[str] = []
+                    for message in result.messages:
+                        content = message.content
+                        if isinstance(content, types.TextContent):
+                            parts.append(content.text)
+                        elif isinstance(content, list):
+                            for block in content:
+                                if isinstance(block, types.TextContent):
+                                    parts.append(block.text)
+                                else:
+                                    parts.append(str(block))
+                        else:
+                            parts.append(str(content))
+                    return "\n".join(parts) or "(no output)"
+                except BaseException as exc:
+                    self._log_call_exception(
+                        "prompt",
+                        "failed while rendering result",
+                        exc,
+                        kwargs,
+                    )
+                    return _mcp_error_result(
+                        f"(MCP prompt returned malformed content: {type(exc).__name__})"
+                    )
 
         return "(MCP prompt call failed)"  # Unreachable
 
