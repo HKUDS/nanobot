@@ -1332,3 +1332,35 @@ def test_mcp_tool_name_limits_long_name():
 
     assert len(name) <= 64
     assert name.startswith("mcp_")
+
+
+def test_long_server_name_tools_are_matched_by_server_name() -> None:
+    server_name = "very-long-server-name-" * 4
+    tool_def = SimpleNamespace(
+        name="search",
+        description="search tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    other_tool_def = SimpleNamespace(
+        name="search",
+        description="other search tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), server_name, tool_def)
+    other_wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "other", other_tool_def)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    registry.register(other_wrapper)
+
+    assert len(wrapper.name) == 64
+    assert not wrapper.name.startswith(mcp_mod._tool_prefix(server_name))
+
+    mcp_mod._attach_reconnect_handlers(SimpleNamespace(), registry, {server_name})
+    assert wrapper._reconnect is not None
+    assert other_wrapper._reconnect is None
+
+    removed = mcp_mod._unregister_server_tools(SimpleNamespace(), registry, server_name)
+
+    assert removed == 1
+    assert wrapper.name not in registry.tool_names
+    assert other_wrapper.name in registry.tool_names

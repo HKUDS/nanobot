@@ -913,9 +913,9 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
+            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
             for tool_def in tools.tools:
-                wrapped_name = _sanitize_name(f"mcp_{name}_{tool_def.name}")
+                wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
                     not allow_all_tools
                     and tool_def.name not in enabled_tools
@@ -1294,11 +1294,10 @@ def _attach_reconnect_handlers(
         )
 
     for server_name in server_names:
-        prefix = _tool_prefix(server_name)
         for tool_name in list(registry.tool_names):
-            if not tool_name.startswith(prefix):
-                continue
             tool = registry.get(tool_name)
+            if not _tool_belongs_to_server(tool, tool_name, server_name):
+                continue
             if isinstance(tool, _MCPWrapperBase):
                 tool.set_reconnect_handler(reconnect)
 
@@ -1351,11 +1350,17 @@ def _tool_prefix(server_name: str) -> str:
     return _sanitize_name(f"mcp_{server_name}_")
 
 
+def _tool_belongs_to_server(tool: Tool | None, tool_name: str, server_name: str) -> bool:
+    if isinstance(tool, _MCPWrapperBase):
+        return getattr(tool, "_server_name", None) == server_name
+    return tool_name.startswith(_tool_prefix(server_name))
+
+
 def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:
-    prefix = _tool_prefix(server_name)
     removed = 0
     for tool_name in list(registry.tool_names):
-        if tool_name.startswith(prefix):
+        tool = registry.get(tool_name)
+        if _tool_belongs_to_server(tool, tool_name, server_name):
             registry.unregister(tool_name)
             removed += 1
     return removed
