@@ -46,7 +46,6 @@ import { Input } from "@/components/ui/input";
 import { fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
-  getHostApi,
   toRuntimeSurface,
 } from "@/lib/runtime";
 import { projectNameFromPath } from "@/lib/workspace";
@@ -497,11 +496,11 @@ export default function App() {
   };
 
   const handleNativeEngineRestart = async (): Promise<string> => {
-    const hostApi = getHostApi();
-    if (!hostApi?.restartEngine) {
+    const runtimeHost = createRuntimeHost(state.runtimeSurface);
+    if (!runtimeHost.restartEngine) {
       throw new Error("native engine restart is unavailable");
     }
-    await hostApi.restartEngine();
+    await runtimeHost.restartEngine();
     const refreshed = await refreshReadyClient(state.client, state.runtimeSurface);
     return refreshed.token;
   };
