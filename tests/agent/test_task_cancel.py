@@ -103,6 +103,18 @@ class TestHandleStop:
 
 
 class TestDispatch:
+    @pytest.mark.asyncio
+    async def test_run_propagates_leaked_cancelled_error_from_consume_inbound(self):
+        loop, bus = _make_loop()
+        loop._connect_mcp = AsyncMock()
+        loop.close_mcp = AsyncMock()
+        bus.consume_inbound = AsyncMock(side_effect=asyncio.CancelledError("mcp cancel scope"))
+
+        with pytest.raises(asyncio.CancelledError, match="mcp cancel scope"):
+            await loop.run()
+
+        loop.close_mcp.assert_awaited_once()
+
     def test_exec_tool_not_registered_when_disabled(self):
         from nanobot.agent.tools.shell import ExecToolConfig
         from nanobot.config.schema import ToolsConfig

@@ -945,11 +945,10 @@ class AgentLoop:
                     )
                     continue
                 except asyncio.CancelledError:
-                    # Preserve real task cancellation so shutdown can complete cleanly.
-                    # Only ignore non-task CancelledError signals that may leak from integrations.
-                    if not self._running or asyncio.current_task().cancelling():
-                        raise
-                    continue
+                    # Preserve cancellation at this boundary. MCP/AnyIO cancel scopes
+                    # can leak CancelledError without cancelling this task, and hiding
+                    # that here would leave the loop running after an integration failure.
+                    raise
                 except Exception as e:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
                     continue
