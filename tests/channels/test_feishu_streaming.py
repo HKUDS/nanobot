@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig, _FeishuStreamBuf
 
@@ -113,6 +114,22 @@ class TestCloseStreamingMode:
         assert ch._close_streaming_mode_sync("card_1", 10) is False
 
 
+class TestStreamUpdateWithReopen:
+    def test_reopens_streaming_mode_and_retries_update(self):
+        ch = _make_channel()
+        ch._client.cardkit.v1.card_element.content.side_effect = [
+            _mock_content_response(False),
+            _mock_content_response(True),
+        ]
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response(True)
+
+        assert ch._stream_update_text_with_reopen_sync("card_1", "hello", 4) == (True, 6)
+        assert ch._client.cardkit.v1.card_element.content.call_count == 2
+        settings_call = ch._client.cardkit.v1.card.settings.call_args[0][0]
+        assert settings_call.body.sequence == 5
+        assert '"streaming_mode": true' in settings_call.body.settings
+
+
 class TestStreamUpdateText:
     def test_returns_true_on_success(self):
         ch = _make_channel()
@@ -148,6 +165,24 @@ class TestSendDelta:
         ch._client.cardkit.v1.card.create.assert_called_once()
         ch._client.im.v1.message.create.assert_called_once()
         ch._client.cardkit.v1.card_element.content.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_first_delta_closes_blank_card_when_initial_update_fails(self):
+        ch = _make_channel()
+        ch._client.cardkit.v1.card.create.return_value = _mock_create_card_response("card_new")
+        ch._client.im.v1.message.create.return_value = _mock_send_response("om_new")
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response(False)
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response(True)
+
+        await ch.send_delta("oc_chat1", "Hello ")
+
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.text == "Hello "
+        assert buf.card_id is None
+        assert ch._client.cardkit.v1.card_element.content.call_count == 2
+        assert ch._client.cardkit.v1.card.settings.call_count == 2
+        close_call = ch._client.cardkit.v1.card.settings.call_args_list[-1][0][0]
+        assert '"streaming_mode": false' in close_call.body.settings
 
     @pytest.mark.asyncio
     async def test_group_delta_uses_create_when_reply_disabled(self):
@@ -238,7 +273,7 @@ class TestSendDelta:
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
         ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.cardkit.v1.card_element.content.assert_called_once()
@@ -255,7 +290,7 @@ class TestSendDelta:
         )
         ch._client.im.v1.message.create.return_value = _mock_send_response("om_fb")
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.cardkit.v1.card_element.content.assert_not_called()
@@ -272,7 +307,8 @@ class TestSendDelta:
         await ch.send_delta(
             "oc_chat1",
             "",
-            metadata={"_stream_end": True, "message_id": "om_001", "chat_type": "group"},
+            metadata={"message_id": "om_001", "chat_type": "group"},
+            stream_end=True,
         )
 
         ch._client.im.v1.message.create.assert_called_once()
@@ -292,11 +328,11 @@ class TestSendDelta:
             "oc_chat1",
             "",
             metadata={
-                "_stream_end": True,
                 "message_id": "om_001",
                 "chat_type": "group",
                 "thread_id": "ot_001",
             },
+            stream_end=True,
         )
 
         ch._client.im.v1.message.reply.assert_called_once()
@@ -317,7 +353,8 @@ class TestSendDelta:
         await ch.send_delta(
             "oc_chat1",
             "",
-            metadata={"_stream_end": True, "message_id": "om_001", "chat_type": "group"},
+            metadata={"message_id": "om_001", "chat_type": "group"},
+            stream_end=True,
         )
 
         ch._client.im.v1.message.reply.assert_called_once()
@@ -335,18 +372,36 @@ class TestSendDelta:
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response(success=False)
         ch._client.im.v1.message.create.return_value = _mock_send_response("om_fb")
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
-        # Should NOT attempt to close streaming mode since update failed
-        ch._client.cardkit.v1.card.settings.assert_not_called()
+        assert ch._client.cardkit.v1.card.settings.call_count == 2
         # Should fall back to sending a regular interactive card
         ch._client.im.v1.message.create.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_stream_end_reopens_streaming_card_before_fallback(self):
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Recovered content", card_id="card_1", sequence=3, last_edit=0.0,
+        )
+        ch._client.cardkit.v1.card_element.content.side_effect = [
+            _mock_content_response(False),
+            _mock_content_response(True),
+        ]
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response(True)
+
+        await ch.send_delta("oc_chat1", "", stream_end=True)
+
+        assert "oc_chat1" not in ch._stream_bufs
+        assert ch._client.cardkit.v1.card_element.content.call_count == 2
+        assert ch._client.cardkit.v1.card.settings.call_count == 2
+        ch._client.im.v1.message.create.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_stream_end_without_buf_is_noop(self):
         ch = _make_channel()
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
         ch._client.cardkit.v1.card_element.content.assert_not_called()
 
     @pytest.mark.asyncio
@@ -394,7 +449,7 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='web_fetch("https://example.com")',
-            metadata={"_tool_hint": True},
+            event=ProgressEvent(content='web_fetch("https://example.com")', tool_hint=True),
         )
         await ch.send(msg)
 
@@ -430,7 +485,7 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
-            metadata={"_tool_hint": True},
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
         )
         await ch.send(msg)
 
@@ -445,7 +500,8 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
-            metadata={"_tool_hint": True, "message_id": "om_001", "chat_type": "group"},
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
+            metadata={"message_id": "om_001", "chat_type": "group"},
         )
         await ch.send(msg)
 
@@ -462,8 +518,8 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
             metadata={
-                "_tool_hint": True,
                 "message_id": "om_001",
                 "chat_type": "group",
                 "thread_id": "ot_001",
@@ -486,7 +542,8 @@ class TestToolHintInlineStreaming:
         msg = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
             content='read_file("path")',
-            metadata={"_tool_hint": True, "message_id": "om_001", "chat_type": "group"},
+            event=ProgressEvent(content='read_file("path")', tool_hint=True),
+            metadata={"message_id": "om_001", "chat_type": "group"},
         )
         await ch.send(msg)
 
@@ -506,13 +563,15 @@ class TestToolHintInlineStreaming:
 
         msg1 = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
-            content='$ cd /project', metadata={"_tool_hint": True},
+            content='$ cd /project',
+            event=ProgressEvent(content='$ cd /project', tool_hint=True),
         )
         await ch.send(msg1)
 
         msg2 = OutboundMessage(
             channel="feishu", chat_id="oc_chat1",
-            content='$ git status', metadata={"_tool_hint": True},
+            content='$ git status',
+            event=ProgressEvent(content='$ git status', tool_hint=True),
         )
         await ch.send(msg2)
 
@@ -525,7 +584,7 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_final_stream_end(self):
-        """When final _stream_end closes the card, tool hint is kept in the final text."""
+        """When stream end closes the card, tool hint is kept in the final text."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Final content\n\n🔧 web_fetch(\"url\")\n\n",
@@ -534,7 +593,7 @@ class TestToolHintInlineStreaming:
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
         ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
 
-        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
         assert "oc_chat1" not in ch._stream_bufs
         update_call = ch._client.cardkit.v1.card_element.content.call_args[0][0]
@@ -551,7 +610,8 @@ class TestToolHintInlineStreaming:
         for content in ("", "   ", "\t\n"):
             msg = OutboundMessage(
                 channel="feishu", chat_id="oc_chat1",
-                content=content, metadata={"_tool_hint": True},
+                content=content,
+                event=ProgressEvent(content=content, tool_hint=True),
             )
             await ch.send(msg)
 

@@ -1,18 +1,25 @@
-# nanobot webui
+# nanobot WebUI Source
 
-The browser front-end for the nanobot gateway. It is built with Vite + React 18 +
-TypeScript + Tailwind 3 + shadcn/ui, talks to the gateway over the WebSocket
-multiplex protocol, and reads session metadata from the embedded REST surface
-on the same port.
+This directory contains the React/TypeScript source for the nanobot WebUI. If
+you installed `nanobot-ai` from PyPI and only want to use the bundled browser UI,
+read the user guide in [`docs/webui.md`](../docs/webui.md). You do not need
+Node.js, Bun, Vite, or anything in this directory unless you are changing the
+frontend.
 
-For the project overview, install guide, and general docs map, see the root
-[`README.md`](../README.md).
+For the project overview, install guide, and general docs map, see the root [`README.md`](../README.md) and [`docs/README.md`](../docs/README.md).
 
-## Just want to use the WebUI?
+## Pick a Path
 
-If you installed nanobot via `pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. Enable the WebSocket channel in `~/.nanobot/config.json` and run `nanobot gateway` — see the root [`README.md`](../README.md#-webui) for the 3-step setup. You do **not** need anything in this directory.
+| Goal | Start with | Opens at |
+|---|---|---|
+| Use the bundled browser UI | [`docs/webui.md`](../docs/webui.md) | `http://127.0.0.1:8765` |
+| Use the WebUI from another device | [`docs/webui.md#lan-access`](../docs/webui.md#lan-access) | `http://<your-ip>:8765` |
+| Change WebUI source code | [Develop the WebUI (Vite HMR)](#develop-the-webui-vite-hmr) | `http://127.0.0.1:5173` |
+| Debug setup failures | [`docs/troubleshooting.md#webui-problems`](../docs/troubleshooting.md#webui-problems) | Diagnosis order and common fixes |
 
-This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, new components, styling, etc.).
+The source app is built with Vite + React 18 + TypeScript + Tailwind 3 +
+shadcn/ui. It talks to the gateway over the WebSocket multiplex protocol and
+reads session metadata from the embedded REST surface on the same port.
 
 ## Layout
 
@@ -28,14 +35,14 @@ nanobot/web/dist/      build output served by the gateway
 From the repository root:
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
 > Editable installs intentionally **skip** the WebUI bundle step — Vite HMR is faster than rebuilding `dist/` on every change.
 
 ### 2. Enable the WebSocket channel
 
-In `~/.nanobot/config.json`:
+In `~/.nanobot/config.json`, merge:
 
 ```json
 { "channels": { "websocket": { "enabled": true } } }
@@ -69,27 +76,6 @@ If your gateway listens on a non-default port, point the dev server at it:
 NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 ```
 
-### Access from another device (LAN)
-
-To use the WebUI from another device on the same network, set `host` to `"0.0.0.0"` and configure a `token` or `tokenIssueSecret` in `~/.nanobot/config.json`:
-
-```json
-{
-  "channels": {
-    "websocket": {
-      "enabled": true,
-      "host": "0.0.0.0",
-      "port": 8765,
-      "tokenIssueSecret": "your-secret-here"
-    }
-  }
-}
-```
-
-The gateway will refuse to start if `host` is `"0.0.0.0"` and neither `token` nor `tokenIssueSecret` is set.
-
-Then open `http://<your-ip>:8765` on the other device. The WebUI will show an authentication form where you enter the secret. It is saved in your browser so you only need to enter it once.
-
 ## Build for packaged runtime
 
 You usually do not need to run this by hand: `python -m build` invokes the WebUI build automatically when packaging the wheel.
@@ -112,5 +98,4 @@ bun run test
 
 ## Acknowledgements
 
-- [`agent-chat-ui`](https://github.com/langchain-ai/agent-chat-ui) for UI and
-  interaction inspiration across the chat surface.
+- [`agent-chat-ui`](https://github.com/langchain-ai/agent-chat-ui) for UI and interaction inspiration across the chat surface.

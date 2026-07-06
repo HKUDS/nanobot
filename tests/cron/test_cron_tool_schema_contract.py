@@ -41,7 +41,9 @@ class _SvcStub:
 @pytest.fixture
 def registry() -> ToolRegistry:
     tool = CronTool(_SvcStub(), default_timezone="UTC")
-    tool.set_context(RequestContext(channel="channel", chat_id="chat-id"))
+    tool.set_context(
+        RequestContext(channel="channel", chat_id="chat-id", session_key="channel:chat-id")
+    )
     reg = ToolRegistry()
     reg.register(tool)
     return reg

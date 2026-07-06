@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import MCPServerConfig
@@ -173,25 +173,19 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         category="web",
         description="Scrape, crawl, search, and extract web pages through Firecrawl's MCP server.",
         docs_url="https://docs.firecrawl.dev/use-cases/developers-mcp",
-        transport="stdio",
+        transport="streamableHttp",
         install_supported=True,
         brand_domain="firecrawl.dev",
         brand_color="#EB5E28",
-        requires="Node.js, npx, and Firecrawl API key",
+        requires="Network access",
         server=MCPServerConfig(
-            type="stdio",
-            command="npx",
-            args=["-y", "firecrawl-mcp"],
+            type="streamableHttp",
+            url="https://mcp.firecrawl.dev/v2/mcp",
             tool_timeout=60,
         ),
-        fields=(
-            McpPresetField(
-                name="firecrawl_api_key",
-                label="Firecrawl API key",
-                target=("env", "FIRECRAWL_API_KEY"),
-                env_var="FIRECRAWL_API_KEY",
-                placeholder="fc-...",
-            ),
+        note=(
+            "Uses Firecrawl Keyless through the hosted MCP endpoint. No API key is required for "
+            "the built-in preset; use a custom MCP server URL if you want account-specific limits."
         ),
     ),
     McpPreset(

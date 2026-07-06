@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -241,7 +242,7 @@ def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     signature = provider_signature(config)
     fallback_signatures = signature[-1]
 
-    assert fallback_signatures[0][12] is None
+    assert fallback_signatures[0][13] is None
 
 
 # -- FallbackProvider tests --
@@ -284,10 +285,34 @@ class TestFallbackOnPrimaryError:
         assert primary.chat_calls[0]["model"] == "primary-model"
         assert fallback.chat_calls[0]["model"] == "fallback-a"
 
+    @pytest.mark.asyncio
+    async def test_logs_primary_error_before_fallback(self) -> None:
+        primary = _FakeProvider("primary", _error_response("primary overloaded"))
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        logs: list[str] = []
+        sink_id = logger.add(lambda message: logs.append(str(message)), format="{message}")
+
+        try:
+            fb = FallbackProvider(
+                primary=primary,
+                fallback_presets=[_fallback("fallback-a")],
+                provider_factory=factory,
+            )
+            await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        finally:
+            logger.remove(sink_id)
+
+        assert any(
+            "Primary model 'primary-model' failed: primary overloaded; trying fallback 'fallback-a'"
+            in line
+            for line in logs
+        )
+
 
 class TestNoFallbackWhenContentStreamed:
     @pytest.mark.asyncio
-    async def test(self) -> None:
+    async def test_non_timeout_error_skips_failover(self) -> None:
         primary = _FakeProvider("primary", _error_response())
         factory = MagicMock()
         fb = FallbackProvider(
@@ -303,10 +328,94 @@ class TestNoFallbackWhenContentStreamed:
             messages=[{"role": "user", "content": "hi"}],
             on_content_delta=_delta,
         )
-        # Primary returns error but content was "streamed" (FakeProvider calls delta)
-        # so failover should be skipped
         assert result.finish_reason == "error"
         factory.assert_not_called()
+
+
+class TestFallbackOnStreamStalledAfterContent:
+    @pytest.mark.asyncio
+    async def test_timeout_with_streamed_content_falls_back(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response("stream stalled", finish_reason="error", error_kind="timeout"),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        streamed: list[str] = []
+        recoveries: list[str] = []
+
+        async def _delta(text: str) -> None:
+            streamed.append(text)
+
+        async def _recover() -> None:
+            recoveries.append("recover")
+
+        result = await fb.chat_stream(
+            messages=[{"role": "user", "content": "hi"}],
+            on_content_delta=_delta,
+            on_stream_recover=_recover,
+        )
+        assert result.finish_reason == "stop"
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+        assert streamed == ["stream stalled", "fallback ok"]
+        assert recoveries == ["recover"]
+
+
+class TestFailoverOnEmptyChoices:
+    """Fallback should trigger when API returns empty choices (no error metadata)."""
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_text_fallback(self) -> None:
+        """_should_fallback should return True for 'API returned empty choices'."""
+        from nanobot.providers.fallback_provider import FallbackProvider
+
+        response = _make_response(
+            "Error: API returned empty choices.",
+            finish_reason="error",
+            error_kind="empty",
+        )
+        # error_kind="empty" matches _FALLBACK_ERROR_KINDS via kind check
+        assert FallbackProvider._should_fallback(response)
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_no_error_kind_text_fallback(self) -> None:
+        """_should_fallback should also match via text token when error_kind is None."""
+        from nanobot.providers.fallback_provider import FallbackProvider
+
+        response = _make_response(
+            "Error: API returned empty choices.",
+            finish_reason="error",
+            # error_kind=None, no status — pure text matching
+        )
+        # "empty" token in _FALLBACK_ERROR_TOKENS matches via text fallback
+        assert FallbackProvider._should_fallback(response)
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_triggers_failover(self) -> None:
+        """End-to-end: empty choices on primary triggers fallback."""
+        primary = _FakeProvider(
+            "primary",
+            _make_response("Error: API returned empty choices.", finish_reason="error"),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once()
 
 
 class TestFailoverOnTransientError:

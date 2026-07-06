@@ -32,6 +32,7 @@ def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
     agent.process_direct = AsyncMock(return_value=response_text)
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
     return agent
 
 

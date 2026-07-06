@@ -13,9 +13,12 @@ from nanobot.agent.tools.long_task import (
     CompleteGoalTool,
     LongTaskTool,
 )
+from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import SessionManager
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
 def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:
@@ -120,8 +123,14 @@ async def test_goal_tools_context_isolated_across_tool_types(tmp_path):
 async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
     sm = SessionManager(tmp_path)
-    lt = LongTaskTool(sessions=sm, bus=bus)
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sm,
+        schedule_background=lambda _coro: None,
+    ).subscribe(runtime_events)
+    lt = LongTaskTool(sessions=sm, runtime_events=runtime_events)
     rc = RequestContext(
         channel="websocket",
         chat_id="chat-99",
@@ -136,8 +145,8 @@ async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
     call = bus.publish_outbound.await_args.args[0]
     assert call.channel == "websocket"
     assert call.chat_id == "chat-99"
-    assert call.metadata.get("_goal_state_sync") is True
-    assert call.metadata["goal_state"] == {
+    assert isinstance(call.event, GoalStateSyncEvent)
+    assert call.event.goal_state == {
         "active": True,
         "ui_summary": "alpha",
         "objective": "Objective alpha",
@@ -148,9 +157,15 @@ async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
 async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
     sm = SessionManager(tmp_path)
-    lt = LongTaskTool(sessions=sm, bus=bus)
-    cg = CompleteGoalTool(sessions=sm, bus=bus)
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sm,
+        schedule_background=lambda _coro: None,
+    ).subscribe(runtime_events)
+    lt = LongTaskTool(sessions=sm, runtime_events=runtime_events)
+    cg = CompleteGoalTool(sessions=sm, runtime_events=runtime_events)
     rc = RequestContext(
         channel="websocket",
         chat_id="chat-z",
@@ -166,7 +181,8 @@ async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
 
     bus.publish_outbound.assert_awaited_once()
     call = bus.publish_outbound.await_args.args[0]
-    assert call.metadata["goal_state"] == {"active": False}
+    assert isinstance(call.event, GoalStateSyncEvent)
+    assert call.event.goal_state == {"active": False}
 
 
 @pytest.mark.asyncio

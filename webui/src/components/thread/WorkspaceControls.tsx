@@ -106,7 +106,7 @@ export function WorkspaceProjectPicker({
 
   if (nativeProjectPicker) {
     return (
-      <div className="flex items-center border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
+      <div className="flex min-w-0 items-center rounded-b-[28px] border-t border-border/25 bg-muted/60 px-3 py-1.5 dark:bg-white/[0.055] sm:px-4">
         <button
           type="button"
           disabled={disabled || pickingFolder}
@@ -114,7 +114,7 @@ export function WorkspaceProjectPicker({
           title={currentProjectScope?.project_path}
           onClick={() => void pickNativeFolder()}
           className={cn(
-            "inline-flex h-7 max-w-[18rem] items-center gap-2 rounded-full px-2.5",
+            "inline-flex h-7 max-w-full items-center gap-2 rounded-full px-2.5 sm:max-w-[18rem]",
             "text-[12px] font-medium text-muted-foreground/90 transition-colors",
             "hover:bg-background/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
             currentProjectScope && "text-foreground/82",
@@ -124,7 +124,7 @@ export function WorkspaceProjectPicker({
           <span className="truncate">{projectLabel}</span>
         </button>
         {pathError || error ? (
-          <span role="alert" className="ml-2 truncate text-[11.5px] font-medium text-destructive">
+          <span role="alert" className="ml-2 min-w-0 truncate text-[11.5px] font-medium text-destructive">
             {pathError ?? error}
           </span>
         ) : null}
@@ -133,7 +133,7 @@ export function WorkspaceProjectPicker({
   }
 
   return (
-    <div className="flex items-center border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
+    <div className="flex min-w-0 items-center rounded-b-[28px] border-t border-border/25 bg-muted/60 px-3 py-1.5 dark:bg-white/[0.055] sm:px-4">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -141,7 +141,7 @@ export function WorkspaceProjectPicker({
             disabled={disabled}
             aria-label={t("thread.composer.workspace.projectAria")}
             className={cn(
-              "inline-flex h-7 max-w-[18rem] items-center gap-2 rounded-full px-2.5",
+              "inline-flex h-7 max-w-full items-center gap-2 rounded-full px-2.5 sm:max-w-[18rem]",
               "text-[12px] font-medium text-muted-foreground/90 transition-colors",
               "hover:bg-background/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
               currentProjectScope && "text-foreground/82",
@@ -254,7 +254,7 @@ export function WorkspaceAccessMenu({
           variant="ghost"
           aria-label={t("thread.composer.workspace.accessAria")}
           className={cn(
-            "max-w-[12.5rem] rounded-[10px] border border-transparent font-semibold shadow-none",
+            "max-w-[min(12.5rem,42vw)] rounded-[10px] border border-transparent font-semibold shadow-none",
             isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
             isFull
               ? "bg-transparent text-orange-600 hover:bg-orange-500/8 dark:text-orange-300 dark:hover:bg-orange-400/10"

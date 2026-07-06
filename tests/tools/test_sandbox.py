@@ -37,6 +37,17 @@ class TestBwrapBackend:
         bind_idx = [i for i, t in enumerate(tokens) if t == "--bind"]
         assert any(tokens[i + 1] == ws and tokens[i + 2] == ws for i in bind_idx)
 
+    def test_home_env_points_to_workspace(self, tmp_path):
+        ws = str(tmp_path / "project")
+        result = wrap_command("bwrap", "echo $HOME", ws, ws)
+        tokens = _parse(result)
+
+        setenv_idx = [i for i, t in enumerate(tokens) if t == "--setenv"]
+        assert any(
+            tokens[i + 1] == "HOME" and tokens[i + 2] == str(tmp_path / "project")
+            for i in setenv_idx
+        )
+
     def test_parent_dir_masked_with_tmpfs(self, tmp_path):
         ws = tmp_path / "project"
         result = wrap_command("bwrap", "ls", str(ws), str(ws))
@@ -45,6 +56,37 @@ class TestBwrapBackend:
         tmpfs_indices = [i for i, t in enumerate(tokens) if t == "--tmpfs"]
         tmpfs_targets = {tokens[i + 1] for i in tmpfs_indices}
         assert str(ws.parent) in tmpfs_targets
+
+    def test_tmp_dir_mounted_as_tmpfs(self, tmp_path):
+        """Regression coverage for #1948: commands need writable scratch space."""
+        ws = tmp_path / "project"
+        result = wrap_command("bwrap", "touch /tmp/probe", str(ws), str(ws))
+        tokens = _parse(result)
+
+        tmpfs_indices = [i for i, t in enumerate(tokens) if t == "--tmpfs"]
+        tmpfs_targets = {tokens[i + 1] for i in tmpfs_indices}
+        assert "/tmp" in tmpfs_targets
+
+    def test_parent_mask_precedes_workspace_recreation(self, tmp_path):
+        ws = tmp_path / "project"
+        result = wrap_command("bwrap", "ls", str(ws), str(ws))
+        tokens = _parse(result)
+
+        parent_mask = next(
+            i for i, t in enumerate(tokens)
+            if t == "--tmpfs" and tokens[i + 1] == str(ws.parent)
+        )
+        workspace_dir = next(
+            i for i, t in enumerate(tokens)
+            if t == "--dir" and tokens[i + 1] == str(ws)
+        )
+        workspace_bind = next(
+            i for i, t in enumerate(tokens)
+            if t == "--bind" and tokens[i + 1] == str(ws) and tokens[i + 2] == str(ws)
+        )
+        chdir = tokens.index("--chdir")
+
+        assert parent_mask < workspace_dir < workspace_bind < chdir
 
     def test_cwd_inside_workspace(self, tmp_path):
         ws = tmp_path / "project"

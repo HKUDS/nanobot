@@ -182,7 +182,11 @@ class WebUIWorkspaceController:
     def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
         if self._sessions is None:
             return self.default_scope()
-        data = self._sessions.read_session_file(session_key)
+        metadata_reader = getattr(self._sessions, "read_session_metadata", None)
+        if callable(metadata_reader):
+            data = metadata_reader(session_key)
+        else:
+            data = self._sessions.read_session_file(session_key)
         metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
         if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
             return self.default_scope()

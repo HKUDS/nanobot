@@ -5,8 +5,10 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import GoalStatusEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
 def _make_loop(tmp_path):
@@ -25,6 +27,11 @@ def _make_loop(tmp_path):
         workspace=tmp_path,
         model="test-model",
     )
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=loop.sessions,
+        schedule_background=lambda coro: loop._schedule_background(coro),
+    ).subscribe(loop.runtime_events)
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
 
@@ -48,13 +55,13 @@ async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
         events.append(await loop.bus.consume_outbound())
 
     statuses = [
-        event.metadata
+        event.event
         for event in events
-        if event.metadata.get("_goal_status") is True
+        if isinstance(event.event, GoalStatusEvent)
     ]
-    assert [status["goal_status"] for status in statuses] == ["running", "idle"]
-    assert isinstance(statuses[0].get("started_at"), float)
-    assert "started_at" not in statuses[1]
+    assert [status.status for status in statuses] == ["running", "idle"]
+    assert isinstance(statuses[0].started_at, float)
+    assert statuses[1].started_at is None
 
 
 @pytest.mark.asyncio
@@ -89,3 +96,28 @@ async def test_process_direct_reuses_existing_session_lock(tmp_path) -> None:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+
+
+@pytest.mark.asyncio
+async def test_process_direct_applies_per_run_hooks(tmp_path) -> None:
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+
+    loop = _make_loop(tmp_path)
+    events: list[tuple[str, str | None]] = []
+
+    class RecordingHook(AgentHook):
+        async def before_run(self, context: AgentRunHookContext) -> None:
+            events.append(("before", None))
+
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            events.append(("after", context.final_content))
+
+    response = await loop.process_direct(
+        "hello",
+        session_key="api:per-run-hook",
+        hooks=[RecordingHook()],
+    )
+
+    assert response is not None
+    assert response.content == "done"
+    assert events == [("before", None), ("after", "done")]

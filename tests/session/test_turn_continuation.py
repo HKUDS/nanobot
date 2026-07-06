@@ -14,9 +14,11 @@ from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_PENDING_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
+    _save_skip_for_turn,
     internal_continuation_pending,
     internal_continuation_run_started_at,
     maybe_continue_turn,
+    should_finalize_on_max_iterations,
     should_stream_budget_response,
 )
 
@@ -47,10 +49,6 @@ async def test_maybe_continue_turn_queues_internal_message():
                 "message_id": "msg-1",
                 "origin_message_id": "msg-0",
                 "_wants_stream": True,
-                "_stream_id": "stream-1",
-                "_stream_delta": True,
-                "_stream_end": True,
-                "_resuming": True,
                 "webui": True,
             },
         ),
@@ -76,10 +74,6 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert queued.metadata["message_id"] == "msg-1"
     assert queued.metadata["origin_message_id"] == "msg-0"
     assert queued.metadata["_wants_stream"] is True
-    assert "_stream_id" not in queued.metadata
-    assert "_stream_delta" not in queued.metadata
-    assert "_stream_end" not in queued.metadata
-    assert "_resuming" not in queued.metadata
     assert "Finish the migration." in queued.content
     assert ctx.all_messages == messages[:-1]
     assert ctx.final_content == ""
@@ -125,3 +119,41 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
         pending_queue_available=False,
         session_metadata=meta,
     )
+    assert not should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata=meta,
+    )
+    assert should_finalize_on_max_iterations(
+        pending_queue_available=False,
+        session_metadata=meta,
+    )
+    assert should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata={},
+    )
+
+
+def test_save_skip_matches_prefix_when_current_message_merged():
+    skip = _save_skip_for_turn(
+        message_metadata=None,
+        initial_message_count=2,  # [system, merged user]
+        history_count=1,
+        user_persisted_early=True,
+    )
+    assert skip == 2
+
+
+def test_save_skip_unchanged_for_standalone_current_message():
+    # [system, history user, current user] with the current user already saved.
+    assert _save_skip_for_turn(
+        message_metadata=None,
+        initial_message_count=3,
+        history_count=1,
+        user_persisted_early=True,
+    ) == 3
+    assert _save_skip_for_turn(
+        message_metadata=None,
+        initial_message_count=3,
+        history_count=1,
+        user_persisted_early=False,
+    ) == 2

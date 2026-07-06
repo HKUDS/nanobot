@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -120,7 +120,9 @@ const MCP_PRESETS: McpPresetInfo[] = [
     connection_summary: "",
   },
 ];
+
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
+const ORIGINAL_MEDIA_DEVICES = navigator.mediaDevices;
 
 function mockBlobUrls() {
   Object.defineProperty(URL, "createObjectURL", {
@@ -133,9 +135,40 @@ function mockBlobUrls() {
   });
 }
 
+function stubVisualViewport({
+  height,
+  offsetTop = 0,
+}: {
+  height: number;
+  offsetTop?: number;
+}) {
+  const target = new EventTarget();
+  vi.stubGlobal("visualViewport", {
+    width: 390,
+    height,
+    offsetTop,
+    offsetLeft: 0,
+    pageTop: offsetTop,
+    pageLeft: 0,
+    scale: 1,
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+    dispatchEvent: target.dispatchEvent.bind(target),
+  } as unknown as VisualViewport);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   Reflect.deleteProperty(window, "nanobotHost");
+  if (ORIGINAL_MEDIA_DEVICES) {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: ORIGINAL_MEDIA_DEVICES,
+    });
+  } else {
+    Reflect.deleteProperty(navigator, "mediaDevices");
+  }
   window.localStorage.clear();
   Object.defineProperty(window, "innerHeight", {
     value: ORIGINAL_INNER_HEIGHT,
@@ -161,6 +194,99 @@ function rect(init: Partial<DOMRect>): DOMRect {
   };
 }
 
+function mockVoiceRecorder(blob = new Blob(["voice"], { type: "audio/webm" })) {
+  const stopTrack = vi.fn();
+  const getUserMedia = vi.fn(async () => ({
+    getTracks: () => [{ stop: stopTrack }],
+  }));
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
+  });
+
+  class FakeMediaRecorder {
+    static isTypeSupported = vi.fn((type: string) => type === "audio/webm");
+
+    state: RecordingState = "inactive";
+    mimeType = blob.type;
+    ondataavailable: ((event: BlobEvent) => void) | null = null;
+    onstop: (() => void) | null = null;
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      this.state = "inactive";
+      this.ondataavailable?.({ data: blob } as BlobEvent);
+      this.onstop?.();
+    }
+  }
+
+  vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+  return { getUserMedia, stopTrack };
+}
+
+function mockVoiceAudioInput(
+  sample = 128,
+  state: AudioContextState = "running",
+  decodedChannels?: Float32Array[],
+) {
+  const decodeAudioDataMock = vi.fn(async () => {
+    if (!decodedChannels) throw new Error("decodeAudioData not mocked");
+    return {
+      numberOfChannels: decodedChannels.length,
+      sampleRate: 16_000,
+      getChannelData: (channel: number) => decodedChannels[channel],
+    } as AudioBuffer;
+  });
+
+  class FakeAudioContext {
+    state = state;
+
+    createMediaStreamSource() {
+      return { connect: vi.fn(), disconnect: vi.fn() };
+    }
+
+    createAnalyser() {
+      return {
+        fftSize: 256,
+        smoothingTimeConstant: 0,
+        disconnect: vi.fn(),
+        getByteTimeDomainData: (data: Uint8Array) => data.fill(sample),
+      };
+    }
+
+    close = vi.fn(async () => undefined);
+    decodeAudioData = decodeAudioDataMock;
+    resume = vi.fn(async () => undefined);
+  }
+
+  vi.stubGlobal("AudioContext", FakeAudioContext);
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+    window.setTimeout(() => callback(performance.now()), 16) as unknown as number
+  );
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) =>
+    window.clearTimeout(id as unknown as number)
+  );
+  return { decodeAudioData: decodeAudioDataMock };
+}
+
+async function waitForVoiceCapture(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  });
+}
+
+function bytesFromDataUrl(dataUrl: string): Uint8Array {
+  const [, base64 = ""] = dataUrl.split(",");
+  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+}
+
+function ascii(bytes: Uint8Array, offset: number, length: number): string {
+  return String.fromCharCode(...bytes.slice(offset, offset + length));
+}
+
 describe("ThreadComposer", () => {
   it("renders a readonly hero model composer when provided", () => {
     render(
@@ -180,6 +306,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");
+    expect(input.className).toContain("text-[16px]");
     expect(input.className).toContain("pt-[27px]");
     fireEvent.change(input, { target: { value: "1" } });
     expect(input.className).toContain("pt-[27px]");
@@ -201,12 +328,293 @@ describe("ThreadComposer", () => {
     expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
+    expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
     expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
+  });
+
+  it("transcribes voice input into the composer without sending", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => "hello voice");
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledWith(
+      expect.stringMatching(/^data:audio\/webm;base64,/),
+      expect.objectContaining({ durationMs: expect.any(Number) }),
+    ));
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("hello voice"));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("converts voice recordings to wav for Xiaomi MiMo transcription", async () => {
+    mockVoiceRecorder(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/webm" }));
+    const { decodeAudioData } = mockVoiceAudioInput(
+      180,
+      "running",
+      [new Float32Array([0, 0.5, -0.5])],
+    );
+    const onTranscribeAudio = vi.fn(async () => "mimo voice");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+        transcriptionProvider="xiaomi_mimo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
+    const [dataUrl, options] = onTranscribeAudio.mock.calls[0];
+    expect(dataUrl).toMatch(/^data:audio\/wav;base64,/);
+    expect(options).toEqual(expect.objectContaining({ durationMs: expect.any(Number) }));
+    expect(decodeAudioData).toHaveBeenCalledTimes(1);
+
+    const bytes = bytesFromDataUrl(dataUrl);
+    const view = new DataView(bytes.buffer);
+    expect(ascii(bytes, 0, 4)).toBe("RIFF");
+    expect(ascii(bytes, 8, 4)).toBe("WAVE");
+    expect(ascii(bytes, 12, 4)).toBe("fmt ");
+    expect(view.getUint16(20, true)).toBe(1);
+    expect(view.getUint16(22, true)).toBe(1);
+    expect(view.getUint32(24, true)).toBe(16_000);
+    expect(view.getUint16(34, true)).toBe(16);
+    expect(ascii(bytes, 36, 4)).toBe("data");
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("mimo voice"));
+  });
+
+  it("does not start duplicate voice recordings while microphone access is pending", async () => {
+    const { getUserMedia, stopTrack } = mockVoiceRecorder();
+    let resolveStream: ((stream: MediaStream) => void) | undefined;
+    getUserMedia.mockImplementation(() => new Promise((resolve) => {
+      resolveStream = resolve as (stream: MediaStream) => void;
+    }));
+    const onTranscribeAudio = vi.fn(async () => "one recording");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.click(voiceButton);
+    fireEvent.click(voiceButton);
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveStream?.({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+    });
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
+  });
+
+  it("supports press-and-hold voice recording", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => "held voice");
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.pointerDown(voiceButton, { button: 0, pointerId: 1, pointerType: "touch" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    });
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.pointerUp(screen.getByRole("button", { name: "Stop recording" }), {
+      pointerId: 1,
+      pointerType: "touch",
+    });
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("held voice"));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("supports keyboard hold voice recording", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => "shortcut voice");
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    expect(voiceButton).toHaveAttribute("title", "Click to dictate or hold");
+    expect(voiceButton).toHaveAttribute("aria-keyshortcuts", "Control+Shift+D");
+    fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.keyUp(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("shortcut voice"));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("ignores the delayed click emitted after a long-press voice recording", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    const onTranscribeAudio = vi.fn(async () => "held once");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.pointerDown(voiceButton, { button: 0, pointerId: 1, pointerType: "touch" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    });
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.pointerUp(screen.getByRole("button", { name: "Stop recording" }), {
+      pointerId: 1,
+      pointerType: "touch",
+    });
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("held once"));
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(onTranscribeAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps existing text when voice transcription fails", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => {
+      throw new Error("not_configured");
+    });
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    await waitForVoiceCapture();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Configure a transcription provider first.")).toBeInTheDocument();
+    });
+    expect(input).toHaveValue("draft");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not transcribe recordings that are too short", async () => {
+    mockVoiceRecorder();
+    const onTranscribeAudio = vi.fn(async () => "should not appear");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Hold a little longer to record voice.")).toBeInTheDocument();
+    });
+    expect(onTranscribeAudio).not.toHaveBeenCalled();
+  });
+
+  it("warns during recording when microphone input is silent", async () => {
+    mockVoiceRecorder();
+    mockVoiceAudioInput();
+    const onTranscribeAudio = vi.fn(async () => "should not appear");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_150));
+    });
+
+    expect(screen.getByText("No microphone input detected.")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+    expect(onTranscribeAudio).not.toHaveBeenCalled();
+  });
+
+  it("does not treat unavailable microphone levels as silence", async () => {
+    mockVoiceRecorder();
+    mockVoiceAudioInput(128, "suspended");
+    const onTranscribeAudio = vi.fn(async () => "voice text");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_150));
+    });
+
+    expect(screen.queryByText("No microphone input detected.")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
+    expect(screen.getByDisplayValue("voice text")).toBeInTheDocument();
   });
 
   it("renders and changes workspace access mode", async () => {
@@ -707,6 +1115,36 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("opens skills only from a $ reference anywhere", () => {
+    render(
+        <ThreadComposer
+          onSend={vi.fn()}
+          placeholder="Type your message..."
+          skills={[{
+            name: "github",
+            description: "Work with pull requests and issues",
+            source: "builtin",
+            available: true,
+          }]}
+          slashCommands={COMMANDS}
+        />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+
+    const palette = screen.getByRole("listbox", { name: "Slash commands" });
+    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("$github");
+    expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("please use $github ");
+  });
+
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {
     render(
       <ThreadComposer
@@ -803,6 +1241,33 @@ describe("ThreadComposer", () => {
       const palette = screen.getByRole("listbox", { name: "Slash commands" });
       expect(palette.className).toContain("top-full");
       expect(palette).toHaveStyle({ maxHeight: "162px" });
+    });
+  });
+
+  it("keeps the slash command palette above a keyboard-constrained visual viewport", async () => {
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 120, bottom: 220, width: 390, height: 100 }),
+    );
+    Object.defineProperty(window, "innerHeight", {
+      value: 800,
+      configurable: true,
+    });
+    stubVisualViewport({ height: 300 });
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        slashCommands={COMMANDS}
+      />,
+    );
+    const input = screen.getByLabelText("Message input");
+
+    fireEvent.change(input, { target: { value: "/" } });
+
+    await waitFor(() => {
+      const palette = screen.getByRole("listbox", { name: "Slash commands" });
+      expect(palette.className).toContain("bottom-full");
+      expect(palette).toHaveStyle({ maxHeight: "112px" });
     });
   });
 

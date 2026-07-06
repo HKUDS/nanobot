@@ -54,7 +54,11 @@
       "label": "Langue",
       "ariaLabel": "Changer de langue"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "automations": "Automatisations",
+    "skills": {
+      "title": "Compétences"
+    }
   },
   "settings": {
     "backToChat": "Retour au chat",
@@ -70,17 +74,21 @@
       "models": "Modèles",
       "providers": "Fournisseurs",
       "image": "Images",
+      "voice": "Voix",
       "browser": "Internet",
       "runtime": "Système",
       "advanced": "Sécurité",
       "cliApps": "Apps CLI",
       "mcp": "MCP",
-      "apps": "Applications"
+      "apps": "Applications",
+      "automations": "Automatisations",
+      "skills": "Compétences"
     },
     "sections": {
       "interface": "Interface utilisateur",
       "ai": "AI",
       "system": "Système",
+      "about": "À propos",
       "status": "État",
       "localPreferences": "Préférences locales",
       "presets": "Préréglages",
@@ -95,7 +103,8 @@
       "mcp": "Services MCP",
       "apps": "Applications",
       "nativeHost": "Hôte natif",
-      "hostSafety": "Sécurité de l’app"
+      "hostSafety": "Sécurité de l’app",
+      "voiceInput": "Saisie vocale"
     },
     "rows": {
       "theme": "Thème",
@@ -138,7 +147,13 @@
       "engine": "Moteur",
       "logs": "Journaux",
       "diagnostics": "Diagnostic",
-      "contextWindow": "Fenêtre de contexte"
+      "contextWindow": "Fenêtre de contexte",
+      "transcription": "Transcription",
+      "transcriptionProvider": "Fournisseur",
+      "transcriptionProviderStatus": "Etat du fournisseur",
+      "transcriptionModel": "Modele",
+      "transcriptionLanguage": "Langue",
+      "voiceLimits": "Limites"
     },
     "help": {
       "theme": "Basculer entre l’apparence claire et sombre.",
@@ -177,7 +192,12 @@
       "diagnostics": "Exporte un petit rapport d’exécution pour le support.",
       "localServiceAccessNative": "Autorise les commandes shell Full Access à atteindre les services sur ce Mac.",
       "webuiDefaultAccessNative": "Utilisé par les chats natifs sans permission propre au projet.",
-      "contextWindow": "Choisissez le budget de contexte par défaut pour cette configuration de modèle."
+      "contextWindow": "Choisissez le budget de contexte par défaut pour cette configuration de modèle.",
+      "transcription": "Transcrit l'entree micro avant l'envoi. Les messages vocaux des canaux utilisent les memes reglages.",
+      "transcriptionProvider": "Utilise les identifiants du fournisseur correspondant dans Fournisseurs.",
+      "transcriptionProviderStatus": "Les cles API restent dans les fournisseurs, pas dans les reglages de transcription.",
+      "transcriptionModel": "Laissez le modele resolu par defaut sauf si votre fournisseur exige un id personnalise.",
+      "transcriptionLanguage": "Indice ISO-639 facultatif, comme en, zh, ja ou ko."
     },
     "values": {
       "light": "Clair",
@@ -187,6 +207,9 @@
       "disabled": "Désactivé",
       "restartPending": "Redémarrage en attente",
       "ready": "Prêt",
+      "privateEngine": "Moteur privé",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Espace par défaut",
       "comfortable": "Confortable",
       "compact": "Compacte",
       "auto": "Automatique",
@@ -276,7 +299,33 @@
       "totalProviders": "{{count}} disponibles",
       "webSearch": "Recherche web",
       "imageGeneration": "Génération d’images",
+      "voiceInput": "Saisie vocale",
       "workspace": "Espace de travail"
+    },
+    "usage": {
+      "title": "Activité des tokens",
+      "shortTitle": "Token Usage",
+      "subtitle": "Usage signalé par le fournisseur sur les 12 derniers mois.",
+      "empty": "L’activité des tokens apparaîtra après les nouvelles réponses du modèle.",
+      "totalTokens": "Tokens cumulés",
+      "peakTokens": "Pic de tokens",
+      "thirtyDayTokens": "Tokens sur 30 jours",
+      "currentStreak": "Série actuelle",
+      "longestStreak": "Plus longue série",
+      "daysValue": "{{count}} j",
+      "last30": "30 jours",
+      "activeDays": "Jours actifs",
+      "requests": "Requêtes",
+      "estimated": "estimé",
+      "includesEstimates": "inclut des estimations",
+      "cellTitle": "{{date}} : {{tokens}} tokens, {{requests}} requêtes",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automatisations",
+        "dream": "Mémoire",
+        "system": "Système"
+      }
     },
     "providers": {
       "searchPlaceholder": "Rechercher des fournisseurs",
@@ -345,6 +394,13 @@
       "unavailable": "Indisponible",
       "noDescription": "Aucune description disponible."
     },
+    "about": {
+      "version": "Version",
+      "checking": "Recherche de mises à jour...",
+      "checkForUpdates": "Rechercher les mises à jour",
+      "upToDate": "Vous êtes à jour",
+      "updateAvailable": "Mise à jour disponible v{{version}}"
+    },
     "mcp": {
       "allCategories": "Toutes les catégories",
       "summary": "{{installed}} presets activés sur {{total}}",
@@ -402,18 +458,160 @@
       "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
     },
     "apps": {
-      "description": "Ajoutez des CLI d’apps et services MCP utilisables par nanobot depuis le chat.",
+      "description": "Activez des extensions, des adaptateurs d’apps locales et des serveurs d’outils connectés.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Canal",
+      "featureLabel": "Fonction",
       "filterAll": "Tout",
+      "filterPlugins": "Extensions",
       "filterCli": "Apps CLI",
       "filterMcp": "Services MCP",
       "enabledSummary": "{{count}} activés",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} extensions · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Rechercher des apps",
-      "featured": "À la une",
+      "featured": "Catalogue",
       "loading": "Chargement des apps...",
-      "empty": "Aucune app ne correspond."
+      "empty": "Aucune app ne correspond.",
+      "restartRequired": "Redémarrez nanobot pour appliquer les apps et fonctions mises à jour."
+    },
+    "nanobotFeatures": {
+      "enabled": "Activé",
+      "enable": "Activer",
+      "disable": "Désactiver",
+      "ready": "Prêt",
+      "missingDependency": "Support manquant",
+      "installSupport": "Installer le support",
+      "installConfirmTitle": "Installer le support pour {{name}} ?",
+      "installConfirmDescription": "nanobot ajoutera ce dont {{name}} a besoin, puis l'activera. Continuer ?",
+      "installConfirmAction": "Installer et activer",
+      "websocketRequired": "Requis pour la WebUI",
+      "channelDisabled": "Canal désactivé",
+      "notEnabled": "Non activé"
+    },
+    "automations": {
+      "filters": {
+        "all": "Toutes",
+        "active": "Actives",
+        "paused": "En pause",
+        "failed": "À traiter",
+        "system": "Système"
+      },
+      "sort": {
+        "next": "Prochaine exécution",
+        "last": "Dernière exécution",
+        "updated": "Mise à jour",
+        "name": "Nom"
+      },
+      "search": "Rechercher tâche, message, discussion liée ou planning",
+      "queue": "File",
+      "loading": "Chargement des automatisations...",
+      "noMatches": "Aucune automatisation ne correspond à cette vue.",
+      "empty": "Aucune automatisation pour le moment.",
+      "emptyHint": "Créez-la depuis son point d'exécution pour que nanobot conserve le bon contexte.",
+      "oneShot": "Ponctuelle",
+      "systemTask": "Automatisation gérée par le système",
+      "localTrigger": "Déclencheur local",
+      "labels": {
+        "schedule": "Planning",
+        "next": "Prochaine",
+        "origin": "Discussion liée",
+        "created": "Créée",
+        "updated": "Modifiée"
+      },
+      "runNow": "Exécuter maintenant",
+      "pause": "Mettre en pause",
+      "resume": "Reprendre",
+      "edit": "Modifier",
+      "delete": "Supprimer",
+      "protected": "Protégée",
+      "editTitle": "Modifier l’automatisation",
+      "save": "Enregistrer",
+      "deleteTitle": "Supprimer l’automatisation",
+      "deleteDescription": "Cela supprime {{name}} du stockage cron. Les anciens messages de chat restent dans la session.",
+      "cancel": "Annuler",
+      "status": {
+        "system": "Système",
+        "running": "En cours d’exécution",
+        "paused": "En pause",
+        "failed": "Échouée",
+        "completed": "Terminée",
+        "noSchedule": "Aucun planning",
+        "active": "En cours"
+      },
+      "origin": {
+        "system": "Système",
+        "unknown": "Aucune discussion liée"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "À {{time}}",
+        "every": "Toutes les {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Chaque jour à {{time}}",
+        "weekdaysAt": "Jours ouvrés à {{time}}",
+        "hourlyAt": "Toutes les heures à :{{minute}}",
+        "hourlyWindow": "Toutes les heures {{start}}-{{end}} à :{{minute}}",
+        "local": "Déclencheur local",
+        "custom": "Planning personnalisé"
+      },
+      "next": {
+        "paused": "En pause",
+        "pending": "En cours d’exécution",
+        "local": "En attente du déclencheur",
+        "none": "Aucune prochaine exécution"
+      },
+      "message": {
+        "showMore": "Afficher le message complet",
+        "showLess": "Afficher moins"
+      },
+      "fields": {
+        "name": "Nom",
+        "message": "Message",
+        "scheduleType": "Type de planning",
+        "every": "Toutes les",
+        "unit": "Unité",
+        "cronExpression": "Expression cron",
+        "timezone": "Fuseau horaire",
+        "runAt": "Exécuter à"
+      },
+      "scheduleTypes": {
+        "every": "Intervalle",
+        "cron": "Cron",
+        "at": "Une fois"
+      },
+      "everyUnits": {
+        "second": "Secondes",
+        "minute": "Minutes",
+        "hour": "Heures",
+        "day": "Jours"
+      },
+      "validation": {
+        "nameRequired": "Le nom est obligatoire.",
+        "messageRequired": "Le message est obligatoire.",
+        "intervalRequired": "L’intervalle doit être un nombre positif.",
+        "cronRequired": "L’expression cron est obligatoire.",
+        "timeRequired": "L’heure d’exécution est obligatoire.",
+        "futureRequired": "L’heure d’exécution doit être dans le futur."
+      }
     },
     "oauth": {
       "authentication": "Authentification OAuth",
@@ -427,10 +625,43 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Connecté",
       "notSignedIn": "Non connecté"
+    },
+    "skills": {
+      "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",
+      "caption": "{{available}} disponibles · {{total}} au total",
+      "featured": "Compétences agent",
+      "empty": "Aucune compétence disponible.",
+      "sourceWorkspace": "Personnalisée",
+      "sourceBuiltin": "Intégrée",
+      "statusAvailable": "Disponible",
+      "statusUnavailable": "Indisponible",
+      "unavailableReason": "Manquant : {{reason}}",
+      "openDetails": "Ouvrir les détails de {{name}}",
+      "loadingDetail": "Chargement des détails...",
+      "loadFailed": "Impossible de charger les détails.",
+      "descriptionTitle": "Description",
+      "source": "Source",
+      "status": "Statut",
+      "requirements": "Prérequis",
+      "noRequirements": "Aucun prérequis explicite.",
+      "commands": "Commandes",
+      "environment": "Variables d’environnement",
+      "missingCommands": "CLI manquant",
+      "missingEnvironment": "ENV manquant",
+      "unavailableReasonLabel": "Raison d’indisponibilité",
+      "rawInstructions": "SKILL.md brut",
+      "rawInstructionsEmpty": "Aucune instruction brute.",
+      "detailDescription": "Détails de {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Choisir un fournisseur",
+      "configureProvider": "Configurer le fournisseur",
+      "languageAuto": "Auto"
     }
   },
   "chat": {
     "fallbackTitle": "Discussion {{id}}",
+    "forkTitle": "Branche : {{title}}",
     "loading": "Chargement…",
     "noSessions": "Aucune session pour le moment.",
     "showMore": "Afficher {{count}} de plus",
@@ -440,7 +671,8 @@
     "newInProject": "Démarrer une nouvelle discussion dans {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -472,7 +704,24 @@
     "title": "Supprimer cette discussion ?",
     "description": "Cette action est irréversible.",
     "cancel": "Annuler",
-    "confirm": "Supprimer"
+    "confirm": "Supprimer",
+    "automationsDescription": "Cette discussion contient des automatisations planifiées. La supprimer les supprimera aussi.",
+    "moreAutomations": "+ {{count}} autres",
+    "confirmWithAutomations": "Supprimer",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Tous les {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Déclencheur local",
+      "unknown": "Planification personnalisée"
+    },
+    "next": {
+      "label": "Prochaine exécution : {{time}}",
+      "disabled": "En pause",
+      "local": "En attente du déclencheur",
+      "none": "Aucune prochaine exécution"
+    }
   },
   "connection": {
     "idle": "Inactif",
@@ -548,7 +797,33 @@
       "toggleSidebar": "Afficher ou masquer la barre latérale",
       "newChat": "Démarrer un nouveau chat",
       "toggleTheme": "Changer le thème depuis l’en-tête",
-      "settings": "Ouvrir les paramètres"
+      "settings": "Ouvrir les paramètres",
+      "sessionInfo": "Détails de la session"
+    },
+    "sessionInfo": {
+      "title": "Session",
+      "untitled": "Chat sans titre",
+      "automations": "Automatisations",
+      "count": "{{count}}",
+      "loading": "Chargement des automatisations...",
+      "loadFailed": "Impossible de charger les automatisations.",
+      "empty": "Aucune automatisation dans cette session pour le moment.",
+      "disabled": "Désactivé",
+      "schedule": {
+        "at": "À {{time}}",
+        "every": "Toutes les {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Déclencheur local",
+        "unknown": "Planification personnalisée"
+      },
+      "next": {
+        "label": "Prochaine {{time}}",
+        "pending": "Exécution imminente",
+        "disabled": "En pause",
+        "local": "En attente du déclencheur",
+        "none": "Aucune prochaine exécution"
+      }
     },
     "composer": {
       "placeholderThread": "Saisissez votre message…",
@@ -565,6 +840,8 @@
       "goalStateCloseAria": "Fermer l’objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
+      "modelNotConfigured": "Modèle non configuré",
+      "configureModel": "Configurer le modèle",
       "queued": {
         "label": "Guidage en attente",
         "guide": "Guider",
@@ -593,6 +870,21 @@
         "reason": "Raisonner",
         "deepResearch": "Recherche approfondie",
         "voice": "Entrée vocale"
+      },
+      "voice": {
+        "hint": "Cliquez pour dicter ou maintenez",
+        "stop": "Arrêter l'enregistrement",
+        "transcribing": "Transcription...",
+        "recordingStatus": "Enregistrement {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "La saisie vocale n'est pas prise en charge par ce navigateur.",
+        "permission": "L'autorisation du microphone est requise.",
+        "notConfigured": "Configurez d'abord un fournisseur de transcription.",
+        "tooLong": "L'enregistrement est trop long.",
+        "tooShort": "Maintenez un peu plus longtemps pour enregistrer la voix.",
+        "noInput": "Aucune entrée microphone détectée.",
+        "failed": "Impossible de transcrire l'audio."
       },
       "slash": {
         "ariaLabel": "Commandes slash",
@@ -637,9 +929,17 @@
             "title": "Restaurer la mémoire",
             "description": "Revenir à un instantané Dream précédent."
           },
+          "dream_prompt": {
+            "title": "Mémoire Dream",
+            "description": "Indiquez à Dream comment organiser la mémoire de cet espace de travail."
+          },
           "goal": {
             "title": "Objectif long terme",
             "description": "Demandez à l’agent de traiter ceci comme un objectif multi‑étapes durable."
+          },
+          "trigger": {
+            "title": "Créer un trigger local",
+            "description": "Crée un trigger CLI lié à cette session de chat."
           },
           "help": {
             "title": "Afficher l’aide",
@@ -683,15 +983,23 @@
         "mcpDescription": "Utiliser @{{name}} comme serveur MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Mode d’accès à l’espace de travail",
         "projectAria": "Choisir un projet",
         "projectPlaceholder": "Sélectionner un projet",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Autorisation par défaut",
+        "full": "Accès complet"
       }
     },
     "scrollToBottom": "Faire défiler vers le bas",
-    "loadEarlier": "Charger les messages précédents"
+    "loadEarlier": "Charger les messages précédents",
+    "forkedFromHistory": "Bifurqué depuis l'historique",
+    "promptNavigator": {
+      "open": "Ouvrir le navigateur de prompts",
+      "title": "Prompts",
+      "search": "Rechercher des prompts",
+      "noResults": "Aucun prompt correspondant.",
+      "jumpTo": "Aller au prompt : {{label}}"
+    }
   },
   "message": {
     "streaming": "en cours de génération",
@@ -710,12 +1018,16 @@
     "agentActivityLiveSummary": "En cours… · {{reasoning}} étapes · {{tools}} appels d’outils",
     "agentActivityLiveToolsOnly": "En cours… · {{tools}} appels d’outils",
     "imageAttachment": "Pièce jointe image",
-    "copyReply": "Copier la réponse",
-    "copiedReply": "Réponse copiée",
+    "forkFromHere": "Bifurquer",
+    "copyReply": "Copier",
+    "copiedReply": "Copié",
     "turnLatencyTitle": "Temps de réponse (de bout en bout)",
     "activityThinkingFor": "Réflexion pendant {{duration}}",
     "activityThought": "Réflexion terminée",
     "activityThoughtFor": "Réflexion terminée en {{duration}}",
+    "activityWorkingFor": "Travail en cours depuis {{duration}}",
+    "activityWorked": "Travail terminé",
+    "activityWorkedFor": "Travail terminé en {{duration}}",
     "cliActivityRunningOne": "Utilisation de @{{name}}",
     "cliActivityRanOne": "@{{name}} utilisé",
     "cliActivityFailedOne": "Échec de @{{name}}",
@@ -724,7 +1036,9 @@
     "cliActivityFailedMany": "Échec de {{count}} apps CLI",
     "cliRunRunning": "Utilisation",
     "cliRunRan": "Utilisé",
-    "cliRunFailed": "Échec"
+    "cliRunFailed": "Échec",
+    "automationSourceFallback": "Automatisation",
+    "automationTriggered": "Déclenché automatiquement"
   },
   "lightbox": {
     "title": "Aperçu de l’image",
@@ -732,6 +1046,15 @@
     "prev": "Image précédente",
     "next": "Image suivante",
     "close": "Fermer l’aperçu"
+  },
+  "filePreview": {
+    "aria": "Aperçu du fichier",
+    "close": "Fermer l’aperçu du fichier",
+    "loading": "Chargement de l’aperçu...",
+    "failed": "Impossible de prévisualiser ce fichier.",
+    "routeMissing": "L’aperçu du fichier nécessite le dernier gateway. Redémarrez nanobot gateway puis réessayez.",
+    "resize": "Redimensionner l’aperçu du fichier",
+    "truncated": "L’aperçu est tronqué car le fichier est volumineux."
   },
   "code": {
     "fallbackLanguage": "code",
@@ -748,17 +1071,17 @@
       "body": "Le serveur a rejeté votre dernier message car il dépasse la taille autorisée. Retirez des images ou choisissez des fichiers plus légers, puis renvoyez-le."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "L’espace de travail n’a pas changé",
+      "body": "La passerelle a refusé le projet ou le mode d’accès demandé ; Nanobot a conservé l’espace de travail précédent."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Espace de travail par défaut",
       "manual": "Coller un chemin",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Utiliser le chemin",
+      "absolutePathRequired": "Saisissez un chemin absolu de dossier sur cette machine."
     }
   }
 }

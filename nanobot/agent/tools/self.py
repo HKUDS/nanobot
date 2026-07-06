@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.runtime_state import RuntimeState
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentStatus
@@ -148,6 +148,7 @@ class MyTool(Tool, ContextAware):
             "\n"
             "When to use:\n"
             "- User asks about your model, settings, or token usage → check that key.\n"
+            "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
             "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
             "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
             "- About to start a large task → check context_window_tokens and max_iterations first."
@@ -175,9 +176,9 @@ class MyTool(Tool, ContextAware):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
-                    "For check without key, shows all config values.",
+                    "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
-                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model)."},
+                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
             },
             "required": ["action"],
         }
@@ -215,7 +216,7 @@ class MyTool(Tool, ContextAware):
     @staticmethod
     def _validate_key(key: str | None, label: str = "key") -> str | None:
         if not key or not key.strip():
-            return f"Error: '{label}' cannot be empty or whitespace"
+            return ToolResult.error(f"Error: '{label}' cannot be empty or whitespace")
         return None
 
     # ------------------------------------------------------------------
@@ -320,7 +321,7 @@ class MyTool(Tool, ContextAware):
         if action in ("inspect", "check"):
             return self._inspect(key)
         if not self._modify_allowed:
-            return "Error: set is disabled (tools.my.allow_set is false)"
+            return ToolResult.error("Error: set is disabled (tools.my.allow_set is false)")
         if action in ("modify", "set"):
             return self._modify(key, value)
         return f"Unknown action: {action}"
@@ -332,7 +333,7 @@ class MyTool(Tool, ContextAware):
             return self._inspect_all()
         top = key.split(".")[0]
         if top in self._DENIED_ATTRS or top.startswith("__"):
-            return f"Error: '{top}' is not accessible"
+            return ToolResult.error(f"Error: '{top}' is not accessible")
         obj, err = self._resolve_path(key)
         if err:
             # "scratchpad" alias for _runtime_vars
@@ -342,12 +343,12 @@ class MyTool(Tool, ContextAware):
             # Fallback: check _runtime_vars for simple keys stored by modify
             if "." not in key and key in self._runtime_state._runtime_vars:
                 return self._format_value(self._runtime_state._runtime_vars[key], key)
-            return f"Error: {err}"
+            return ToolResult.error(f"Error: {err}")
         # Guard against mock auto-generated attributes
         if "." not in key and not _has_real_attr(self._runtime_state, key):
             if key in self._runtime_state._runtime_vars:
                 return self._format_value(self._runtime_state._runtime_vars[key], key)
-            return f"Error: '{key}' not found"
+            return ToolResult.error(f"Error: '{key}' not found")
         return self._format_value(obj, key)
 
     def _inspect_all(self) -> str:
@@ -378,51 +379,68 @@ class MyTool(Tool, ContextAware):
         top = key.split(".")[0]
         if top in self.BLOCKED or top in self._DENIED_ATTRS or top.startswith("__") or top.lower() in self._SENSITIVE_NAMES:
             self._audit("modify", f"BLOCKED {key}")
-            return f"Error: '{key}' is protected and cannot be modified"
+            return ToolResult.error(f"Error: '{key}' is protected and cannot be modified")
         if top in self.READ_ONLY:
             self._audit("modify", f"READ_ONLY {key}")
-            return f"Error: '{key}' is read-only and cannot be modified"
+            return ToolResult.error(f"Error: '{key}' is read-only and cannot be modified")
         if "." in key:
             parent_path, leaf = key.rsplit(".", 1)
             if leaf in self._DENIED_ATTRS or leaf.startswith("__"):
                 self._audit("modify", f"BLOCKED leaf '{leaf}'")
-                return f"Error: '{leaf}' is not accessible"
+                return ToolResult.error(f"Error: '{leaf}' is not accessible")
             if leaf.lower() in self._SENSITIVE_NAMES:
                 self._audit("modify", f"BLOCKED sensitive leaf '{leaf}'")
-                return f"Error: '{leaf}' is not accessible"
+                return ToolResult.error(f"Error: '{leaf}' is not accessible")
             parent, err = self._resolve_path(parent_path)
             if err:
-                return f"Error: {err}"
+                return ToolResult.error(f"Error: {err}")
             if isinstance(parent, dict):
                 parent[leaf] = value
             else:
                 setattr(parent, leaf, value)
             self._audit("modify", f"{key} = {value!r}")
             return f"Set {key} = {value!r}"
+        if key == "model_preset":
+            return self._modify_model_preset(value)
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         return self._modify_free(key, value)
+
+    def _modify_model_preset(self, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return ToolResult.error("Error: 'model_preset' must be a non-empty string")
+        name = value.strip()
+        result = self._modify_free("model_preset", name)
+        if isinstance(result, ToolResult) and result.is_error:
+            return result if result.endswith((".", "!", "?")) else ToolResult.error(f"{result}.")
+        return (
+            f"{result}; model is now {self._runtime_state.model!r}; "
+            f"context_window_tokens is now {self._runtime_state.context_window_tokens!r}"
+        )
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]
         expected = spec["type"]
         if expected is int and isinstance(value, bool):
-            return f"Error: '{key}' must be {expected.__name__}, got bool"
+            return ToolResult.error(f"Error: '{key}' must be {expected.__name__}, got bool")
         if not isinstance(value, expected):
             try:
                 value = expected(value)
             except (ValueError, TypeError):
-                return f"Error: '{key}' must be {expected.__name__}, got {type(value).__name__}"
+                return ToolResult.error(f"Error: '{key}' must be {expected.__name__}, got {type(value).__name__}")
         old = getattr(self._runtime_state, key)
         if "min" in spec and value < spec["min"]:
-            return f"Error: '{key}' must be >= {spec['min']}"
+            return ToolResult.error(f"Error: '{key}' must be >= {spec['min']}")
         if "max" in spec and value > spec["max"]:
-            return f"Error: '{key}' must be <= {spec['max']}"
+            return ToolResult.error(f"Error: '{key}' must be <= {spec['max']}")
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
-            return f"Error: '{key}' must be at least {spec['min_len']} characters"
+            return ToolResult.error(f"Error: '{key}' must be at least {spec['min_len']} characters")
         setattr(self._runtime_state, key, value)
         if key == "model":
             self._runtime_state._active_preset = None
+        sync_replay = getattr(self._runtime_state, "_sync_replay_max_messages", None)
+        if key == "context_window_tokens" and callable(sync_replay):
+            sync_replay()
         if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
             self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
@@ -440,24 +458,25 @@ class MyTool(Tool, ContextAware):
                         "modify",
                         f"REJECTED type mismatch {key}: expects {old_t.__name__}, got {new_t.__name__}",
                     )
-                    return f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}"
+                    return ToolResult.error(f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}")
             try:
                 setattr(self._runtime_state, key, value)
             except (ValueError, KeyError) as e:
-                self._audit("modify", f"REJECTED {key}: {e}")
-                return f"Error: {e}"
+                message = str(e.args[0] if isinstance(e, KeyError) and e.args else e).strip('"')
+                self._audit("modify", f"REJECTED {key}: {message}")
+                return ToolResult.error(f"Error: {message}")
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):
             self._audit("modify", f"REJECTED callable {key}")
-            return "Error: cannot store callable values"
+            return ToolResult.error("Error: cannot store callable values")
         err = self._validate_json_safe(value)
         if err:
             self._audit("modify", f"REJECTED {key}: {err}")
-            return f"Error: {err}"
+            return ToolResult.error(f"Error: {err}")
         if key not in self._runtime_state._runtime_vars and len(self._runtime_state._runtime_vars) >= self._MAX_RUNTIME_KEYS:
             self._audit("modify", f"REJECTED {key}: max keys ({self._MAX_RUNTIME_KEYS}) reached")
-            return f"Error: scratchpad is full (max {self._MAX_RUNTIME_KEYS} keys). Remove unused keys first."
+            return ToolResult.error(f"Error: scratchpad is full (max {self._MAX_RUNTIME_KEYS} keys). Remove unused keys first.")
         old = self._runtime_state._runtime_vars.get(key)
         self._runtime_state._runtime_vars[key] = value
         self._audit("modify", f"scratchpad.{key}: {old!r} -> {value!r}")

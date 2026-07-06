@@ -1,22 +1,34 @@
 import type {
+  AutomationsPayload,
+  AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
+  FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
+  NanobotFeaturesPayload,
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
+  SessionDeleteResult,
+  SessionAutomationsPayload,
   SettingsPayload,
   SettingsUpdate,
   SidebarStatePayload,
+  SkillDetail,
+  SkillsPayload,
   SlashCommand,
+  TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
 } from "./types";
+import { fetchWithTimeout } from "./http";
+
+const API_READ_TIMEOUT_MS = 20_000;
 
 export class ApiError extends Error {
   status: number;
@@ -31,15 +43,20 @@ async function request<T>(
   url: string,
   token: string,
   init?: RequestInit,
+  timeoutMs: number = 0,
 ): Promise<T> {
-  const res = await fetch(url, {
-    ...(init ?? {}),
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
+  const res = await fetchWithTimeout(
+    url,
+    {
+      ...(init ?? {}),
+      headers: {
+        ...(init?.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "same-origin",
     },
-    credentials: "same-origin",
-  });
+    timeoutMs,
+  );
   if (!res.ok) {
     const text = typeof res.text === "function" ? (await res.text()).trim() : "";
     throw new ApiError(res.status, text || `HTTP ${res.status}`);
@@ -73,6 +90,10 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
   return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
 }
 
+function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
+  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
+}
+
 function splitKey(key: string): { channel: string; chatId: string } {
   const idx = key.indexOf(":");
   if (idx === -1) return { channel: "", chatId: key };
@@ -95,6 +116,8 @@ export async function listSessions(
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
     token,
+    undefined,
+    API_READ_TIMEOUT_MS,
   );
   return body.sessions.map((s) => ({
     key: s.key,
@@ -109,13 +132,28 @@ export async function listSessions(
 }
 
 /** Disk-backed WebUI display thread snapshot (separate from agent session). */
+export interface FetchWebuiThreadOptions {
+  limit?: number;
+  direction?: "latest";
+  before?: string | null;
+}
+
 export async function fetchWebuiThread(
   token: string,
   key: string,
+  optionsOrBase?: FetchWebuiThreadOptions | string,
   base: string = "",
 ): Promise<WebuiThreadPersistedPayload | null> {
-  const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread`;
-  const res = await fetch(url, {
+  const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
+  const resolvedBase = typeof optionsOrBase === "string" ? optionsOrBase : base;
+  const params = new URLSearchParams();
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.direction) params.set("direction", options.direction);
+  if (options?.before) params.set("before", options.before);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
+  const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
   });
@@ -124,37 +162,239 @@ export async function fetchWebuiThread(
   return (await res.json()) as WebuiThreadPersistedPayload;
 }
 
-export async function deleteSession(
+export async function fetchFilePreview(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<FilePreviewPayload> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  return request<FilePreviewPayload>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSessionAutomations(
   token: string,
   key: string,
   base: string = "",
-): Promise<boolean> {
-  const body = await request<{ deleted: boolean }>(
-    `${base}/api/sessions/${encodeURIComponent(key)}/delete`,
+): Promise<SessionAutomationsPayload> {
+  return request<SessionAutomationsPayload>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/automations`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchAutomations(
+  token: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runAutomationAction(
+  token: string,
+  action: "enable" | "disable" | "delete" | "run",
+  id: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/${action}?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateAutomation(
+  token: string,
+  id: string,
+  values: AutomationUpdatePayload,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/update?${query}`,
+    token,
+    {
+      headers: automationValuesHeader(values),
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSkills(
+  token: string,
+  base: string = "",
+): Promise<SkillsPayload> {
+  return request<SkillsPayload>(
+    `${base}/api/webui/skills`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSkillDetail(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<SkillDetail> {
+  return request<SkillDetail>(
+    `${base}/api/webui/skills/${encodeURIComponent(name)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function deleteSession(
+  token: string,
+  key: string,
+  optionsOrBase?: { deleteAutomations?: boolean } | string,
+  base: string = "",
+): Promise<SessionDeleteResult> {
+  const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
+  const resolvedBase = typeof optionsOrBase === "string" ? optionsOrBase : base;
+  const query = new URLSearchParams();
+  if (options?.deleteAutomations) query.set("delete_automations", "true");
+  const suffix = query.toString() ? `?${query}` : "";
+  return request<SessionDeleteResult>(
+    `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
     token,
   );
-  return body.deleted;
 }
 
 export async function fetchSettings(
   token: string,
   base: string = "",
 ): Promise<SettingsPayload> {
-  return request<SettingsPayload>(`${base}/api/settings`, token);
+  return request<SettingsPayload>(
+    `${base}/api/settings`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSettingsUsage(
+  token: string,
+  base: string = "",
+): Promise<NonNullable<SettingsPayload["usage"]>> {
+  return request<NonNullable<SettingsPayload["usage"]>>(
+    `${base}/api/settings/usage`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export interface VersionCheckResult {
+  updateAvailable: {
+    currentVersion: string;
+    latestVersion: string;
+    pypiUrl?: string;
+  } | null;
+}
+
+export async function checkVersion(
+  token: string,
+  base: string = "",
+): Promise<VersionCheckResult> {
+  return request<VersionCheckResult>(
+    `${base}/api/settings/version-check`,
+    token,
+    undefined,
+    10_000,
+  );
 }
 
 export async function fetchWorkspaces(
   token: string,
   base: string = "",
 ): Promise<WorkspacesPayload> {
-  return request<WorkspacesPayload>(`${base}/api/workspaces`, token);
+  return request<WorkspacesPayload>(
+    `${base}/api/workspaces`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function fetchCliApps(
   token: string,
   base: string = "",
 ): Promise<CliAppsPayload> {
-  return request<CliAppsPayload>(`${base}/api/settings/cli-apps`, token);
+  return request<CliAppsPayload>(
+    `${base}/api/settings/cli-apps`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchInstalledCliApps(
+  token: string,
+  base: string = "",
+): Promise<CliAppsPayload> {
+  return request<CliAppsPayload>(
+    `${base}/api/settings/cli-apps?installed_only=1`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchNanobotFeatures(
+  token: string,
+  base: string = "",
+): Promise<NanobotFeaturesPayload> {
+  return request<NanobotFeaturesPayload>(
+    `${base}/api/settings/nanobot-features`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function enableNanobotFeature(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<NanobotFeaturesPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<NanobotFeaturesPayload>(
+    `${base}/api/settings/nanobot-features/enable?${query}`,
+    token,
+  );
+}
+
+export async function disableNanobotFeature(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<NanobotFeaturesPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<NanobotFeaturesPayload>(
+    `${base}/api/settings/nanobot-features/disable?${query}`,
+    token,
+  );
 }
 
 export async function runCliAppAction(
@@ -172,7 +412,12 @@ export async function fetchMcpPresets(
   token: string,
   base: string = "",
 ): Promise<McpPresetsPayload> {
-  return request<McpPresetsPayload>(`${base}/api/settings/mcp-presets`, token);
+  return request<McpPresetsPayload>(
+    `${base}/api/settings/mcp-presets`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function fetchProviderModels(
@@ -185,6 +430,8 @@ export async function fetchProviderModels(
   return request<ProviderModelsPayload>(
     `${base}/api/settings/provider-models?${query}`,
     token,
+    undefined,
+    API_READ_TIMEOUT_MS,
   );
 }
 
@@ -252,7 +499,12 @@ export async function listSlashCommands(
     icon: string;
     arg_hint?: string;
   };
-  const body = await request<{ commands: Row[] }>(`${base}/api/commands`, token);
+  const body = await request<{ commands: Row[] }>(
+    `${base}/api/commands`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
   return body.commands
     .filter((command) => !["/stop", "/restart"].includes(command.command))
     .map((command) => ({
@@ -268,7 +520,12 @@ export async function fetchSidebarState(
   token: string,
   base: string = "",
 ): Promise<SidebarStatePayload> {
-  return request<SidebarStatePayload>(`${base}/api/webui/sidebar-state`, token);
+  return request<SidebarStatePayload>(
+    `${base}/api/webui/sidebar-state`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function updateSidebarState(
@@ -432,6 +689,24 @@ export async function updateImageGenerationSettings(
   query.set("max_images_per_turn", String(update.maxImagesPerTurn));
   return request<SettingsPayload>(
     `${base}/api/settings/image-generation/update?${query}`,
+    token,
+  );
+}
+
+export async function updateTranscriptionSettings(
+  token: string,
+  update: TranscriptionSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("enabled", String(update.enabled));
+  query.set("provider", update.provider);
+  query.set("model", update.model);
+  query.set("language", update.language);
+  query.set("max_duration_sec", String(update.maxDurationSec));
+  query.set("max_upload_mb", String(update.maxUploadMb));
+  return request<SettingsPayload>(
+    `${base}/api/settings/transcription/update?${query}`,
     token,
   );
 }

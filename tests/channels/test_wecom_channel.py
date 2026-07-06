@@ -18,6 +18,7 @@ if not WECOM_AVAILABLE:
     pytest.skip("WeCom dependencies not installed (wecom_aibot_sdk)", allow_module_level=True)
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.wecom import (
     WecomChannel,
@@ -316,7 +317,7 @@ async def test_send_text_with_frame() -> None:
 
 @pytest.mark.asyncio
 async def test_send_progress_with_frame() -> None:
-    """When metadata has _progress, send uses reply_stream with finish=False."""
+    """Progress events use reply_stream with finish=False."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
     client = _FakeWeComClient()
     channel._client = client
@@ -324,7 +325,12 @@ async def test_send_progress_with_frame() -> None:
     channel._chat_frames["chat1"] = _FakeFrame()
 
     await channel.send(
-        OutboundMessage(channel="wecom", chat_id="chat1", content="thinking...", metadata={"_progress": True})
+        OutboundMessage(
+            channel="wecom",
+            chat_id="chat1",
+            content="thinking...",
+            event=ProgressEvent(content="thinking..."),
+        )
     )
 
     client.reply_stream.assert_called_once()
@@ -420,7 +426,7 @@ async def test_send_exception_caught_not_raised() -> None:
     await channel.send(
         OutboundMessage(channel="wecom", chat_id="chat1", content="fail test")
     )
-    # No exception — test passes if we reach here.
+    client.reply_stream.assert_called_once()
 
 
 # ── _process_message() ──────────────────────────────────────────────

@@ -12,7 +12,11 @@ import pytest
 from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.web import WebFetchTool
 from nanobot.config.schema import WebFetchConfig
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 _REAL_GETADDRINFO = socket.getaddrinfo
 
@@ -147,6 +151,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(tool, "_fetch_jina", _fail_jina)
+    monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "Hello world")
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
@@ -158,6 +163,47 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         "nanobot-test-agent",
         "nanobot-test-agent",
     ]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+
+    class FakeResponse:
+        status_code = 200
+        url = "https://example.com/page"
+        text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
+        headers = {"content-type": "text/html"}
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None, follow_redirects=False, **kwargs):
+            return FakeResponse()
+
+    def _missing_readability(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'lxml_html_clean'")
+
+    monkeypatch.setattr(tool, "_extract_readable_html", _missing_readability)
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool._fetch_readability("https://example.com/page", "markdown", 5000)
+
+    data = json.loads(result)
+    assert data["extractor"] == "html"
+    assert data["untrusted"] is True
+    assert "Hello world" in data["text"]
 
 
 @pytest.mark.asyncio

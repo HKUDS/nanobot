@@ -14,6 +14,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -47,6 +48,10 @@ class SlackConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
+    # When group_policy is "allowlist", also require the bot to be @mentioned
+    # before responding (so it only replies to mentions in approved channels,
+    # instead of every message). No effect for "mention"/"open" policies.
+    group_require_mention: bool = False
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
@@ -160,7 +165,7 @@ class SlackChannel(BaseChannel):
             # only makes sense within the originating conversation.
             thread_ts_param = thread_ts if thread_ts and target_chat_id == origin_chat_id else None
 
-            is_progress = (msg.metadata or {}).get("_progress", False)
+            is_progress = isinstance(msg.event, ProgressEvent)
             if is_progress and not msg.content:
                 pass  # skip empty progress messages (e.g. tool-event-only updates)
             elif msg.content or not (msg.media or []):
@@ -186,7 +191,7 @@ class SlackChannel(BaseChannel):
                     self.logger.exception("Failed to upload file {}", media_path)
 
             # Update reaction emoji when the final (non-progress) response is sent
-            if not (msg.metadata or {}).get("_progress"):
+            if not is_progress:
                 event = slack_meta.get("event", {})
                 await self._update_react_emoji(origin_chat_id, event.get("ts"))
 
@@ -648,15 +653,22 @@ class SlackChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return True
 
+    def _is_mention(self, event_type: str, text: str) -> bool:
+        if event_type == "app_mention":
+            return True
+        return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
+
     def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
         if self.config.group_policy == "open":
             return True
         if self.config.group_policy == "mention":
-            if event_type == "app_mention":
-                return True
-            return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
+            return self._is_mention(event_type, text)
         if self.config.group_policy == "allowlist":
-            return chat_id in self.config.group_allow_from
+            if chat_id not in self.config.group_allow_from:
+                return False
+            if self.config.group_require_mention:
+                return self._is_mention(event_type, text)
+            return True
         return False
 
     def is_allowed(self, sender_id: str) -> bool:

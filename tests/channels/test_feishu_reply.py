@@ -18,6 +18,7 @@ if not FEISHU_AVAILABLE:
     pytest.skip("Feishu dependencies not installed (lark-oapi)", allow_module_level=True)
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig
 
@@ -56,6 +57,7 @@ def _make_feishu_event(
     sender_open_id: str = "ou_alice",
     parent_id: str | None = None,
     root_id: str | None = None,
+    mentions=None,
 ):
     message = SimpleNamespace(
         message_id=message_id,
@@ -65,7 +67,7 @@ def _make_feishu_event(
         content=content,
         parent_id=parent_id,
         root_id=root_id,
-        mentions=[],
+        mentions=mentions or [],
     )
     sender = SimpleNamespace(
         sender_type="user",
@@ -331,7 +333,8 @@ async def test_send_skips_reply_for_progress_messages() -> None:
         channel="feishu",
         chat_id="oc_abc",
         content="thinking...",
-        metadata={"message_id": "om_001", "_progress": True},
+        event=ProgressEvent(content="thinking..."),
+        metadata={"message_id": "om_001"},
     ))
 
     channel._client.im.v1.message.create.assert_called_once()
@@ -545,6 +548,71 @@ async def test_on_message_no_extra_api_call_when_no_parent_id() -> None:
 
     channel._client.im.v1.message.get.assert_not_called()
     assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_on_message_strips_required_leading_bot_mention_for_commands() -> None:
+    channel = _make_feishu_channel(group_policy="mention")
+    channel._processed_message_ids.clear()
+    channel._bot_open_id = "ou_bot"
+    captured = []
+
+    async def _capture(**kwargs):
+        captured.append(kwargs)
+
+    channel._handle_message = _capture
+    mention = SimpleNamespace(
+        key="@_user_1",
+        name="nanobot",
+        id=SimpleNamespace(open_id="ou_bot", user_id=None),
+    )
+
+    with patch.object(channel, "_add_reaction", return_value=None):
+        await channel._on_message(
+            _make_feishu_event(
+                chat_type="group",
+                content=json.dumps({"text": "@_user_1 /new"}),
+                mentions=[mention],
+            )
+        )
+
+    assert len(captured) == 1
+    assert captured[0]["content"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_on_message_keeps_longer_mention_key_that_shares_bot_prefix() -> None:
+    channel = _make_feishu_channel(group_policy="mention")
+    channel._processed_message_ids.clear()
+    channel._bot_open_id = "ou_bot"
+    captured = []
+
+    async def _capture(**kwargs):
+        captured.append(kwargs)
+
+    channel._handle_message = _capture
+    bot_mention = SimpleNamespace(
+        key="@_user_1",
+        name="nanobot",
+        id=SimpleNamespace(open_id="ou_bot", user_id=None),
+    )
+    user_mention = SimpleNamespace(
+        key="@_user_10",
+        name="Alice",
+        id=SimpleNamespace(open_id="ou_alice", user_id=None),
+    )
+
+    with patch.object(channel, "_add_reaction", return_value=None):
+        await channel._on_message(
+            _make_feishu_event(
+                chat_type="group",
+                content=json.dumps({"text": "@_user_10 /new @_user_1"}),
+                mentions=[bot_mention, user_mention],
+            )
+        )
+
+    assert len(captured) == 1
+    assert captured[0]["content"] == "@Alice (ou_alice) /new @nanobot (ou_bot)"
 
 
 # ---------------------------------------------------------------------------

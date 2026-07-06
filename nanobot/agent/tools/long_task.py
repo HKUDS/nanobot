@@ -20,15 +20,14 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     discard_legacy_goal_state_key,
     goal_state_raw,
-    goal_state_ws_blob,
     parse_goal_state,
 )
 
@@ -43,9 +42,13 @@ def _iso_now() -> str:
 class _GoalToolsMixin(ContextAware):
     """Shared routing context + Session lookup."""
 
-    def __init__(self, sessions: SessionManager, bus: Any | None = None) -> None:
+    def __init__(
+        self,
+        sessions: SessionManager,
+        runtime_events: RuntimeEventBus | None = None,
+    ) -> None:
         self._sessions = sessions
-        self._bus = bus
+        self._runtime_events = runtime_events
         # Each subclass gets its own ContextVar so concurrent tasks across
         # different tool types (LongTaskTool vs CompleteGoalTool) do not
         # interfere with each other.
@@ -66,25 +69,25 @@ class _GoalToolsMixin(ContextAware):
             return None
         return self._sessions.get_or_create(key)
 
-    async def _publish_goal_state_ws(self, metadata: dict[str, Any]) -> None:
-        """Fan-out authoritative goal snapshot for this WebSocket chat only."""
-        bus = self._bus
+    async def _publish_goal_state_changed(self, metadata: dict[str, Any]) -> None:
+        """Publish authoritative goal metadata as a runtime event."""
+        runtime_events = self._runtime_events
         rc = self._request_ctx.get()
-        if bus is None or rc is None or rc.channel != "websocket":
+        if runtime_events is None or rc is None:
             return
         cid = (rc.chat_id or "").strip()
         if not cid:
             return
-        await bus.publish_outbound(
-            OutboundMessage(
-                channel="websocket",
-                chat_id=cid,
-                content="",
-                metadata={
-                    "_goal_state_sync": True,
-                    "goal_state": goal_state_ws_blob(metadata),
-                },
-            ),
+        await runtime_events.publish(
+            GoalStateChanged(
+                context=RuntimeEventContext(
+                    channel=rc.channel,
+                    chat_id=cid,
+                    session_key=rc.session_key or f"{rc.channel}:{cid}",
+                    metadata=dict(rc.metadata or {}),
+                ),
+                session_metadata=dict(metadata),
+            )
         )
 
 
@@ -108,14 +111,21 @@ class _GoalToolsMixin(ContextAware):
 class LongTaskTool(Tool, _GoalToolsMixin):
     """Begin or replace focus on a long-running objective stored on the session."""
 
-    def __init__(self, sessions: Any, bus: Any | None = None) -> None:
-        _GoalToolsMixin.__init__(self, sessions, bus)
+    def __init__(
+        self,
+        sessions: Any,
+        runtime_events: RuntimeEventBus | None = None,
+    ) -> None:
+        _GoalToolsMixin.__init__(self, sessions, runtime_events)
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         sess = getattr(ctx, "sessions", None)
         assert sess is not None  # guarded by enabled()
-        return cls(sessions=sess, bus=getattr(ctx, "bus", None))
+        return cls(
+            sessions=sess,
+            runtime_events=getattr(ctx, "runtime_events", None),
+        )
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
@@ -140,12 +150,12 @@ class LongTaskTool(Tool, _GoalToolsMixin):
     async def execute(self, goal: str, ui_summary: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
-            return (
+            return ToolResult.error(
                 "Error: long_task requires an active chat session (missing routing context)."
             )
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if isinstance(prior, dict) and prior.get("status") == "active":
-            return (
+            return ToolResult.error(
                 "Error: a sustained goal is already active. "
                 "Use complete_goal when finished, or ask the user before replacing it."
             )
@@ -160,7 +170,7 @@ class LongTaskTool(Tool, _GoalToolsMixin):
         sess.metadata[GOAL_STATE_KEY] = blob
         discard_legacy_goal_state_key(sess.metadata)
         self._sessions.save(sess)
-        await self._publish_goal_state_ws(sess.metadata)
+        await self._publish_goal_state_changed(sess.metadata)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
             "Goal recorded. Keep working toward the objective using ordinary tools. "
@@ -183,14 +193,21 @@ class LongTaskTool(Tool, _GoalToolsMixin):
 class CompleteGoalTool(Tool, _GoalToolsMixin):
     """Mark the active sustained goal finished after all required work is verified."""
 
-    def __init__(self, sessions: Any, bus: Any | None = None) -> None:
-        _GoalToolsMixin.__init__(self, sessions, bus)
+    def __init__(
+        self,
+        sessions: Any,
+        runtime_events: RuntimeEventBus | None = None,
+    ) -> None:
+        _GoalToolsMixin.__init__(self, sessions, runtime_events)
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         sess = getattr(ctx, "sessions", None)
         assert sess is not None
-        return cls(sessions=sess, bus=getattr(ctx, "bus", None))
+        return cls(
+            sessions=sess,
+            runtime_events=getattr(ctx, "runtime_events", None),
+        )
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
@@ -213,7 +230,7 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
     async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
-            return "Error: complete_goal requires an active chat session."
+            return ToolResult.error("Error: complete_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active goal to complete."
@@ -227,7 +244,7 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         }
         discard_legacy_goal_state_key(sess.metadata)
         self._sessions.save(sess)
-        await self._publish_goal_state_ws(sess.metadata)
+        await self._publish_goal_state_changed(sess.metadata)
         tail = (recap or "").strip()
         if tail:
             return f"Goal marked complete ({ended}). Recap:\n{tail}"

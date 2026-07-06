@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import {
   Archive,
+  Brain,
+  CalendarClock,
   Menu,
   Search,
   Settings,
@@ -34,8 +36,10 @@ interface SidebarProps {
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
   onOpenApps: () => void;
+  onOpenSkills: () => void;
+  onOpenAutomations: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | null;
+  activeUtility?: "apps" | "skills" | "automations" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -47,12 +51,28 @@ interface SidebarProps {
   projectNameOverrides?: Record<string, string>;
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
-  completedChatIds?: string[];
+  updatedChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
+}
+
+type NavigatorWithUserAgentData = Navigator & {
+  userAgentData?: { platform?: string };
+};
+
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform || "";
+  const userAgentPlatform =
+    (navigator as NavigatorWithUserAgentData).userAgentData?.platform || "";
+  return /mac|iphone|ipad|ipod/i.test(`${platform} ${userAgentPlatform}`);
+}
+
+function newChatShortcutLabel(): string {
+  return isApplePlatform() ? "⌘⇧O" : "Ctrl+Shift+O";
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -61,6 +81,7 @@ export function Sidebar(props: SidebarProps) {
     useState<HTMLElement | null>(null);
   const collapsed = Boolean(props.collapsed);
   const toggleLabel = t("thread.header.toggleSidebar");
+  const newChatShortcut = newChatShortcutLabel();
 
   return (
     <nav
@@ -124,6 +145,8 @@ export function Sidebar(props: SidebarProps) {
           label={t("sidebar.newChat")}
           onClick={props.onNewChat}
           icon={<SquarePen className="h-4 w-4" />}
+          shortcut={newChatShortcut}
+          ariaKeyShortcuts="Meta+Shift+O Control+Shift+O"
         />
         <SidebarActionButton
           collapsed={collapsed}
@@ -137,6 +160,20 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenApps}
           active={props.activeUtility === "apps"}
           icon={<Blocks className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.skills.title")}
+          onClick={props.onOpenSkills}
+          active={props.activeUtility === "skills"}
+          icon={<Brain className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.automations", { defaultValue: "Automations" })}
+          onClick={props.onOpenAutomations}
+          active={props.activeUtility === "automations"}
+          icon={<CalendarClock className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton
@@ -173,7 +210,7 @@ export function Sidebar(props: SidebarProps) {
             projectNameOverrides={props.projectNameOverrides}
             collapsedGroups={props.collapsedGroups}
             runningChatIds={props.runningChatIds}
-            completedChatIds={props.completedChatIds}
+            updatedChatIds={props.updatedChatIds}
             density={props.viewState?.density}
             showPreviews={props.viewState?.show_previews}
             showTimestamps={props.viewState?.show_timestamps}
@@ -213,6 +250,8 @@ function SidebarActionButton({
   onClick,
   active = false,
   className,
+  shortcut,
+  ariaKeyShortcuts,
 }: {
   collapsed: boolean;
   label: string;
@@ -220,14 +259,19 @@ function SidebarActionButton({
   onClick: () => void;
   active?: boolean;
   className?: string;
+  shortcut?: string;
+  ariaKeyShortcuts?: string;
 }) {
+  const title = shortcut ? `${label} (${shortcut})` : collapsed ? label : undefined;
+
   return (
     <Button
       type="button"
       variant="ghost"
       aria-label={label}
       aria-current={active ? "page" : undefined}
-      title={collapsed ? label : undefined}
+      aria-keyshortcuts={ariaKeyShortcuts}
+      title={title}
       onClick={() => onClick()}
       className={cn(
         "group h-8 min-w-0 gap-2 overflow-hidden rounded-full font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",

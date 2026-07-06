@@ -9,7 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.schema import (
     BooleanSchema,
@@ -24,6 +24,7 @@ DEFAULT_WAIT_FOR_MS = 10_000
 MAX_WAIT_FOR_MS = 120_000
 DEFAULT_MAX_OUTPUT_CHARS = 10_000
 MAX_OUTPUT_CHARS = 50_000
+OUTPUT_DRAIN_GRACE_S = 0.1
 
 
 @dataclass(slots=True)
@@ -127,7 +128,15 @@ class _ExecSession:
     ) -> _SessionPoll:
         self.last_access = time.monotonic()
         if yield_time_ms > 0 and self.process.returncode is None:
-            await asyncio.sleep(min(yield_time_ms, MAX_YIELD_MS) / 1000)
+            wait_s = min(yield_time_ms, MAX_YIELD_MS) / 1000
+            remaining_s = self.deadline - time.monotonic()
+            if remaining_s <= 0:
+                wait_s = 0
+            else:
+                wait_s = min(wait_s, remaining_s)
+            if wait_s > 0:
+                with suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self.process.wait(), timeout=wait_s)
 
         if self.process.returncode is None and time.monotonic() >= self.deadline:
             self._timed_out = True
@@ -139,6 +148,8 @@ class _ExecSession:
                     asyncio.gather(self._stdout_task, self._stderr_task),
                     timeout=2.0,
                 )
+        elif yield_time_ms > 0:
+            await self._wait_for_buffered_output()
 
         async with self._lock:
             output = "".join(self._chunks)
@@ -162,6 +173,14 @@ class _ExecSession:
         self.process.kill()
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self.process.wait(), timeout=5.0)
+
+    async def _wait_for_buffered_output(self) -> None:
+        deadline = time.monotonic() + OUTPUT_DRAIN_GRACE_S
+        while time.monotonic() < deadline:
+            async with self._lock:
+                if self._chunks:
+                    return
+            await asyncio.sleep(0.01)
 
 
 class ExecSessionManager:
@@ -481,11 +500,12 @@ class WriteStdinTool(Tool):
                 max_output_chars=output_limit,
                 owner_session_key=current_request_session_key(),
             )
-            return format_session_poll(session_id, poll)
+            result = format_session_poll(session_id, poll)
+            return ToolResult.error(result) if poll.timed_out else result
         except KeyError:
-            return f"Error: exec session not found: {session_id}"
+            return ToolResult.error(f"Error: exec session not found: {session_id!r}")
         except Exception as exc:
-            return f"Error writing to exec session: {exc}"
+            return ToolResult.error(f"Error writing to exec session: {exc}")
 
     async def _wait_for_output(
         self,
@@ -521,13 +541,14 @@ class WriteStdinTool(Tool):
                 joined = "".join(aggregate)
                 if wait_for in joined:
                     poll.output = joined
-                    return format_session_poll(session_id, poll)
+                    result = format_session_poll(session_id, poll)
+                    return ToolResult.error(result) if poll.timed_out else result
             if poll.done or remaining_ms <= 0:
                 poll.output = "".join(aggregate)
                 result = format_session_poll(session_id, poll)
                 if wait_for not in poll.output:
                     result += f"\nWait target not observed: {wait_for!r}"
-                return result
+                return ToolResult.error(result) if poll.timed_out else result
 
 
 @tool_parameters(tool_parameters_schema())
@@ -595,4 +616,4 @@ class ListExecSessionsTool(Tool):
                 )
             return "\n".join(lines)
         except Exception as exc:
-            return f"Error listing exec sessions: {exc}"
+            return ToolResult.error(f"Error listing exec sessions: {exc}")

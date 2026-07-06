@@ -131,6 +131,205 @@ async def test_tavily_search(monkeypatch):
     assert "https://openclaw.io" in result
 
 
+def test_keenable_without_api_key_is_concurrency_safe(monkeypatch):
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+    tool = _tool(provider="keenable", api_key="")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+@pytest.mark.asyncio
+async def test_keenable_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "keenable" in url
+        assert kw["headers"]["X-API-Key"] == "keen-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        return _response(json={
+            "results": [{"title": "Keen", "url": "https://keenable.ai", "description": "short", "snippet": "longer excerpt"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="keen-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Keen" in result
+    assert "https://keenable.ai" in result
+    assert "longer excerpt" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_without_api_key_uses_public_endpoint(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.keenable.ai/v1/search/public"
+        assert "X-API-Key" not in kw["headers"]
+        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        return _response(json={
+            "results": [{"title": "Public", "url": "https://keenable.ai/pub", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Public" in result
+    assert "https://keenable.ai/pub" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["X-API-Key"] == "env-keen-key"
+        return _response(json={
+            "results": [{"title": "Env", "url": "https://keenable.ai/env", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("KEENABLE_API_KEY", "env-keen-key")
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="bad-keen-key")
+    result = await tool.execute(query="keenable")
+    assert "Error: Keenable search failed (401)" in result
+
+
+@pytest.mark.asyncio
+async def test_bocha_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.bochaai.com/v1/web-search"
+        assert kw["headers"]["Authorization"] == "Bearer bocha-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {
+            "query": "MAI-THINKING-1 model",
+            "freshness": "noLimit",
+            "summary": True,
+            "count": 2,
+        }
+        return _response(json={
+            "webPages": {
+                "value": [
+                    {
+                        "name": "MAI-THINKING-1 - Microsoft Research",
+                        "url": "https://www.microsoft.com/research/maithinking-1",
+                        "summary": "MAI-THINKING-1 is a 35B-active MoE model with strong reasoning capabilities.",
+                        "snippet": "MAI-THINKING-1 achieves 97.0% on AIME 2025 and 52.8% on SWE-Bench Pro.",
+                    }
+                ]
+            }
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="bocha", api_key="bocha-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="MAI-THINKING-1 model", count=2)
+
+    assert "MAI-THINKING-1" in result
+    assert "https://www.microsoft.com/research/maithinking-1" in result
+    assert "35B-active MoE" in result
+
+
+@pytest.mark.asyncio
+async def test_bocha_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("BOCHA_API_KEY", raising=False)
+
+    tool = _tool(provider="bocha")
+    result = await tool.execute(query="test")
+
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_bocha_rate_limited(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=429, json={"error": "rate limit"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="bocha", api_key="bocha-key")
+    result = await tool.execute(query="test")
+
+    assert "429" in result
+
+
+@pytest.mark.asyncio
+async def test_volcengine_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://open.feedcoopapi.com/search_api/web_search"
+        assert kw["headers"]["Authorization"] == "Bearer volc-key"
+        assert kw["headers"]["X-Traffic-Tag"] == "nanobot"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {
+            "Query": "北京周边游",
+            "SearchType": "web",
+            "Count": 2,
+            "NeedSummary": True,
+            "TimeRange": "OneWeek",
+            "Filter": {"AuthInfoLevel": 1},
+            "QueryControl": {"QueryRewrite": True},
+        }
+        return _response(json={
+            "Result": {
+                "WebResults": [
+                    {
+                        "Title": "北京周边游攻略",
+                        "Url": "https://example.cn/travel",
+                        "Summary": "适合周末出行的路线。",
+                        "AuthInfoDes": "非常权威",
+                    }
+                ]
+            }
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="volcengine", api_key="volc-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="北京周边游", count=2, timeRange="OneWeek", authLevel=1, queryRewrite=True)
+
+    assert "北京周边游攻略" in result
+    assert "https://example.cn/travel" in result
+    assert "非常权威" in result
+
+
+@pytest.mark.asyncio
+async def test_volcengine_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("VOLCENGINE_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("WEB_SEARCH_API_KEY", raising=False)
+
+    tool = _tool(provider="volcengine")
+    result = await tool.execute(query="test")
+
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_volcengine_invalid_time_range_returns_error():
+    tool = _tool(provider="volcengine", api_key="volc-key")
+    result = await tool.execute(query="test", timeRange="Yesterday")
+
+    assert "timeRange must be" in result
+
+
 @pytest.mark.asyncio
 async def test_searxng_search(monkeypatch):
     async def mock_get(self, url, **kw):
@@ -164,6 +363,31 @@ async def test_duckduckgo_search(monkeypatch):
     tool = _tool(provider="duckduckgo")
     result = await tool.execute(query="hello")
     assert "DDG Result" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_search_passes_proxy(monkeypatch):
+    """DDGS client must receive the configured proxy so search works behind a proxy."""
+    captured: dict = {}
+    proxy_url = "http://proxy.example:8080"
+
+    class ProxyCaptorDDGS:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def text(self, query, max_results=5):
+            return [{"title": "Result", "href": "https://example.com", "body": "OK"}]
+
+    monkeypatch.setattr("ddgs.DDGS", ProxyCaptorDDGS)
+
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="duckduckgo"),
+        proxy=proxy_url,
+    )
+    result = await tool.execute(query="test")
+    assert captured["proxy"] == proxy_url
+    assert captured["timeout"] == 10
+    assert "Result" in result
 
 
 @pytest.mark.asyncio
@@ -224,6 +448,71 @@ async def test_kagi_search(monkeypatch):
     assert "Kagi Result" in result
     assert "https://kagi.com" in result
     assert "ignored related search" not in result
+
+
+@pytest.mark.asyncio
+async def test_exa_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.exa.ai/search"
+        assert kw["headers"]["x-api-key"] == "exa-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {
+            "query": "test",
+            "numResults": 2,
+            "contents": {"highlights": True},
+        }
+        return _response(json={
+            "results": [
+                {
+                    "title": "Exa Result",
+                    "url": "https://exa.ai",
+                    "highlights": ["Relevant Exa highlight"],
+                }
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="exa", api_key="exa-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="test", count=2)
+
+    assert "Exa Result" in result
+    assert "https://exa.ai" in result
+    assert "Relevant Exa highlight" in result
+
+
+@pytest.mark.asyncio
+async def test_exa_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["x-api-key"] == "env-exa-key"
+        return _response(json={
+            "results": [
+                {
+                    "title": "Env Exa Result",
+                    "url": "https://exa.ai/env",
+                    "summary": "Summary fallback",
+                }
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("EXA_API_KEY", "env-exa-key")
+    tool = _tool(provider="exa", api_key="")
+    result = await tool.execute(query="test", count=1)
+
+    assert "Env Exa Result" in result
+    assert "Summary fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_exa_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="exa", api_key="bad-exa-key")
+    result = await tool.execute(query="test")
+
+    assert "Error: Exa search failed (401)" in result
 
 
 @pytest.mark.asyncio
@@ -308,6 +597,23 @@ async def test_kagi_fallback_to_duckduckgo_when_no_key(monkeypatch):
     monkeypatch.delenv("KAGI_API_KEY", raising=False)
 
     tool = _tool(provider="kagi", api_key="")
+    result = await tool.execute(query="test")
+    assert "Fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_exa_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+
+    tool = _tool(provider="exa", api_key="")
     result = await tool.execute(query="test")
     assert "Fallback" in result
 

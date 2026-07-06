@@ -173,6 +173,7 @@ interface AgentActivityClusterProps {
   turnLatencyMs?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
 }
 
 /**
@@ -186,6 +187,7 @@ export function AgentActivityCluster({
   turnLatencyMs,
   cliApps = [],
   mcpPresets = [],
+  onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEdits = useMemo(
@@ -243,19 +245,32 @@ export function AgentActivityCluster({
   const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
   const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && messages.every(messageHasOnlyFileActivity);
+  const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const durationMs = activityDurationMs(messages, isTurnStreaming, now, turnLatencyMs);
   const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = isTurnStreaming
-    ? t("message.activityThinkingFor", {
-        duration: activityDuration,
-        defaultValue: "Thinking for {{duration}}",
-      })
-    : durationMs <= 0
-      ? t("message.activityThought", { defaultValue: "Thought" })
-    : t("message.activityThoughtFor", {
-        duration: activityDuration,
-        defaultValue: "Thought for {{duration}}",
-      });
+  const thoughtLabel = hasNonReasoningActivity
+    ? isTurnStreaming
+      ? t("message.activityWorkingFor", {
+          duration: activityDuration,
+          defaultValue: "Working for {{duration}}",
+        })
+      : durationMs <= 0
+        ? t("message.activityWorked", { defaultValue: "Worked" })
+      : t("message.activityWorkedFor", {
+          duration: activityDuration,
+          defaultValue: "Worked for {{duration}}",
+        })
+    : isTurnStreaming
+      ? t("message.activityThinkingFor", {
+          duration: activityDuration,
+          defaultValue: "Thinking for {{duration}}",
+        })
+      : durationMs <= 0
+        ? t("message.activityThought", { defaultValue: "Thought" })
+      : t("message.activityThoughtFor", {
+          duration: activityDuration,
+          defaultValue: "Thought for {{duration}}",
+        });
 
   const fileActivitySummary = fileCount > 0
     ? hasPendingFileEdit && !singleFilePath
@@ -423,6 +438,7 @@ export function AgentActivityCluster({
         added={added}
         deleted={deleted}
         hasDiffStats={hasDiffStats}
+        onOpenFilePreview={onOpenFilePreview}
       />
     );
   }
@@ -449,6 +465,8 @@ export function AgentActivityCluster({
           <FileReferenceChip
             path={singleFilePath}
             tooltipPath={singleFileTooltipPath}
+            previewPath={singleFileTooltipPath || singleFilePath}
+            onOpen={onOpenFilePreview}
             active={hasLiveEditingFiles}
             className="-my-0.5 min-w-0"
             textClassName="text-xs"
@@ -494,6 +512,7 @@ export function AgentActivityCluster({
                       key={m.id}
                       text={m.reasoning ?? ""}
                       streaming={isTurnStreaming && !!m.reasoningStreaming}
+                      onOpenFilePreview={onOpenFilePreview}
                     />
                   );
                 }
@@ -510,7 +529,12 @@ export function AgentActivityCluster({
                 }
                 return null;
               })}
-              {fileEdits.length ? <FileEditGroup edits={fileEdits} /> : null}
+              {fileEdits.length ? (
+                <FileEditGroup
+                  edits={fileEdits}
+                  onOpenFilePreview={onOpenFilePreview}
+                />
+              ) : null}
             </div>
           </div>
         </div>
@@ -537,6 +561,7 @@ function FileEditFlatActivity({
   added,
   deleted,
   hasDiffStats,
+  onOpenFilePreview,
 }: {
   edits: FileEditSummary[];
   active: boolean;
@@ -550,6 +575,7 @@ function FileEditFlatActivity({
   added: number;
   deleted: number;
   hasDiffStats: boolean;
+  onOpenFilePreview?: (path: string) => void;
 }) {
   const showRows = edits.length > 1 || edits.some((edit) => edit.status === "error" || edit.pending);
   return (
@@ -569,6 +595,8 @@ function FileEditFlatActivity({
           <FileReferenceChip
             path={singleFilePath}
             tooltipPath={singleFileTooltipPath}
+            previewPath={singleFileTooltipPath || singleFilePath}
+            onOpen={onOpenFilePreview}
             active={hasLiveEditingFiles}
             className="-my-0.5 min-w-0"
             textClassName="text-xs"
@@ -583,7 +611,7 @@ function FileEditFlatActivity({
       </div>
       {showRows ? (
         <div className="mt-0.5 pl-4">
-          <FileEditGroup edits={edits} />
+          <FileEditGroup edits={edits} onOpenFilePreview={onOpenFilePreview} />
         </div>
       ) : null}
     </div>
@@ -1495,6 +1523,7 @@ function fileActivityManySummaryKey(editing: boolean, failed: boolean, deleted: 
 }
 
 function fileEditCallKey(edit: UIFileEdit): string {
+  if (edit.call_id && edit.path) return `${edit.call_id}|${edit.tool}|${edit.path}`;
   if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
   return `${edit.tool}|${edit.path}`;
 }

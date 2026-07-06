@@ -4,6 +4,8 @@ export type Role = "user" | "assistant" | "tool" | "system";
  * progress pings) that should not be rendered as conversational replies. */
 export type MessageKind = "message" | "trace";
 
+export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
+
 /** One image attached to a UIMessage.
  *
  * ``url`` can arrive in three different shapes, which the bubble renders
@@ -29,6 +31,8 @@ export interface UIMediaAttachment {
   url?: string;
   name?: string;
 }
+
+export interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string; label?: string; }
 
 export interface UIMessage {
   id: string;
@@ -64,6 +68,12 @@ export interface UIMessage {
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
+  /** Lightweight provenance for proactive assistant messages. */
+  source?: UIMessageSource;
+  /** Stable protocol metadata for grouping all activity emitted by one user turn. */
+  turnId?: string;
+  turnPhase?: UITurnPhase;
+  turnSeq?: number;
 }
 
 export interface UICliAppAttachment {
@@ -85,6 +95,95 @@ export interface UIMcpPresetAttachment {
   logo_url?: string | null;
   brand_color?: string | null;
 }
+
+export interface SessionAutomationJob {
+  id: string;
+  name: string;
+  enabled: boolean;
+  protected?: boolean;
+  delete_after_run?: boolean;
+  created_at_ms?: number | null;
+  updated_at_ms?: number | null;
+  kind?: "local_trigger" | "cron" | string;
+  schedule: {
+    kind: "at" | "every" | "cron" | "local" | string;
+    at_ms?: number | null;
+    every_ms?: number | null;
+    expr?: string | null;
+    tz?: string | null;
+  };
+  payload: {
+    message: string;
+    kind?: "agent_turn" | "system_event" | "local_trigger" | string;
+    command?: string;
+  };
+  state: {
+    next_run_at_ms?: number | null;
+    last_run_at_ms?: number | null;
+    last_status?: "ok" | "error" | "skipped" | string | null;
+    last_error?: string | null;
+    pending?: boolean;
+    run_history?: Array<{
+      run_at_ms: number;
+      status: "ok" | "error" | "skipped" | string;
+      duration_ms?: number;
+      error?: string | null;
+    }>;
+  };
+  origin?: {
+    session_key?: string;
+    channel: string;
+    chat_id?: string;
+    title?: string;
+    preview?: string;
+  } | null;
+  trigger?: {
+    id: string;
+    command: string;
+  };
+}
+
+export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationUpdatePayload {
+  name?: string;
+  message?: string;
+  schedule?: {
+    kind: "at" | "every" | "cron";
+    at_ms?: number;
+    every_ms?: number;
+    expr?: string;
+    tz?: string;
+  };
+}
+
+export interface SessionDeleteResult {
+  deleted: boolean;
+  blocked_by_automations?: boolean;
+  automations?: SessionAutomationJob[];
+}
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  source: "workspace" | "builtin" | string;
+  available: boolean;
+  unavailable_reason?: string;
+}
+
+export interface SkillRequirements {
+  bins: string[];
+  env: string[];
+  missing_bins: string[];
+  missing_env: string[];
+}
+
+export interface SkillDetail extends SkillSummary {
+  requirements: SkillRequirements;
+  raw_markdown: string;
+}
+
+export interface SkillsPayload { skills: SkillSummary[]; }
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
@@ -279,6 +378,7 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    reasoning_effort_values?: string[];
   }>;
   providers: Array<{
     name: string;
@@ -289,6 +389,7 @@ export interface SettingsPayload {
     api_key_hint?: string | null;
     api_base?: string | null;
     default_api_base?: string | null;
+    model_selectable?: boolean;
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
@@ -303,7 +404,7 @@ export interface SettingsPayload {
     providers: Array<{
       name: string;
       label: string;
-      credential: "none" | "api_key" | "base_url";
+      credential: "none" | "api_key" | "optional_api_key" | "base_url";
     }>;
   };
   web: {
@@ -337,6 +438,23 @@ export interface SettingsPayload {
       default_api_base?: string | null;
     }>;
   };
+  transcription?: {
+    enabled: boolean;
+    provider: string;
+    provider_configured: boolean;
+    model: string;
+    language: string | null;
+    max_duration_sec: number;
+    max_upload_mb: number;
+    providers: Array<{
+      name: string;
+      label: string;
+      configured: boolean;
+      api_key_hint?: string | null;
+      api_base?: string | null;
+      default_api_base?: string | null;
+    }>;
+  };
   runtime: {
     config_path: string;
     workspace_path: string;
@@ -349,11 +467,45 @@ export interface SettingsPayload {
     };
     dream: {
       schedule: string;
-      max_batch_size: number;
-      max_iterations: number;
-      annotate_line_ages: boolean;
     };
     unified_session: boolean;
+  };
+  usage?: {
+    days: Array<{
+      date: string;
+      prompt_tokens: number;
+      completion_tokens: number;
+      cached_tokens: number;
+      total_tokens: number;
+      provider_tokens?: number;
+      estimated_tokens?: number;
+      requests: number;
+      provider_requests?: number;
+      estimated_requests?: number;
+      sources?: Record<
+        "user" | "api" | "cron" | "dream" | "system" | string,
+        {
+          prompt_tokens: number;
+          completion_tokens: number;
+          cached_tokens: number;
+          total_tokens: number;
+          provider_tokens?: number;
+          estimated_tokens?: number;
+          requests: number;
+          provider_requests?: number;
+          estimated_requests?: number;
+        }
+      >;
+    }>;
+    total_tokens: number;
+    total_tokens_30d: number;
+    total_tokens_365d: number;
+    peak_day_tokens: number;
+    current_streak_days: number;
+    longest_streak_days: number;
+    active_days_30d: number;
+    requests_30d: number;
+    updated_at?: string | null;
   };
   advanced: {
     restrict_to_workspace: boolean;
@@ -374,10 +526,14 @@ export interface SettingsPayload {
     mcp_server_count: number;
     exec_enabled: boolean;
     exec_sandbox?: string | null;
+    exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
   };
   requires_restart: boolean;
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
+  version?: {
+    current: string;
+  };
 }
 
 export interface AppPackageRef {
@@ -455,6 +611,7 @@ export interface CliAppsPayload {
   apps: CliAppInfo[];
   installed_count: number;
   catalog_updated_at?: string | null;
+  catalog_refresh_pending?: boolean;
   last_action?: {
     ok: boolean;
     message: string;
@@ -464,6 +621,29 @@ export interface CliAppsPayload {
     still_available?: boolean;
     verification?: string[];
     verification_failed?: string[];
+  };
+}
+
+export interface NanobotFeatureInfo {
+  name: string;
+  display_name: string;
+  type: "channel" | "feature" | string;
+  enabled: boolean;
+  installed: boolean;
+  ready: boolean;
+  status: "enabled" | "missing_dependency" | "not_enabled" | string;
+  install_supported: boolean;
+  requires_restart: boolean;
+}
+
+export interface NanobotFeaturesPayload {
+  features: NanobotFeatureInfo[];
+  enabled_count: number;
+  requires_restart?: boolean;
+  last_action?: {
+    ok: boolean;
+    message: string;
+    enabled?: boolean;
   };
 }
 
@@ -592,6 +772,15 @@ export interface ImageGenerationSettingsUpdate {
   maxImagesPerTurn: number;
 }
 
+export interface TranscriptionSettingsUpdate {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  language: string;
+  maxDurationSec: number;
+  maxUploadMb: number;
+}
+
 export interface SlashCommand {
   command: string;
   title: string;
@@ -608,10 +797,16 @@ export type ConnectionStatus =
   | "closed"
   | "error";
 
+export interface InboundTurnMetadata {
+  turn_id?: string;
+  turn_phase?: UITurnPhase;
+  turn_seq?: number;
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string }
-  | {
+  | ({
       event: "message";
       chat_id: string;
       text: string;
@@ -624,49 +819,51 @@ export type InboundEvent =
       kind?: "tool_hint" | "progress" | "reasoning";
       /** Server-measured turn wall time when this frame finishes an assistant reply. */
       latency_ms?: number;
+      /** Lightweight provenance for proactive assistant messages. */
+      source?: UIMessageSource;
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "file_edit";
       chat_id: string;
       edits: UIFileEdit[];
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "delta";
       chat_id: string;
       text: string;
       stream_id?: string;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "reasoning_delta";
       chat_id: string;
       text: string;
       stream_id?: string;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
-    }
+    } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";
       model_name: string;
       model_preset?: string | null;
     }
-  | {
+  | ({
       event: "turn_end";
       chat_id: string;
       latency_ms?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
-    }
+    } & InboundTurnMetadata)
   | {
       event: "goal_status";
       chat_id: string;
@@ -685,6 +882,13 @@ export type InboundEvent =
       chat_id: string;
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
+    }
+  | { event: "transcription_result"; request_id: string; text: string }
+  | {
+      event: "transcription_error";
+      request_id?: string;
+      detail?: string;
+      provider?: string;
     }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string };
 
@@ -727,18 +931,41 @@ export interface OutboundMcpPresetMention {
 }
 
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
+export interface WebuiThreadPagePayload {
+  before_cursor?: string | null;
+  has_more_before?: boolean;
+  loaded_message_count?: number;
+  total_known_message_count?: number;
+  user_message_offset?: number;
+}
+
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
   messages: UIMessage[];
+  fork_boundary_message_count?: number;
+  has_pending_tool_calls?: boolean;
+  page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
+}
+
+export interface FilePreviewPayload {
+  path: string;
+  display_path: string;
+  project_path: string;
+  language: string;
+  content: string;
+  size: number;
+  truncated: boolean;
 }
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
+  | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {
       type: "message";
       chat_id: string;
@@ -748,6 +975,7 @@ export type Outbound =
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       workspace_scope?: WorkspaceScopePayload;
+      turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

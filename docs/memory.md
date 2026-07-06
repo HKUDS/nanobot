@@ -54,10 +54,7 @@ Dream reads:
 - the current `USER.md`
 - the current `memory/MEMORY.md`
 
-Then it works in two phases:
-
-1. It studies what is new and what is already known.
-2. It edits the long-term files surgically, not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
+Then it edits the long-term files surgically in a single pass — not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
 
 This is why nanobot's memory is not just archival. It is interpretive.
 
@@ -67,6 +64,9 @@ This is why nanobot's memory is not just archival. It is interpretive.
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
+├── prompts/
+│   ├── README.md        # Notes for memory guidance files
+│   └── dream.md         # Optional instructions for how Dream organizes memory
 └── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
@@ -123,6 +123,8 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 | `/dream-log <sha>` | Show a specific Dream change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-prompt` | Show how Dream is being guided for memory |
+| `/dream-prompt init` | Create an editable Dream memory guide at `prompts/dream.md` |
 
 These commands exist for a reason: automatic memory is powerful, but users should always retain the right to inspect, understand, and restore it.
 
@@ -137,6 +139,28 @@ This gives memory a history of its own:
 - you can restore a previous state
 
 That turns memory from a silent mutation into an auditable process.
+
+## Guiding Dream
+
+Dream decides what to keep, update, or forget using nanobot's built-in memory instructions. Most users can leave this alone.
+
+If one workspace needs a different memory style, create an editable guide:
+
+```text
+/dream-prompt init
+```
+
+This creates:
+
+```text
+workspace/prompts/dream.md
+```
+
+Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds the current `## Conversation History` block automatically.
+
+To return to nanobot's default behavior, delete `prompts/dream.md` or leave it empty.
+
+Each workspace has its own guide. Changing this file does not affect other nanobot workspaces.
 
 ## Configuration
 
@@ -160,21 +184,17 @@ Dream is configured under `agents.defaults.dream`:
 | Field | Meaning |
 |-------|---------|
 | `intervalH` | How often Dream runs, in hours |
-| `modelOverride` | Optional Dream-specific model override |
-| `maxBatchSize` | How many history entries Dream processes per run |
-| `maxIterations` | The tool budget for Dream's editing phase |
+| `cron` | Cron expression override (takes precedence over `intervalH`) |
+| `modelOverride` | Optional Dream-specific model override *(pending implementation)* |
+| `maxBatchSize` | *(Deprecated — not used)* |
+| `maxIterations` | *(Deprecated — not used)* |
 
 In practical terms:
 
-- `modelOverride: null` means Dream uses the same model as the main agent. Set it only if you want Dream to run on a different model.
-- `maxBatchSize` controls how many new `history.jsonl` entries Dream consumes in one run. Larger batches catch up faster; smaller batches are lighter and steadier.
-- `maxIterations` limits how many read/edit steps Dream can take while updating `SOUL.md`, `USER.md`, and `MEMORY.md`. It is a safety budget, not a quality score.
-- `intervalH` is the normal way to configure Dream. Internally it runs as an `every` schedule, not as a cron expression.
-
-Legacy note:
-
-- Older source-based configs may still contain `dream.cron`. nanobot continues to honor it for backward compatibility, but new configs should use `intervalH`.
-- Older source-based configs may still contain `dream.model`. nanobot continues to honor it for backward compatibility, but new configs should use `modelOverride`.
+- `intervalH` is the normal way to configure Dream frequency. Internally it runs as an `every` schedule.
+- `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
+- `modelOverride` is reserved for a future release. Currently Dream uses the same model as the main agent.
+- `maxBatchSize` and `maxIterations` are preserved for config compatibility but no longer affect behavior.
 
 ## In Practice
 

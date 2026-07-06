@@ -28,10 +28,6 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
-    transcription_provider: str = "groq"
-    transcription_api_key: str = ""
-    transcription_api_base: str = ""
-    transcription_language: str | None = None
     send_progress: bool = True
     send_tool_hints: bool = False
     show_reasoning: bool = True
@@ -51,24 +47,14 @@ class BaseChannel(ABC):
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
-        if not self.transcription_api_key:
-            return ""
         try:
-            if self.transcription_provider == "openai":
-                from nanobot.providers.transcription import OpenAITranscriptionProvider
-                provider = OpenAITranscriptionProvider(
-                    api_key=self.transcription_api_key,
-                    api_base=self.transcription_api_base or None,
-                    language=self.transcription_language or None,
-                )
-            else:
-                from nanobot.providers.transcription import GroqTranscriptionProvider
-                provider = GroqTranscriptionProvider(
-                    api_key=self.transcription_api_key,
-                    api_base=self.transcription_api_base or None,
-                    language=self.transcription_language or None,
-                )
-            return await provider.transcribe(file_path)
+            from nanobot.audio.transcription import (
+                resolve_transcription_config,
+                transcribe_audio_file,
+            )
+            from nanobot.config.loader import load_config
+
+            return await transcribe_audio_file(file_path, resolve_transcription_config(load_config()))
         except Exception:
             self.logger.exception("Audio transcription failed")
             return ""
@@ -115,20 +101,33 @@ class BaseChannel(ABC):
         """
         pass
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
+    ) -> None:
         """Deliver a streaming text chunk.
 
         Override in subclasses to enable streaming. Implementations should
         raise on delivery failure so the channel manager can retry.
 
-        Streaming contract: ``_stream_delta`` is a chunk, ``_stream_end`` ends
-        the current segment, and stateful implementations must key buffers by
-        ``_stream_id`` rather than only by ``chat_id``.
+        Stateful implementations should key buffers by ``stream_id`` rather
+        than only by ``chat_id`` when it is provided.
         """
         pass
 
     async def send_reasoning_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Stream a chunk of model reasoning/thinking content.
 
@@ -137,21 +136,36 @@ class BaseChannel(ABC):
         subtext, WebUI italic bubble, ...) override to render reasoning
         as a subordinate trace that updates in place as the model thinks.
 
-        Streaming contract mirrors :meth:`send_delta`: ``_reasoning_delta``
-        is a chunk, ``_reasoning_end`` ends the current reasoning segment,
-        and stateful implementations should key buffers by ``_stream_id``
-        rather than only by ``chat_id``.
+        Streaming contract mirrors :meth:`send_delta`: stateful implementations
+        should key buffers by ``stream_id`` rather than only by ``chat_id``.
         """
         return
 
     async def send_reasoning_end(
-        self, chat_id: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Mark the end of a reasoning stream segment.
 
         Default is no-op. Channels that buffer ``send_reasoning_delta``
         chunks for in-place updates use this signal to flush and freeze
         the rendered group; one-shot channels can ignore it entirely.
+        """
+        return
+
+    async def send_file_edit_events(
+        self,
+        chat_id: str,
+        edits: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Deliver structured live file-edit events.
+
+        Default is no-op. Channels with a rich activity surface can override
+        this to render editing progress without receiving empty text messages.
         """
         return
 
@@ -166,13 +180,18 @@ class BaseChannel(ABC):
         """
         if not msg.content:
             return
-        meta = dict(msg.metadata or {})
-        meta.setdefault("_reasoning_delta", True)
-        await self.send_reasoning_delta(msg.chat_id, msg.content, meta)
-        end_meta = dict(meta)
-        end_meta.pop("_reasoning_delta", None)
-        end_meta["_reasoning_end"] = True
-        await self.send_reasoning_end(msg.chat_id, end_meta)
+        stream_id = getattr(msg.event, "stream_id", None)
+        await self.send_reasoning_delta(
+            msg.chat_id,
+            msg.content,
+            msg.metadata,
+            stream_id=stream_id,
+        )
+        await self.send_reasoning_end(
+            msg.chat_id,
+            msg.metadata,
+            stream_id=stream_id,
+        )
 
     @property
     def supports_streaming(self) -> bool:

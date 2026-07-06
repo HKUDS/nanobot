@@ -151,6 +151,24 @@ class SkillsLoader:
             + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
         )
 
+    def get_skill_availability(self, name: str) -> tuple[bool, str]:
+        """Return whether a skill can run and why not when it cannot."""
+        meta = self._get_skill_meta(name)
+        available = self._check_requirements(meta)
+        return available, "" if available else self._get_missing_requirements(meta)
+
+    def get_skill_requirements(self, name: str) -> dict[str, list[str]]:
+        """Return explicit command/env requirements and currently missing entries."""
+        requires = self._get_skill_meta(name).get("requires", {})
+        bins = [str(value) for value in requires.get("bins", [])]
+        env = [str(value) for value in requires.get("env", [])]
+        return {
+            "bins": bins,
+            "env": env,
+            "missing_bins": [value for value in bins if not shutil.which(value)],
+            "missing_env": [value for value in env if not os.environ.get(value)],
+        }
+
     def _get_skill_description(self, name: str) -> str:
         """Get the description of a skill from its frontmatter."""
         meta = self.get_skill_metadata(name)

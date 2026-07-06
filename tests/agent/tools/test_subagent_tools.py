@@ -16,8 +16,8 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from nanobot.agent.subagent import SubagentManager, SubagentStatus
-    from nanobot.bus.queue import MessageBus
     from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import ToolsConfig
 
     bus = MessageBus()
@@ -340,8 +340,8 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     # With sub-agents running and an empty queue, it should block
     drain_task = asyncio.create_task(injection_callback())
 
-    # Give it a moment to enter the blocking wait
-    await asyncio.sleep(0.05)
+    # Let the task enter the blocking queue wait.
+    await asyncio.sleep(0)
 
     # Should still be running (blocked on pending_queue.get())
     assert not drain_task.done(), "drain should block while sub-agents are running"
@@ -467,9 +467,12 @@ async def test_drain_pending_timeout(tmp_path):
 
     assert injection_callback is not None
 
-    # Patch the timeout to be very short for testing
-    with patch("nanobot.agent.loop.asyncio.wait_for") as mock_wait:
-        mock_wait.side_effect = asyncio.TimeoutError
+    # Patch the timeout path without leaking the queue.get() coroutine.
+    async def _timeout(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    with patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_timeout):
         results = await injection_callback()
         assert results == []
 

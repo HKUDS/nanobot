@@ -1,4 +1,7 @@
-![nanobot README cover](./images/readme-cover.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./images/readme-cover-dark.png">
+  <img alt="nanobot README cover" src="./images/readme-cover-light.png">
+</picture>
 
 <div align="center">
   <p>
@@ -31,10 +34,52 @@
   </p>
 </div>
 
-🐈 **nanobot** is an open-source, ultra-lightweight agent runtime for people who want to own their AI agent stack. It gives you a small, readable core plus the practical pieces for real long-running agents: WebUI, chat channels, tools, memory, MCP, model routing, and deployment.
+🐈 **nanobot** is an open-source, ultra-lightweight personal AI agent you can truly own. It keeps the agent core small and readable while giving you the practical pieces for real long-running work: WebUI, chat channels, tools, memory, MCP, model routing, automation, and deployment.
+
+## Start Here
+
+| You want to... | Go to |
+|---|---|
+| Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
+| Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
+| Open the bundled browser UI | [WebUI](#-webui) |
+| Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [Chat Apps](./docs/chat-apps.md) |
+| Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
+| Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
+
+## Open Source Partners
+
+<p align="center">
+  <a href="https://platform.kimi.com?aff=nanobot"><picture><source media="(prefers-color-scheme: dark)" srcset="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69mt3v89kkekg24gg"><img alt="Kimi Open Source Friends" height="44" src="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69fudcmosb3pipls0"></picture></a>
+  <a href="https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link"><img alt="MiniMax" height="40" src="https://mintcdn.com/minimax-zh/1UjvBcdoC6r0UeyA/logo/light.svg?fit=max&auto=format&n=1UjvBcdoC6r0UeyA&q=85&s=672d724b639b2d88d0702fae329ea4f8"></a>
+</p>
 
 ## 📢 News
 
+- **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
+- **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
+- **2026-06-20** 💬 Telegram rich messages, safer SDK concurrency, smoother Quick Start.
+- **2026-06-19** 🔎 Firecrawl app, OpenAI image edits, safer session deletion.
+- **2026-06-18** 💬 Feishu recovery, Keenable search, Mistral polish, workspace-aware git.
+- **2026-06-17** 🧠 Default idle auto-compact, clearer `/dream`, macOS installer fixes.
+- **2026-06-16** 🎯 Fresher goal context, Kimi K2.7 thinking, cleaner API retries.
+- **2026-06-15** 📱 Mobile WebUI polish, optional file tools, real API usage.
+- **2026-06-14** 🖼️ Themed cover, partner links, stronger Codex image streaming.
+- **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
+
+<details>
+<summary>Earlier news</summary>
+
+- **2026-06-12** 💬 Slack allowlisted channels can require mentions.
+- **2026-06-11** ✂️ Fenced-code message splitting.
+- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
+- **2026-06-09** 🎙️ Shared voice input, more STT providers, TeX and email polish.
+- **2026-06-08** 🧮 Token heatmap fix, safer MCP HTTP probing, docs cleanup.
+- **2026-06-06** 🧰 SDK MCP cleanup, removable OpenAI image defaults.
+- **2026-06-05** 🖼️ Azure AAD, custom image providers, `/skill`, steadier pairing.
+- **2026-06-04** 🔌 MCP reconnects, `uv pip` install fallback, QQ pairing.
+- **2026-06-03** 🧠 Hidden-history recovery, quieter email progress handling.
+- **2026-06-02** 📬 Email attachments, Napcat QQ, Volcengine search, simpler Dream.
 - **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
 - **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
 - **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
@@ -45,10 +90,6 @@
 - **2026-05-24** 🧰 MCP presets, richer slash actions, configurable OpenAI-compatible requests.
 - **2026-05-23** 🖼️ Zhipu image generation, longer exec windows, cleaner transcription config.
 - **2026-05-22** 🛠️ CLI Apps, more image providers, safer web redirects and edits.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
 - **2026-05-20** 📶 Signal channel, faster gateway startup, multilingual README links.
 - **2026-05-19** 🎨 Image provider registry, StepFun and Skywork, stronger WebUI controls.
@@ -144,13 +185,13 @@
 - **2026-02-17** 🎉 Released **v0.1.4** — MCP support, progress streaming, new providers, and multiple channel improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4) for details.
 - **2026-02-16** 🦞 nanobot now integrates a [ClawHub](https://clawhub.ai) skill — search and install public agent skills.
 - **2026-02-15** 🔑 nanobot now supports OpenAI Codex provider with OAuth login support.
-- **2026-02-14** 🔌 nanobot now supports MCP! See [MCP section](#mcp-model-context-protocol) for details.
+- **2026-02-14** 🔌 nanobot now supports MCP! See [MCP section](./docs/configuration.md#mcp-model-context-protocol) for details.
 - **2026-02-13** 🎉 Released **v0.1.3.post7** — includes security hardening and multiple improvements. **Please upgrade to the latest version to address security issues**. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post7) for more details.
 - **2026-02-12** 🧠 Redesigned memory system — Less code, more reliable. Join the [discussion](https://github.com/HKUDS/nanobot/discussions/566) about it!
 - **2026-02-11** ✨ Enhanced CLI experience and added MiniMax support!
 - **2026-02-10** 🎉 Released **v0.1.3.post6** with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
 - **2026-02-09** 💬 Added Slack, Email, and QQ support — nanobot now supports multiple chat platforms!
-- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
+- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](./docs/configuration.md#providers).
 - **2026-02-07** 🚀 Released **v0.1.3.post5** with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
 - **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
@@ -176,13 +217,49 @@
 > 
 > If you want the most stable day-to-day experience, install from PyPI or with `uv`.
 
-**Install from source**
+Pick **one** install method:
+
+Prerequisites: Python 3.11 or newer. Git is only needed for a source install; Node.js/Bun are only needed if you are developing the WebUI itself.
+
+If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
+
+**One-command setup**
+
+macOS / Linux:
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
 ```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
+```
+
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps below and go straight to **Open the WebUI**.
+
+To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
+```
+
+To install the current `main` branch instead, pass `--dev`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
+```
+
+If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
 
 **Install with `uv`**
 
@@ -190,87 +267,149 @@ pip install -e .
 uv tool install nanobot-ai
 ```
 
-**Install from PyPI**
+**Install from PyPI with pip**
 
 ```bash
-pip install nanobot-ai
+python -m pip install nanobot-ai
+```
+
+If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
+
+**Install from source**
+
+```bash
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+python -m pip install -e .
+```
+
+Verify the install:
+
+```bash
+nanobot --version
 ```
 
 ## 🚀 Quick Start
 
 **1. Initialize**
 
+Skip this step if the one-command setup already started the wizard and Quick Start finished there.
+
 ```bash
 nanobot onboard
 ```
 
+Use `nanobot onboard --wizard` if you prefer an interactive setup.
+
 **2. Configure** (`~/.nanobot/config.json`)
 
-Configure these **two parts** in your config (other options have defaults). Add or merge the following blocks into your existing config instead of replacing the whole file.
+Skip this step if you already configured provider and model settings in the wizard.
 
-*Set your API key* (e.g. [OpenRouter](https://openrouter.ai/keys), recommended for global users):
+`nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
+
+The example below uses a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service. Provider examples are recipes, not rankings or endorsements. For copyable provider-specific setup, see [Provider Cookbook](./docs/provider-cookbook.md).
+
+*Set your API key*:
 
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
 ```
 
-*Set your model* (optionally pin a provider — defaults to auto-detection):
+*Set a model preset and make it active*:
 
 ```json
 {
+  "modelPresets": {
+    "primary": {
+      "label": "Primary",
+      "provider": "custom",
+      "model": "model-id-from-your-provider",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "temperature": 0.1
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-6"
+      "modelPreset": "primary"
     }
   }
 }
 ```
 
-**3. Chat**
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and `fallbackModels`.
+
+For another provider, the same config shape still applies:
+
+| Replace | Where |
+|---|---|
+| Provider config key | `providers.<provider>` |
+| API key | `providers.<provider>.apiKey` |
+| Preset provider name | `modelPresets.primary.provider` |
+| Model ID | `modelPresets.primary.model` |
+| Endpoint URL, only when needed | `providers.<provider>.apiBase` |
+
+**3. Open the WebUI**
+
+Start the browser workbench:
+
+```bash
+nanobot webui
+```
+
+`nanobot webui` prepares the local WebSocket channel if needed, starts the gateway, and opens `http://127.0.0.1:8765`. It binds the first-run WebUI to `127.0.0.1` by default, so it is not exposed to your LAN. Prefer not to keep a terminal open? Use `nanobot webui --background`, then manage the gateway with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+
+For manual or terminal-only setup, test one CLI message:
+
+```bash
+nanobot status
+nanobot agent -m "Hello!"
+```
+
+In `nanobot status`, it is normal for most providers to say `not set`. The active preset's provider should be configured, and `Config` plus `Workspace` should show check marks.
+
+If that works, start an interactive chat:
 
 ```bash
 nanobot agent
 ```
 
+Need help with `PATH`, API keys, provider/model matching, or JSON errors? See the fuller [Install and Quick Start](./docs/quick-start.md) and [Troubleshooting](./docs/troubleshooting.md).
 
-- Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
-- Want to run locally? Use [Atomic Chat](./docs/configuration.md#atomic-chat-local), [vLLM](./docs/configuration.md#vllm-local-openai-compatible), [Ollama](./docs/configuration.md#ollama-local), and [others](./docs/configuration.md#local-providers).
+- Want a pasteable provider setup? See [Provider Cookbook](./docs/provider-cookbook.md)
+- Want to understand provider/model matching? See [Providers and Models](./docs/providers.md)
+- Want web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
+- Want to run locally? See [Ollama](./docs/providers.md#ollama), [vLLM or another local OpenAI-compatible server](./docs/providers.md#vllm-or-other-local-openai-compatible-server), and the full [provider reference](./docs/configuration.md#providers).
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
 ## 🌐 WebUI
 
-The WebUI ships **inside the published wheel** — no extra build step. Just enable the WebSocket channel and open it in your browser.
+The WebUI ships **inside the published wheel** — no extra build step. It is the browser workbench for chat sessions, workspace controls, Apps, Skills, Automations, and settings. For the full user guide, see [`docs/webui.md`](./docs/webui.md).
 
 <p align="center">
   <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
 </p>
 
-**1. Enable the WebSocket channel in `~/.nanobot/config.json`**
-
-```json
-{ "channels": { "websocket": { "enabled": true } } }
-```
-
-**2. Start the gateway**
+**Open it**
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-**3. Open the WebUI**
+The command enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
 
-Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open it from another device on your LAN, see [WebUI docs → LAN access](./webui/README.md#access-from-another-device-lan).
+The WebUI is served by the WebSocket channel on port `8765` by default. The gateway's `18790` port is for the health endpoint, not the browser UI.
 
 > [!TIP]
-> Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the Vite dev server (HMR) workflow.
+> Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the source-tree, Vite dev server, build, and test workflow.
 
 ## 🏗️ Architecture
 
@@ -307,6 +446,13 @@ Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open 
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
+- Start with no technical background: [Start Without Technical Background](./docs/start-without-technical-background.md)
+- Start from zero with developer basics: [Install and Quick Start](./docs/quick-start.md)
+- Understand the runtime model: [Concepts](./docs/concepts.md)
+- Read the source-level map: [Architecture](./docs/architecture.md)
+- Choose a provider/model: [Providers and Models](./docs/providers.md)
+- Copy provider setup recipes: [Provider Cookbook](./docs/provider-cookbook.md)
+- Debug setup and runtime failures: [Troubleshooting](./docs/troubleshooting.md)
 - Talk to your nanobot with familiar chat apps: [Chat Apps](./docs/chat-apps.md)
 - Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)
 - Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
@@ -316,14 +462,9 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
 
-### Branching Strategy
+### Contribution Flow
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Stable releases — bug fixes and minor improvements |
-| `nightly` | Experimental features — new features and breaking changes |
-
-**Unsure which branch to target?** See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution guidelines.
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 

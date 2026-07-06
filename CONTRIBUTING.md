@@ -14,42 +14,30 @@ software together: with care, clarity, and respect for the next person reading t
 
 Maintainers are community stewards who help review, organize, and maintain the project. The list below describes each maintainer's current open-source project responsibilities.
 
-| Maintainer | Focus |
-|------------|-------|
-| [@re-bin](https://github.com/re-bin) | Project lead, `main` branch |
-| [@chengyongru](https://github.com/chengyongru) | `nightly` branch, experimental features |
+| Maintainer | Role |
+|------------|------|
+| [@re-bin](https://github.com/re-bin) | Project lead; reviews community PRs and handles merges |
+| [@chengyongru](https://github.com/chengyongru) | Reviews community PRs and may approve them; merges are handled by the project lead |
 
-## Branching Strategy
+## Contribution Flow
 
-We use a two-branch model to balance stability and exploration:
+### What Should I Open a PR For?
 
-| Branch | Purpose | Stability |
-|--------|---------|-----------|
-| `main` | Stable releases | Production-ready |
-| `nightly` | Experimental features | May have bugs or breaking changes |
-
-### Which Branch Should I Target?
-
-**Target `nightly` if your PR includes:**
+PRs are welcome for:
 
 - New features or functionality
-- Refactoring that may affect existing behavior
-- Changes to APIs or configuration
-
-**Target `main` if your PR includes:**
-
 - Bug fixes with no behavior changes
 - Documentation improvements
 - Minor tweaks that don't affect functionality
+- Refactoring that is clearly scoped and easy to review
+- Changes to APIs or configuration, when the impact is documented
 
-**When in doubt, target `nightly`.** It is easier to move a stable idea from `nightly`
-to `main` than to undo a risky change after it lands in the stable branch.
+For riskier or larger changes, please open an issue or draft PR early so the
+shape of the work can be discussed before the implementation grows too large.
 
 ### Starting Work
 
-Before making changes, sync the target branch and create a topic branch from it.
-For stable bug fixes and documentation-only changes, start from the latest `main`.
-For experimental work, start from the latest `nightly`.
+Before making changes, sync your local checkout and create a topic branch.
 
 ```bash
 git fetch upstream
@@ -64,28 +52,6 @@ uses a different remote name.
 Keep unrelated local changes out of the topic branch. If your checkout already has
 work in progress, use a separate worktree or finish that work before starting a
 new branch.
-
-### How Does Nightly Get Merged to Main?
-
-We don't merge the entire `nightly` branch. Instead, stable features are **cherry-picked** from `nightly` into individual PRs targeting `main`:
-
-```
-nightly  ──┬── feature A (stable) ──► PR ──► main
-           ├── feature B (testing)
-           └── feature C (stable) ──► PR ──► main
-```
-
-This happens approximately **once a week**, but the timing depends on when features become stable enough.
-
-### Quick Summary
-
-| Your Change | Target Branch |
-|-------------|---------------|
-| New feature | `nightly` |
-| Bug fix | `main` |
-| Documentation | `main` |
-| Refactoring | `nightly` |
-| Unsure | `nightly` |
 
 ## Development Setup
 
@@ -106,9 +72,9 @@ pytest
 ruff check nanobot/
 
 # Format code — optional. The existing tree predates `ruff format`,
-# so running it across `nanobot/` produces a large unrelated diff
-# (E501 is ignored, so many existing lines exceed the 100-char setting).
-# Format only files you've actually touched, not the whole package.
+# so running it broadly produces large unrelated diffs.
+# Do not mix mechanical formatting churn into a functional PR.
+# Use formatting only for the exact code your change intentionally touches.
 ruff format <files-you-changed>
 ```
 
@@ -137,6 +103,9 @@ In practice:
 - Async: uses `asyncio` throughout; pytest with `asyncio_mode = "auto"`
 - Prefer readable code over magical code
 - Prefer focused patches over broad rewrites
+- Do not mix mechanical formatting, line wrapping, import sorting, or quote churn
+  into a feature or bugfix PR. If formatting cleanup is needed, make it a
+  separate formatting-only PR.
 - If a new abstraction is introduced, it should clearly reduce complexity rather than move it around
 
 ## Modifying CI Workflows

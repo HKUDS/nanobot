@@ -10,9 +10,14 @@ import re
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
-import json_repair
-
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    parse_tool_arguments,
+    resolve_stream_idle_timeout_s,
+    tool_arguments_object_for_replay,
+)
 
 _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _TEXT_BLOCK_TYPES = {"text", "input_text", "output_text"}
@@ -66,7 +71,7 @@ class BedrockProvider(LLMProvider):
             import boto3
         except ImportError as exc:  # pragma: no cover - exercised only without boto3 installed
             raise RuntimeError(
-                "AWS Bedrock provider requires boto3. Install it with `pip install boto3`."
+                "AWS Bedrock provider requires boto3. Run `nanobot plugins enable bedrock`."
             ) from exc
 
         session_kwargs: dict[str, Any] = {}
@@ -176,14 +181,7 @@ class BedrockProvider(LLMProvider):
         function = tool_call.get("function")
         if not isinstance(function, dict):
             return None
-        args = function.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json_repair.loads(args) if args.strip() else {}
-            except Exception:
-                args = {}
-        if not isinstance(args, dict):
-            args = {}
+        args = tool_arguments_object_for_replay(function.get("arguments", {}))
         return {
             "toolUse": {
                 "toolUseId": str(tool_call.get("id") or ""),
@@ -491,7 +489,7 @@ class BedrockProvider(LLMProvider):
                 content_parts.append(block["text"])
             tool_use = block.get("toolUse")
             if isinstance(tool_use, dict):
-                arguments = tool_use.get("input") if isinstance(tool_use.get("input"), dict) else {}
+                arguments = tool_use.get("input", {})
                 tool_calls.append(ToolCallRequest(
                     id=str(tool_use.get("toolUseId") or ""),
                     name=str(tool_use.get("name") or ""),
@@ -616,14 +614,11 @@ class BedrockProvider(LLMProvider):
         for buf in tool_buffers.values():
             args: Any = {}
             if buf.get("input"):
-                try:
-                    args = json_repair.loads(buf["input"])
-                except Exception:
-                    args = {}
+                args = parse_tool_arguments(buf["input"])
             tool_calls.append(ToolCallRequest(
                 id=buf.get("id") or "",
                 name=buf.get("name") or "",
-                arguments=args if isinstance(args, dict) else {},
+                arguments=args,
             ))
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -707,7 +702,7 @@ class BedrockProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         _ = on_thinking_delta, on_tool_call_delta
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         thinking_blocks: list[dict[str, Any]] = []
@@ -748,7 +743,7 @@ class BedrockProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

@@ -54,7 +54,11 @@
       "label": "语言",
       "ariaLabel": "切换语言"
     },
-    "apps": "应用"
+    "apps": "应用",
+    "automations": "自动任务",
+    "skills": {
+      "title": "技能"
+    }
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -70,17 +74,21 @@
       "models": "模型",
       "providers": "提供商",
       "image": "图片",
+      "voice": "语音",
       "browser": "网页",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
       "runtime": "系统",
       "advanced": "安全",
-      "apps": "应用"
+      "apps": "应用",
+      "automations": "自动任务",
+      "skills": "技能"
     },
     "sections": {
       "interface": "界面",
       "ai": "AI",
       "system": "系统",
+      "about": "关于",
       "status": "状态",
       "localPreferences": "本地偏好",
       "presets": "预设",
@@ -95,7 +103,8 @@
       "capabilities": "能力",
       "apps": "应用",
       "nativeHost": "原生宿主",
-      "hostSafety": "应用安全"
+      "hostSafety": "应用安全",
+      "voiceInput": "语音识别"
     },
     "models": {
       "selectModel": "选择模型",
@@ -157,7 +166,13 @@
       "engine": "引擎",
       "logs": "日志",
       "diagnostics": "诊断",
-      "contextWindow": "上下文窗口"
+      "contextWindow": "上下文窗口",
+      "transcription": "语音转写",
+      "transcriptionProvider": "提供商",
+      "transcriptionProviderStatus": "提供商状态",
+      "transcriptionModel": "模型",
+      "transcriptionLanguage": "语言",
+      "voiceLimits": "限制"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
@@ -196,7 +211,12 @@
       "diagnostics": "导出一份用于支持排查的小型运行报告。",
       "localServiceAccessNative": "允许完全访问权限下的 shell 命令访问这台 Mac 上的服务。",
       "webuiDefaultAccessNative": "用于没有单独项目权限的原生聊天。",
-      "contextWindow": "选择此模型配置的默认上下文预算。"
+      "contextWindow": "选择此模型配置的默认上下文预算。",
+      "transcription": "发送前先把麦克风输入转写到输入框。聊天渠道里的语音消息也使用同一套设置。",
+      "transcriptionProvider": "使用「提供商」中对应提供商的凭据。",
+      "transcriptionProviderStatus": "API Key 仍保存在 providers 里，不写进 transcription 设置。",
+      "transcriptionModel": "除非提供商需要自定义模型 ID，否则保持解析后的默认值即可。",
+      "transcriptionLanguage": "可选 ISO-639 语言提示，例如 en、zh、ja 或 ko。"
     },
     "timezone": {
       "select": "选择时区",
@@ -233,6 +253,13 @@
       "unsupported": "暂不支持",
       "unavailable": "不可用",
       "noDescription": "暂无描述。"
+    },
+    "about": {
+      "version": "版本",
+      "checking": "正在检查...",
+      "checkForUpdates": "检查更新",
+      "upToDate": "已是最新版本",
+      "updateAvailable": "有可用更新 v{{version}}"
     },
     "mcp": {
       "allCategories": "全部分类",
@@ -295,6 +322,9 @@
       "disabled": "已禁用",
       "restartPending": "等待重启",
       "ready": "就绪",
+      "privateEngine": "私有引擎",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "默认工作区",
       "comfortable": "舒适",
       "compact": "紧凑",
       "auto": "自动",
@@ -384,7 +414,33 @@
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "网页搜索",
       "imageGeneration": "图片生成",
+      "voiceInput": "语音识别",
       "workspace": "工作区"
+    },
+    "usage": {
+      "title": "Token 活动",
+      "shortTitle": "Token Usage",
+      "subtitle": "最近 12 个月由提供商上报的 token 用量。",
+      "empty": "新的模型回复产生后，这里会显示 token 活动。",
+      "totalTokens": "累计 Token 数",
+      "peakTokens": "峰值 Token 数",
+      "thirtyDayTokens": "30 天 Token 数",
+      "currentStreak": "当前连续天数",
+      "longestStreak": "最长连续天数",
+      "daysValue": "{{count}} 天",
+      "last30": "30 天",
+      "activeDays": "活跃天数",
+      "requests": "请求数",
+      "estimated": "估算",
+      "includesEstimates": "包含估算",
+      "cellTitle": "{{date}}：{{tokens}} tokens，{{requests}} 次请求",
+      "sources": {
+        "user": "对话",
+        "api": "API",
+        "cron": "自动任务",
+        "dream": "记忆整理",
+        "system": "系统"
+      }
     },
     "providers": {
       "searchPlaceholder": "搜索提供商",
@@ -402,18 +458,160 @@
       "missingCredential": "启用图片生成前请先配置此提供商。"
     },
     "apps": {
-      "description": "添加 nanobot 可在聊天中使用的 App CLI 和 MCP 服务。",
+      "description": "启用插件、本地应用适配器和已连接的工具服务。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "渠道",
+      "featureLabel": "能力",
       "filterAll": "全部",
+      "filterPlugins": "插件",
       "filterCli": "CLI 应用",
       "filterMcp": "MCP 服务",
       "enabledSummary": "已启用 {{count}} 个",
-      "caption": "{{cli}} 个 CLI · {{mcp}} 个 MCP",
+      "caption": "{{plugins}} 个插件 · {{cli}} 个 CLI · {{mcp}} 个 MCP",
       "searchPlaceholder": "搜索应用",
-      "featured": "精选",
+      "featured": "应用目录",
       "loading": "正在加载应用...",
-      "empty": "没有匹配的应用。"
+      "empty": "没有匹配的应用。",
+      "restartRequired": "重启 nanobot 以应用更新后的应用和能力。"
+    },
+    "nanobotFeatures": {
+      "enabled": "已启用",
+      "enable": "启用",
+      "disable": "禁用",
+      "ready": "就绪",
+      "missingDependency": "缺少支持包",
+      "installSupport": "安装支持包",
+      "installConfirmTitle": "安装 {{name}} 支持？",
+      "installConfirmDescription": "将安装并启用 {{name}} 支持。是否继续？",
+      "installConfirmAction": "安装并启用",
+      "websocketRequired": "WebUI 必需",
+      "channelDisabled": "渠道已禁用",
+      "notEnabled": "未启用"
+    },
+    "automations": {
+      "filters": {
+        "all": "全部",
+        "active": "运行中",
+        "paused": "已暂停",
+        "failed": "异常",
+        "system": "系统"
+      },
+      "sort": {
+        "next": "下次运行",
+        "last": "上次运行",
+        "updated": "更新时间",
+        "name": "名称"
+      },
+      "search": "搜索任务、消息、关联会话或计划",
+      "queue": "任务队列",
+      "loading": "正在加载自动任务...",
+      "noMatches": "当前视图没有匹配的自动任务。",
+      "empty": "暂无自动任务。",
+      "emptyHint": "请从它应该运行的来源处创建，这样 nanobot 才能保留正确上下文。",
+      "oneShot": "一次性",
+      "systemTask": "系统管理的自动任务",
+      "localTrigger": "本地触发器",
+      "labels": {
+        "schedule": "计划",
+        "next": "下次",
+        "origin": "关联会话",
+        "created": "创建于",
+        "updated": "更新于"
+      },
+      "runNow": "立即运行",
+      "pause": "暂停",
+      "resume": "恢复",
+      "edit": "编辑",
+      "delete": "删除",
+      "protected": "受保护",
+      "editTitle": "编辑自动任务",
+      "save": "保存",
+      "deleteTitle": "删除自动任务",
+      "deleteDescription": "这会从 cron 存储中删除 {{name}}，历史聊天消息会保留在会话中。",
+      "cancel": "取消",
+      "status": {
+        "system": "系统",
+        "running": "正在运行",
+        "paused": "已暂停",
+        "failed": "失败",
+        "completed": "已完成",
+        "noSchedule": "无计划",
+        "active": "运行中"
+      },
+      "origin": {
+        "system": "系统",
+        "unknown": "未关联会话"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "钉钉",
+        "discord": "Discord",
+        "email": "邮件",
+        "feishu": "飞书",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "微信",
+        "wecom": "企业微信",
+        "weixin": "微信",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "在 {{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "每天 {{time}}",
+        "weekdaysAt": "工作日 {{time}}",
+        "hourlyAt": "每小时第 {{minute}} 分钟",
+        "hourlyWindow": "{{start}}-{{end}} 点每小时第 {{minute}} 分钟",
+        "local": "本地触发器",
+        "custom": "自定义计划"
+      },
+      "next": {
+        "paused": "已暂停",
+        "pending": "正在运行",
+        "local": "等待触发",
+        "none": "没有下次运行"
+      },
+      "message": {
+        "showMore": "查看完整消息",
+        "showLess": "收起消息"
+      },
+      "fields": {
+        "name": "名称",
+        "message": "消息",
+        "scheduleType": "计划类型",
+        "every": "每隔",
+        "unit": "单位",
+        "cronExpression": "Cron 表达式",
+        "timezone": "时区",
+        "runAt": "运行时间"
+      },
+      "scheduleTypes": {
+        "every": "间隔",
+        "cron": "Cron",
+        "at": "一次性"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分钟",
+        "hour": "小时",
+        "day": "天"
+      },
+      "validation": {
+        "nameRequired": "名称不能为空。",
+        "messageRequired": "消息不能为空。",
+        "intervalRequired": "间隔必须是正整数。",
+        "cronRequired": "Cron 表达式不能为空。",
+        "timeRequired": "运行时间不能为空。",
+        "futureRequired": "运行时间必须晚于当前时间。"
+      }
     },
     "oauth": {
       "authentication": "OAuth 认证",
@@ -427,10 +625,43 @@
       "signInBeforeSaving": "将此 OAuth 提供商设为当前模型提供商前，请先登录。",
       "signedIn": "已登录",
       "notSignedIn": "未登录"
+    },
+    "skills": {
+      "description": "查看此 agent 在对话中可以加载的指令技能。",
+      "caption": "{{available}} 个可用 · 共 {{total}} 个",
+      "featured": "Agent 技能",
+      "empty": "暂无可用技能。",
+      "sourceWorkspace": "自定义",
+      "sourceBuiltin": "内置",
+      "statusAvailable": "可用",
+      "statusUnavailable": "不可用",
+      "unavailableReason": "缺少：{{reason}}",
+      "openDetails": "查看 {{name}} 详情",
+      "loadingDetail": "正在加载技能详情...",
+      "loadFailed": "无法加载技能详情。",
+      "descriptionTitle": "完整描述",
+      "source": "来源",
+      "status": "状态",
+      "requirements": "需求",
+      "noRequirements": "没有显式需求。",
+      "commands": "命令",
+      "environment": "环境变量",
+      "missingCommands": "缺 CLI",
+      "missingEnvironment": "缺 ENV",
+      "unavailableReasonLabel": "不可用原因",
+      "rawInstructions": "原始 SKILL.md",
+      "rawInstructionsEmpty": "没有原始说明。",
+      "detailDescription": "{{name}} 的详情。"
+    },
+    "voice": {
+      "selectProvider": "选择提供商",
+      "configureProvider": "配置提供商",
+      "languageAuto": "自动"
     }
   },
   "chat": {
     "fallbackTitle": "对话 {{id}}",
+    "forkTitle": "分叉：{{title}}",
     "loading": "加载中…",
     "noSessions": "还没有会话。",
     "showMore": "再显示 {{count}} 个",
@@ -440,7 +671,8 @@
     "newInProject": "在 {{project}} 中开始新对话",
     "activity": {
       "running": "Agent 正在运行",
-      "complete": "Agent 已完成"
+      "complete": "Agent 已完成",
+      "updated": "有新内容"
     },
     "pin": "置顶",
     "unpin": "取消置顶",
@@ -472,7 +704,24 @@
     "title": "删除这个对话？",
     "description": "此操作无法撤销。",
     "cancel": "取消",
-    "confirm": "删除"
+    "confirm": "删除",
+    "automationsDescription": "这个对话有关联的自动任务。删除对话也会删除这些自动任务。",
+    "moreAutomations": "另有 {{count}} 个",
+    "confirmWithAutomations": "删除",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "每 {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "本地触发器",
+      "unknown": "自定义计划"
+    },
+    "next": {
+      "label": "下次：{{time}}",
+      "disabled": "已暂停",
+      "local": "等待触发",
+      "none": "没有下次运行"
+    }
   },
   "connection": {
     "idle": "空闲",
@@ -548,7 +797,33 @@
       "toggleSidebar": "切换侧边栏",
       "newChat": "从顶部新建对话",
       "toggleTheme": "从顶部切换主题",
-      "settings": "打开设置"
+      "settings": "打开设置",
+      "sessionInfo": "会话详情"
+    },
+    "sessionInfo": {
+      "title": "会话",
+      "untitled": "未命名对话",
+      "automations": "自动任务",
+      "count": "{{count}}",
+      "loading": "正在加载自动任务...",
+      "loadFailed": "无法加载自动任务。",
+      "empty": "这个会话暂时没有自动任务。",
+      "disabled": "已关闭",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "本地触发器",
+        "unknown": "自定义计划"
+      },
+      "next": {
+        "label": "下次 {{time}}",
+        "pending": "即将执行",
+        "disabled": "已暂停",
+        "local": "等待触发",
+        "none": "没有下次运行"
+      }
     },
     "composer": {
       "placeholderThread": "输入消息…",
@@ -564,6 +839,8 @@
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
+      "modelNotConfigured": "模型未配置",
+      "configureModel": "配置模型",
       "queued": {
         "label": "待引导提示",
         "guide": "引导",
@@ -592,6 +869,21 @@
         "reason": "推理",
         "deepResearch": "深度研究",
         "voice": "语音输入"
+      },
+      "voice": {
+        "hint": "点击进行听写或长按",
+        "stop": "停止录音",
+        "transcribing": "正在转写...",
+        "recordingStatus": "正在录音 {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "当前浏览器不支持语音输入。",
+        "permission": "需要麦克风权限。",
+        "notConfigured": "请先配置转写提供商。",
+        "tooLong": "录音时间太长。",
+        "tooShort": "请稍微多录一会儿。",
+        "noInput": "没有检测到麦克风输入。",
+        "failed": "语音转写失败。"
       },
       "slash": {
         "ariaLabel": "斜杠命令",
@@ -646,9 +938,17 @@
             "title": "恢复记忆",
             "description": "将记忆恢复到之前的 Dream 快照。"
           },
+          "dream_prompt": {
+            "title": "Dream 记忆",
+            "description": "设置 Dream 如何整理当前工作区的记忆。"
+          },
           "goal": {
             "title": "长期目标",
             "description": "让助手把当前请求当作需要多步骤持续推进的目标。"
+          },
+          "trigger": {
+            "title": "创建本地触发器",
+            "description": "创建绑定到当前聊天会话的 CLI 触发器。"
           },
           "help": {
             "title": "查看帮助",
@@ -691,7 +991,15 @@
       }
     },
     "scrollToBottom": "滚动到底部",
-    "loadEarlier": "加载更早消息"
+    "loadEarlier": "加载更早消息",
+    "forkedFromHistory": "从历史消息分叉",
+    "promptNavigator": {
+      "open": "打开输入导航",
+      "title": "输入列表",
+      "search": "搜索输入",
+      "noResults": "没有匹配的输入。",
+      "jumpTo": "跳转到输入：{{label}}"
+    }
   },
   "message": {
     "streaming": "流式输出中",
@@ -712,6 +1020,9 @@
     "activityThinkingFor": "思考中 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "思考了 {{duration}}",
+    "activityWorkingFor": "处理中 {{duration}}",
+    "activityWorked": "已处理",
+    "activityWorkedFor": "处理了 {{duration}}",
     "cliActivityRunningOne": "正在使用 @{{name}}",
     "cliActivityRanOne": "已使用 @{{name}}",
     "cliActivityFailedOne": "使用 @{{name}} 失败",
@@ -722,8 +1033,11 @@
     "cliRunRan": "已使用",
     "cliRunFailed": "失败",
     "imageAttachment": "图片附件",
-    "copyReply": "复制回复",
-    "copiedReply": "已复制回复",
+    "automationSourceFallback": "自动化",
+    "automationTriggered": "自动触发",
+    "forkFromHere": "分叉",
+    "copyReply": "复制",
+    "copiedReply": "已复制",
     "turnLatencyTitle": "本轮耗时（端到端）"
   },
   "lightbox": {
@@ -732,6 +1046,15 @@
     "prev": "上一张",
     "next": "下一张",
     "close": "关闭预览"
+  },
+  "filePreview": {
+    "aria": "文件预览",
+    "close": "关闭文件预览",
+    "loading": "正在加载预览...",
+    "failed": "无法预览这个文件。",
+    "routeMissing": "文件预览需要最新的 gateway。请重启 nanobot gateway 后再试。",
+    "resize": "调整文件预览宽度",
+    "truncated": "文件较大，当前只显示前半部分预览。"
   },
   "code": {
     "fallbackLanguage": "代码",

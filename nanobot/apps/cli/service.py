@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
@@ -95,6 +96,8 @@ class CliAppsRuntimeConfig:
 
 _BRANDS: dict[str, tuple[str, str]] = {
     "1password-cli": ("1password", "#3B66BC"),
+    "arcgis": ("arcgis", "#2C7AC3"),
+    "arcgis-pro": ("arcgis", "#2C7AC3"),
     "audacity": ("audacity", "#0000CC"),
     "blender": ("blender", "#E87D0D"),
     "browser": ("googlechrome", "#4285F4"),
@@ -116,6 +119,7 @@ _BRANDS: dict[str, tuple[str, str]] = {
     "intelwatch": ("intel", "#0071C5"),
     "iterm2": ("iterm2", "#000000"),
     "jimeng": ("bytedance", "#3C8CFF"),
+    "joplin": ("joplin", "#1071D3"),
     "kdenlive": ("kdenlive", "#527EB2"),
     "krita": ("krita", "#3BABFF"),
     "libreoffice": ("libreoffice", "#18A303"),
@@ -404,6 +408,19 @@ class CliAppManager:
     def _cache_path(self, source: str) -> Path:
         return self.data_dir / f"{source}_registry_cache.json"
 
+    def _cached_registry(self, cache_path: Path) -> tuple[dict[str, Any] | None, float]:
+        cached = _read_json(cache_path)
+        if not cached:
+            return None, 0.0
+        data = cached.get("data")
+        if not isinstance(data, dict):
+            return None, 0.0
+        try:
+            cached_at = float(cached.get("_cached_at", 0))
+        except (TypeError, ValueError):
+            cached_at = 0.0
+        return data, cached_at
+
     def _load_installed(self) -> dict[str, Any]:
         data = _read_json(self.installed_path) or {}
         apps = data.get("apps") if isinstance(data.get("apps"), dict) else data
@@ -423,39 +440,90 @@ class CliAppManager:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        cached = _read_json(cache_path)
+        data, cached_at = self._cached_registry(cache_path)
         if (
             not force_refresh
-            and cached
-            and _now() - float(cached.get("_cached_at", 0)) < self.runtime.catalog_ttl_seconds
+            and data is not None
+            and _now() - cached_at < self.runtime.catalog_ttl_seconds
         ):
-            data = cached.get("data")
-            if isinstance(data, dict):
-                return data
+            return data
 
         try:
             response = httpx.get(url, timeout=15.0, follow_redirects=True)
             response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, dict):
+            fetched = response.json()
+            if not isinstance(fetched, dict):
                 raise ValueError("registry response must be an object")
         except Exception:
-            if cached and isinstance(cached.get("data"), dict):
-                return cached["data"]
+            if data is not None:
+                return data
             raise
 
-        _write_json(cache_path, {"_cached_at": _now(), "data": data})
-        return data
+        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        return fetched
 
-    def catalog(self, *, force_refresh: bool = False) -> tuple[list[dict[str, Any]], str | None]:
-        registries: list[tuple[str, str, dict[str, Any]]] = []
-        for source, url, raw_base, required in _CATALOG_SOURCES:
+    async def _fetch_registry_async(
+        self,
+        url: str,
+        cache_path: Path,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        data, cached_at = self._cached_registry(cache_path)
+        if (
+            not force_refresh
+            and data is not None
+            and _now() - cached_at < self.runtime.catalog_ttl_seconds
+        ):
+            return data
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                response = await client.get(url)
+            response.raise_for_status()
+            fetched = response.json()
+            if not isinstance(fetched, dict):
+                raise ValueError("registry response must be an object")
+        except Exception:
+            if data is not None:
+                return data
+            raise
+
+        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        return fetched
+
+    async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:
+        for source, url, _raw_base, required in _CATALOG_SOURCES:
             try:
-                registry = self._fetch_registry(
+                await self._fetch_registry_async(
                     url,
                     self._cache_path(source),
                     force_refresh=force_refresh,
                 )
+            except Exception:
+                if required:
+                    raise
+
+    def catalog(
+        self,
+        *,
+        force_refresh: bool = False,
+        cache_only: bool = False,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        registries: list[tuple[str, str, dict[str, Any]]] = []
+        for source, url, raw_base, required in _CATALOG_SOURCES:
+            try:
+                cache_path = self._cache_path(source)
+                if cache_only:
+                    registry, _ = self._cached_registry(cache_path)
+                    if registry is None:
+                        continue
+                else:
+                    registry = self._fetch_registry(
+                        url,
+                        cache_path,
+                        force_refresh=force_refresh,
+                    )
             except Exception:
                 if required:
                     raise
@@ -484,6 +552,15 @@ class CliAppManager:
                 else:
                     apps_by_name[key] = entry
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
+
+    def catalog_cache_fresh(self, *, include_optional: bool = False) -> bool:
+        for source, _url, _raw_base, required in _CATALOG_SOURCES:
+            if not required and not include_optional:
+                continue
+            data, cached_at = self._cached_registry(self._cache_path(source))
+            if data is None or _now() - cached_at >= self.runtime.catalog_ttl_seconds:
+                return False
+        return True
 
     def _manifest_source(self, app: dict[str, Any]) -> str:
         source = str(app.get("_source") or "harness")
@@ -671,8 +748,8 @@ class CliAppManager:
             },
         )
 
-    def payload(self, *, force_refresh: bool = False) -> dict[str, Any]:
-        apps, updated = self.catalog(force_refresh=force_refresh)
+    def payload(self, *, force_refresh: bool = False, cache_only: bool = False) -> dict[str, Any]:
+        apps, updated = self.catalog(force_refresh=force_refresh, cache_only=cache_only)
         installed = self._load_installed()
         rows = [self._app_payload(app, installed) for app in apps]
         rows.sort(key=lambda item: (str(item["category"]), str(item["display_name"]).lower()))
@@ -680,6 +757,29 @@ class CliAppManager:
             "apps": rows,
             "installed_count": sum(1 for item in rows if item["installed"]),
             "catalog_updated_at": updated,
+        }
+
+    def installed_payload(self) -> dict[str, Any]:
+        installed = self._load_installed()
+        rows = []
+        for name, raw_entry in sorted(installed.items()):
+            entry = raw_entry if isinstance(raw_entry, dict) else {}
+            strategy = str(entry.get("strategy") or "bundled")
+            app = {
+                "name": str(name),
+                "display_name": str(entry.get("display_name") or name),
+                "category": str(entry.get("category") or "installed"),
+                "description": str(entry.get("description") or ""),
+                "requires": str(entry.get("requires") or ""),
+                "_source": str(entry.get("source") or "local"),
+                "entry_point": str(entry.get("entry_point") or ""),
+                "package_manager": strategy,
+            }
+            rows.append(self._app_payload(app, installed))
+        return {
+            "apps": rows,
+            "installed_count": len(rows),
+            "catalog_updated_at": None,
         }
 
     def _pip_package_from_install(self, app: dict[str, Any]) -> str | None:
@@ -699,15 +799,31 @@ class CliAppManager:
             return None
         return args[0]
 
+    @staticmethod
+    def _pip_available() -> bool:
+        """Return True if pip is importable for the current interpreter."""
+        from importlib.util import find_spec
+
+        return find_spec("pip") is not None
+
     def _pip_install_argv(self, app: dict[str, Any], *, update: bool = False) -> list[str]:
         install_cmd = str(app.get("install_cmd") or "")
         if not _is_pip_install_command(install_cmd) or _has_shell_meta(install_cmd):
             raise CliAppError("unsupported pip install command")
         tokens = shlex.split(install_cmd)
         args = tokens[2:] if tokens[:2] == ["pip", "install"] else tokens[4:]
-        prefix = [sys.executable, "-m", "pip", "install"]
+        pip_available = self._pip_available()
+        if pip_available:
+            prefix = [sys.executable, "-m", "pip", "install"]
+        elif shutil.which("uv"):
+            prefix = ["uv", "pip", "install", "--python", sys.executable]
+        else:
+            raise CliAppError("pip is not available and uv is not installed")
         if update:
-            prefix.extend(["--upgrade", "--force-reinstall"])
+            if pip_available:
+                prefix.extend(["--upgrade", "--force-reinstall"])
+            else:
+                prefix.extend(["--upgrade", "--reinstall"])
         return prefix + args
 
     def _pip_uninstall_argv(
@@ -715,18 +831,24 @@ class CliAppManager:
         app: dict[str, Any],
         installed_entry: dict[str, Any] | None = None,
     ) -> list[str]:
+        if self._pip_available():
+            prefix = [sys.executable, "-m", "pip", "uninstall", "-y"]
+        elif shutil.which("uv"):
+            prefix = ["uv", "pip", "uninstall", "--python", sys.executable]
+        else:
+            raise CliAppError("pip is not available and uv is not installed")
         distribution = str((installed_entry or {}).get("pip_distribution") or "").strip()
         if distribution:
-            return [sys.executable, "-m", "pip", "uninstall", "-y", distribution]
+            return [*prefix, distribution]
         uninstall_cmd = str(app.get("uninstall_cmd") or "")
         packages = _pip_uninstall_args_from_command(uninstall_cmd)
         if packages:
-            return [sys.executable, "-m", "pip", "uninstall", "-y", *packages]
+            return [*prefix, *packages]
         package = str(app.get("pip_package") or "").strip() or self._pip_package_from_install(app)
         if not package:
             entry_point = str(app.get("entry_point") or "").strip()
             package = entry_point if entry_point.startswith("cli-anything-") else f"cli-anything-{_brand_key(str(app['name']))}"
-        return [sys.executable, "-m", "pip", "uninstall", "-y", package]
+        return [*prefix, package]
 
     def _npm_argv(self, app: dict[str, Any], action: str) -> list[str]:
         npm = shutil.which("npm")
@@ -820,12 +942,19 @@ class CliAppManager:
         raise CliAppError("this CLI app uses an unsupported install strategy")
 
     def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        command = subprocess.list2cmdline(argv)
+        logger.info("CLI Apps: running {}", command)
+        result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=timeout,
         )
+        logger.info("CLI Apps: command exited with code {}: {}", result.returncode, command)
+        output = (result.stderr or result.stdout or "").strip()
+        if output:
+            logger.info("CLI Apps command output:\n{}", _truncate(output, 4000))
+        return result
 
     def _installed_entry(self, app: dict[str, Any]) -> dict[str, Any]:
         entry_point = str(app.get("entry_point") or "")

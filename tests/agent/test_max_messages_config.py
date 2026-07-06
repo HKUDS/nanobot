@@ -1,4 +1,4 @@
-"""Tests for max_messages config wiring into session history replay."""
+"""Tests for the internal max_messages replay cap."""
 
 from __future__ import annotations
 
@@ -11,20 +11,27 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
-from nanobot.session.manager import Session
+from nanobot.providers.factory import ProviderSnapshot
+from nanobot.session.manager import (
+    FILE_MAX_MESSAGES,
+    Session,
+    replay_max_messages_for_context,
+)
 
-DEFAULT_MAX_MESSAGES = 120
 
-
-def _make_loop(tmp_path: Path, max_messages: int = DEFAULT_MAX_MESSAGES) -> AgentLoop:
+def _make_loop(
+    tmp_path: Path,
+    context_window_tokens: int = 200_000,
+) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.generation.max_tokens = 4096
     return AgentLoop(
         bus=MessageBus(),
         provider=provider,
         workspace=tmp_path,
         model="test-model",
-        max_messages=max_messages,
+        context_window_tokens=context_window_tokens,
     )
 
 
@@ -37,25 +44,58 @@ def _populated_session(n: int) -> Session:
     return session
 
 
+def _tool_round(call_id: str) -> list[dict]:
+    return [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": call_id, "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
+    ]
+
+
 class TestMaxMessagesInit:
-    """Verify AgentLoop stores the config value correctly."""
+    """Verify AgentLoop derives the internal replay cap correctly."""
 
-    def test_default_is_builtin_limit(self, tmp_path: Path) -> None:
+    def test_context_formula(self) -> None:
+        assert replay_max_messages_for_context(8_000) == 120
+        assert replay_max_messages_for_context(32_768) == 327
+        assert replay_max_messages_for_context(200_000) == FILE_MAX_MESSAGES
+
+    def test_default_for_200k_context_reaches_file_cap(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._max_messages == DEFAULT_MAX_MESSAGES
+        assert loop._max_messages == FILE_MAX_MESSAGES
 
-    def test_positive_value_stored(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path, max_messages=25)
-        assert loop._max_messages == 25
+    def test_default_scales_with_context_window(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path, context_window_tokens=32_768)
+        assert loop._max_messages == 327
 
-    def test_zero_uses_builtin_limit(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path, max_messages=0)
-        assert loop._max_messages == DEFAULT_MAX_MESSAGES
+    def test_provider_refresh_resyncs_context_derived_limit(self, tmp_path: Path) -> None:
+        old_provider = MagicMock()
+        old_provider.get_default_model.return_value = "old-model"
+        old_provider.generation.max_tokens = 4096
+        new_provider = MagicMock()
+        new_provider.generation.max_tokens = 4096
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=old_provider,
+            workspace=tmp_path,
+            model="old-model",
+            context_window_tokens=32_768,
+            provider_snapshot_loader=lambda: ProviderSnapshot(
+                provider=new_provider,
+                model="new-model",
+                context_window_tokens=200_000,
+                signature=("new-model",),
+            ),
+        )
 
-    def test_negative_treated_as_builtin_limit(self, tmp_path: Path) -> None:
-        """Negative values should not produce negative slicing."""
-        loop = _make_loop(tmp_path, max_messages=-5)
-        assert loop._max_messages == DEFAULT_MAX_MESSAGES
+        assert loop._max_messages == 327
+        loop._refresh_provider_snapshot()
+        assert loop._max_messages == FILE_MAX_MESSAGES
 
 
 class TestGetHistoryWithMaxMessages:
@@ -64,7 +104,7 @@ class TestGetHistoryWithMaxMessages:
     def test_default_uses_builtin_limit(self) -> None:
         session = _populated_session(80)
         history = session.get_history()
-        assert len(history) <= DEFAULT_MAX_MESSAGES
+        assert len(history) <= FILE_MAX_MESSAGES
 
     def test_explicit_max_messages_limits_output(self) -> None:
         session = _populated_session(40)  # 80 messages total
@@ -80,7 +120,7 @@ class TestGetHistoryWithMaxMessages:
     def test_max_messages_zero_uses_builtin_limit(self) -> None:
         session = _populated_session(80)  # 160 messages total
         history = session.get_history(max_messages=0)
-        assert len(history) <= DEFAULT_MAX_MESSAGES
+        assert len(history) <= FILE_MAX_MESSAGES
 
     def test_small_session_unaffected(self) -> None:
         """When session has fewer messages than max_messages, all are returned."""
@@ -90,12 +130,13 @@ class TestGetHistoryWithMaxMessages:
 
 
 class TestMaxMessagesIntegration:
-    """Verify the config flows from AgentLoop into get_history calls."""
+    """Verify AgentLoop passes the replay cap into get_history calls."""
 
     @pytest.mark.asyncio
-    async def test_process_message_passes_config_to_history_call(self, tmp_path: Path) -> None:
+    async def test_process_message_passes_limit_to_history_call(self, tmp_path: Path) -> None:
         """The real message path should pass max_messages into session history replay."""
-        loop = _make_loop(tmp_path, max_messages=25)
+        loop = _make_loop(tmp_path)
+        loop._max_messages = 25
         loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[], usage={})
         )
@@ -111,10 +152,14 @@ class TestMaxMessagesIntegration:
         assert result is not None
         assert mock_hist.call_count == 1
         assert mock_hist.call_args.kwargs["max_messages"] == 25
+        assert mock_hist.call_args.kwargs["extend_to_user"] is False
 
     @pytest.mark.asyncio
-    async def test_zero_config_passes_builtin_limit_to_history_call(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path, max_messages=0)
+    async def test_default_limit_passes_context_derived_limit_to_history_call(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        loop = _make_loop(tmp_path)
         loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[], usage={})
         )
@@ -128,32 +173,44 @@ class TestMaxMessagesIntegration:
             )
 
         assert result is not None
-        assert mock_hist.call_args.kwargs["max_messages"] == DEFAULT_MAX_MESSAGES
+        assert mock_hist.call_args.kwargs["max_messages"] == FILE_MAX_MESSAGES
+        assert mock_hist.call_args.kwargs["extend_to_user"] is False
 
+    @pytest.mark.asyncio
+    async def test_process_message_uses_current_user_as_replay_boundary(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A live user turn should not extend history to an older long tool turn."""
+        loop = _make_loop(tmp_path)
+        loop._max_messages = 6
+        loop.provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(content="ok", tool_calls=[], usage={})
+        )
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
-class TestSchemaConfig:
-    """Verify the config schema accepts max_messages."""
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "long older turn")
+        for i in range(8):
+            session.messages.extend(_tool_round(f"older-{i}"))
+        session.add_message("assistant", "older final")
 
-    def test_schema_default(self) -> None:
-        from nanobot.config.schema import AgentDefaults
+        with patch.object(session, "get_history", wraps=session.get_history) as mock_hist:
+            result = await loop._process_message(
+                InboundMessage(
+                    channel="cli",
+                    sender_id="user",
+                    chat_id="test",
+                    content="new question",
+                )
+            )
 
-        defaults = AgentDefaults()
-        assert defaults.max_messages == DEFAULT_MAX_MESSAGES
-
-    def test_schema_accepts_zero_as_builtin_limit(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        defaults = AgentDefaults(max_messages=0)
-        assert defaults.max_messages == 0
-
-    def test_schema_accepts_positive(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        defaults = AgentDefaults(max_messages=25)
-        assert defaults.max_messages == 25
-
-    def test_schema_rejects_negative(self) -> None:
-        from nanobot.config.schema import AgentDefaults
-
-        with pytest.raises(Exception):  # Pydantic validation error
-            AgentDefaults(max_messages=-1)
+        assert result is not None
+        assert mock_hist.call_args.kwargs["extend_to_user"] is False
+        sent_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+        sent_text = "\n".join(str(message.get("content")) for message in sent_messages)
+        assert "new question" in sent_text
+        assert "long older turn" not in sent_text

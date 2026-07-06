@@ -161,6 +161,16 @@ def test_build_kwargs_converts_messages_tools_and_tool_results() -> None:
     assert kwargs["toolConfig"]["toolChoice"] == {"any": {}}
 
 
+def test_tool_use_block_repairs_history_tool_arguments() -> None:
+    block = BedrockProvider._tool_use_block({
+        "id": "toolu_1",
+        "function": {"name": "read_file", "arguments": '{path:"foo.txt"}'},
+    })
+
+    assert block is not None
+    assert block["toolUse"]["input"] == {"path": "foo.txt"}
+
+
 def test_build_kwargs_keeps_tool_config_for_historical_tool_blocks_without_tools() -> None:
     provider = BedrockProvider(region="us-east-1", client=FakeClient())
     messages = [

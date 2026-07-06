@@ -60,6 +60,7 @@ function fakeClient() {
       },
       sendMessage: vi.fn(),
       newChat: vi.fn(),
+      forkChat: vi.fn(),
       attach: vi.fn(),
       connect: vi.fn(),
       close: vi.fn(),
@@ -154,6 +155,58 @@ describe("useNanobotStream", () => {
       content: "final chunk",
       isStreaming: false,
     });
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("preserves proactive automation source metadata on complete assistant messages", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-cron", {
+        event: "message",
+        chat_id: "chat-cron",
+        text: "Time to drink water.",
+        source: { kind: "cron", label: "drink water" },
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Time to drink water.",
+      source: { kind: "cron", label: "drink water" },
+    });
+  });
+
+  it("does not start streaming from completed trailing activity after an answer", () => {
+    const fake = fakeClient();
+    const initialMessages = [
+      {
+        id: "a1",
+        role: "assistant" as const,
+        content: "Cron test",
+        turnId: "cron:run",
+        createdAt: Date.now(),
+      },
+      {
+        id: "t1",
+        role: "tool" as const,
+        kind: "trace" as const,
+        content: "message({})",
+        traces: ["message({})"],
+        turnId: "cron:run",
+        createdAt: Date.now(),
+      },
+    ];
+
+    const { result } = renderHook(
+      () => useNanobotStream("chat-cron-done", initialMessages),
+      { wrapper: wrap(fake.client) },
+    );
+
+    expect(result.current.messages.at(-1)?.kind).toBe("trace");
     expect(result.current.isStreaming).toBe(false);
   });
 
@@ -541,6 +594,62 @@ describe("useNanobotStream", () => {
       }],
     });
     expect(result.current.messages[0].toolEvents).toBeUndefined();
+  });
+
+  it("keeps every file from one apply_patch call", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-apply-patch-many", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-apply-patch-many", {
+        event: "message",
+        chat_id: "chat-apply-patch-many",
+        text: "apply_patch()",
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-patch",
+          name: "apply_patch",
+          arguments: { edits: [] },
+        }],
+      });
+      fake.emit("chat-apply-patch-many", {
+        event: "file_edit",
+        chat_id: "chat-apply-patch-many",
+        edits: [
+          {
+            call_id: "call-patch",
+            tool: "apply_patch",
+            path: "USER.md",
+            phase: "end",
+            added: 0,
+            deleted: 3,
+            approximate: false,
+            status: "done",
+          },
+          {
+            call_id: "call-patch",
+            tool: "apply_patch",
+            path: "MEMORY.md",
+            phase: "end",
+            added: 0,
+            deleted: 4,
+            approximate: false,
+            status: "done",
+          },
+        ],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].traces).toEqual([]);
+    expect(result.current.messages[0].toolEvents).toBeUndefined();
+    expect(result.current.messages[0].fileEdits?.map((edit) => edit.path)).toEqual([
+      "USER.md",
+      "MEMORY.md",
+    ]);
   });
 
   it("upgrades pending file_edit placeholders when the path arrives", () => {
@@ -1039,6 +1148,41 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[1].reasoningStreaming).toBe(false);
   });
 
+  it("stamps completed live Thought blocks with their own latency", async () => {
+    const dateNow = vi.spyOn(Date, "now");
+    let now = Date.UTC(2026, 5, 1, 0, 0, 0);
+    dateNow.mockImplementation(() => now);
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(() => useNanobotStream("chat-r5-lat", EMPTY_MESSAGES), {
+        wrapper: wrap(fake.client),
+      });
+      await act(async () => {});
+
+      act(() => {
+        fake.emit("chat-r5-lat", {
+          event: "reasoning_delta",
+          chat_id: "chat-r5-lat",
+          text: "Thinking through the tests.",
+        });
+      });
+      await act(async () => {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      });
+
+      expect(result.current.messages[0].createdAt).toBe(now);
+      now += 2100;
+      act(() => {
+        fake.emit("chat-r5-lat", { event: "reasoning_end", chat_id: "chat-r5-lat" });
+      });
+
+      expect(result.current.messages[0].reasoningStreaming).toBe(false);
+      expect(result.current.messages[0].latencyMs).toBe(2100);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
   it("keeps alternating reasoning and answer deltas in separate ordered blocks", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-r5b", EMPTY_MESSAGES), {
@@ -1307,6 +1451,8 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].role).toBe("user");
     expect(result.current.messages[0].content).toBe("fine");
+    expect(result.current.messages[0].turnId).toEqual(expect.any(String));
+    expect(result.current.messages[0].turnPhase).toBe("user");
   });
 
   it("attaches assistant media_urls to complete messages", () => {
@@ -1447,7 +1593,10 @@ describe("useNanobotStream", () => {
       "chat-img",
       "draw a square icon",
       undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: "1:1" } },
+      expect.objectContaining({
+        imageGeneration: { enabled: true, aspect_ratio: "1:1" },
+        turnId: expect.any(String),
+      }),
     );
   });
 

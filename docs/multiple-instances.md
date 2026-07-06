@@ -22,6 +22,9 @@ Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. w
 **Run instances:**
 
 ```bash
+# Check one instance before starting it
+nanobot status --config ~/.nanobot-telegram/config.json
+
 # Instance A - Telegram bot
 nanobot gateway --config ~/.nanobot-telegram/config.json
 
@@ -42,6 +45,9 @@ To open a CLI session against one of these instances locally:
 nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
 nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
 
+# Open the browser workbench for a specific instance
+nanobot webui -c ~/.nanobot-telegram/config.json
+
 # Optional one-off workspace override
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
@@ -52,7 +58,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 |-----------|---------------|---------|
 | **Config** | `--config` path | `~/.nanobot-A/config.json` |
 | **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
-| **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
+| **Cron Jobs** | workspace directory | `~/.nanobot-A/workspace/cron/` |
 | **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
 
 ## How It Works
@@ -67,14 +73,13 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 2. Set a different `agents.defaults.workspace` for that instance.
 3. Start the instance with `--config`.
 
-Example config:
+Example config fragment:
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.nanobot-telegram/workspace",
-      "model": "anthropic/claude-sonnet-4-6"
+      "workspace": "~/.nanobot-telegram/workspace"
     }
   },
   "channels": {
@@ -90,17 +95,17 @@ Example config:
 }
 ```
 
+The copied base config can keep using the same `modelPresets` and `agents.defaults.modelPreset`. If this instance needs a different model, add another preset and set `agents.defaults.modelPreset` to that preset name.
+
 Start separate instances:
 
 ```bash
+nanobot status --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-discord/config.json
 ```
 
-Each gateway instance also exposes a lightweight HTTP health endpoint on
-`gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`,
-so the endpoint stays local unless you explicitly set `gateway.host` to a
-public or LAN-facing address.
+Each gateway instance also exposes a lightweight HTTP health endpoint on `gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`, so the endpoint stays local unless you explicitly set `gateway.host` to a public or LAN-facing address.
 
 - `GET /health` returns `{"status":"ok"}`
 - Other paths return `404`
@@ -123,4 +128,4 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - Each instance must use a different port if they run at the same time
 - Use a different workspace per instance if you want isolated memory, sessions, and skills
 - `--workspace` overrides the workspace defined in the config file
-- Cron jobs and runtime media/state are derived from the config directory
+- Cron jobs are stored in the active workspace; runtime media/state is derived from the config directory

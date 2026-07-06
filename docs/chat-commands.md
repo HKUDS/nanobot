@@ -15,6 +15,11 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-prompt` | Show how Dream is being guided for memory |
+| `/dream-prompt init` | Create an editable Dream memory guide at `prompts/dream.md` |
+| `/skill` | List enabled skills and their descriptions |
+| `/trigger` | Show local trigger usage |
+| `/trigger <name>` | Create a named local trigger for the current chat/session |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
@@ -42,7 +47,7 @@ Use `/model` to inspect the current runtime model:
 /model
 ```
 
-The response shows the current model, the current preset, and the available preset names. `default` is always available and represents the model settings from `agents.defaults.*`.
+The response shows the current model, the current preset, and the available preset names. Named presets come from the top-level `modelPresets` config and are the recommended way to configure model choices. `default` is always available and represents the model settings from direct `agents.defaults.*` fields.
 
 To switch presets for future turns:
 
@@ -54,19 +59,95 @@ To switch presets for future turns:
 
 Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
 
+## Local triggers
+
+Use `/trigger <name>` when a local script or another service should be able to
+send a message into the current chat/session later. A name is required; plain
+`/trigger` only shows the usage hint.
+
+Create the trigger from the chat where future messages should arrive:
+
+```text
+/trigger PR review
+```
+
+nanobot replies with a trigger ID and a command shaped like:
+
+```bash
+nanobot trigger trg_8K4P2Q9X "Review PR #4502"
+```
+
+Replace `"Review PR #4502"` with the message you want nanobot to receive. The
+trigger is bound to the session where it was created, so the message goes back
+to that same chat. Keep `nanobot gateway` running so trigger messages can be
+delivered. The trigger message starts an automation turn recorded in that
+session with the message you passed to the CLI; it is not treated as a normal
+user message. If that session is already running a turn, the trigger waits
+until the session is idle instead of being injected into the active turn.
+
+Trigger deliveries are stored in the workspace until their linked agent turn
+finishes successfully. If the gateway exits after claiming a delivery but before
+the turn completes, the next gateway start requeues that delivery. This is an
+at-least-once local queue: a delivery may run more than once if the process
+exits at the wrong time, so external scripts should make repeated trigger
+messages safe. If the delivery reaches the agent and the agent turn fails, the
+delivery is marked failed in Automations instead of retrying forever.
+
+For longer or generated content, omit the message argument and pipe stdin:
+
+```bash
+printf '%s\n' "Review the latest failed CI job" | nanobot trigger trg_8K4P2Q9X
+```
+
+If an external webhook should wake nanobot up, run your own small webhook
+service and have it call the trigger command after it builds the final message:
+
+```bash
+nanobot trigger <trigger-id> "<message>"
+```
+
+If you run multiple nanobot instances, pass the same config or workspace
+selector used by the gateway:
+
+```bash
+nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
+nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
+```
+
+Manage triggers from the WebUI Automations view. You can search, pause/resume,
+rename, delete, and copy the trigger command there. A session may have multiple
+triggers, just like it may have multiple scheduled automations.
+
 ## Periodic Tasks
 
-The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks under `## Active Tasks`, the agent executes them and delivers results to your most recently active chat channel. If there are no active tasks, the heartbeat is skipped silently.
+Periodic background checks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). When `nanobot gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers only results that pass the notification gate to your most recently active chat channel. If there are no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
+
+Use heartbeat for recurring checks that should usually stay quiet. User-created cron jobs are different: they run as scheduled turns in the chat/session where they were created and normally deliver the result back to that channel.
 
 **Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
 
 ```markdown
 ## Active Tasks
 
-- [ ] Check weather forecast and send a summary
-- [ ] Scan inbox for urgent emails
+- Check weather forecast and notify me only if storms are expected
+- Scan inbox for urgent emails and notify me if any are found
 ```
 
-The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
+The agent can also manage this file itself - ask it to "add a periodic background check" or "check this periodically but only notify me if something changes" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
+
+You can change the interval or disable the built-in heartbeat in `~/.nanobot/config.json`:
+
+```json
+{
+  "gateway": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 1800
+    }
+  }
+}
+```
+
+The heartbeat job is visible in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. To stop it, set `gateway.heartbeat.enabled` to `false` and restart the gateway.
 
 > **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.

@@ -2,25 +2,83 @@
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./channel-plugin-guide.md).
 
+Before configuring a chat app, make sure the local CLI path works:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `nanobot gateway` to stay running after the channel is configured.
+
+Most examples below are snippets to merge into `~/.nanobot/config.json`.
+
+> [!NOTE]
+> If you are upgrading from a version where chat app SDKs were installed by default,
+> install the channel extra in the same Python environment before enabling or
+> restarting that channel:
+>
+> ```bash
+> nanobot plugins enable <channel>
+> ```
+>
+> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
+> `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
+> To turn a channel off later, run `nanobot plugins disable <channel>`.
+> nanobot keeps the saved settings, but stops loading that channel after the
+> next restart.
+
+## Common Setup Pattern
+
+Every chat app uses the same shape:
+
+1. Create or prepare the bot/account in the chat platform.
+2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
+3. Merge that platform's JSON snippet into `~/.nanobot/config.json`.
+4. Keep access control narrow at first with `allowFrom` or the platform-specific allow list.
+5. Check that nanobot can see the configured channel:
+
+```bash
+nanobot channels status
+```
+
+6. Start the gateway and leave that terminal running:
+
+```bash
+nanobot gateway
+```
+
+7. Send a message from the allowed account. In group chats, follow that channel's `groupPolicy` behavior: many channels default to mention-only, while Matrix and WhatsApp default to open group replies.
+
+If `nanobot channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one nanobot is reading. If the channel is enabled but messages do not arrive, run `nanobot gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
+
+> `["*"]` allows anyone who can reach that channel to talk to the bot. Use it only when that is intentional, or temporarily while testing in a private sandbox.
+
 | Channel | What you need |
 |---------|---------------|
 | **Telegram** | Bot token from @BotFather |
 | **Discord** | Bot token + Message Content intent |
 | **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
 | **WeChat (Weixin)** | QR code scan (`nanobot channels login weixin`) |
-| **Feishu** | App ID + App Secret |
+| **Feishu** | QR code scan (`nanobot channels login feishu`) or App ID + App Secret |
 | **DingTalk** | App Key + App Secret |
 | **Slack** | Bot token + App-Level token |
 | **Matrix** | Homeserver URL + Access token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Napcat (QQ)** | Napcat Forward WebSocket URL + access token |
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
 | **Signal** | signal-cli daemon + phone number |
 
 <details>
-<summary><b>Telegram</b> (Recommended)</summary>
+<summary><b>Telegram</b></summary>
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable telegram
+```
 
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
@@ -41,8 +99,9 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 }
 ```
 
-> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
-> Copy this value **without the `@` symbol** and paste it into the config file.
+> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
 **3. Run**
@@ -53,9 +112,7 @@ nanobot gateway
 
 **Webhook mode (optional)**
 
-Telegram uses long polling by default. To receive updates through a webhook, expose
-a public HTTPS URL that forwards to nanobot's local listener and set `mode` to
-`webhook`:
+Telegram uses long polling by default. To receive updates through a webhook, expose a public HTTPS URL that forwards to nanobot's local listener and set `mode` to `webhook`:
 
 ```json
 {
@@ -76,17 +133,9 @@ a public HTTPS URL that forwards to nanobot's local listener and set `mode` to
 }
 ```
 
-> `webhookSecretToken` is required in webhook mode. Do not expose the local
-> webhook listener directly to the public internet without a reverse proxy or
-> tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only
-> listens on `webhookListenHost:webhookListenPort` and validates Telegram's
-> webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot
-> still serializes Telegram updates per conversation before forwarding them to
-> the agent.
+> `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot still serializes Telegram updates per conversation before forwarding them to the agent.
 >
-> `webhookUrl` is the public HTTPS URL registered with Telegram.
-> `webhookPath` is the local path nanobot listens on. They often use the same
-> path, but may differ when a reverse proxy or tunnel rewrites the request path.
+> `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path nanobot listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
 
 </details>
 
@@ -94,6 +143,14 @@ a public HTTPS URL that forwards to nanobot's local listener and set `mode` to
 <summary><b>Mochat (Claw IM)</b></summary>
 
 Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
+
+**Install the optional realtime dependency**
+
+```bash
+nanobot plugins enable mochat
+```
+
+Without this extra, Mochat still works through HTTP polling.
 
 **1. Ask nanobot to set up Mochat for you**
 
@@ -205,18 +262,14 @@ nanobot gateway
 <details>
 <summary><b>Matrix (Element)</b></summary>
 
-Install Matrix dependencies first:
+Enable Matrix support first:
 
 ```bash
-pip install nanobot-ai[matrix]
+nanobot plugins enable matrix
 ```
 
 > [!NOTE]
-> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on
-> `python-olm`, which has no pre-built Windows wheel and is skipped by the
-> `matrix` extra on `sys_platform == 'win32'`. The command above will still
-> succeed on Windows but without `matrix-nio` installed, so enabling the
-> Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
+> Matrix encryption is disabled by default on Windows because `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel. Use macOS, Linux, or WSL2 if you need Matrix E2EE.
 
 **1. Create/choose a Matrix account**
 
@@ -229,9 +282,7 @@ pip install nanobot-ai[matrix]
   - `userId` (example: `@nanobot:matrix.org`)
   - `password`
 
-(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
-for reliable encryption, password login is recommended instead. If the
-`password` is provided, `accessToken` and `deviceId` will be ignored.)
+(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but for reliable encryption, password login is recommended instead. If the `password` is provided, `accessToken` and `deviceId` will be ignored.)
 
 **3. Configure**
 
@@ -281,9 +332,13 @@ nanobot gateway
 <details>
 <summary><b>WhatsApp</b></summary>
 
-Requires **Node.js ≥18**.
+Requires the WhatsApp optional dependencies:
 
-**1. Link device**
+```bash
+nanobot plugins enable whatsapp
+```
+
+**1. Link device with QR**
 
 ```bash
 nanobot channels login whatsapp
@@ -297,25 +352,54 @@ nanobot channels login whatsapp
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "allowFrom": ["+1234567890"]
+      "allowFrom": ["1234567890"]
     }
   }
 }
 ```
 
-**3. Run** (two terminals)
+Optional session database path:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "databasePath": "~/.nanobot/whatsapp-auth/neonize.db"
+    }
+  }
+}
+```
+
+**Migrating from the old bridge**
+
+- Remove `bridgeUrl` and `bridgeToken`; WhatsApp no longer runs a local Node.js bridge.
+- Re-run `nanobot channels login whatsapp`; old Baileys bridge auth data is not reused by neonize.
+- Update `allowFrom` entries to the WhatsApp sender ID without a leading `+`.
+
+**3. Run**
 
 ```bash
-# Terminal 1
-nanobot channels login whatsapp
-
-# Terminal 2
 nanobot gateway
 ```
 
-> WhatsApp bridge updates are not applied automatically for existing installations.
-> After upgrading nanobot, rebuild the local bridge with:
-> `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
+**Optional: static LID mappings**
+
+Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
+learns LID to phone mappings at runtime when both identifiers are present, but you
+can also seed mappings up front so the phone number resolves from the
+very first message:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "allowFrom": ["1234567890"],
+      "lidMappings": { "123456789012345": "1234567890" }
+    }
+  }
+}
+```
 
 </details>
 
@@ -323,6 +407,20 @@ nanobot gateway
 <summary><b>Feishu</b></summary>
 
 Uses **WebSocket** long connection — no public IP required.
+
+**Quick setup: QR login**
+
+```bash
+nanobot plugins enable feishu
+nanobot channels login feishu
+# Use --force to create/sign in with a new bot
+```
+
+Open the printed URL or scan the QR code with Feishu/Lark on your phone. If the optional `qrcode` package is installed, nanobot shows a terminal QR code; otherwise it prints the login URL. nanobot writes `appId`, `appSecret`, `domain`, and `enabled` under `channels.feishu` in the active config file. Use `--config <path>` to update a non-default config.
+
+If QR login is unavailable for your account, use manual setup below.
+
+**Manual setup**
 
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
@@ -384,6 +482,12 @@ nanobot gateway
 
 Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
 
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable qq
+```
+
 **1. Register & create bot**
 - Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
 - Create a new bot application
@@ -425,9 +529,65 @@ Now send a message to the bot from QQ — it should respond!
 </details>
 
 <details>
+<summary><b>Napcat (QQ via OneBot v11 支持群聊等功能)</b></summary>
+
+Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **forward WebSocket** (OneBot v11). Use this when you have your own QQ account running through Napcat and want full private + group chat support.
+
+**1. Set up Napcat**
+
+- Install and log into Napcat, then enable a **Forward WebSocket** server. See the [official Napcat Docker tutorial](https://github.com/NapNeko/NapCat-Docker).
+- In the webui, follow "网络配置" -> "新建" -> "Websocket 服务器" to create a forward websocket server. By default, the URL is `ws://127.0.0.1:3001`
+- Copy the forward websocket server's token
+- (Optional) In the webui, follow "系统配置" -> "登陆配置" -> "快速登录QQ" to automatically login after restarts
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable napcat
+```
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "napcat": {
+      "enabled": true,
+      "wsUrl": "ws://127.0.0.1:3001",
+      "accessToken": "YOUR_WEBSOCKET_TOKEN",
+      "allowFrom": ["*"],
+      "groupPolicy": "mention",
+      "groupPolicyOverrides": {
+        "123456789": "open",
+        "987654321": 0.2
+      },
+      "welcomeNewMembers": true
+    }
+  }
+}
+```
+
+| Option | What it does |
+|--------|--------------|
+| `wsUrl` | Napcat forward-WebSocket endpoint. Bearer auth via `accessToken` is sent in the `Authorization` header. |
+| `allowFrom` | QQ numbers permitted to talk to the bot. `["*"]` = anyone. Required `["*"]` (or include the joining user) for `welcomeNewMembers` to fire. |
+| `groupPolicy` | `"mention"` (default) — reply only when @-mentioned or replying to the bot's own message. `"open"` — reply to every group message. A float `p` in `[0.0, 1.0]` — @mentions and replies-to-bot always reply; every other group message replies with probability `p` (so `0.0` ≡ `"mention"`, `1.0` ≡ `"open"`). Private chats always reply. |
+| `groupPolicyOverrides` | Optional per-group overrides for `groupPolicy`, keyed by group id (as a string). Each value takes the same shape as `groupPolicy` (`"mention"`, `"open"`, or a float). Groups not listed fall back to `groupPolicy`. |
+| `welcomeNewMembers` | When true, `notice.group_increase` events are pushed to the bus as a synthetic message so the agent can greet new joiners. |
+| `maxImageBytes` | Hard cap (in bytes) for inbound image downloads. Defaults to 20 MB. Larger images are dropped with a warning. |
+
+</details>
+
+<details>
 <summary><b>DingTalk (钉钉)</b></summary>
 
 Uses **Stream Mode** — no public IP required.
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable dingtalk
+```
 
 **1. Create a DingTalk bot**
 - Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
@@ -447,13 +607,16 @@ Uses **Stream Mode** — no public IP required.
       "enabled": true,
       "clientId": "YOUR_APP_KEY",
       "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_STAFF_ID"]
+      "allowFrom": ["YOUR_STAFF_ID"],
+      "groupUserIsolation": false
     }
   }
 }
 ```
 
 > `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
+>
+> `groupUserIsolation`: Optional. Defaults to `false`, which keeps one shared session per group chat. Set it to `true` to give each sender in a DingTalk group chat a separate session while replies still go back to the same group.
 
 **3. Run**
 
@@ -467,6 +630,12 @@ nanobot gateway
 <summary><b>Slack</b></summary>
 
 Uses **Socket Mode** — no public URL required.
+
+**Install the optional channel dependency**
+
+```bash
+nanobot plugins enable slack
+```
 
 **1. Create a Slack app**
 - Go to [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"
@@ -506,7 +675,9 @@ nanobot gateway
 DM the bot directly or @mention it in a channel — it should respond!
 
 > [!TIP]
-> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels).
+> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels via `groupAllowFrom`).
+> - `groupAllowFrom`: channel IDs the bot may respond in when `groupPolicy` is `"allowlist"`.
+> - `groupRequireMention`: when `true` and `groupPolicy` is `"allowlist"`, the bot only replies to channels in `groupAllowFrom` **and** only when @mentioned (instead of every message). No effect for `"mention"`/`"open"`. Use this to scope the bot to approved channels while keeping mention-only behavior.
 > - DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
 
 </details>
@@ -527,6 +698,11 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 > - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
+> - `postAction`: Optional post-processing for processed emails: `"delete"` or `"move"` (default `null`).
+>   This runs only after an accepted email is successfully delivered to the AI pipeline.
+> - `postActionMoveMailbox`: Destination mailbox used when `postAction` is `"move"` (for example `"Processed"` or `"[Gmail]/Trash"`).
+> - `postActionIgnoreSkipped`: If `true` (default), skipped emails are ignored for post-action and not moved/deleted.
+> - `postActionExpunge`: When `true`, the channel allows a full-mailbox `EXPUNGE` fallback if UID-scoped expunge is unavailable or fails (default `false`). Enable only on very old IMAP servers that lack modern UIDPLUS support. Note that this fallback will expunge **all** messages marked as deleted in the mailbox, including ones not handled by the agent. Leaving this off is safe for all modern IMAP servers.
 > - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).
 > - `maxAttachmentSize`: Max size per attachment in bytes (default `2000000` / 2MB).
 > - `maxAttachmentsPerEmail`: Max attachments to save per email (default `5`).
@@ -547,6 +723,10 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
       "allowFrom": ["your-real-email@gmail.com"],
+      "postAction": "move",
+      "postActionMoveMailbox": "[Gmail]/Trash",
+      "postActionIgnoreSkipped": true,
+      "postActionExpunge": false,
       "allowedAttachmentTypes": ["application/pdf", "image/*"]
     }
   }
@@ -567,10 +747,10 @@ nanobot gateway
 
 Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. No local WeChat desktop client is required.
 
-**1. Install with WeChat support**
+**1. Enable WeChat support**
 
 ```bash
-pip install "nanobot-ai[weixin]"
+nanobot plugins enable weixin
 ```
 
 **2. Configure**
@@ -619,10 +799,10 @@ nanobot gateway
 >
 > Uses **WebSocket** long connection — no public IP required.
 
-**1. Install the optional dependency**
+**1. Enable WeCom support**
 
 ```bash
-pip install nanobot-ai[wecom]
+nanobot plugins enable wecom
 ```
 
 **2. Create a WeCom AI Bot**
@@ -658,10 +838,10 @@ nanobot gateway
 > Direct-message text in/out, tenant-aware OAuth, conversation reference persistence.
 > Uses a public HTTPS webhook — no WebSocket; you need a tunnel or reverse proxy.
 
-**1. Install the optional dependency**
+**1. Enable Microsoft Teams support**
 
 ```bash
-pip install nanobot-ai[msteams]
+nanobot plugins enable msteams
 ```
 
 **2. Create a Teams / Azure bot app registration**

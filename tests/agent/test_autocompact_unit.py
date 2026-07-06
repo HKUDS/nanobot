@@ -200,12 +200,21 @@ class TestCheckExpired:
         """Expired session should trigger schedule_background."""
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
-        old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
-        mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_ts}]
+        old_dt = datetime.now() - timedelta(minutes=20)
+        session = _make_session("cli:old", updated_at=old_dt)
+        _add_turns(session, 5)
+        mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_dt.isoformat()}]
+        mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
-        scheduler = MagicMock()
+
+        scheduled = []
+
+        def scheduler(coro):
+            scheduled.append(coro)
+            coro.close()
+
         ac.check_expired(scheduler)
-        scheduler.assert_called_once()
+        assert len(scheduled) == 1
         assert "cli:old" in ac._archiving
 
     def test_active_session_key_skips(self):
@@ -251,6 +260,40 @@ class TestCheckExpired:
         ac.check_expired(scheduler)
         scheduler.assert_not_called()
 
+    def test_dream_session_skips(self):
+        """Internal Dream sessions should not be scheduled for idle compact."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
+        mock_sm.list_sessions.return_value = [
+            {"key": "dream:20260602-155256", "updated_at": old_ts},
+        ]
+        ac.sessions = mock_sm
+        scheduler = MagicMock()
+
+        ac.check_expired(scheduler)
+
+        scheduler.assert_not_called()
+        assert "dream:20260602-155256" not in ac._archiving
+
+    def test_already_trimmed_session_skips(self):
+        """Expired session with no removable tail should not be re-scheduled."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        last_active = datetime(2026, 1, 1, 10, 0, 0)
+        session = _make_session("cli:done", updated_at=last_active)
+        _add_turns(session, 2)
+        mock_sm.list_sessions.return_value = [
+            {"key": "cli:done", "updated_at": last_active.isoformat()},
+        ]
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
+
+        scheduler = MagicMock()
+        ac.check_expired(scheduler)
+
+        scheduler.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # _archive
@@ -272,6 +315,17 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:test", ac._RECENT_SUFFIX_MESSAGES,
         )
+
+    @pytest.mark.asyncio
+    async def test_dream_session_is_ignored(self):
+        ac = _make_autocompact()
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
+        ac._archiving.add("dream:20260602-155256")
+
+        await ac._archive("dream:20260602-155256")
+
+        ac.consolidator.compact_idle_session.assert_not_awaited()
+        assert "dream:20260602-155256" not in ac._archiving
 
     @pytest.mark.asyncio
     async def test_populates_summaries_from_metadata(self):
@@ -415,6 +469,33 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is None
+
+    def test_dream_session_skips_reload_and_summaries(self):
+        """Internal Dream sessions should not reload or receive compact summaries."""
+        ac = _make_autocompact(ttl=15)
+        mock_sm = MagicMock(spec=SessionManager)
+        ac.sessions = mock_sm
+        key = "dream:20260602-155256"
+        ac._archiving.add(key)
+        ac._summaries[key] = ("Hot summary.", datetime(2026, 6, 2, 15, 52, 56))
+        session = _make_session(
+            key=key,
+            updated_at=datetime.now() - timedelta(minutes=20),
+            metadata={
+                "_last_summary": {
+                    "text": "Cold summary.",
+                    "last_active": "2026-06-02T15:52:56",
+                },
+            },
+        )
+
+        result_session, summary = ac.prepare_session(session, key)
+
+        mock_sm.get_or_create.assert_not_called()
+        assert result_session is session
+        assert summary is None
+        assert key not in ac._archiving
+        assert key not in ac._summaries
 
     def test_cold_path_metadata_not_dict_returns_none(self):
         """If metadata _last_summary is not a dict, should return None summary."""

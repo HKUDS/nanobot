@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
+    _INTERNAL_SESSION_PREFIXES = ("dream:",)
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0):
@@ -33,9 +34,33 @@ class AutoCompact:
             ts = datetime.fromisoformat(ts)
         return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
 
+    def _has_compactable_idle_tail(self, key: str) -> bool:
+        session = self.sessions.get_or_create(key)
+        tail = list(session.messages[session.last_consolidated:])
+        if not tail:
+            return False
+        probe = Session(
+            key=session.key,
+            messages=tail,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            metadata={},
+            last_consolidated=0,
+        )
+        result = probe.retain_recent_legal_suffix(
+            self._RECENT_SUFFIX_MESSAGES,
+            extend_to_user=True,
+        )
+        messages_to_remove = result.dropped[result.already_consolidated_count:]
+        return bool(messages_to_remove)
+
     @staticmethod
     def _format_summary(text: str, last_active: datetime) -> str:
         return f"Previous conversation summary (last active {last_active.isoformat()}):\n{text}"
+
+    @classmethod
+    def _is_internal_session(cls, key: str) -> bool:
+        return key.startswith(cls._INTERNAL_SESSION_PREFIXES)
 
     def check_expired(self, schedule_background: Callable[[Coroutine], None],
                       active_session_keys: Collection[str] = ()) -> None:
@@ -43,15 +68,19 @@ class AutoCompact:
         now = datetime.now()
         for info in self.sessions.list_sessions():
             key = info.get("key", "")
-            if not key or key in self._archiving:
+            if not key or self._is_internal_session(key) or key in self._archiving:
                 continue
             if key in active_session_keys:
                 continue
-            if self._is_expired(info.get("updated_at"), now):
+            updated_at = info.get("updated_at")
+            if self._is_expired(updated_at, now) and self._has_compactable_idle_tail(key):
                 self._archiving.add(key)
                 schedule_background(self._archive(key))
 
     async def _archive(self, key: str) -> None:
+        if self._is_internal_session(key):
+            self._archiving.discard(key)
+            return
         try:
             summary = await self.consolidator.compact_idle_session(
                 key, self._RECENT_SUFFIX_MESSAGES,
@@ -70,6 +99,10 @@ class AutoCompact:
             self._archiving.discard(key)
 
     def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
+        if self._is_internal_session(key):
+            self._archiving.discard(key)
+            self._summaries.pop(key, None)
+            return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)

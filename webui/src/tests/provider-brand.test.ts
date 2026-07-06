@@ -40,5 +40,26 @@ describe("provider brand logos", () => {
     expect(providerBrand("stepfun")?.logoUrls[0]).toBe("https://www.stepfun.com/step_favicon.svg");
     expect(providerBrand("xiaomi_mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
     expect(providerBrand("mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
+    expect(providerBrand("xiaomi")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
+  });
+
+  it("keeps OpenRouter voice settings on the first-party brand domain", () => {
+    expect(providerBrand("openrouter")?.logoUrls).toContain("https://openrouter.ai/favicon.ico");
+    expect(providerBrand("openrouter")?.initials).toBe("OR");
+  });
+
+  it("keeps AssemblyAI voice settings on the first-party brand domain", () => {
+    expect(providerBrand("assemblyai")?.logoUrls).toContain("https://assemblyai.com/favicon.ico");
+    expect(providerBrand("assemblyai")?.initials).toBe("AA");
+  });
+
+  it("keeps Bocha web search settings on the first-party brand domain", () => {
+    expect(providerBrand("bocha")?.logoUrls).toContain("https://bochaai.com/favicon.ico");
+    expect(providerBrand("bocha")?.initials).toBe("B");
+  });
+
+  it("keeps Keenable web search settings on the first-party brand domain", () => {
+    expect(providerBrand("keenable")?.logoUrls).toContain("https://keenable.ai/favicon.ico");
+    expect(providerBrand("keenable")?.initials).toBe("K");
   });
 });

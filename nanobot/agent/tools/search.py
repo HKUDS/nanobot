@@ -9,6 +9,7 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, TypeVar
 
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
 
 _DEFAULT_HEAD_LIMIT = 250
@@ -218,12 +219,12 @@ class FindFilesTool(_SearchTool):
         try:
             target = self._resolve(path or ".")
             if not target.exists():
-                return f"Error: Path not found: {path}"
+                return ToolResult.error(f"Error: Path not found: {path}")
             if not (target.is_dir() or target.is_file()):
-                return f"Error: Unsupported path: {path}"
+                return ToolResult.error(f"Error: Unsupported path: {path}")
 
             if sort not in {"path", "modified"}:
-                return "Error: sort must be 'path' or 'modified'"
+                return ToolResult.error("Error: sort must be 'path' or 'modified'")
 
             limit = (
                 _DEFAULT_FILE_HEAD_LIMIT
@@ -271,9 +272,9 @@ class FindFilesTool(_SearchTool):
                 result += "\n\n" + note
             return result
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error finding files: {e}"
+            return ToolResult.error(f"Error finding files: {e}")
 
 
 class GrepTool(_SearchTool):
@@ -425,16 +426,16 @@ class GrepTool(_SearchTool):
         try:
             target = self._resolve(path or ".")
             if not target.exists():
-                return f"Error: Path not found: {path}"
+                return ToolResult.error(f"Error: Path not found: {path}")
             if not (target.is_dir() or target.is_file()):
-                return f"Error: Unsupported path: {path}"
+                return ToolResult.error(f"Error: Unsupported path: {path}")
 
             flags = re.IGNORECASE if case_insensitive else 0
             try:
                 needle = re.escape(pattern) if fixed_strings else pattern
                 regex = re.compile(needle, flags)
             except re.error as e:
-                return f"Error: invalid regex pattern: {e}"
+                return ToolResult.error(f"Error: invalid regex pattern: {e}")
 
             if head_limit is not None:
                 limit = None if head_limit == 0 else head_limit
@@ -579,6 +580,6 @@ class GrepTool(_SearchTool):
                 result += "\n\n" + "\n".join(notes)
             return result
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error searching files: {e}"
+            return ToolResult.error(f"Error searching files: {e}")

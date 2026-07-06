@@ -1,12 +1,17 @@
 """Test Azure OpenAI provider (Responses API via OpenAI SDK)."""
 
-from unittest.mock import AsyncMock, MagicMock
+import sys
+import time
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+from nanobot.providers.azure_openai_provider import (
+    AzureOpenAIProvider,
+    _AzureTokenProvider,
+)
 from nanobot.providers.base import LLMResponse
-
 
 # ---------------------------------------------------------------------------
 # Init & validation
@@ -25,6 +30,8 @@ def test_init_creates_sdk_client():
     assert provider.default_model == "gpt-4o-deployment"
     # SDK client base_url ends with /openai/v1/
     assert str(provider._client.base_url).rstrip("/").endswith("/openai/v1")
+    # Static-key path must NOT construct an AAD token provider
+    assert provider._token_provider is None
 
 
 def test_init_base_url_no_trailing_slash():
@@ -42,11 +49,6 @@ def test_init_base_url_with_trailing_slash():
     assert str(provider._client.base_url).rstrip("/").endswith("/openai/v1")
 
 
-def test_init_validation_missing_key():
-    with pytest.raises(ValueError, match="Azure OpenAI api_key is required"):
-        AzureOpenAIProvider(api_key="", api_base="https://test.com")
-
-
 def test_init_validation_missing_base():
     with pytest.raises(ValueError, match="Azure OpenAI api_base is required"):
         AzureOpenAIProvider(api_key="test", api_base="")
@@ -57,6 +59,137 @@ def test_no_api_version_in_base_url():
     provider = AzureOpenAIProvider(api_key="k", api_base="https://res.openai.azure.com")
     base = str(provider._client.base_url)
     assert "api-version" not in base
+
+
+# ---------------------------------------------------------------------------
+# AAD / DefaultAzureCredential fallback
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_azure_identity(monkeypatch, credential_factory):
+    """Install a fake ``azure.identity.aio`` module exposing ``DefaultAzureCredential``."""
+    azure_mod = sys.modules.get("azure") or SimpleNamespace()
+    identity_mod = SimpleNamespace()
+    aio_mod = SimpleNamespace(DefaultAzureCredential=credential_factory)
+    identity_mod.aio = aio_mod
+    azure_mod.identity = identity_mod  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "azure", azure_mod)
+    monkeypatch.setitem(sys.modules, "azure.identity", identity_mod)
+    monkeypatch.setitem(sys.modules, "azure.identity.aio", aio_mod)
+
+
+def test_init_missing_key_uses_aad_token_provider(monkeypatch):
+    """Empty api_key falls back to DefaultAzureCredential via _AzureTokenProvider."""
+    credential_instance = MagicMock()
+    credential_factory = MagicMock(return_value=credential_instance)
+    _install_fake_azure_identity(monkeypatch, credential_factory)
+
+    provider = AzureOpenAIProvider(
+        api_key="", api_base="https://res.openai.azure.com",
+    )
+
+    assert provider._token_provider is not None
+    assert isinstance(provider._token_provider, _AzureTokenProvider)
+    # DefaultAzureCredential must have been instantiated exactly once
+    credential_factory.assert_called_once_with()
+    assert provider._token_provider._credential is credential_instance
+    # The token provider must be wired into the OpenAI SDK as its
+    # ``_api_key_provider`` callable — that's what the SDK invokes per
+    # request to refresh the bearer token.
+    assert provider._client._api_key_provider is provider._token_provider
+    # Static api_key starts empty until the first refresh.
+    assert provider._client.api_key == ""
+
+
+@pytest.mark.asyncio
+async def test_aad_token_provider_wires_into_sdk_auth_headers(monkeypatch):
+    """Regression guard: the token provider must be wired into the
+    OpenAI SDK so ``_refresh_api_key`` pulls a fresh token and the
+    bearer ends up in ``auth_headers``.  Without this, a refactor that
+    constructs ``_AzureTokenProvider`` but forgets to pass it to
+    ``AsyncOpenAI`` would silently send unauthenticated requests.
+    """
+    access_token = SimpleNamespace(token="token-A", expires_on=time.time() + 3600)
+    credential_instance = MagicMock()
+    credential_instance.get_token = AsyncMock(return_value=access_token)
+    credential_factory = MagicMock(return_value=credential_instance)
+    _install_fake_azure_identity(monkeypatch, credential_factory)
+
+    provider = AzureOpenAIProvider(
+        api_key="", api_base="https://res.openai.azure.com",
+    )
+
+    assert provider._client.api_key == ""
+    assert provider._client.auth_headers == {}
+
+    await provider._client._refresh_api_key()
+
+    assert provider._client.api_key == "token-A"
+    assert provider._client.auth_headers == {"Authorization": "Bearer token-A"}
+    credential_instance.get_token.assert_awaited_with(
+        "https://cognitiveservices.azure.com/.default"
+    )
+
+    # Rotated token on second refresh proves per-request delegation (no client-side caching).
+    credential_instance.get_token = AsyncMock(
+        return_value=SimpleNamespace(token="token-B", expires_on=time.time() + 3600)
+    )
+    await provider._client._refresh_api_key()
+    assert provider._client.auth_headers == {"Authorization": "Bearer token-B"}
+    credential_factory.assert_called_once_with()
+
+
+def test_init_explicit_key_does_not_construct_credential(monkeypatch):
+    """Explicit api_key wins; DefaultAzureCredential must never be touched."""
+    credential_factory = MagicMock(side_effect=AssertionError(
+        "DefaultAzureCredential must not be constructed when api_key is set"
+    ))
+    _install_fake_azure_identity(monkeypatch, credential_factory)
+
+    provider = AzureOpenAIProvider(
+        api_key="real-key", api_base="https://res.openai.azure.com",
+    )
+
+    assert provider._token_provider is None
+    credential_factory.assert_not_called()
+
+
+def test_init_missing_key_without_azure_identity_raises(monkeypatch):
+    """Clear RuntimeError with install hint when azure-identity is missing."""
+    # Force the import inside _AzureTokenProvider to fail.
+    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "azure.identity.aio":
+            raise ImportError("No module named 'azure.identity.aio'")
+        return real_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=fake_import):
+        with pytest.raises(RuntimeError, match=r"nanobot plugins enable azure"):
+            AzureOpenAIProvider(api_key="", api_base="https://res.openai.azure.com")
+
+
+@pytest.mark.asyncio
+async def test_token_provider_returns_credential_token(monkeypatch):
+    """Token callback delegates to DefaultAzureCredential.get_token with the AOAI scope."""
+    access_token = SimpleNamespace(token="token-A", expires_on=time.time() + 3600)
+    credential_instance = MagicMock()
+    credential_instance.get_token = AsyncMock(return_value=access_token)
+
+    credential_factory = MagicMock(return_value=credential_instance)
+    _install_fake_azure_identity(monkeypatch, credential_factory)
+
+    tp = _AzureTokenProvider()
+
+    assert await tp() == "token-A"
+    credential_instance.get_token.assert_awaited_with(
+        "https://cognitiveservices.azure.com/.default"
+    )
+    # No client-side caching layer — every call delegates to the Azure SDK,
+    # which has its own MSAL-backed token cache.
+    assert await tp() == "token-A"
+    assert credential_instance.get_token.await_count == 2
 
 
 # ---------------------------------------------------------------------------

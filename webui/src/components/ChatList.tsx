@@ -40,6 +40,8 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
+const ACTION_MENU_CONTENT_CLASS = "w-[8.5rem] min-w-[8.5rem]";
+const ACTION_MENU_ITEM_CLASS = "grid w-[7.75rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-2";
 
 interface ChatListProps {
   sessions: ChatSummary[];
@@ -58,7 +60,7 @@ interface ChatListProps {
   projectNameOverrides?: Record<string, string>;
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
-  completedChatIds?: string[];
+  updatedChatIds?: string[];
   density?: SidebarDensity;
   showPreviews?: boolean;
   showTimestamps?: boolean;
@@ -87,7 +89,7 @@ export const ChatList = memo(function ChatList({
   projectNameOverrides = {},
   collapsedGroups = {},
   runningChatIds = [],
-  completedChatIds = [],
+  updatedChatIds = [],
   density = "comfortable",
   showPreviews = false,
   showTimestamps = false,
@@ -173,8 +175,9 @@ export const ChatList = memo(function ChatList({
   const pinned = new Set(pinnedKeys);
   const archived = new Set(archivedKeys);
   const running = new Set(runningChatIds);
-  const completed = new Set(completedChatIds);
+  const updated = new Set(updatedChatIds);
   const compact = density === "compact";
+  const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
 
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
@@ -192,12 +195,11 @@ export const ChatList = memo(function ChatList({
 
           return (
             <section key={group.id} aria-label={group.label}>
-              {group.kind === "project"
-                && limitedGroups[index - 1]?.kind !== "project" ? (
-                  <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
-                    {labels.projects}
-                  </div>
-                ) : null}
+              {index === firstProjectGroupIndex ? (
+                <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
+                  {labels.projects}
+                </div>
+              ) : null}
               {group.kind === "project" ? (
                 <ProjectGroupHeader
                   label={group.label}
@@ -243,8 +245,8 @@ export const ChatList = memo(function ChatList({
                     const projectMode = group.kind === "project";
                     const activityState = running.has(s.chatId)
                       ? "running"
-                      : completed.has(s.chatId) && !active
-                        ? "complete"
+                      : updated.has(s.chatId) && !active
+                        ? "updated"
                         : null;
                     return (
                       <li key={s.key} className="min-w-0">
@@ -309,32 +311,36 @@ export const ChatList = memo(function ChatList({
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                               align="end"
+                              className={ACTION_MENU_CONTENT_CLASS}
                               portalContainer={actionMenuPortalContainer}
                               onCloseAutoFocus={(event) => event.preventDefault()}
                             >
                               <DropdownMenuItem
                                 onSelect={() => onTogglePin(s.key)}
+                                className={ACTION_MENU_ITEM_CLASS}
                               >
                                 {isPinned ? (
-                                  <PinOff className="mr-2 h-4 w-4" />
+                                  <PinOff className="h-4 w-4 shrink-0" />
                                 ) : (
-                                  <Pin className="mr-2 h-4 w-4" />
+                                  <Pin className="h-4 w-4 shrink-0" />
                                 )}
                                 {isPinned ? t("chat.unpin") : t("chat.pin")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onSelect={() => onRequestRename(s.key, title)}
+                                className={ACTION_MENU_ITEM_CLASS}
                               >
-                                <Pencil className="mr-2 h-4 w-4" />
+                                <Pencil className="h-4 w-4 shrink-0" />
                                 {t("chat.rename")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onSelect={() => onToggleArchive(s.key)}
+                                className={ACTION_MENU_ITEM_CLASS}
                               >
                                 {isArchived ? (
-                                  <ArchiveRestore className="mr-2 h-4 w-4" />
+                                  <ArchiveRestore className="h-4 w-4 shrink-0" />
                                 ) : (
-                                  <Archive className="mr-2 h-4 w-4" />
+                                  <Archive className="h-4 w-4 shrink-0" />
                                 )}
                                 {isArchived ? t("chat.unarchive") : t("chat.archive")}
                               </DropdownMenuItem>
@@ -342,9 +348,12 @@ export const ChatList = memo(function ChatList({
                                 onSelect={() => {
                                   window.setTimeout(() => onRequestDelete(s.key, title), 0);
                                 }}
-                                className="text-destructive focus:text-destructive"
+                                className={cn(
+                                  ACTION_MENU_ITEM_CLASS,
+                                  "text-destructive focus:text-destructive",
+                                )}
                               >
-                                <Trash2 className="mr-2 h-4 w-4" />
+                                <Trash2 className="h-4 w-4 shrink-0" />
                                 {t("chat.delete")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -439,11 +448,12 @@ function ProjectGroupHeader({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
+            className={ACTION_MENU_CONTENT_CLASS}
             portalContainer={actionMenuPortalContainer}
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
-            <DropdownMenuItem onSelect={onRequestRename}>
-              <Pencil className="mr-2 h-4 w-4" />
+            <DropdownMenuItem onSelect={onRequestRename} className={ACTION_MENU_ITEM_CLASS}>
+              <Pencil className="h-4 w-4 shrink-0" />
               {t("chat.rename")}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -515,7 +525,7 @@ function ChatsFoldFooter({
 function SessionActivityIndicator({
   state,
 }: {
-  state: "running" | "complete" | null;
+  state: "running" | "updated" | null;
 }) {
   const { t } = useTranslation();
 
@@ -532,15 +542,15 @@ function SessionActivityIndicator({
     );
   }
 
-  if (state === "complete") {
-    const label = t("chat.activity.complete");
+  if (state === "updated") {
+    const label = t("chat.activity.updated");
     return (
       <span
         aria-label={label}
         title={label}
         className="grid h-4 w-4 shrink-0 place-items-center"
       >
-        <span className="h-2 w-2 rounded-full bg-blue-500 dark:bg-blue-400" />
+        <span className="h-2 w-2 rounded-full bg-[#ff8a3d] shadow-[0_0_0_2px_rgba(255,138,61,0.16)]" />
       </span>
     );
   }

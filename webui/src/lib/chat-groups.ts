@@ -281,19 +281,18 @@ function groupSessionsByProject(
     ),
   }));
 
-  groups.sort((a, b) => {
-    const timeOrder = dateToTime(b.updatedAt) - dateToTime(a.updatedAt);
-    if (timeOrder !== 0) return timeOrder;
-    return a.label.localeCompare(b.label, "en", {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
-
   if (conversations.length) {
+    const chatsUpdatedAt = conversations.reduce<string | null>(
+      (best, s) => {
+        const candidate = s.updatedAt ?? s.createdAt ?? null;
+        return isNewerDate(candidate, best) ? candidate : best;
+      },
+      null,
+    );
     groups.push({
       id: "workspace:chats",
       label: labels.all,
+      updatedAt: chatsUpdatedAt,
       sessions: sortProjectSessions(
         conversations,
         options.sort,
@@ -303,6 +302,15 @@ function groupSessionsByProject(
       ),
     });
   }
+
+  groups.sort((a, b) => {
+    const timeOrder = dateToTime(b.updatedAt) - dateToTime(a.updatedAt);
+    if (timeOrder !== 0) return timeOrder;
+    return a.label.localeCompare(b.label, "en", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
 
   return groups;
 }

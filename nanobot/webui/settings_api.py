@@ -15,14 +15,22 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from nanobot.config.loader import get_config_path, load_config, save_config
-from nanobot.config.schema import ModelPresetConfig
+from nanobot import __version__
+from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
+from nanobot.audio.transcription import resolve_transcription_config
+from nanobot.audio.transcription_registry import (
+    resolve_transcription_provider,
+    transcription_provider_names,
+)
+from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
+from nanobot.config.schema import ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
 )
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.workspaces import (
     read_webui_default_access_mode,
     write_webui_default_access_mode,
@@ -30,6 +38,13 @@ from nanobot.webui.workspaces import (
 
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
+
+
+def _version_payload() -> dict[str, Any]:
+    """Return version info for the settings payload."""
+    return {
+        "current": __version__,
+    }
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
@@ -65,15 +80,7 @@ _NATIVE_RESTART_BEHAVIOR_BY_SECTION = {
     "apps": "engineRestart",
 }
 
-_WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
-    {"name": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
-    {"name": "brave", "label": "Brave Search", "credential": "api_key"},
-    {"name": "tavily", "label": "Tavily", "credential": "api_key"},
-    {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
-    {"name": "jina", "label": "Jina", "credential": "api_key"},
-    {"name": "kagi", "label": "Kagi", "credential": "api_key"},
-    {"name": "olostep", "label": "Olostep", "credential": "api_key"},
-)
+_WEB_SEARCH_PROVIDER_OPTIONS = SEARCH_PROVIDER_OPTIONS
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
 }
@@ -88,50 +95,9 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-
-_MODEL_LIST_UNSUPPORTED_BACKENDS = {
-    "anthropic",
-    "azure_openai",
-    "bedrock",
-    "github_copilot",
-    "openai_codex",
-}
-
-_MODEL_LIST_CATALOG_PROVIDERS = {
-    "aihubmix",
-    "byteplus",
-    "byteplus_coding_plan",
-    "huggingface",
-    "novita",
-    "openrouter",
-    "siliconflow",
-    "volcengine",
-    "volcengine_coding_plan",
-}
-
-_MODEL_LIST_OFFICIAL_PROVIDERS = {
-    "ant_ling",
-    "dashscope",
-    "deepseek",
-    "gemini",
-    "groq",
-    "longcat",
-    "minimax",
-    "minimax_anthropic",
-    "mistral",
-    "moonshot",
-    "nvidia",
-    "openai",
-    "qianfan",
-    "skywork",
-    "stepfun",
-    "xiaomi_mimo",
-    "zhipu",
-}
-
 
 class WebUISettingsError(ValueError):
     """User-facing settings validation failure."""
@@ -244,13 +210,19 @@ def _resolve_env_placeholders(value: str | None) -> str | None:
 
 
 def _provider_requires_api_key(spec: Any) -> bool:
-    if spec.backend == "azure_openai":
-        return True
+    if spec.name == "azure_openai":
+        return False
     if spec.is_oauth:
         return False
     if spec.is_local or spec.is_direct:
         return False
     return True
+
+
+def _provider_requires_api_base(spec: Any) -> bool:
+    if spec.name == "azure_openai":
+        return True
+    return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
 
 
 def _oauth_provider_status(spec: Any) -> dict[str, Any]:
@@ -259,7 +231,8 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 
     if spec.name == "openai_codex":
         try:
-            from oauth_cli_kit import get_token as get_codex_token
+            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.storage import FileTokenStorage
         except Exception:
             return {
                 "configured": False,
@@ -269,10 +242,17 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
             }
         token = None
         with suppress(Exception):
-            token = get_codex_token()
+            token = FileTokenStorage(
+                token_filename=OPENAI_CODEX_PROVIDER.token_filename,
+            ).load()
         expires_at = getattr(token, "expires", None) if token else None
+        now_ms = int(time.time() * 1000)
         return {
-            "configured": bool(token and token.access),
+            "configured": bool(
+                token
+                and token.access
+                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
+            ),
             "account": getattr(token, "account_id", None) if token else None,
             "expires_at": expires_at,
             "login_supported": True,
@@ -304,6 +284,8 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
         return bool(_oauth_provider_status(spec)["configured"])
+    if _provider_requires_api_base(spec):
+        return bool(provider_config.api_base)
     if _provider_requires_api_key(spec):
         return bool(provider_config.api_key)
     return bool(
@@ -314,11 +296,70 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     )
 
 
+def _dynamic_provider_items(config: Any) -> list[tuple[str, ProviderConfig]]:
+    return [
+        (name, provider_config)
+        for name, provider_config in (config.providers.model_extra or {}).items()
+        if isinstance(provider_config, ProviderConfig)
+    ]
+
+
+def _resolve_settings_provider(
+    config: Any,
+    provider_name: str,
+) -> tuple[Any, str, ProviderConfig] | None:
+    spec = find_by_name(provider_name)
+    if spec is not None:
+        provider_config = getattr(config.providers, spec.name, None)
+        if isinstance(provider_config, ProviderConfig):
+            return spec, spec.name, provider_config
+        return None
+
+    normalized = provider_name.replace("-", "_")
+    for extra_name, provider_config in _dynamic_provider_items(config):
+        if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
+            return create_dynamic_spec(extra_name, thinking_style=(provider_config.thinking_style or "")), extra_name, provider_config
+    return None
+
+
+def _provider_settings_row(
+    name: str,
+    spec: Any,
+    provider_config: ProviderConfig,
+) -> dict[str, Any]:
+    oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
+    row = {
+        "name": name,
+        "label": spec.label,
+        "configured": (
+            bool(oauth_status["configured"])
+            if oauth_status is not None
+            else _provider_configured_for_settings(spec, provider_config)
+        ),
+        "auth_type": "oauth" if spec.is_oauth else "api_key",
+        "api_key_required": _provider_requires_api_key(spec),
+        "api_key_hint": _mask_secret_hint(provider_config.api_key),
+        "api_base": provider_config.api_base,
+        "default_api_base": spec.default_api_base or None,
+        "model_selectable": not spec.is_transcription_only,
+    }
+    if oauth_status is not None:
+        row["oauth_account"] = oauth_status["account"]
+        row["oauth_expires_at"] = oauth_status["expires_at"]
+        row["oauth_login_supported"] = oauth_status["login_supported"]
+    if spec.name == "openai":
+        row["api_type"] = provider_config.api_type
+    return row
+
+
 def _model_catalog_kind(spec: Any) -> str:
-    if spec.name in _MODEL_LIST_CATALOG_PROVIDERS:
-        return "catalog"
-    if spec.name in _MODEL_LIST_OFFICIAL_PROVIDERS:
-        return "official"
+    catalog = getattr(spec, "model_catalog", "auto")
+    if catalog != "auto":
+        return catalog
+    if spec.is_transcription_only or spec.is_oauth:
+        return "unsupported"
+    if spec.backend != "openai_compat" and spec.name != "minimax_anthropic":
+        return "unsupported"
     if spec.is_local:
         return "local"
     if spec.is_direct:
@@ -404,34 +445,29 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
-    spec = find_by_name(provider_name)
-    if spec is None:
-        raise WebUISettingsError("unknown provider")
 
+    config = load_config()
+    resolved_provider = _resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+
+    catalog_kind = _model_catalog_kind(spec)
     base_payload: dict[str, Any] = {
-        "provider": spec.name,
+        "provider": provider_key,
         "label": spec.label,
-        "catalog_kind": _model_catalog_kind(spec),
+        "catalog_kind": catalog_kind,
         "models": [],
         "model_count": 0,
         "message": None,
         "fetched_at": time.time(),
     }
-    if (
-        spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
-        and spec.name != "minimax_anthropic"
-    ) or spec.is_oauth:
+    if catalog_kind == "unsupported":
         return {
             **base_payload,
             "status": "unsupported",
-            "catalog_kind": "unsupported",
             "message": "Model list is not available for this provider. Type a model ID manually.",
         }
-
-    config = load_config()
-    provider_config = getattr(config.providers, spec.name, None)
-    if provider_config is None:
-        raise WebUISettingsError("unknown provider")
 
     api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
     if spec.name == "openai" and not api_base:
@@ -514,7 +550,7 @@ def _parse_context_window_tokens(value: str | None) -> int | None:
     except ValueError:
         raise WebUISettingsError("context_window_tokens must be an integer") from None
     if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
-        raise WebUISettingsError("context_window_tokens must be 65536 or 262144")
+        raise WebUISettingsError("context_window_tokens must be 65536, 200000, or 262144")
     return parsed
 
 
@@ -533,14 +569,13 @@ def _model_configuration_slug(label: str) -> str:
 def _validate_configured_provider(config: Any, provider: str) -> None:
     if provider == "auto":
         return
-    spec = find_by_name(provider)
-    if spec is None:
+    resolved_provider = _resolve_settings_provider(config, provider)
+    if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
-    provider_config = getattr(config.providers, provider, None)
-    if (
-        provider_config is None
-        or not _provider_configured_for_settings(spec, provider_config)
-    ):
+    spec, _, provider_config = resolved_provider
+    if spec.is_transcription_only:
+        raise WebUISettingsError("provider does not support chat models")
+    if not _provider_configured_for_settings(spec, provider_config):
         raise WebUISettingsError("provider is not configured")
 
 
@@ -569,6 +604,56 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
                 ),
             }
         )
+    return rows
+
+
+_DEFAULT_REASONING_EFFORT_VALUES: tuple[str, ...] = ("", "low", "medium", "high")
+
+
+def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
+    """Return user-facing reasoning_effort options for this provider+model.
+
+    Mistral chat models accept only "high"/"none"; Magistral rejects the
+    kwarg entirely (reasoning is implicit). For everyone else, return the
+    full OpenAI vocab.
+    """
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None:
+        return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+    model_lower = (model or "").lower()
+    implicit = getattr(spec, "implicit_reasoning_models", ())
+    if implicit and any(pat in model_lower for pat in implicit):
+        # Reasoning is always on; only "Default" makes sense.
+        return [""]
+
+    remap = getattr(spec, "reasoning_effort_remap", ())
+    if remap:
+        # Reverse the remap: surface the distinct wire-vocab outputs as the
+        # user's options. Mistral collapses to "high"/"none" → UI shows
+        # "Default" + "High".
+        wire_values: list[str] = []
+        for _user_val, wire_val in remap:
+            if wire_val and wire_val != "none" and wire_val not in wire_values:
+                wire_values.append(wire_val)
+        return ["", *wire_values]
+
+    return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+
+def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for name in transcription_provider_names():
+        spec = find_by_name(name)
+        provider_config = getattr(config.providers, name, None)
+        rows.append({
+            "name": name,
+            "label": spec.label if spec is not None else name,
+            "configured": bool(getattr(provider_config, "api_key", None)),
+            "api_key_hint": _mask_secret_hint(getattr(provider_config, "api_key", None)),
+            "api_base": getattr(provider_config, "api_base", None),
+            "default_api_base": spec.default_api_base if spec and spec.default_api_base else None,
+        })
     return rows
 
 
@@ -604,31 +689,19 @@ def settings_payload(
         provider_config = getattr(config.providers, spec.name, None)
         if provider_config is None:
             continue
-        oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
-        row = {
-            "name": spec.name,
-            "label": spec.label,
-            "configured": (
-                bool(oauth_status["configured"])
-                if oauth_status is not None
-                else _provider_configured_for_settings(spec, provider_config)
-            ),
-            "auth_type": "oauth" if spec.is_oauth else "api_key",
-            "api_key_required": _provider_requires_api_key(spec),
-            "api_key_hint": _mask_secret_hint(provider_config.api_key),
-            "api_base": provider_config.api_base,
-            "default_api_base": spec.default_api_base or None,
-        }
-        if oauth_status is not None:
-            row["oauth_account"] = oauth_status["account"]
-            row["oauth_expires_at"] = oauth_status["expires_at"]
-            row["oauth_login_supported"] = oauth_status["login_supported"]
-        if spec.name == "openai":
-            row["api_type"] = provider_config.api_type
-        providers.append(row)
+        providers.append(_provider_settings_row(spec.name, spec, provider_config))
+    for provider_key, provider_config in _dynamic_provider_items(config):
+        providers.append(
+            _provider_settings_row(
+                provider_key,
+                create_dynamic_spec(provider_key, thinking_style=(provider_config.thinking_style or "")),
+                provider_config,
+            )
+        )
 
     search_config = config.tools.web.search
     image_config = config.tools.image_generation
+    transcription = resolve_transcription_config(config)
     search_provider = (
         search_config.provider
         if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
@@ -655,6 +728,9 @@ def settings_payload(
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
             "reasoning_effort": defaults.reasoning_effort,
+            "reasoning_effort_values": _reasoning_effort_values_for(
+                defaults.provider, defaults.model
+            ),
         }
     ]
     for name, preset in config.model_presets.items():
@@ -670,6 +746,9 @@ def settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "reasoning_effort_values": _reasoning_effort_values_for(
+                    preset.provider, preset.model
+                ),
             }
         )
 
@@ -729,6 +808,16 @@ def settings_payload(
             "save_dir": image_config.save_dir,
             "providers": image_providers,
         },
+        "transcription": {
+            "enabled": transcription.enabled,
+            "provider": transcription.provider,
+            "provider_configured": transcription.configured,
+            "model": transcription.model,
+            "language": transcription.language,
+            "max_duration_sec": transcription.max_duration_sec,
+            "max_upload_mb": transcription.max_upload_mb,
+            "providers": _transcription_provider_rows(config),
+        },
         "runtime": {
             "config_path": str(get_config_path().expanduser()),
             "workspace_path": str(config.workspace_path),
@@ -741,12 +830,10 @@ def settings_payload(
             },
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
-                "max_batch_size": defaults.dream.max_batch_size,
-                "max_iterations": defaults.dream.max_iterations,
-                "annotate_line_ages": defaults.dream.annotate_line_ages,
             },
             "unified_session": defaults.unified_session,
         },
+        "usage": token_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
@@ -758,9 +845,11 @@ def settings_payload(
             "mcp_server_count": len(config.tools.mcp_servers),
             "exec_enabled": exec_config.enable,
             "exec_sandbox": exec_config.sandbox or None,
+            "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
         "requires_restart": requires_restart,
+        "version": _version_payload(),
     }
     return decorate_settings_payload(
         payload,
@@ -769,6 +858,12 @@ def settings_payload(
         restart_required_sections=restart_required_sections,
         apply_state=apply_state,
     )
+
+
+def settings_usage_payload() -> dict[str, Any]:
+    """Return the lightweight token usage slice for Overview refreshes."""
+    config = load_config()
+    return token_usage_payload(timezone_name=config.agents.defaults.timezone)
 
 
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:
@@ -965,13 +1060,13 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
-    spec = find_by_name(provider_name)
-    if spec is None or spec.is_oauth:
-        raise WebUISettingsError("unknown provider")
 
     config = load_config()
-    provider_config = getattr(config.providers, spec.name, None)
-    if provider_config is None:
+    resolved_provider = _resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+    if spec.is_oauth:
         raise WebUISettingsError("unknown provider")
 
     changed = False
@@ -1006,8 +1101,8 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     restart_required = (
         changed
         and image_config.enabled
-        and image_config.provider == spec.name
-        and get_image_gen_provider(spec.name) is not None
+        and image_config.provider == provider_key
+        and get_image_gen_provider(provider_key) is not None
     )
     return settings_payload(requires_restart=restart_required)
 
@@ -1026,14 +1121,19 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         except ImportError:
             raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
 
+        try:
+            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+        except ValueError as e:
+            raise WebUISettingsError(str(e), status=400) from e
         token = None
         with suppress(Exception):
-            token = get_token()
+            token = get_token(proxy=proxy)
         if not (token and token.access):
             messages: list[str] = []
             token = login_oauth_interactive(
                 print_fn=lambda message: messages.append(str(message)),
                 prompt_fn=lambda _prompt: "",
+                proxy=proxy,
             )
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
@@ -1162,15 +1262,17 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("base_url is required")
         set_search_value("base_url", base_url)
         set_search_value("api_key", "")
-    else:
-        api_key = _query_first_alias(query, "api_key", "apiKey")
-        api_key = api_key.strip() if api_key is not None else None
-        if not api_key and previous_provider == provider_name and search_config.api_key:
+    elif credential in {"api_key", "optional_api_key"}:
+        raw_api_key = _query_first_alias(query, "api_key", "apiKey")
+        api_key = raw_api_key.strip() if raw_api_key is not None else None
+        if api_key is None and previous_provider == provider_name and search_config.api_key:
             api_key = search_config.api_key
-        if not api_key:
+        if credential == "api_key" and not api_key:
             raise WebUISettingsError("api_key is required")
-        set_search_value("api_key", api_key)
+        set_search_value("api_key", api_key or "")
         set_search_value("base_url", "")
+    else:
+        raise WebUISettingsError("unknown web search credential type")
 
     max_results = _query_first_alias(query, "max_results", "maxResults")
     if max_results is not None:
@@ -1303,3 +1405,73 @@ def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:
     if changed:
         save_config(config)
     return settings_payload(requires_restart=changed)
+
+
+def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
+    config = load_config()
+    transcription = config.transcription
+    changed = False
+
+    enabled = _query_first(query, "enabled")
+    if enabled is not None:
+        parsed_enabled = _parse_bool(enabled, "enabled")
+        if transcription.enabled != parsed_enabled:
+            transcription.enabled = parsed_enabled
+            changed = True
+
+    provider = _query_first(query, "provider")
+    if provider is not None:
+        provider = provider.strip().lower()
+        provider_spec = resolve_transcription_provider(provider)
+        if provider_spec is None:
+            raise WebUISettingsError("unknown transcription provider")
+        provider = provider_spec.name
+        if transcription.provider != provider:
+            transcription.provider = provider
+            changed = True
+
+    model = _query_first(query, "model")
+    if model is not None:
+        model = model.strip() or None
+        if model is not None and len(model) > 200:
+            raise WebUISettingsError("transcription model is too long")
+        if transcription.model != model:
+            transcription.model = model
+            changed = True
+
+    language = _query_first(query, "language")
+    if language is not None:
+        language = language.strip().lower() or None
+        if language is not None and not re.fullmatch(r"[a-z]{2,3}", language):
+            raise WebUISettingsError("transcription language must be 2-3 lowercase letters")
+        if transcription.language != language:
+            transcription.language = language
+            changed = True
+
+    max_duration_sec = _query_first_alias(query, "max_duration_sec", "maxDurationSec")
+    if max_duration_sec is not None:
+        try:
+            parsed_duration = int(max_duration_sec)
+        except ValueError:
+            raise WebUISettingsError("max_duration_sec must be an integer") from None
+        if parsed_duration < 1 or parsed_duration > 600:
+            raise WebUISettingsError("max_duration_sec must be between 1 and 600")
+        if transcription.max_duration_sec != parsed_duration:
+            transcription.max_duration_sec = parsed_duration
+            changed = True
+
+    max_upload_mb = _query_first_alias(query, "max_upload_mb", "maxUploadMb")
+    if max_upload_mb is not None:
+        try:
+            parsed_upload = int(max_upload_mb)
+        except ValueError:
+            raise WebUISettingsError("max_upload_mb must be an integer") from None
+        if parsed_upload < 1 or parsed_upload > 100:
+            raise WebUISettingsError("max_upload_mb must be between 1 and 100")
+        if transcription.max_upload_mb != parsed_upload:
+            transcription.max_upload_mb = parsed_upload
+            changed = True
+
+    if changed:
+        save_config(config)
+    return settings_payload()

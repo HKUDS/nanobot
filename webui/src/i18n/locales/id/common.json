@@ -54,7 +54,11 @@
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
     },
-    "apps": "Aplikasi"
+    "apps": "Aplikasi",
+    "automations": "Otomasi",
+    "skills": {
+      "title": "Skill"
+    }
   },
   "settings": {
     "backToChat": "Kembali ke chat",
@@ -70,17 +74,21 @@
       "models": "Model",
       "providers": "Penyedia",
       "image": "Gambar",
+      "voice": "Suara",
       "browser": "Internet",
       "runtime": "Sistem",
       "advanced": "Keamanan",
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
-      "apps": "Aplikasi"
+      "apps": "Aplikasi",
+      "automations": "Otomasi",
+      "skills": "Skill"
     },
     "sections": {
       "interface": "Antarmuka",
       "ai": "AI",
       "system": "Sistem",
+      "about": "Tentang",
       "status": "Status",
       "localPreferences": "Preferensi lokal",
       "presets": "Preset",
@@ -95,7 +103,8 @@
       "mcp": "Layanan MCP",
       "apps": "Aplikasi",
       "nativeHost": "Host native",
-      "hostSafety": "Keamanan aplikasi"
+      "hostSafety": "Keamanan aplikasi",
+      "voiceInput": "Input suara"
     },
     "rows": {
       "theme": "Tema",
@@ -138,7 +147,13 @@
       "engine": "Mesin",
       "logs": "Log",
       "diagnostics": "Diagnostik",
-      "contextWindow": "Jendela konteks"
+      "contextWindow": "Jendela konteks",
+      "transcription": "Transkripsi",
+      "transcriptionProvider": "Penyedia",
+      "transcriptionProviderStatus": "Status penyedia",
+      "transcriptionModel": "Model",
+      "transcriptionLanguage": "Bahasa",
+      "voiceLimits": "Batas"
     },
     "help": {
       "theme": "Beralih antara tampilan terang dan gelap.",
@@ -177,7 +192,12 @@
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
       "localServiceAccessNative": "Permite que comandos shell con Full Access alcancen servicios en este Mac.",
       "webuiDefaultAccessNative": "Usado por chats nativos sin permiso específico de proyecto.",
-      "contextWindow": "Pilih anggaran konteks default untuk konfigurasi model ini."
+      "contextWindow": "Pilih anggaran konteks default untuk konfigurasi model ini.",
+      "transcription": "Transkripsikan input mikrofon sebelum dikirim. Pesan suara channel memakai pengaturan yang sama.",
+      "transcriptionProvider": "Menggunakan kredensial penyedia yang sesuai dari Providers.",
+      "transcriptionProviderStatus": "API key tetap berada di providers, bukan di pengaturan transkripsi.",
+      "transcriptionModel": "Biarkan memakai default yang teresolusi kecuali penyedia membutuhkan id model khusus.",
+      "transcriptionLanguage": "Petunjuk ISO-639 opsional, seperti en, zh, ja, atau ko."
     },
     "values": {
       "light": "Terang",
@@ -187,6 +207,9 @@
       "disabled": "Nonaktif",
       "restartPending": "Menunggu mulai ulang",
       "ready": "Siap",
+      "privateEngine": "Mesin privat",
+      "unixSocket": "Soket Unix",
+      "defaultWorkspace": "Workspace default",
       "comfortable": "Nyaman",
       "compact": "Ringkas",
       "auto": "Otomatis",
@@ -276,7 +299,33 @@
       "totalProviders": "{{count}} tersedia",
       "webSearch": "Pencarian web",
       "imageGeneration": "Pembuatan gambar",
+      "voiceInput": "Input suara",
       "workspace": "Ruang kerja"
+    },
+    "usage": {
+      "title": "Aktivitas token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Penggunaan yang dilaporkan penyedia selama 12 bulan terakhir.",
+      "empty": "Aktivitas token akan muncul setelah balasan model baru.",
+      "totalTokens": "Total token",
+      "peakTokens": "Puncak token",
+      "thirtyDayTokens": "Token 30 hari",
+      "currentStreak": "Rentetan saat ini",
+      "longestStreak": "Rentetan terpanjang",
+      "daysValue": "{{count}} h",
+      "last30": "30 hari",
+      "activeDays": "Hari aktif",
+      "requests": "Permintaan",
+      "estimated": "perkiraan",
+      "includesEstimates": "termasuk perkiraan",
+      "cellTitle": "{{date}}: {{tokens}} token, {{requests}} permintaan",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Otomasi",
+        "dream": "Memori",
+        "system": "Sistem"
+      }
     },
     "providers": {
       "searchPlaceholder": "Cari penyedia",
@@ -345,6 +394,13 @@
       "unavailable": "Tidak tersedia",
       "noDescription": "Tidak ada deskripsi."
     },
+    "about": {
+      "version": "Versi",
+      "checking": "Memeriksa pembaruan...",
+      "checkForUpdates": "Periksa pembaruan",
+      "upToDate": "Anda sudah menggunakan versi terbaru",
+      "updateAvailable": "Pembaruan tersedia v{{version}}"
+    },
     "mcp": {
       "allCategories": "Semua kategori",
       "summary": "{{installed}} dari {{total}} preset diaktifkan",
@@ -402,18 +458,160 @@
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
     },
     "apps": {
-      "description": "Tambahkan CLI aplikasi dan layanan MCP yang dapat digunakan nanobot dari chat.",
+      "description": "Aktifkan plugin, adaptor aplikasi lokal, dan server alat terhubung.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Kanal",
+      "featureLabel": "Fitur",
       "filterAll": "Semua",
+      "filterPlugins": "Plugin",
       "filterCli": "Aplikasi CLI",
       "filterMcp": "Layanan MCP",
       "enabledSummary": "{{count}} aktif",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} plugin · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Cari aplikasi",
-      "featured": "Unggulan",
+      "featured": "Katalog",
       "loading": "Memuat aplikasi...",
-      "empty": "Tidak ada aplikasi yang cocok."
+      "empty": "Tidak ada aplikasi yang cocok.",
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
+    },
+    "nanobotFeatures": {
+      "enabled": "Aktif",
+      "enable": "Aktifkan",
+      "disable": "Nonaktifkan",
+      "ready": "Siap",
+      "missingDependency": "Dukungan belum terpasang",
+      "installSupport": "Instal dukungan",
+      "installConfirmTitle": "Instal dukungan untuk {{name}}?",
+      "installConfirmDescription": "nanobot akan menambahkan yang dibutuhkan {{name}}, lalu mengaktifkannya. Lanjutkan?",
+      "installConfirmAction": "Instal dan aktifkan",
+      "websocketRequired": "Wajib untuk WebUI",
+      "channelDisabled": "Kanal dinonaktifkan",
+      "notEnabled": "Belum aktif"
+    },
+    "automations": {
+      "filters": {
+        "all": "Semua",
+        "active": "Aktif",
+        "paused": "Dijeda",
+        "failed": "Perlu ditangani",
+        "system": "Sistem"
+      },
+      "sort": {
+        "next": "Jalankan berikutnya",
+        "last": "Jalankan terakhir",
+        "updated": "Diperbarui",
+        "name": "Nama"
+      },
+      "search": "Cari tugas, pesan, chat terkait, atau jadwal",
+      "queue": "Antrean",
+      "loading": "Memuat otomasi...",
+      "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
+      "empty": "Belum ada otomasi.",
+      "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
+      "oneShot": "Satu kali",
+      "systemTask": "Automasi yang dikelola sistem",
+      "localTrigger": "Pemicu lokal",
+      "labels": {
+        "schedule": "Jadwal",
+        "next": "Berikutnya",
+        "origin": "Chat tertaut",
+        "created": "Dibuat",
+        "updated": "Diperbarui"
+      },
+      "runNow": "Jalankan sekarang",
+      "pause": "Jeda",
+      "resume": "Lanjutkan",
+      "edit": "Edit",
+      "delete": "Hapus",
+      "protected": "Terlindungi",
+      "editTitle": "Edit otomasi",
+      "save": "Simpan",
+      "deleteTitle": "Hapus otomasi",
+      "deleteDescription": "Ini menghapus {{name}} dari penyimpanan cron. Pesan chat sebelumnya tetap ada di sesi.",
+      "cancel": "Batal",
+      "status": {
+        "system": "Sistem",
+        "running": "Sedang berjalan",
+        "paused": "Dijeda",
+        "failed": "Gagal",
+        "completed": "Selesai",
+        "noSchedule": "Tanpa jadwal",
+        "active": "Aktif"
+      },
+      "origin": {
+        "system": "Sistem",
+        "unknown": "Tidak ada chat tertaut"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Setiap hari pukul {{time}}",
+        "weekdaysAt": "Hari kerja pukul {{time}}",
+        "hourlyAt": "Setiap jam pada :{{minute}}",
+        "hourlyWindow": "Setiap jam {{start}}-{{end}} pada :{{minute}}",
+        "local": "Pemicu lokal",
+        "custom": "Jadwal khusus"
+      },
+      "next": {
+        "paused": "Dijeda",
+        "pending": "Sedang berjalan",
+        "local": "Menunggu pemicu",
+        "none": "Tidak ada jadwal berikutnya"
+      },
+      "message": {
+        "showMore": "Tampilkan pesan lengkap",
+        "showLess": "Tampilkan lebih sedikit"
+      },
+      "fields": {
+        "name": "Nama",
+        "message": "Pesan",
+        "scheduleType": "Jenis jadwal",
+        "every": "Setiap",
+        "unit": "Unit",
+        "cronExpression": "Ekspresi cron",
+        "timezone": "Zona waktu",
+        "runAt": "Jalankan pada"
+      },
+      "scheduleTypes": {
+        "every": "Interval",
+        "cron": "Cron",
+        "at": "Sekali"
+      },
+      "everyUnits": {
+        "second": "Detik",
+        "minute": "Menit",
+        "hour": "Jam",
+        "day": "Hari"
+      },
+      "validation": {
+        "nameRequired": "Nama wajib diisi.",
+        "messageRequired": "Pesan wajib diisi.",
+        "intervalRequired": "Interval harus berupa angka positif.",
+        "cronRequired": "Ekspresi cron wajib diisi.",
+        "timeRequired": "Waktu eksekusi wajib diisi.",
+        "futureRequired": "Waktu eksekusi harus berada di masa depan."
+      }
     },
     "oauth": {
       "authentication": "Autentikasi OAuth",
@@ -427,10 +625,43 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sudah masuk",
       "notSignedIn": "Belum masuk"
+    },
+    "skills": {
+      "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",
+      "caption": "{{available}} tersedia · {{total}} total",
+      "featured": "Skill agent",
+      "empty": "Tidak ada skill yang tersedia.",
+      "sourceWorkspace": "Kustom",
+      "sourceBuiltin": "Bawaan",
+      "statusAvailable": "Tersedia",
+      "statusUnavailable": "Tidak tersedia",
+      "unavailableReason": "Kurang: {{reason}}",
+      "openDetails": "Buka detail {{name}}",
+      "loadingDetail": "Memuat detail skill...",
+      "loadFailed": "Tidak dapat memuat detail skill.",
+      "descriptionTitle": "Deskripsi",
+      "source": "Sumber",
+      "status": "Status",
+      "requirements": "Kebutuhan",
+      "noRequirements": "Tidak ada kebutuhan eksplisit.",
+      "commands": "Perintah",
+      "environment": "Variabel lingkungan",
+      "missingCommands": "CLI hilang",
+      "missingEnvironment": "ENV hilang",
+      "unavailableReasonLabel": "Alasan tidak tersedia",
+      "rawInstructions": "SKILL.md mentah",
+      "rawInstructionsEmpty": "Tidak ada instruksi mentah.",
+      "detailDescription": "Detail untuk {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Pilih penyedia",
+      "configureProvider": "Konfigurasi penyedia",
+      "languageAuto": "Auto"
     }
   },
   "chat": {
     "fallbackTitle": "Obrolan {{id}}",
+    "forkTitle": "Cabang: {{title}}",
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
     "showMore": "Tampilkan {{count}} lagi",
@@ -440,7 +671,8 @@
     "newInProject": "Mulai obrolan baru di {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -472,7 +704,24 @@
     "title": "Hapus obrolan ini?",
     "description": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
-    "confirm": "Hapus"
+    "confirm": "Hapus",
+    "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
+    "moreAutomations": "+ {{count}} lagi",
+    "confirmWithAutomations": "Hapus",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Setiap {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Pemicu lokal",
+      "unknown": "Jadwal khusus"
+    },
+    "next": {
+      "label": "Berikutnya: {{time}}",
+      "disabled": "Dijeda",
+      "local": "Menunggu pemicu",
+      "none": "Tidak ada jadwal berikutnya"
+    }
   },
   "connection": {
     "idle": "Idle",
@@ -548,7 +797,33 @@
       "toggleSidebar": "Tampilkan atau sembunyikan sidebar",
       "newChat": "Mulai chat baru",
       "toggleTheme": "Alihkan tema dari header",
-      "settings": "Buka pengaturan"
+      "settings": "Buka pengaturan",
+      "sessionInfo": "Detail sesi"
+    },
+    "sessionInfo": {
+      "title": "Sesi",
+      "untitled": "Chat tanpa judul",
+      "automations": "Otomasi",
+      "count": "{{count}}",
+      "loading": "Memuat otomasi...",
+      "loadFailed": "Tidak dapat memuat otomasi.",
+      "empty": "Belum ada otomasi dalam sesi ini.",
+      "disabled": "Mati",
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Pemicu lokal",
+        "unknown": "Jadwal khusus"
+      },
+      "next": {
+        "label": "Berikutnya {{time}}",
+        "pending": "Segera berjalan",
+        "disabled": "Dijeda",
+        "local": "Menunggu pemicu",
+        "none": "Tidak ada jadwal berikutnya"
+      }
     },
     "composer": {
       "placeholderThread": "Ketik pesan Anda…",
@@ -565,6 +840,8 @@
       "goalStateCloseAria": "Tutup tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "modelNotConfigured": "Model belum dikonfigurasi",
+      "configureModel": "Konfigurasi model",
       "queued": {
         "label": "Panduan antrean",
         "guide": "Pandu",
@@ -593,6 +870,21 @@
         "reason": "Bernalar",
         "deepResearch": "Riset mendalam",
         "voice": "Input suara"
+      },
+      "voice": {
+        "hint": "Klik untuk mendikte atau tahan",
+        "stop": "Hentikan rekaman",
+        "transcribing": "Mentranskripsi...",
+        "recordingStatus": "Merekam {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "Input suara tidak didukung di browser ini.",
+        "permission": "Izin mikrofon diperlukan.",
+        "notConfigured": "Konfigurasikan penyedia transkripsi terlebih dahulu.",
+        "tooLong": "Rekaman terlalu panjang.",
+        "tooShort": "Tahan sedikit lebih lama untuk merekam suara.",
+        "noInput": "Tidak ada input mikrofon yang terdeteksi.",
+        "failed": "Tidak dapat mentranskripsi audio."
       },
       "slash": {
         "ariaLabel": "Perintah slash",
@@ -637,9 +929,17 @@
             "title": "Pulihkan memori",
             "description": "Kembalikan memori ke snapshot Dream sebelumnya."
           },
+          "dream_prompt": {
+            "title": "Memori Dream",
+            "description": "Atur cara Dream menyusun memori workspace ini."
+          },
           "goal": {
             "title": "Tujuan jangka panjang",
             "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."
+          },
+          "trigger": {
+            "title": "Buat trigger lokal",
+            "description": "Buat trigger CLI yang terikat ke sesi chat ini."
           },
           "help": {
             "title": "Tampilkan bantuan",
@@ -683,15 +983,23 @@
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Mode akses workspace",
         "projectAria": "Pilih proyek",
         "projectPlaceholder": "Pilih proyek",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Izin default",
+        "full": "Akses penuh"
       }
     },
     "scrollToBottom": "Gulir ke bawah",
-    "loadEarlier": "Muat pesan sebelumnya"
+    "loadEarlier": "Muat pesan sebelumnya",
+    "forkedFromHistory": "Fork dari riwayat",
+    "promptNavigator": {
+      "open": "Buka navigator prompt",
+      "title": "Prompt",
+      "search": "Cari prompt",
+      "noResults": "Tidak ada prompt yang cocok.",
+      "jumpTo": "Lompat ke prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "sedang mengalir",
@@ -710,12 +1018,16 @@
     "agentActivityLiveSummary": "Berjalan… · {{reasoning}} langkah · {{tools}} panggilan alat",
     "agentActivityLiveToolsOnly": "Berjalan… · {{tools}} panggilan alat",
     "imageAttachment": "Lampiran gambar",
-    "copyReply": "Salin balasan",
-    "copiedReply": "Balasan disalin",
+    "forkFromHere": "Fork",
+    "copyReply": "Salin",
+    "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",
     "activityThoughtFor": "Selesai berpikir dalam {{duration}}",
+    "activityWorkingFor": "Memproses selama {{duration}}",
+    "activityWorked": "Selesai memproses",
+    "activityWorkedFor": "Diproses selama {{duration}}",
     "cliActivityRunningOne": "Menggunakan @{{name}}",
     "cliActivityRanOne": "Menggunakan @{{name}} selesai",
     "cliActivityFailedOne": "@{{name}} gagal",
@@ -724,7 +1036,9 @@
     "cliActivityFailedMany": "{{count}} aplikasi CLI gagal",
     "cliRunRunning": "Menggunakan",
     "cliRunRan": "Digunakan",
-    "cliRunFailed": "Gagal"
+    "cliRunFailed": "Gagal",
+    "automationSourceFallback": "Otomatisasi",
+    "automationTriggered": "Dipicu otomatis"
   },
   "lightbox": {
     "title": "Pratinjau gambar",
@@ -732,6 +1046,15 @@
     "prev": "Gambar sebelumnya",
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
+  },
+  "filePreview": {
+    "aria": "Pratinjau file",
+    "close": "Tutup pratinjau file",
+    "loading": "Memuat pratinjau...",
+    "failed": "Tidak dapat mempratinjau file ini.",
+    "routeMissing": "Pratinjau file memerlukan gateway terbaru. Mulai ulang nanobot gateway lalu coba lagi.",
+    "resize": "Ubah ukuran pratinjau file",
+    "truncated": "Pratinjau dipotong karena file ini besar."
   },
   "code": {
     "fallbackLanguage": "kode",
@@ -748,17 +1071,17 @@
       "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace tidak berubah",
+      "body": "Gateway menolak proyek atau mode akses yang diminta, jadi Nanobot tetap memakai workspace sebelumnya."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace default",
       "manual": "Tempel path",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Gunakan path",
+      "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
   }
 }

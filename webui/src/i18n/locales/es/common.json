@@ -54,7 +54,11 @@
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "automations": "Automatizaciones",
+    "skills": {
+      "title": "Habilidades"
+    }
   },
   "settings": {
     "backToChat": "Volver al chat",
@@ -70,17 +74,21 @@
       "models": "Modelos",
       "providers": "Proveedores",
       "image": "Imagen",
+      "voice": "Voz",
       "browser": "Internet",
       "runtime": "Sistema",
       "advanced": "Seguridad",
       "cliApps": "Apps CLI",
       "mcp": "MCP",
-      "apps": "Aplicaciones"
+      "apps": "Aplicaciones",
+      "automations": "Automatizaciones",
+      "skills": "Habilidades"
     },
     "sections": {
       "interface": "Interfaz",
       "ai": "AI",
       "system": "Sistema",
+      "about": "Acerca de",
       "status": "Estado",
       "localPreferences": "Preferencias locales",
       "presets": "Preajustes",
@@ -95,7 +103,8 @@
       "mcp": "Servicios MCP",
       "apps": "Aplicaciones",
       "nativeHost": "Host nativo",
-      "hostSafety": "Seguridad de la app"
+      "hostSafety": "Seguridad de la app",
+      "voiceInput": "Entrada de voz"
     },
     "rows": {
       "theme": "Tema",
@@ -138,7 +147,13 @@
       "engine": "Motor",
       "logs": "Registros",
       "diagnostics": "Diagnóstico",
-      "contextWindow": "Ventana de contexto"
+      "contextWindow": "Ventana de contexto",
+      "transcription": "Transcripcion",
+      "transcriptionProvider": "Proveedor",
+      "transcriptionProviderStatus": "Estado del proveedor",
+      "transcriptionModel": "Modelo",
+      "transcriptionLanguage": "Idioma",
+      "voiceLimits": "Limites"
     },
     "help": {
       "theme": "Cambia entre apariencia clara y oscura.",
@@ -177,7 +192,12 @@
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
       "localServiceAccessNative": "Permite que comandos shell con Full Access alcancen servicios en este Mac.",
       "webuiDefaultAccessNative": "Usado por chats nativos sin permiso específico de proyecto.",
-      "contextWindow": "Elige el presupuesto de contexto predeterminado para esta configuración de modelo."
+      "contextWindow": "Elige el presupuesto de contexto predeterminado para esta configuración de modelo.",
+      "transcription": "Transcribe la entrada del microfono antes de enviarla. Los mensajes de voz de los canales usan la misma configuracion.",
+      "transcriptionProvider": "Usa las credenciales del proveedor correspondiente en Proveedores.",
+      "transcriptionProviderStatus": "Las claves API permanecen en proveedores, no en la configuracion de transcripcion.",
+      "transcriptionModel": "Dejalo como el valor predeterminado resuelto salvo que el proveedor necesite un id de modelo personalizado.",
+      "transcriptionLanguage": "Pista ISO-639 opcional, como en, zh, ja o ko."
     },
     "values": {
       "light": "Claro",
@@ -187,6 +207,9 @@
       "disabled": "Desactivado",
       "restartPending": "Reinicio pendiente",
       "ready": "Listo",
+      "privateEngine": "Motor privado",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Espacio predeterminado",
       "comfortable": "Cómodo",
       "compact": "Compacto",
       "auto": "Automático",
@@ -276,7 +299,33 @@
       "totalProviders": "{{count}} disponibles",
       "webSearch": "Búsqueda web",
       "imageGeneration": "Generación de imágenes",
+      "voiceInput": "Entrada de voz",
       "workspace": "Espacio de trabajo"
+    },
+    "usage": {
+      "title": "Actividad de tokens",
+      "shortTitle": "Token Usage",
+      "subtitle": "Uso reportado por el proveedor durante los últimos 12 meses.",
+      "empty": "La actividad de tokens aparecerá después de nuevas respuestas del modelo.",
+      "totalTokens": "Tokens totales",
+      "peakTokens": "Pico de tokens",
+      "thirtyDayTokens": "Tokens en 30 días",
+      "currentStreak": "Racha actual",
+      "longestStreak": "Racha más larga",
+      "daysValue": "{{count}} d",
+      "last30": "30 días",
+      "activeDays": "Días activos",
+      "requests": "Solicitudes",
+      "estimated": "estimado",
+      "includesEstimates": "incluye estimaciones",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} solicitudes",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automatizaciones",
+        "dream": "Memoria",
+        "system": "Sistema"
+      }
     },
     "providers": {
       "searchPlaceholder": "Buscar proveedores",
@@ -345,6 +394,13 @@
       "unavailable": "No disponible",
       "noDescription": "Sin descripción disponible."
     },
+    "about": {
+      "version": "Versión",
+      "checking": "Buscando actualizaciones...",
+      "checkForUpdates": "Buscar actualizaciones",
+      "upToDate": "Estás al día",
+      "updateAvailable": "Actualización disponible v{{version}}"
+    },
     "mcp": {
       "allCategories": "Todas las categorías",
       "summary": "{{installed}} de {{total}} presets habilitados",
@@ -402,18 +458,160 @@
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
     },
     "apps": {
-      "description": "Agrega CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
+      "description": "Activa complementos, adaptadores locales de apps y servidores de herramientas conectados.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Canal",
+      "featureLabel": "Función",
       "filterAll": "Todo",
+      "filterPlugins": "Complementos",
       "filterCli": "Apps CLI",
       "filterMcp": "Servicios MCP",
       "enabledSummary": "{{count}} activados",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} complementos · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Buscar apps",
-      "featured": "Destacadas",
+      "featured": "Catálogo",
       "loading": "Cargando apps...",
-      "empty": "Ninguna app coincide con este filtro."
+      "empty": "Ninguna app coincide con este filtro.",
+      "restartRequired": "Reinicia nanobot para aplicar apps y funciones actualizadas."
+    },
+    "nanobotFeatures": {
+      "enabled": "Activado",
+      "enable": "Activar",
+      "disable": "Desactivar",
+      "ready": "Listo",
+      "missingDependency": "Falta soporte",
+      "installSupport": "Instalar soporte",
+      "installConfirmTitle": "¿Instalar soporte para {{name}}?",
+      "installConfirmDescription": "nanobot añadirá lo que {{name}} necesita y luego lo activará. ¿Continuar?",
+      "installConfirmAction": "Instalar y activar",
+      "websocketRequired": "Requerido para WebUI",
+      "channelDisabled": "El canal está desactivado",
+      "notEnabled": "No activado"
+    },
+    "automations": {
+      "filters": {
+        "all": "Todas",
+        "active": "Activas",
+        "paused": "Pausadas",
+        "failed": "Requieren atención",
+        "system": "Sistema"
+      },
+      "sort": {
+        "next": "Próxima ejecución",
+        "last": "Última ejecución",
+        "updated": "Actualizada",
+        "name": "Nombre"
+      },
+      "search": "Buscar tarea, mensaje, chat vinculado u horario",
+      "queue": "Cola",
+      "loading": "Cargando automatizaciones...",
+      "noMatches": "No hay automatizaciones que coincidan con esta vista.",
+      "empty": "Aún no hay automatizaciones.",
+      "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
+      "oneShot": "Una vez",
+      "systemTask": "Automatización administrada por el sistema",
+      "localTrigger": "Activador local",
+      "labels": {
+        "schedule": "Programación",
+        "next": "Siguiente",
+        "origin": "Chat vinculado",
+        "created": "Creada",
+        "updated": "Actualizada"
+      },
+      "runNow": "Ejecutar ahora",
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "protected": "Protegida",
+      "editTitle": "Editar automatización",
+      "save": "Guardar",
+      "deleteTitle": "Eliminar automatización",
+      "deleteDescription": "Esto elimina {{name}} del almacén cron. Los mensajes de chat anteriores permanecen en la sesión.",
+      "cancel": "Cancelar",
+      "status": {
+        "system": "Sistema",
+        "running": "Ejecutándose ahora",
+        "paused": "Pausada",
+        "failed": "Fallida",
+        "completed": "Completada",
+        "noSchedule": "Sin programación",
+        "active": "Activa"
+      },
+      "origin": {
+        "system": "Sistema",
+        "unknown": "Sin chat vinculado"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "A las {{time}}",
+        "every": "Cada {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Diaria a las {{time}}",
+        "weekdaysAt": "Días laborables a las {{time}}",
+        "hourlyAt": "Cada hora en :{{minute}}",
+        "hourlyWindow": "Cada hora {{start}}-{{end}} en :{{minute}}",
+        "local": "Activador local",
+        "custom": "Programación personalizada"
+      },
+      "next": {
+        "paused": "Pausada",
+        "pending": "Ejecutándose ahora",
+        "local": "Esperando activador",
+        "none": "Sin próxima ejecución"
+      },
+      "message": {
+        "showMore": "Mostrar mensaje completo",
+        "showLess": "Mostrar menos"
+      },
+      "fields": {
+        "name": "Nombre",
+        "message": "Mensaje",
+        "scheduleType": "Tipo de programación",
+        "every": "Cada",
+        "unit": "Unidad",
+        "cronExpression": "Expresión cron",
+        "timezone": "Zona horaria",
+        "runAt": "Ejecutar a las"
+      },
+      "scheduleTypes": {
+        "every": "Intervalo",
+        "cron": "Cron",
+        "at": "Una vez"
+      },
+      "everyUnits": {
+        "second": "Segundos",
+        "minute": "Minutos",
+        "hour": "Horas",
+        "day": "Días"
+      },
+      "validation": {
+        "nameRequired": "El nombre es obligatorio.",
+        "messageRequired": "El mensaje es obligatorio.",
+        "intervalRequired": "El intervalo debe ser un número positivo.",
+        "cronRequired": "La expresión cron es obligatoria.",
+        "timeRequired": "La hora de ejecución es obligatoria.",
+        "futureRequired": "La hora de ejecución debe estar en el futuro."
+      }
     },
     "oauth": {
       "authentication": "Autenticación OAuth",
@@ -427,10 +625,43 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sesión iniciada",
       "notSignedIn": "Sin sesión"
+    },
+    "skills": {
+      "description": "Revisa las habilidades de instrucciones que este agente puede cargar durante una conversación.",
+      "caption": "{{available}} disponibles · {{total}} en total",
+      "featured": "Habilidades del agente",
+      "empty": "No hay habilidades disponibles.",
+      "sourceWorkspace": "Personalizada",
+      "sourceBuiltin": "Integradas",
+      "statusAvailable": "Disponible",
+      "statusUnavailable": "No disponible",
+      "unavailableReason": "Falta: {{reason}}",
+      "openDetails": "Abrir detalles de {{name}}",
+      "loadingDetail": "Cargando detalles de la habilidad...",
+      "loadFailed": "No se pudieron cargar los detalles.",
+      "descriptionTitle": "Descripción",
+      "source": "Origen",
+      "status": "Estado",
+      "requirements": "Requisitos",
+      "noRequirements": "Sin requisitos explícitos.",
+      "commands": "Comandos",
+      "environment": "Variables de entorno",
+      "missingCommands": "Falta CLI",
+      "missingEnvironment": "Falta ENV",
+      "unavailableReasonLabel": "Motivo de indisponibilidad",
+      "rawInstructions": "SKILL.md original",
+      "rawInstructionsEmpty": "No hay instrucciones originales.",
+      "detailDescription": "Detalles de {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Seleccionar proveedor",
+      "configureProvider": "Configurar proveedor",
+      "languageAuto": "Auto"
     }
   },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
+    "forkTitle": "Bifurcación: {{title}}",
     "loading": "Cargando…",
     "noSessions": "Todavía no hay sesiones.",
     "showMore": "Mostrar {{count}} más",
@@ -440,7 +671,8 @@
     "newInProject": "Iniciar un chat nuevo en {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -472,7 +704,24 @@
     "title": "¿Eliminar este chat?",
     "description": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
-    "confirm": "Eliminar"
+    "confirm": "Eliminar",
+    "automationsDescription": "Este chat tiene automatizaciones programadas. Al eliminarlo también se eliminarán.",
+    "moreAutomations": "+ {{count}} más",
+    "confirmWithAutomations": "Eliminar",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Cada {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Activador local",
+      "unknown": "Programación personalizada"
+    },
+    "next": {
+      "label": "Siguiente: {{time}}",
+      "disabled": "Pausada",
+      "local": "Esperando activador",
+      "none": "Sin próxima ejecución"
+    }
   },
   "connection": {
     "idle": "Inactivo",
@@ -548,7 +797,33 @@
       "toggleSidebar": "Mostrar u ocultar la barra lateral",
       "newChat": "Iniciar un chat nuevo",
       "toggleTheme": "Cambiar tema desde el encabezado",
-      "settings": "Abrir configuración"
+      "settings": "Abrir configuración",
+      "sessionInfo": "Detalles de la sesión"
+    },
+    "sessionInfo": {
+      "title": "Sesión",
+      "untitled": "Chat sin título",
+      "automations": "Automatizaciones",
+      "count": "{{count}}",
+      "loading": "Cargando automatizaciones...",
+      "loadFailed": "No se pudieron cargar las automatizaciones.",
+      "empty": "Esta sesión aún no tiene automatizaciones.",
+      "disabled": "Desactivado",
+      "schedule": {
+        "at": "A las {{time}}",
+        "every": "Cada {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Activador local",
+        "unknown": "Programación personalizada"
+      },
+      "next": {
+        "label": "Siguiente {{time}}",
+        "pending": "Se ejecutará pronto",
+        "disabled": "En pausa",
+        "local": "Esperando activador",
+        "none": "Sin próxima ejecución"
+      }
     },
     "composer": {
       "placeholderThread": "Escribe tu mensaje…",
@@ -565,6 +840,8 @@
       "goalStateCloseAria": "Cerrar objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
+      "modelNotConfigured": "Modelo no configurado",
+      "configureModel": "Configurar modelo",
       "queued": {
         "label": "Guía en cola",
         "guide": "Guiar",
@@ -593,6 +870,21 @@
         "reason": "Razonar",
         "deepResearch": "Investigación profunda",
         "voice": "Entrada de voz"
+      },
+      "voice": {
+        "hint": "Haz clic para dictar o mantén",
+        "stop": "Detener grabación",
+        "transcribing": "Transcribiendo...",
+        "recordingStatus": "Grabando {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "Este navegador no admite entrada de voz.",
+        "permission": "Se requiere permiso de micrófono.",
+        "notConfigured": "Configura primero un proveedor de transcripción.",
+        "tooLong": "La grabación es demasiado larga.",
+        "tooShort": "Mantén pulsado un poco más para grabar voz.",
+        "noInput": "No se detectó entrada del micrófono.",
+        "failed": "No se pudo transcribir el audio."
       },
       "slash": {
         "ariaLabel": "Comandos slash",
@@ -637,9 +929,17 @@
             "title": "Restaurar memoria",
             "description": "Revierte la memoria a una instantánea Dream anterior."
           },
+          "dream_prompt": {
+            "title": "Memoria de Dream",
+            "description": "Indica a Dream cómo organizar la memoria de este espacio de trabajo."
+          },
           "goal": {
             "title": "Objetivo a largo plazo",
             "description": "Indica al agente que trate esto como un objetivo sostenido en varios pasos."
+          },
+          "trigger": {
+            "title": "Crear trigger local",
+            "description": "Crea un trigger de CLI vinculado a esta sesion de chat."
           },
           "help": {
             "title": "Mostrar ayuda",
@@ -683,15 +983,23 @@
         "mcpDescription": "Usar @{{name}} como servidor MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Modo de acceso al espacio de trabajo",
         "projectAria": "Elegir proyecto",
         "projectPlaceholder": "Seleccionar proyecto",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Permiso predeterminado",
+        "full": "Acceso completo"
       }
     },
     "scrollToBottom": "Desplazarse al final",
-    "loadEarlier": "Cargar mensajes anteriores"
+    "loadEarlier": "Cargar mensajes anteriores",
+    "forkedFromHistory": "Bifurcado desde el historial",
+    "promptNavigator": {
+      "open": "Abrir navegador de prompts",
+      "title": "Prompts",
+      "search": "Buscar prompts",
+      "noResults": "No hay prompts coincidentes.",
+      "jumpTo": "Ir al prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "transmitiendo",
@@ -710,12 +1018,16 @@
     "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
     "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
     "imageAttachment": "Imagen adjunta",
-    "copyReply": "Copiar respuesta",
-    "copiedReply": "Respuesta copiada",
+    "forkFromHere": "Bifurcar",
+    "copyReply": "Copiar",
+    "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",
+    "activityWorkingFor": "Trabajando durante {{duration}}",
+    "activityWorked": "Trabajo completado",
+    "activityWorkedFor": "Trabajó durante {{duration}}",
     "cliActivityRunningOne": "Usando @{{name}}",
     "cliActivityRanOne": "Usó @{{name}}",
     "cliActivityFailedOne": "Falló @{{name}}",
@@ -724,7 +1036,9 @@
     "cliActivityFailedMany": "Fallaron {{count}} apps CLI",
     "cliRunRunning": "Usando",
     "cliRunRan": "Usado",
-    "cliRunFailed": "Falló"
+    "cliRunFailed": "Falló",
+    "automationSourceFallback": "Automatización",
+    "automationTriggered": "Activada automáticamente"
   },
   "lightbox": {
     "title": "Vista previa de imagen",
@@ -732,6 +1046,15 @@
     "prev": "Imagen anterior",
     "next": "Imagen siguiente",
     "close": "Cerrar vista previa"
+  },
+  "filePreview": {
+    "aria": "Vista previa de archivo",
+    "close": "Cerrar vista previa de archivo",
+    "loading": "Cargando vista previa...",
+    "failed": "No se pudo previsualizar este archivo.",
+    "routeMissing": "La vista previa necesita el gateway más reciente. Reinicia nanobot gateway e inténtalo de nuevo.",
+    "resize": "Cambiar el tamaño de la vista previa",
+    "truncated": "La vista previa está truncada porque el archivo es grande."
   },
   "code": {
     "fallbackLanguage": "código",
@@ -748,17 +1071,17 @@
       "body": "El servidor rechazó tu último mensaje por superar el tamaño permitido. Quita algunas imágenes o usa archivos más pequeños y vuelve a enviarlo."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "El espacio de trabajo no cambió",
+      "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Espacio de trabajo predeterminado",
       "manual": "Pegar ruta",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Usar ruta",
+      "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
     }
   }
 }

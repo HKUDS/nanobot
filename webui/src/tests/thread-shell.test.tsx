@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -59,6 +59,7 @@ function makeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
+    forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
@@ -75,6 +76,20 @@ function wrap(client: ReturnType<typeof makeClient>, children: ReactNode, modelN
     >
       {children}
     </ClientProvider>
+  );
+}
+
+function expectSendMessageWithTurn(
+  client: ReturnType<typeof makeClient>,
+  chatId: string,
+  content: string,
+  options: unknown = undefined,
+) {
+  expect(client.sendMessage).toHaveBeenCalledWith(
+    chatId,
+    content,
+    options,
+    expect.objectContaining({ turnId: expect.any(String) }),
   );
 }
 
@@ -197,6 +212,7 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       mcp_server_count: 0,
       exec_enabled: true,
       exec_sandbox: null,
+      exec_path_prepend_set: false,
       exec_path_append_set: false,
     },
     requires_restart: false,
@@ -270,6 +286,45 @@ describe("ThreadShell", () => {
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
   });
 
+  it("opens model settings from the unconfigured model badge", async () => {
+    const client = makeClient();
+    const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");
+    settings.agent.has_api_key = false;
+    settings.providers = settings.providers.map((provider) =>
+      provider.name === "openai_codex"
+        ? { ...provider, auth_type: "oauth", configured: false }
+        : provider,
+    );
+    const onOpenModelSettings = vi.fn();
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("unconfigured-model")}
+          title="Unconfigured model"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+          onOpenModelSettings={onOpenModelSettings}
+        />,
+        "openai-codex/gpt-5.1-codex",
+      ),
+    );
+
+    const badge = await screen.findByRole("button", { name: "Model not configured" });
+    expect(screen.getByTestId("composer-model-setup-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
+    fireEvent.click(badge);
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Configure model" }));
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(2);
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps image generation controls out of the composer", async () => {
     const client = makeClient();
     const disabledSettings = modelSettings("deepseek-v4-pro", "deepseek");
@@ -339,11 +394,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-a",
-        "persist me across tabs",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-a", "persist me across tabs"),
     );
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
 
@@ -403,11 +454,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-a",
-        "delete me cleanly",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-a", "delete me cleanly"),
     );
     expect(screen.getByText("delete me cleanly")).toBeInTheDocument();
 
@@ -506,11 +553,7 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-new",
-        "first message should stay",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-new", "first message should stay"),
     );
     await waitFor(() =>
       expect(screen.getByText("first message should stay")).toBeInTheDocument(),
@@ -575,7 +618,7 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith("chat-new", "/model", undefined),
+      expectSendMessageWithTurn(client, "chat-new", "/model"),
     );
 
     await act(async () => {
@@ -680,6 +723,58 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
 
+  it("forks assistant replies using the global user message index rather than the visible window index", async () => {
+    const client = makeClient();
+    const onForkChat = vi.fn().mockResolvedValue("chat-fork");
+    const rows = [
+      { role: "user" as const, content: "question 100" },
+      { role: "assistant" as const, content: "answer 100" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Along-chat/webui-thread")) {
+          return httpJson({
+            ...transcriptFromSimpleMessages(rows),
+            page: {
+              before_cursor: "before-question-100",
+              has_more_before: true,
+              loaded_message_count: 2,
+              user_message_offset: 100,
+            },
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("long-chat")}
+          title="Long chat"
+          onToggleSidebar={() => {}}
+          onForkChat={onForkChat}
+        />,
+      ),
+    );
+
+    const targetText = await screen.findByText("answer 100");
+    fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
+      name: "Fork",
+    }));
+
+    await waitFor(() =>
+      expect(onForkChat).toHaveBeenCalledWith("long-chat", 101),
+    );
+  });
+
   it("does not cache optimistic messages under the next chat during a session switch", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-b");
@@ -703,11 +798,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-a",
-        "only in chat a",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-a", "only in chat a"),
     );
     expect(screen.getByText("only in chat a")).toBeInTheDocument();
 
@@ -840,6 +931,75 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.getByText("live assistant reply")).toBeInTheDocument());
   });
 
+  it("keeps live fork replies when a canonical refresh is missing an earlier assistant answer", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-fork/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "first fork question" }]
+                : [
+                    { role: "user", content: "first fork question" },
+                    { role: "user", content: "second fork question" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-fork")}
+          title="Chat chat-fork"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("first fork question")).toBeInTheDocument());
+    await act(async () => {
+      client._emitChat("chat-fork", {
+        event: "message",
+        chat_id: "chat-fork",
+        text: "first fork answer",
+      });
+    });
+    expect(screen.getByText("first fork answer")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "second fork question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expectSendMessageWithTurn(client, "chat-fork", "second fork question"),
+    );
+    expect(screen.getByText("second fork question")).toBeInTheDocument();
+
+    await act(async () => {
+      client._emitSessionUpdate("chat-fork");
+    });
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    expect(screen.getByText("first fork question")).toBeInTheDocument();
+    expect(screen.getByText("first fork answer")).toBeInTheDocument();
+    expect(screen.getByText("second fork question")).toBeInTheDocument();
+  });
+
   it("does not refetch thread history on turn_end", async () => {
     const client = makeClient();
     let historyCalls = 0;
@@ -944,11 +1104,74 @@ describe("ThreadShell", () => {
     expect(historyCalls).toBe(1);
   });
 
+  it("does not scroll again when canonical history refreshes after a session update", async () => {
+    const client = makeClient();
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollTo;
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question" }]
+                : [
+                    { role: "user", content: "question" },
+                    { role: "assistant", content: "canonical answer" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-a")}
+            title="Chat chat-a"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+      await act(async () => {
+        for (let i = 0; i < 8; i += 1) {
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        }
+      });
+      scrollTo.mockClear();
+
+      await act(async () => {
+        client._emitSessionUpdate("chat-a");
+      });
+
+      await waitFor(() => expect(historyCalls).toBe(2));
+      await waitFor(() => expect(screen.getByText("canonical answer")).toBeInTheDocument());
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+    }
+  });
+
   it("scrolls to the bottom after loading a session from the blank new-chat page", async () => {
     const client = makeClient();
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -969,46 +1192,49 @@ describe("ThreadShell", () => {
       }),
     );
 
-    try {
-      const { rerender } = render(
+    const { container, rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    scrollTo.mockClear();
+
+    await act(async () => {
+      rerender(
         wrap(
           client,
           <ThreadShell
-            session={null}
-            title="nanobot"
+            session={session("chat-a")}
+            title="Chat chat-a"
             onToggleSidebar={() => {}}
             onNewChat={() => {}}
           />,
         ),
       );
+    });
 
-      expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
-      scrollIntoView.mockClear();
-
-      await act(async () => {
-        rerender(
-          wrap(
-            client,
-            <ThreadShell
-              session={session("chat-a")}
-              title="Chat chat-a"
-              onToggleSidebar={() => {}}
-              onNewChat={() => {}}
-            />,
-          ),
-        );
-      });
-
-      await waitFor(() => expect(screen.getByText("loaded answer")).toBeInTheDocument());
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
-          behavior: "auto",
-        }),
-      );
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    }
+    await waitFor(() => expect(screen.getByText("loaded answer")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1800,
+        behavior: "auto",
+      }),
+    );
   });
 
   it("opens slash commands on the blank welcome page", async () => {
