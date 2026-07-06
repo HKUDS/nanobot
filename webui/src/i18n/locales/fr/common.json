@@ -125,6 +125,10 @@
       "maxResults": "Résultats max.",
       "timeout": "Délai d’attente",
       "jinaReader": "Lecteur Jina",
+      "fetchProvider": "Fournisseur de récupération",
+      "fetchApiKey": "Clé API Tavily Extract",
+      "fetchBaseUrl": "URL de base Tavily Extract",
+      "fetchTimeout": "Délai de récupération",
       "imageGeneration": "Génération d’images",
       "imageProvider": "Fournisseur d’images",
       "imageProviderStatus": "État du fournisseur",
@@ -169,6 +173,10 @@
       "maxResults": "Résultats renvoyés par chaque appel web_search.",
       "timeout": "Nombre de secondes avant l’expiration d’une requête de recherche.",
       "jinaReader": "Utilise Jina Reader pour web_fetch lorsque disponible.",
+      "fetchProvider": "Fournisseur utilisé par web_fetch pour lire le contenu des pages.",
+      "fetchApiKey": "Utilisée par web_fetch pour Tavily Extract. Laissez vide pour utiliser TAVILY_API_KEY depuis l’environnement de la passerelle.",
+      "fetchBaseUrl": "Remplacement facultatif pour les endpoints Extract compatibles Tavily.",
+      "fetchTimeout": "Nombre de secondes avant l’expiration d’une requête de fournisseur web_fetch.",
       "imageGeneration": "Expose generate_image dans les chats lorsqu’un fournisseur d’image configuré est disponible.",
       "imageProvider": "Choisissez le fournisseur inscrit utilisé par generate_image.",
       "imageProviderStatus": "La génération d’images réutilise les identifiants des fournisseurs.",
@@ -198,6 +206,15 @@
       "transcriptionProviderStatus": "Les cles API restent dans les fournisseurs, pas dans les reglages de transcription.",
       "transcriptionModel": "Laissez le modele resolu par defaut sauf si votre fournisseur exige un id personnalise.",
       "transcriptionLanguage": "Indice ISO-639 facultatif, comme en, zh, ja ou ko."
+    },
+    "placeholders": {
+      "fetchProvider": "Sélectionner un fournisseur de récupération"
+    },
+    "fetchProviders": {
+      "auto": "Auto",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "Readability locale"
     },
     "values": {
       "light": "Clair",

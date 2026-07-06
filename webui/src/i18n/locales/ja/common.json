@@ -125,6 +125,10 @@
       "maxResults": "最大結果数",
       "timeout": "タイムアウト",
       "jinaReader": "Jina リーダー",
+      "fetchProvider": "取得プロバイダー",
+      "fetchApiKey": "Tavily Extract API キー",
+      "fetchBaseUrl": "Tavily Extract ベース URL",
+      "fetchTimeout": "取得タイムアウト",
       "imageGeneration": "画像生成",
       "imageProvider": "画像プロバイダー",
       "imageProviderStatus": "プロバイダー状態",
@@ -169,6 +173,10 @@
       "maxResults": "各 web_search 呼び出しで返す結果数です。",
       "timeout": "検索プロバイダーのリクエストがタイムアウトするまでの秒数です。",
       "jinaReader": "利用可能な場合、web_fetch に Jina Reader を使います。",
+      "fetchProvider": "web_fetch がページ内容を読むときに使用するプロバイダーです。",
+      "fetchApiKey": "web_fetch が Tavily Extract を使うための API キーです。空欄の場合は gateway 環境の TAVILY_API_KEY を使用します。",
+      "fetchBaseUrl": "Tavily 互換 Extract エンドポイントの任意の上書きです。",
+      "fetchTimeout": "web_fetch プロバイダーのリクエストがタイムアウトするまでの秒数です。",
       "imageGeneration": "画像プロバイダーが設定済みのとき、チャットで generate_image を有効にします。",
       "imageProvider": "generate_image で使用する登録済みプロバイダーを選択します。",
       "imageProviderStatus": "画像生成は「プロバイダー」の認証情報を再利用します。",
@@ -198,6 +206,15 @@
       "transcriptionProviderStatus": "APIキーは文字起こし設定ではなくプロバイダー側に保存されます。",
       "transcriptionModel": "プロバイダーがカスタムモデルIDを必要としない限り、解決済みのデフォルトのままにします。",
       "transcriptionLanguage": "en、zh、ja、ko などの任意の ISO-639 ヒント。"
+    },
+    "placeholders": {
+      "fetchProvider": "取得プロバイダーを選択"
+    },
+    "fetchProviders": {
+      "auto": "自動",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "ローカル readability"
     },
     "values": {
       "light": "ライト",

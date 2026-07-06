@@ -416,7 +416,11 @@ export interface SettingsPayload {
       timeout: number;
     };
     fetch: {
-      use_jina_reader: boolean;
+      enable: boolean;
+      provider: string;
+      api_key_hint?: string | null;
+      base_url?: string | null;
+      timeout: number;
     };
   };
   image_generation: {
@@ -755,7 +759,10 @@ export interface WebSearchSettingsUpdate {
   baseUrl?: string;
   maxResults?: number;
   timeout?: number;
-  useJinaReader?: boolean;
+  fetchProvider?: string;
+  fetchApiKey?: string;
+  fetchBaseUrl?: string;
+  fetchTimeout?: number;
 }
 
 export interface NetworkSafetySettingsUpdate {

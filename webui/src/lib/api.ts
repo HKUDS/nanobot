@@ -652,9 +652,10 @@ export async function updateWebSearchSettings(
   if (update.baseUrl !== undefined) query.set("base_url", update.baseUrl);
   if (update.maxResults !== undefined) query.set("max_results", String(update.maxResults));
   if (update.timeout !== undefined) query.set("timeout", String(update.timeout));
-  if (update.useJinaReader !== undefined) {
-    query.set("use_jina_reader", String(update.useJinaReader));
-  }
+  if (update.fetchProvider !== undefined) query.set("fetch_provider", update.fetchProvider);
+  if (update.fetchApiKey !== undefined) query.set("fetch_api_key", update.fetchApiKey);
+  if (update.fetchBaseUrl !== undefined) query.set("fetch_base_url", update.fetchBaseUrl);
+  if (update.fetchTimeout !== undefined) query.set("fetch_timeout", String(update.fetchTimeout));
   return request<SettingsPayload>(
     `${base}/api/settings/web-search/update?${query}`,
     token,

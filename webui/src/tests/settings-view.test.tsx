@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import type { SettingsPayload } from "@/lib/types";
 
 function jsonResponse(body: unknown): Response {
@@ -56,7 +57,7 @@ function settingsPayload(): SettingsPayload {
       proxy: null,
       user_agent: null,
       search: { max_results: 5, timeout: 30 },
-      fetch: { use_jina_reader: true },
+      fetch: { enable: true, provider: "auto", api_key_hint: null, base_url: null, timeout: 30 },
     },
     image_generation: {
       enabled: false,
@@ -159,7 +160,7 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models" | "browser";
+    initialSection?: SettingsSectionKey;
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -558,6 +559,52 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
+  });
+
+  it("saves web fetch provider credentials from browser settings", async () => {
+    const basePayload = settingsPayload();
+    const updatedPayload: SettingsPayload = {
+      ...basePayload,
+      web: {
+        ...basePayload.web,
+        fetch: {
+          enable: true,
+          provider: "auto",
+          api_key_hint: "tav••••test",
+          base_url: "https://extract.example.com",
+          timeout: 60,
+        },
+      },
+      requires_restart: true,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/settings/web-search/update?")) return jsonResponse(updatedPayload);
+      return jsonResponse(basePayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "browser", initialSettings: basePayload });
+
+    fireEvent.change(screen.getByPlaceholderText("Enter API key"), {
+      target: { value: "tvly-test" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("https://api.tavily.com"), {
+      target: { value: "https://extract.example.com" },
+    });
+    fireEvent.change(screen.getAllByRole("spinbutton")[2], {
+      target: { value: "60" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/web-search/update?provider=duckduckgo&max_results=5&timeout=30&fetch_provider=auto&fetch_api_key=tvly-test&fetch_base_url=https%3A%2F%2Fextract.example.com&fetch_timeout=60",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
   });
 
   it("aligns token activity days with the configured timezone", async () => {
@@ -1142,7 +1189,7 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
       if (
         url ===
-        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true"
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&fetch_provider=auto&fetch_base_url=&fetch_timeout=30"
       ) {
         return jsonResponse(updatedPayload);
       }
@@ -1162,7 +1209,7 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&use_jina_reader=true",
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&fetch_provider=auto&fetch_base_url=&fetch_timeout=30",
         expect.objectContaining({
           headers: { Authorization: "Bearer tok" },
         }),

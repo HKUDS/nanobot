@@ -393,8 +393,18 @@ const DEFAULT_WEB_SEARCH_FORM: WebSearchSettingsUpdate = {
   baseUrl: "",
   maxResults: 5,
   timeout: 30,
-  useJinaReader: true,
+  fetchProvider: "auto",
+  fetchApiKey: "",
+  fetchBaseUrl: "",
+  fetchTimeout: 30,
 };
+
+const WEB_FETCH_PROVIDERS = [
+  { name: "auto", label: "Auto" },
+  { name: "tavily", label: "Tavily Extract" },
+  { name: "jina", label: "Jina Reader" },
+  { name: "readability", label: "Local readability" },
+];
 
 const DEFAULT_IMAGE_GENERATION_FORM: ImageGenerationSettingsUpdate = {
   enabled: false,
@@ -462,7 +472,10 @@ function webSearchFormFromPayload(
     baseUrl: payload.web_search.base_url ?? "",
     maxResults: payload.web_search.max_results,
     timeout: payload.web_search.timeout,
-    useJinaReader: payload.web.fetch.use_jina_reader,
+    fetchProvider: payload.web.fetch.provider,
+    fetchApiKey: "",
+    fetchBaseUrl: payload.web.fetch.base_url ?? "",
+    fetchTimeout: payload.web.fetch.timeout,
   };
 }
 
@@ -629,6 +642,8 @@ export function SettingsView({
   );
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
+  const [webFetchKeyVisible, setWebFetchKeyVisible] = useState(false);
+  const [webFetchKeyEditing, setWebFetchKeyEditing] = useState(false);
   const [form, setForm] = useState<AgentSettingsDraft>(() =>
     initialSettings ? agentDraftFromPayload(initialSettings) : DEFAULT_AGENT_SETTINGS_DRAFT,
   );
@@ -1231,14 +1246,25 @@ export function SettingsView({
 
     setWebSearchSaving(true);
     try {
+      const fetchProviderChanged =
+        (webSearchForm.fetchProvider ?? settings.web.fetch.provider) !== settings.web.fetch.provider;
+      const fetchBaseUrlChanged =
+        (webSearchForm.fetchBaseUrl ?? settings.web.fetch.base_url ?? "") !==
+        (settings.web.fetch.base_url ?? "");
+      const fetchTimeoutChanged =
+        (webSearchForm.fetchTimeout ?? settings.web.fetch.timeout) !== settings.web.fetch.timeout;
       const webFetchRestartRequired =
-        (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
-        settings.web.fetch.use_jina_reader;
+        fetchProviderChanged ||
+        fetchBaseUrlChanged ||
+        fetchTimeoutChanged ||
+        !!webSearchForm.fetchApiKey?.trim();
       const update: WebSearchSettingsUpdate = {
         provider: webSearchForm.provider,
         maxResults: webSearchForm.maxResults,
         timeout: webSearchForm.timeout,
-        useJinaReader: webSearchForm.useJinaReader,
+        fetchProvider: webSearchForm.fetchProvider,
+        fetchBaseUrl: webSearchForm.fetchBaseUrl ?? "",
+        fetchTimeout: webSearchForm.fetchTimeout,
       };
       if (
         webSearchProviderAcceptsApiKey(provider) &&
@@ -1247,6 +1273,8 @@ export function SettingsView({
         update.apiKey = apiKey;
       }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
+      const fetchApiKey = webSearchForm.fetchApiKey?.trim() ?? "";
+      if (fetchApiKey) update.fetchApiKey = fetchApiKey;
       const payload = await updateWebSearchSettings(token, update);
       applyPayload(payload);
       if (payload.requires_restart || webFetchRestartRequired) {
@@ -1259,10 +1287,15 @@ export function SettingsView({
         baseUrl: payload.web_search.base_url ?? prev.baseUrl ?? "",
         maxResults: payload.web_search.max_results,
         timeout: payload.web_search.timeout,
-        useJinaReader: payload.web.fetch.use_jina_reader,
+        fetchProvider: payload.web.fetch.provider,
+        fetchApiKey: "",
+        fetchBaseUrl: payload.web.fetch.base_url ?? "",
+        fetchTimeout: payload.web.fetch.timeout,
       }));
       setWebSearchKeyVisible(false);
       setWebSearchKeyEditing(false);
+      setWebFetchKeyVisible(false);
+      setWebFetchKeyEditing(false);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -1299,10 +1332,15 @@ export function SettingsView({
       baseUrl: settings.web_search.base_url ?? "",
       maxResults: settings.web_search.max_results,
       timeout: settings.web_search.timeout,
-      useJinaReader: settings.web.fetch.use_jina_reader,
+      fetchProvider: settings.web.fetch.provider,
+      fetchApiKey: "",
+      fetchBaseUrl: settings.web.fetch.base_url ?? "",
+      fetchTimeout: settings.web.fetch.timeout,
     });
     setWebSearchKeyVisible(false);
     setWebSearchKeyEditing(false);
+    setWebFetchKeyVisible(false);
+    setWebFetchKeyEditing(false);
   }, [settings]);
 
   const handleWebSearchProviderChange = useCallback((provider: string) => {
@@ -1313,7 +1351,10 @@ export function SettingsView({
       baseUrl: provider === settings.web_search.provider ? settings.web_search.base_url ?? "" : "",
       maxResults: prev.maxResults ?? settings.web_search.max_results,
       timeout: prev.timeout ?? settings.web_search.timeout,
-      useJinaReader: prev.useJinaReader ?? settings.web.fetch.use_jina_reader,
+      fetchProvider: prev.fetchProvider ?? settings.web.fetch.provider,
+      fetchApiKey: prev.fetchApiKey ?? "",
+      fetchBaseUrl: prev.fetchBaseUrl ?? settings.web.fetch.base_url ?? "",
+      fetchTimeout: prev.fetchTimeout ?? settings.web.fetch.timeout,
     }));
     setWebSearchKeyVisible(false);
     setWebSearchKeyEditing(false);
@@ -1654,6 +1695,8 @@ export function SettingsView({
             form={webSearchForm}
             keyVisible={webSearchKeyVisible}
             keyEditing={webSearchKeyEditing}
+            fetchKeyVisible={webFetchKeyVisible}
+            fetchKeyEditing={webFetchKeyEditing}
             saving={webSearchSaving}
             onChangeForm={setWebSearchForm}
             onChangeProvider={handleWebSearchProviderChange}
@@ -1662,6 +1705,12 @@ export function SettingsView({
               setWebSearchKeyEditing((editing) => !editing);
               setWebSearchKeyVisible(false);
               setWebSearchForm((prev) => ({ ...prev, apiKey: "" }));
+            }}
+            onToggleFetchKey={() => setWebFetchKeyVisible((visible) => !visible)}
+            onToggleFetchKeyEditing={() => {
+              setWebFetchKeyEditing((editing) => !editing);
+              setWebFetchKeyVisible(false);
+              setWebSearchForm((prev) => ({ ...prev, fetchApiKey: "" }));
             }}
             onReset={resetWebSearchDraft}
             onSave={saveWebSearch}
@@ -3309,11 +3358,15 @@ function WebSettings({
   form,
   keyVisible,
   keyEditing,
+  fetchKeyVisible,
+  fetchKeyEditing,
   saving,
   onChangeForm,
   onChangeProvider,
   onToggleKey,
   onToggleKeyEditing,
+  onToggleFetchKey,
+  onToggleFetchKeyEditing,
   onReset,
   onSave,
   showBrandLogos,
@@ -3325,11 +3378,15 @@ function WebSettings({
   form: WebSearchSettingsUpdate;
   keyVisible: boolean;
   keyEditing: boolean;
+  fetchKeyVisible: boolean;
+  fetchKeyEditing: boolean;
   saving: boolean;
   onChangeForm: Dispatch<SetStateAction<WebSearchSettingsUpdate>>;
   onChangeProvider: (provider: string) => void;
   onToggleKey: () => void;
   onToggleKeyEditing: () => void;
+  onToggleFetchKey: () => void;
+  onToggleFetchKeyEditing: () => void;
   onReset: () => void;
   onSave: () => void;
   showBrandLogos: boolean;
@@ -3339,6 +3396,10 @@ function WebSettings({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const fetchProviders = WEB_FETCH_PROVIDERS.map((provider) => ({
+    ...provider,
+    label: tx(`settings.fetchProviders.${provider.name}`, provider.label),
+  }));
   const selectedProvider =
     settings.web_search.providers.find((provider) => provider.name === form.provider) ??
     settings.web_search.providers[0];
@@ -3349,15 +3410,28 @@ function WebSettings({
   const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
-  const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
+  const effectiveFetchProvider = form.fetchProvider ?? settings.web.fetch.provider;
+  const fetchApiKey = form.fetchApiKey?.trim() ?? "";
+  const fetchBaseUrl = form.fetchBaseUrl?.trim() ?? "";
+  const effectiveFetchTimeout = form.fetchTimeout ?? settings.web.fetch.timeout;
+  const showTavilyFetchConfig = effectiveFetchProvider === "auto" || effectiveFetchProvider === "tavily";
+  const hasExistingFetchSecret = !!settings.web.fetch.api_key_hint;
+  const showFetchKeyInput = showTavilyFetchConfig && (!hasExistingFetchSecret || fetchKeyEditing);
   const dirty =
     form.provider !== settings.web_search.provider ||
     apiKey.length > 0 ||
     baseUrl !== (settings.web_search.base_url ?? "") ||
     form.maxResults !== settings.web_search.max_results ||
     form.timeout !== settings.web_search.timeout ||
-    effectiveJinaReader !== settings.web.fetch.use_jina_reader;
-  const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
+    effectiveFetchProvider !== settings.web.fetch.provider ||
+    fetchApiKey.length > 0 ||
+    fetchBaseUrl !== (settings.web.fetch.base_url ?? "") ||
+    effectiveFetchTimeout !== settings.web.fetch.timeout;
+  const fetchSettingsDirty =
+    effectiveFetchProvider !== settings.web.fetch.provider ||
+    fetchApiKey.length > 0 ||
+    fetchBaseUrl !== (settings.web.fetch.base_url ?? "") ||
+    effectiveFetchTimeout !== settings.web.fetch.timeout;
   const missingCredential =
     webSearchProviderRequiresApiKey(selectedProvider)
       ? !apiKey && !hasExistingSecret
@@ -3496,14 +3570,99 @@ function WebSettings({
             />
           </SettingsRow>
           <SettingsRow
-            title={tx("settings.rows.jinaReader", "Jina reader")}
-            description={tx("settings.help.jinaReader", "Use Jina Reader for web_fetch when available.")}
+            title={tx("settings.rows.fetchProvider", "Fetch provider")}
+            description={tx("settings.help.fetchProvider", "Provider used by web_fetch when reading page content.")}
           >
-            <ToggleButton
-              checked={effectiveJinaReader}
-              onChange={(useJinaReader) => onChangeForm((prev) => ({ ...prev, useJinaReader }))}
-              ariaLabel={tx("settings.rows.jinaReader", "Jina reader")}
-              label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            <ProviderPicker
+              providers={fetchProviders}
+              value={effectiveFetchProvider}
+              emptyLabel={tx("settings.placeholders.fetchProvider", "Select fetch provider")}
+              onChange={(fetchProvider) => onChangeForm((prev) => ({ ...prev, fetchProvider }))}
+            />
+          </SettingsRow>
+          {showTavilyFetchConfig ? (
+            <>
+              <SettingsRow
+                title={tx("settings.rows.fetchApiKey", "Tavily Extract API key")}
+                description={tx("settings.help.fetchApiKey", "Used by web_fetch for Tavily Extract. Leave blank to use TAVILY_API_KEY from the gateway environment.")}
+              >
+                <div className="relative w-[280px] max-w-full">
+                  {showFetchKeyInput ? (
+                    <>
+                      <Input
+                        type={fetchKeyVisible ? "text" : "password"}
+                        value={form.fetchApiKey ?? ""}
+                        onChange={(event) =>
+                          onChangeForm((prev) => ({ ...prev, fetchApiKey: event.target.value }))
+                        }
+                        placeholder={
+                          hasExistingFetchSecret
+                            ? t("settings.byok.apiKeyConfiguredPlaceholder")
+                            : t("settings.byok.apiKeyPlaceholder")
+                        }
+                        className="h-9 rounded-full pr-11 text-[13px]"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={onToggleFetchKey}
+                        aria-label={
+                          fetchKeyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
+                        }
+                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        {fetchKeyVisible ? (
+                          <EyeOff className="h-3.5 w-3.5" aria-hidden />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" aria-hidden />
+                        )}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
+                        {settings.web.fetch.api_key_hint ?? t("settings.byok.configuredKeyHint")}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={onToggleFetchKeyEditing}
+                        aria-label={t("settings.actions.edit")}
+                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </SettingsRow>
+              <SettingsRow
+                title={tx("settings.rows.fetchBaseUrl", "Tavily Extract base URL")}
+                description={tx("settings.help.fetchBaseUrl", "Optional override for Tavily-compatible extract endpoints.")}
+              >
+                <Input
+                  value={form.fetchBaseUrl ?? ""}
+                  onChange={(event) =>
+                    onChangeForm((prev) => ({ ...prev, fetchBaseUrl: event.target.value }))
+                  }
+                  placeholder="https://api.tavily.com"
+                  className="h-9 w-[280px] rounded-full text-[13px]"
+                />
+              </SettingsRow>
+            </>
+          ) : null}
+          <SettingsRow
+            title={tx("settings.rows.fetchTimeout", "Fetch timeout")}
+            description={tx("settings.help.fetchTimeout", "Seconds before a web_fetch provider request times out.")}
+          >
+            <NumberInput
+              value={effectiveFetchTimeout}
+              min={1}
+              max={120}
+              onChange={(fetchTimeout) => onChangeForm((prev) => ({ ...prev, fetchTimeout }))}
+              suffix="s"
             />
           </SettingsRow>
           <RestartSettingsFooter
@@ -3516,7 +3675,7 @@ function WebSettings({
                 ? t("settings.byok.webSearch.missingCredential")
                 : requiresRestartPending && !dirty
                   ? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
-                  : jinaReaderDirty
+                  : fetchSettingsDirty
                     ? tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
                     : dirty
                       ? t("settings.byok.webSearch.saveHint")

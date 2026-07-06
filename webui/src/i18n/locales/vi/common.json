@@ -125,6 +125,10 @@
       "maxResults": "Kết quả tối đa",
       "timeout": "Thời gian chờ",
       "jinaReader": "Trình đọc Jina",
+      "fetchProvider": "Nhà cung cấp fetch",
+      "fetchApiKey": "API key Tavily Extract",
+      "fetchBaseUrl": "Base URL Tavily Extract",
+      "fetchTimeout": "Thời gian chờ fetch",
       "imageGeneration": "Tạo hình ảnh",
       "imageProvider": "Nhà cung cấp hình ảnh",
       "imageProviderStatus": "Trạng thái nhà cung cấp",
@@ -169,6 +173,10 @@
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
       "jinaReader": "Usa Jina Reader para web_fetch cuando esté disponible.",
+      "fetchProvider": "Nhà cung cấp được web_fetch dùng để đọc nội dung trang.",
+      "fetchApiKey": "Được web_fetch dùng cho Tavily Extract. Để trống để dùng TAVILY_API_KEY từ môi trường gateway.",
+      "fetchBaseUrl": "Ghi đè tùy chọn cho endpoint Extract tương thích Tavily.",
+      "fetchTimeout": "Số giây trước khi yêu cầu nhà cung cấp web_fetch hết thời gian chờ.",
       "imageGeneration": "Expone generate_image en chats cuando hay un proveedor de imagen configurado.",
       "imageProvider": "Elige el proveedor registrado usado por generate_image.",
       "imageProviderStatus": "La generación de imágenes reutiliza credenciales de Proveedores.",
@@ -198,6 +206,15 @@
       "transcriptionProviderStatus": "API key nam trong providers, khong nam trong cai dat transcription.",
       "transcriptionModel": "Giu mac dinh da resolve tru khi nha cung cap can id model tuy chinh.",
       "transcriptionLanguage": "Goi y ISO-639 tuy chon, nhu en, zh, ja hoac ko."
+    },
+    "placeholders": {
+      "fetchProvider": "Chọn nhà cung cấp fetch"
+    },
+    "fetchProviders": {
+      "auto": "Tự động",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "Readability cục bộ"
     },
     "values": {
       "light": "Sáng",
