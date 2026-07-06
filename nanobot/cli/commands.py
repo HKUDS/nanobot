@@ -1307,13 +1307,16 @@ def _run_gateway(
     session_manager = SessionManager(config.workspace_path)
 
     # Self-heal the gateway state file with the current PID after any restart.
+    from nanobot.config.loader import get_config_path
     from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths
+
+    config_path = str(get_config_path().resolve(strict=False))
     GatewayRuntime.refresh_state_pid(
         paths=GatewayRuntimePaths.for_instance(
             workspace=str(config.workspace_path)
             if not is_default_workspace(config.workspace_path)
             else None,
-            config_path=config.config_path,
+            config_path=config_path,
         )
     )
 
