@@ -93,9 +93,9 @@ def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:
     if not isinstance(arguments, dict):
         return None
     if tool_name == "web_fetch":
-        url = str(arguments.get("url") or "").strip()
-        if url:
-            return f"web_fetch:{url.lower()}"
+        url = arguments.get("url")
+        if isinstance(url, str) and url.strip():
+            return f"web_fetch:{url.strip().lower()}"
     if tool_name == "web_search":
         query = str(arguments.get("query") or arguments.get("search_term") or "").strip()
         if query:
