@@ -1653,6 +1653,63 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("finalizes active streaming before turn-ending side-channel commands", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-new", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      result.current.send("long task");
+    });
+    const activeTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+
+    act(() => {
+      fake.emit("chat-new", {
+        event: "delta",
+        chat_id: "chat-new",
+        text: "partial answer",
+        turn_id: activeTurnId,
+      });
+    });
+    await flushStreamFrame();
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages.find((message) => message.content === "partial answer"))
+      .toMatchObject({ isStreaming: true });
+
+    act(() => {
+      result.current.send("/new", undefined, {
+        sideChannel: true,
+        finalizeActiveTurn: true,
+      });
+    });
+
+    const newCall = fake.client.sendMessage.mock.calls.at(-1)!;
+    expect(newCall[3]).not.toHaveProperty("sideChannel");
+    expect(newCall[3]).not.toHaveProperty("finalizeActiveTurn");
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages.find((message) => message.content === "partial answer"))
+      .toMatchObject({ isStreaming: false });
+
+    act(() => {
+      fake.emit("chat-new", {
+        event: "message",
+        chat_id: "chat-new",
+        text: "New session started.",
+        turn_id: newCall[3]?.turnId,
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "long task",
+      "partial answer",
+      "/new",
+      "New session started.",
+    ]);
+  });
+
   it("lets stream_end finish streaming while side-channel status replies arrive", () => {
     vi.useFakeTimers();
     try {

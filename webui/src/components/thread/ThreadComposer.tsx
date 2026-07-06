@@ -109,8 +109,21 @@ const FALLBACK_SIDE_CHANNEL_COMMANDS = new Set([
 ]);
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
 
+function slashCommandName(content: string): string {
+  return content.split(/\s+/, 1)[0];
+}
+
+function isExactSlashCommand(content: string, commandName: string): boolean {
+  if (slashCommandName(content) !== commandName) return false;
+  return content.slice(commandName.length).trim().length === 0;
+}
+
+function shouldFinalizeActiveTurn(content: string): boolean {
+  return isExactSlashCommand(content, "/new");
+}
+
 function isSlashCommandSideChannel(content: string, visibleSlashCommands: SlashCommand[]): boolean {
-  const commandName = content.split(/\s+/, 1)[0];
+  const commandName = slashCommandName(content);
   if (!commandName.startsWith("/")) return false;
   if (commandName === "/goal" && content.slice(commandName.length).trim().length > 0) {
     return false;
@@ -1509,15 +1522,37 @@ export function ThreadComposer({
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    const isSlashSideChannel =
+    const hasPlainTextCommandPayload =
       payload === undefined
       && attachedCliApps.length === 0
-      && attachedMcpPresets.length === 0
+      && attachedMcpPresets.length === 0;
+    if (
+      hasPlainTextCommandPayload
+      && isStreaming
+      && onStop
+      && isExactSlashCommand(content, "/stop")
+    ) {
+      handleStop();
+      setQueuedPrompts([]);
+      clear();
+      clearComposerText();
+      return;
+    }
+    const isSlashSideChannel =
+      hasPlainTextCommandPayload
       && isSlashCommandSideChannel(content, visibleSlashCommands);
+    const finalizeActiveTurn =
+      isSlashSideChannel && shouldFinalizeActiveTurn(content);
     onSend(
       content,
       payload,
-      isSlashSideChannel ? { ...options, sideChannel: true } : options,
+      isSlashSideChannel
+        ? {
+            ...options,
+            sideChannel: true,
+            ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
+          }
+        : options,
     );
     setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
@@ -1530,9 +1565,12 @@ export function ThreadComposer({
     canSend,
     clear,
     clearComposerText,
+    handleStop,
+    isStreaming,
     modelNeedsSetup,
     onModelBadgeClick,
     onSend,
+    onStop,
     readyImages,
     value,
     visibleSlashCommands,

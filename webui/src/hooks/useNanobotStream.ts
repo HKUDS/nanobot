@@ -448,6 +448,7 @@ export interface SendOptions {
   mcpPresets?: OutboundMcpPresetMention[];
   workspaceScope?: WorkspaceScopePayload | null;
   sideChannel?: boolean;
+  finalizeActiveTurn?: boolean;
 }
 
 function eventExtendsModelActivity(ev: InboundEvent): boolean {
@@ -1111,19 +1112,26 @@ export function useNanobotStream(
       if (!hasImages && !content.trim()) return;
 
       const sideChannel = options?.sideChannel === true;
+      const finalizeActiveTurn = options?.finalizeActiveTurn === true;
       flushPendingStreamEvents();
+      if (finalizeActiveTurn) {
+        cancelStreamEndTimer();
+        setIsStreaming(false);
+      }
       const turnId = crypto.randomUUID();
       if (sideChannel) sideChannelTurnIdsRef.current.add(turnId);
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => {
-        if (!sideChannel) {
+        if (!sideChannel || finalizeActiveTurn) {
           buffer.current = null;
           activeAssistantRef.current = null;
           closedAssistantStreamIdsRef.current.clear();
           clearActivitySegment();
+          suppressStreamUntilTurnEndRef.current = false;
         }
+        const base = finalizeActiveTurn ? finalizeStreamedTurn(prev) : prev;
         return [
-          ...(sideChannel ? prev : pruneReasoningOnlyPlaceholders(prev)),
+          ...(sideChannel ? base : pruneReasoningOnlyPlaceholders(base)),
           {
             id: crypto.randomUUID(),
             role: "user",
@@ -1142,9 +1150,10 @@ export function useNanobotStream(
       const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
       const wireOptions = { ...options, turnId };
       delete wireOptions.sideChannel;
+      delete wireOptions.finalizeActiveTurn;
       client.sendMessage(chatId, content, wireMedia, wireOptions);
     },
-    [chatId, clearActivitySegment, client, flushPendingStreamEvents],
+    [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );
 
   const stop = useCallback(() => {

@@ -1345,6 +1345,47 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/status", undefined, { sideChannel: true });
   });
 
+  it("marks new chat commands as side-channel sends that finalize the active turn", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "/new",
+      undefined,
+      { sideChannel: true, finalizeActiveTurn: true },
+    );
+  });
+
+  it("routes a manually submitted stop command through the stop handler", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/stop" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("keeps goal task commands on the normal agent turn path", () => {
     const onSend = vi.fn();
     render(
