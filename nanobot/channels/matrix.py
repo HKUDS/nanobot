@@ -3,6 +3,7 @@
 import asyncio
 import json
 import mimetypes
+import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -45,7 +46,7 @@ try:
     from nio.exceptions import EncryptionError
 except ImportError as e:
     raise ImportError(
-        "Matrix dependencies not installed. Run: pip install nanobot-ai[matrix]"
+        "Matrix dependencies not installed. Run: nanobot plugins enable matrix"
     ) from e
 
 from nanobot.bus.events import OutboundMessage
@@ -191,6 +192,10 @@ def _build_matrix_text_content(
     return content
 
 
+def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
+    return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -200,7 +205,7 @@ class MatrixConfig(Base):
     password: str = ""
     access_token: str = ""
     device_id: str = ""
-    e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
+    e2ee_enabled: bool = Field(default=sys.platform != "win32", alias="e2eeEnabled")
     sas_verification: bool = Field(default=False, alias="sasVerification")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024
@@ -542,7 +547,8 @@ class MatrixChannel(BaseChannel):
         relates_to = self._build_thread_relates_to(metadata)
 
         if stream_end:
-            buf = self._stream_bufs.pop(chat_id, None)
+            stream_key = _matrix_stream_key(chat_id, stream_id)
+            buf = self._stream_bufs.pop(stream_key, None)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -556,10 +562,11 @@ class MatrixChannel(BaseChannel):
             await self._send_room_content(chat_id, content)
             return
 
-        buf = self._stream_bufs.get(chat_id)
+        stream_key = _matrix_stream_key(chat_id, stream_id)
+        buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _StreamBuf()
-            self._stream_bufs[chat_id] = buf
+            self._stream_bufs[stream_key] = buf
         buf.text += delta
 
         if not buf.text.strip():

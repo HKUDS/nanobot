@@ -1,6 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -122,6 +123,25 @@ def _sanitize_name(name: str) -> str:
     return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
 
 
+_MAX_TOOL_NAME_LENGTH = 64
+_HASH_LENGTH = 8
+
+
+def _limit_tool_name(name: str, max_length: int = _MAX_TOOL_NAME_LENGTH) -> str:
+    """Limit a tool name while keeping short names unchanged."""
+    if len(name) <= max_length:
+        return name
+
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
+    prefix_length = max_length - _HASH_LENGTH - 1
+    return f"{name[:prefix_length]}_{digest}"
+
+
+def _sanitize_mcp_tool_name(name: str) -> str:
+    """Sanitize and limit an MCP-derived tool name."""
+    return _limit_tool_name(_sanitize_name(name))
+
+
 def _is_transient(exc: BaseException) -> bool:
     """Check if an exception looks like a transient connection error."""
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
@@ -129,6 +149,8 @@ def _is_transient(exc: BaseException) -> bool:
 
 def _is_session_terminated(exc: BaseException) -> bool:
     """Return True when the MCP SDK reports a dead client session."""
+    if _is_transient(exc):
+        return True
     messages = [str(exc)]
     error = getattr(exc, "error", None)
     if error is not None:
@@ -387,7 +409,7 @@ class MCPToolWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
-        self._name = _sanitize_name(f"mcp_{server_name}_{tool_def.name}")
+        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
@@ -418,7 +440,9 @@ class MCPToolWrapper(_MCPWrapperBase):
                 logger.warning(
                     "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
                 )
-                return f"(MCP tool call timed out after {self._tool_timeout}s)"
+                return ToolResult.error(
+                    f"(MCP tool call timed out after {self._tool_timeout}s)"
+                )
             except asyncio.CancelledError:
                 # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
                 # Re-raise only if our task was externally cancelled (e.g. /stop).
@@ -426,7 +450,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 if task is not None and task.cancelling() > 0:
                     raise
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return "(MCP tool call was cancelled)"
+                return ToolResult.error("(MCP tool call was cancelled)")
             except Exception as exc:
                 if await self._refresh_session_after_termination(
                     exc,
@@ -451,20 +475,35 @@ class MCPToolWrapper(_MCPWrapperBase):
                         self._name,
                         type(exc).__name__,
                     )
-                    return f"(MCP tool call failed after retry: {type(exc).__name__})"
+                    return ToolResult.error(
+                        f"(MCP tool call failed after retry: {type(exc).__name__})"
+                    )
                 logger.exception(
                     "MCP tool '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
                     exc,
                 )
-                return f"(MCP tool call failed: {type(exc).__name__})"
+                return ToolResult.error(
+                    f"(MCP tool call failed: {type(exc).__name__})"
+                )
             else:
                 # Success — extract text and persist any image content as artifacts.
-                rendered = self._render_call_result(result.content, kwargs)
-                if getattr(result, "isError", False):
-                    return ToolResult.error(rendered)
-                return rendered
+                try:
+                    rendered = self._render_call_result(result.content, kwargs)
+                    if getattr(result, "isError", False):
+                        return ToolResult.error(rendered)
+                    return rendered
+                except Exception as exc:
+                    logger.exception(
+                        "MCP tool '{}' failed while rendering result: {}: {}",
+                        self._name,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    return ToolResult.error(
+                        f"(MCP tool returned malformed content: {type(exc).__name__})"
+                    )
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
 
@@ -529,7 +568,7 @@ class MCPResourceWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._uri = resource_def.uri
-        self._name = _sanitize_name(f"mcp_{server_name}_resource_{resource_def.name}")
+        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_resource_{resource_def.name}")
         desc = resource_def.description or resource_def.name
         self._description = f"[MCP Resource] {desc}\nURI: {self._uri}"
         self._parameters: dict[str, Any] = {
@@ -630,7 +669,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
     def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
         self._set_mcp_connection(session, server_name)
         self._prompt_name = prompt_def.name
-        self._name = _sanitize_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
+        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
         desc = prompt_def.description or prompt_def.name
         self._description = (
             f"[MCP Prompt] {desc}\n"
@@ -874,9 +913,9 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
+            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
             for tool_def in tools.tools:
-                wrapped_name = _sanitize_name(f"mcp_{name}_{tool_def.name}")
+                wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
                     not allow_all_tools
                     and tool_def.name not in enabled_tools
@@ -1255,11 +1294,10 @@ def _attach_reconnect_handlers(
         )
 
     for server_name in server_names:
-        prefix = _tool_prefix(server_name)
         for tool_name in list(registry.tool_names):
-            if not tool_name.startswith(prefix):
-                continue
             tool = registry.get(tool_name)
+            if not _tool_belongs_to_server(tool, tool_name, server_name):
+                continue
             if isinstance(tool, _MCPWrapperBase):
                 tool.set_reconnect_handler(reconnect)
 
@@ -1312,11 +1350,17 @@ def _tool_prefix(server_name: str) -> str:
     return _sanitize_name(f"mcp_{server_name}_")
 
 
+def _tool_belongs_to_server(tool: Tool | None, tool_name: str, server_name: str) -> bool:
+    if isinstance(tool, _MCPWrapperBase):
+        return getattr(tool, "_server_name", None) == server_name
+    return tool_name.startswith(_tool_prefix(server_name))
+
+
 def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:
-    prefix = _tool_prefix(server_name)
     removed = 0
     for tool_name in list(registry.tool_names):
-        if tool_name.startswith(prefix):
+        tool = registry.get(tool_name)
+        if _tool_belongs_to_server(tool, tool_name, server_name):
             registry.unregister(tool_name)
             removed += 1
     return removed

@@ -338,6 +338,9 @@ class WebSearchTool(Tool):
             return "volcengine" if api_key else "duckduckgo"
         if provider == "keenable":
             return "keenable"
+        if provider == "serper":
+            api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
+            return "serper" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -394,6 +397,8 @@ class WebSearchTool(Tool):
             )
         elif provider == "keenable":
             return await self._search_keenable(query, n)
+        elif provider == "serper":
+            return await self._search_serper(query, n)
         else:
             return ToolResult.error(f"Error: unknown search provider '{provider}'")
 
@@ -667,6 +672,43 @@ class WebSearchTool(Tool):
             return ToolResult.error(f"Error: Exa search failed ({e.response.status_code}): {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Exa search failed: {e}")
+
+    async def _search_serper(self, query: str, n: int) -> str:
+        """Search via Serper.dev (Google Search API)."""
+        api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
+        if not api_key:
+            logger.warning("SERPER_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            headers = {
+                "X-API-KEY": api_key,
+                "Content-Type": "application/json",
+                "User-Agent": self.user_agent,
+            }
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    "https://google.serper.dev/search",
+                    headers=headers,
+                    json={"q": query, "num": n},
+                    timeout=float(self.config.timeout),
+                )
+                r.raise_for_status()
+            items = [
+                {
+                    "title": result.get("title", ""),
+                    "url": result.get("link", ""),
+                    "content": result.get("snippet", ""),
+                }
+                for result in r.json().get("organic", [])
+                if isinstance(result, dict)
+            ]
+            return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                return ToolResult.error("Error: Serper search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Serper search failed ({e.response.status_code}): {e}")
+        except Exception as e:
+            return ToolResult.error(f"Error: Serper search failed: {e}")
 
     async def _search_volcengine(
         self,

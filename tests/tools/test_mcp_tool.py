@@ -16,6 +16,7 @@ from nanobot.agent.tools.mcp import (
     MCPResourceWrapper,
     MCPToolWrapper,
     _normalize_windows_stdio_command,
+    _sanitize_mcp_tool_name,
     _sanitize_name,
     connect_mcp_servers,
 )
@@ -321,6 +322,35 @@ async def test_execute_wraps_mcp_is_error_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_contains_malformed_success_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool returned malformed content: TypeError)"
+    assert is_tool_error_result(wrapper.name, result)
+
+
+@pytest.mark.asyncio
+async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, {})
+
+    assert is_tool_error_result(wrapper.name, result)
+    assert "MCP tool returned malformed content" in result
+    assert "Analyze the error above and try a different approach" in result
+
+
+@pytest.mark.asyncio
 async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
@@ -401,6 +431,7 @@ async def test_execute_returns_timeout_message() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call timed out after 0.01s)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 @pytest.mark.asyncio
@@ -413,6 +444,7 @@ async def test_execute_handles_server_cancelled_error() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call was cancelled)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 @pytest.mark.asyncio
@@ -444,6 +476,7 @@ async def test_execute_handles_generic_exception() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call failed: RuntimeError)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 def _make_tool_def(name: str) -> SimpleNamespace:
@@ -510,6 +543,26 @@ async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
         await stack.aclose()
 
     assert registry.tool_names == ["mcp_test_demo"]
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_supports_limited_wrapped_names(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    long_tool_name = "tool-" + "very-long-name-" * 8
+    wrapped_name = _sanitize_mcp_tool_name(f"mcp_test_{long_tool_name}")
+    assert len(wrapped_name) == 64
+
+    fake_mcp_runtime["session"] = _make_fake_session([long_tool_name, "other"])
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=[wrapped_name])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == [wrapped_name]
 
 
 @pytest.mark.asyncio
@@ -1287,3 +1340,47 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
 )
 def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
     assert mcp_mod._redact_url(url) == expected
+
+def test_mcp_tool_name_keeps_short_name():
+    name = _sanitize_mcp_tool_name("mcp_myserver_resource_myres")
+    assert name == "mcp_myserver_resource_myres"
+
+
+def test_mcp_tool_name_limits_long_name():
+    long_name = "mcp_" + "a" * 100
+    name = _sanitize_mcp_tool_name(long_name)
+
+    assert len(name) <= 64
+    assert name.startswith("mcp_")
+
+
+def test_long_server_name_tools_are_matched_by_server_name() -> None:
+    server_name = "very-long-server-name-" * 4
+    tool_def = SimpleNamespace(
+        name="search",
+        description="search tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    other_tool_def = SimpleNamespace(
+        name="search",
+        description="other search tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), server_name, tool_def)
+    other_wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "other", other_tool_def)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    registry.register(other_wrapper)
+
+    assert len(wrapper.name) == 64
+    assert not wrapper.name.startswith(mcp_mod._tool_prefix(server_name))
+
+    mcp_mod._attach_reconnect_handlers(SimpleNamespace(), registry, {server_name})
+    assert wrapper._reconnect is not None
+    assert other_wrapper._reconnect is None
+
+    removed = mcp_mod._unregister_server_tools(SimpleNamespace(), registry, server_name)
+
+    assert removed == 1
+    assert wrapper.name not in registry.tool_names
+    assert other_wrapper.name in registry.tool_names

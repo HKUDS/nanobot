@@ -25,6 +25,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename
@@ -555,6 +556,10 @@ def _qr_register_inner(
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
+_NEW_SESSION_DIVIDER_CONTENT = json.dumps({
+    "type": "divider",
+    "params": {"divider_text": {"text": "New session started."}},
+})
 
 
 @dataclass
@@ -672,7 +677,7 @@ class FeishuChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
         if not FEISHU_AVAILABLE:
-            self.logger.error("SDK not installed. Run: pip install lark-oapi")
+            self.logger.error("SDK not installed. Run: nanobot plugins enable feishu")
             return
 
         if not self.config.app_id or not self.config.app_secret:
@@ -2010,6 +2015,14 @@ class FeishuChannel(BaseChannel):
                     )
                 return
 
+            if (
+                msg.content.strip() == "New session started."
+                and msg.metadata.get("chat_type") == "p2p"
+                and not msg.media
+                and not msg.buttons
+            ):
+                return
+
             # Determine whether the first message should quote the user's message.
             # Only the very first send (media or text) in this call uses reply; subsequent
             # chunks/media fall back to plain create to avoid redundant quote bubbles.
@@ -2259,6 +2272,17 @@ class FeishuChannel(BaseChannel):
 
             if not content and not media_paths:
                 return
+
+            if chat_type == "p2p" and normalize_command_text(content).lower() == "/new":
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    self._send_message_sync,
+                    "open_id",
+                    sender_id,
+                    "system",
+                    _NEW_SESSION_DIVIDER_CONTENT,
+                )
 
             # Build session key for conversation isolation.
             # If topic_isolation is True: each topic gets its own session via root_id/message_id.

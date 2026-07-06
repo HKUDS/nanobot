@@ -5,6 +5,7 @@ from __future__ import annotations
 import email.utils
 import hmac
 import http
+import ipaddress
 import json
 import re
 from typing import Any
@@ -129,6 +130,70 @@ def is_localhost(connection: Any) -> bool:
     if host.startswith("::ffff:"):
         host = host[7:]
     return host in {"127.0.0.1", "::1", "localhost"}
+
+
+def _host_without_port(value: str) -> str:
+    value = value.strip().strip('"').strip("'")
+    if not value:
+        return ""
+    if value.startswith("["):
+        end = value.find("]")
+        return value[1:end] if end > 0 else value
+    if value.count(":") == 1:
+        host, port = value.rsplit(":", 1)
+        if port.isdigit():
+            return host
+    return value
+
+
+def is_loopback_host(value: str) -> bool:
+    host = _host_without_port(value)
+    if host.startswith("::ffff:"):
+        host = host[7:]
+    host = host.rstrip(".").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _split_comma_header(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _forwarded_header_values(value: str, key: str) -> list[str]:
+    values: list[str] = []
+    for entry in _split_comma_header(value):
+        for part in entry.split(";"):
+            name, sep, raw = part.partition("=")
+            if sep and name.strip().lower() == key:
+                cleaned = raw.strip().strip('"')
+                if cleaned:
+                    values.append(cleaned)
+    return values
+
+
+def _all_forwarded_values_are_loopback(headers: Any) -> bool:
+    checks: list[str] = []
+    checks.extend(_split_comma_header(case_insensitive_header(headers, "X-Forwarded-For")))
+    checks.extend(_split_comma_header(case_insensitive_header(headers, "X-Real-IP")))
+    checks.extend(_split_comma_header(case_insensitive_header(headers, "X-Forwarded-Host")))
+    forwarded = case_insensitive_header(headers, "Forwarded")
+    checks.extend(_forwarded_header_values(forwarded, "for"))
+    checks.extend(_forwarded_header_values(forwarded, "host"))
+    return all(is_loopback_host(value) for value in checks)
+
+
+def is_local_browser_request(connection: Any, headers: Any) -> bool:
+    """Return True only for a local TCP peer presenting a local browser origin."""
+    if not is_localhost(connection):
+        return False
+    host = case_insensitive_header(headers, "Host")
+    if not is_loopback_host(host):
+        return False
+    return _all_forwarded_values_are_loopback(headers)
 
 
 def bearer_token(headers: Any) -> str | None:

@@ -21,6 +21,7 @@ def _exception_chain_has_disconnect(exc: BaseException | None) -> bool:
             ConnectionAbortedError,
             ConnectionResetError,
             ConnectionClosed,
+            EOFError,
         )):
             return True
         exc = exc.__cause__ or exc.__context__

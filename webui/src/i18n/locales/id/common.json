@@ -458,18 +458,36 @@
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
     },
     "apps": {
-      "description": "Tambahkan CLI aplikasi dan layanan MCP yang dapat digunakan nanobot dari chat.",
+      "description": "Aktifkan plugin, adaptor aplikasi lokal, dan server alat terhubung.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Kanal",
+      "featureLabel": "Fitur",
       "filterAll": "Semua",
+      "filterPlugins": "Plugin",
       "filterCli": "Aplikasi CLI",
       "filterMcp": "Layanan MCP",
       "enabledSummary": "{{count}} aktif",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} plugin · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Cari aplikasi",
-      "featured": "Unggulan",
+      "featured": "Katalog",
       "loading": "Memuat aplikasi...",
-      "empty": "Tidak ada aplikasi yang cocok."
+      "empty": "Tidak ada aplikasi yang cocok.",
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
+    },
+    "nanobotFeatures": {
+      "enabled": "Aktif",
+      "enable": "Aktifkan",
+      "disable": "Nonaktifkan",
+      "ready": "Siap",
+      "missingDependency": "Dukungan belum terpasang",
+      "installSupport": "Instal dukungan",
+      "installConfirmTitle": "Instal dukungan untuk {{name}}?",
+      "installConfirmDescription": "nanobot akan menambahkan yang dibutuhkan {{name}}, lalu mengaktifkannya. Lanjutkan?",
+      "installConfirmAction": "Instal dan aktifkan",
+      "websocketRequired": "Wajib untuk WebUI",
+      "channelDisabled": "Kanal dinonaktifkan",
+      "notEnabled": "Belum aktif"
     },
     "automations": {
       "filters": {
@@ -911,6 +929,10 @@
             "title": "Pulihkan memori",
             "description": "Kembalikan memori ke snapshot Dream sebelumnya."
           },
+          "dream_prompt": {
+            "title": "Memori Dream",
+            "description": "Atur cara Dream menyusun memori workspace ini."
+          },
           "goal": {
             "title": "Tujuan jangka panjang",
             "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."
@@ -961,11 +983,11 @@
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Mode akses workspace",
         "projectAria": "Pilih proyek",
         "projectPlaceholder": "Pilih proyek",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Izin default",
+        "full": "Akses penuh"
       }
     },
     "scrollToBottom": "Gulir ke bawah",
@@ -1049,17 +1071,17 @@
       "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace tidak berubah",
+      "body": "Gateway menolak proyek atau mode akses yang diminta, jadi Nanobot tetap memakai workspace sebelumnya."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace default",
       "manual": "Tempel path",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Gunakan path",
+      "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
   }
 }

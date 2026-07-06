@@ -624,6 +624,29 @@ export interface CliAppsPayload {
   };
 }
 
+export interface NanobotFeatureInfo {
+  name: string;
+  display_name: string;
+  type: "channel" | "feature" | string;
+  enabled: boolean;
+  installed: boolean;
+  ready: boolean;
+  status: "enabled" | "missing_dependency" | "not_enabled" | string;
+  install_supported: boolean;
+  requires_restart: boolean;
+}
+
+export interface NanobotFeaturesPayload {
+  features: NanobotFeatureInfo[];
+  enabled_count: number;
+  requires_restart?: boolean;
+  last_action?: {
+    ok: boolean;
+    message: string;
+    enabled?: boolean;
+  };
+}
+
 export interface McpPresetField {
   name: string;
   label: string;
