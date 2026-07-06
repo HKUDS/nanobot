@@ -1329,6 +1329,51 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
   });
 
+  it("marks builtin slash commands as side-channel sends before command metadata loads", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/status", undefined, { sideChannel: true });
+  });
+
+  it("keeps goal task commands on the normal agent turn path", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/goal",
+            title: "Start long-running goal",
+            description: "Tell the agent to treat the request as a long-running goal.",
+            icon: "activity",
+            argHint: "<goal>",
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/goal fix the release blocker" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "/goal fix the release blocker",
+      undefined,
+      undefined,
+    );
+  });
+
   it("shows a stop button while streaming", () => {
     const onStop = vi.fn();
     render(

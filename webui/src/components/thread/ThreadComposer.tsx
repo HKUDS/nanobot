@@ -90,7 +90,36 @@ import { cn } from "@/lib/utils";
 const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
+const FALLBACK_SIDE_CHANNEL_COMMANDS = new Set([
+  "/new",
+  "/stop",
+  "/restart",
+  "/status",
+  "/model",
+  "/history",
+  "/goal",
+  "/trigger",
+  "/dream",
+  "/dream-log",
+  "/dream-restore",
+  "/dream-prompt",
+  "/skill",
+  "/help",
+  "/pairing",
+]);
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
+
+function isSlashCommandSideChannel(content: string, visibleSlashCommands: SlashCommand[]): boolean {
+  const commandName = content.split(/\s+/, 1)[0];
+  if (!commandName.startsWith("/")) return false;
+  if (commandName === "/goal" && content.slice(commandName.length).trim().length > 0) {
+    return false;
+  }
+  return (
+    FALLBACK_SIDE_CHANNEL_COMMANDS.has(commandName)
+    || visibleSlashCommands.some((command) => command.command === commandName)
+  );
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -1480,12 +1509,11 @@ export function ThreadComposer({
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    const commandName = content.split(/\s+/, 1)[0];
     const isSlashSideChannel =
       payload === undefined
       && attachedCliApps.length === 0
       && attachedMcpPresets.length === 0
-      && visibleSlashCommands.some((command) => command.command === commandName);
+      && isSlashCommandSideChannel(content, visibleSlashCommands);
     onSend(
       content,
       payload,
