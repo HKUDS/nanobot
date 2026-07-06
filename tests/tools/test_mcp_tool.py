@@ -15,6 +15,7 @@ from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPResourceWrapper,
     MCPToolWrapper,
+    _format_mcp_arguments,
     _normalize_windows_stdio_command,
     _sanitize_name,
     connect_mcp_servers,
@@ -133,6 +134,42 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
         inputSchema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
+
+
+def test_format_mcp_arguments_redacts_secret_keys_recursively() -> None:
+    rendered = _format_mcp_arguments(
+        {
+            "query": "status",
+            "limit": 10,
+            "api_key": "api-key-value",
+            "api_token": "token-value",
+            "key": "key-value",
+            "Password": "password-value",
+            "nested": {
+                "aws_secret_access_key": "aws-value",
+                "auth_header": "bearer value",
+                "private_key": "private-key-value",
+                "safe": "visible",
+            },
+            "metadata": {"credential_id": "credential-value", "note": "keep me"},
+        }
+    )
+
+    assert json.loads(rendered) == {
+        "query": "status",
+        "limit": 10,
+        "api_key": "***",
+        "api_token": "***",
+        "key": "***",
+        "Password": "***",
+        "nested": {
+            "aws_secret_access_key": "***",
+            "auth_header": "***",
+            "private_key": "***",
+            "safe": "visible",
+        },
+        "metadata": {"credential_id": "***", "note": "keep me"},
+    }
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:

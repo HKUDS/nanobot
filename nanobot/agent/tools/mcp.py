@@ -45,6 +45,16 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+_SECRET_ARGUMENT_KEY_PARTS: tuple[str, ...] = (
+    "api_key",
+    "token",
+    "password",
+    "secret",
+    "credential",
+    "auth",
+    "private_key",
+    "key",
+)
 
 
 def _is_malformed_mcp_progress_notification(message: Any) -> bool:
@@ -356,12 +366,30 @@ def _format_mcp_arguments(arguments: Mapping[str, Any] | None) -> str:
     if not arguments:
         return "{}"
     try:
-        rendered = json.dumps(arguments, ensure_ascii=False, default=repr)
+        rendered = json.dumps(_redact_mcp_arguments(arguments), ensure_ascii=False, default=repr)
     except BaseException:
-        rendered = repr(dict(arguments))
+        rendered = "{}"
     if len(rendered) > 1000:
         return rendered[:1000] + "...<truncated>"
     return rendered
+
+
+def _redact_mcp_arguments(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: "***" if _is_secret_argument_key(key) else _redact_mcp_arguments(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_mcp_arguments(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_mcp_arguments(item) for item in value)
+    return value
+
+
+def _is_secret_argument_key(key: Any) -> bool:
+    key_text = str(key).lower()
+    return any(part in key_text for part in _SECRET_ARGUMENT_KEY_PARTS)
 
 
 def _mcp_error_result(message: str) -> ToolResult:
