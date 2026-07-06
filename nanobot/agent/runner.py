@@ -1190,7 +1190,7 @@ class AgentRunner:
                 result = await spec.tools.execute(tool_call.name, params)
         except asyncio.CancelledError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             await hook.on_execute_tool_error(context, tool_call, tool, params, exc)
             event = {
                 "name": tool_call.name,
