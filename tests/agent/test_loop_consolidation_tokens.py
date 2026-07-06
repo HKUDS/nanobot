@@ -30,6 +30,12 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
     return loop
 
 
+def test_replay_token_budget_is_zero_when_context_window_disabled(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=0)
+
+    assert loop._replay_token_budget() == 0
+
+
 @pytest.mark.asyncio
 async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
