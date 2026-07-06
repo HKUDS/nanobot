@@ -1480,7 +1480,17 @@ export function ThreadComposer({
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    onSend(content, payload, options);
+    const commandName = content.split(/\s+/, 1)[0];
+    const isSlashSideChannel =
+      payload === undefined
+      && attachedCliApps.length === 0
+      && attachedMcpPresets.length === 0
+      && visibleSlashCommands.some((command) => command.command === commandName);
+    onSend(
+      content,
+      payload,
+      isSlashSideChannel ? { ...options, sideChannel: true } : options,
+    );
     setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
@@ -1497,6 +1507,7 @@ export function ThreadComposer({
     onSend,
     readyImages,
     value,
+    visibleSlashCommands,
   ]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {

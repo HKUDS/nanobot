@@ -1312,6 +1312,23 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
   });
 
+  it("marks known slash commands as side-channel sends", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/history" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
+  });
+
   it("shows a stop button while streaming", () => {
     const onStop = vi.fn();
     render(

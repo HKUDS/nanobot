@@ -1622,7 +1622,89 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].content).toBe("long task");
   });
 
-  it("keeps streaming alive across stream_end and completes on turn_end", async () => {
+  it("does not mark side-channel slash commands as streaming", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-status", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      result.current.send("/status", undefined, { sideChannel: true });
+    });
+
+    const call = fake.client.sendMessage.mock.calls.at(-1)!;
+    const turnId = call[3]?.turnId;
+    expect(call[3]).not.toHaveProperty("sideChannel");
+    expect(result.current.isStreaming).toBe(false);
+
+    act(() => {
+      fake.emit("chat-status", {
+        event: "message",
+        chat_id: "chat-status",
+        text: "status reply",
+        turn_id: turnId,
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "/status",
+      "status reply",
+    ]);
+  });
+
+  it("lets stream_end finish streaming while side-channel status replies arrive", () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(() => useNanobotStream("chat-status-loop", EMPTY_MESSAGES), {
+        wrapper: wrap(fake.client),
+      });
+
+      act(() => {
+        result.current.send("write normally");
+      });
+      const promptTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+
+      act(() => {
+        fake.emit("chat-status-loop", {
+          event: "stream_end",
+          chat_id: "chat-status-loop",
+          text: "done",
+          turn_id: promptTurnId,
+        });
+      });
+
+      act(() => {
+        result.current.send("/status", undefined, { sideChannel: true });
+      });
+      const statusTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+
+      act(() => {
+        fake.emit("chat-status-loop", {
+          event: "message",
+          chat_id: "chat-status-loop",
+          text: "status reply",
+          turn_id: statusTurnId,
+        });
+      });
+
+      expect(result.current.isStreaming).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(result.current.isStreaming).toBe(false);
+      expect(result.current.messages.find((message) => message.content === "done")).toMatchObject({
+        isStreaming: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps streaming alive across stream_end when tool activity follows", async () => {
     const fake = fakeClient();
     const onTurnEnd = vi.fn();
     const { result } = renderHook(() => useNanobotStream("chat-s", EMPTY_MESSAGES, false, onTurnEnd), {
@@ -1660,14 +1742,15 @@ describe("useNanobotStream", () => {
       fake.emit("chat-s", {
         event: "message",
         chat_id: "chat-s",
-        text: "Hello world",
+        kind: "progress",
+        text: "Calling tool",
       });
     });
 
     expect(result.current.isStreaming).toBe(true);
     expect(result.current.messages.at(-1)).toMatchObject({
-      role: "assistant",
-      content: "Hello world",
+      role: "tool",
+      content: "Calling tool",
     });
 
     act(() => {

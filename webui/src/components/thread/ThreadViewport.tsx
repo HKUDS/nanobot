@@ -455,6 +455,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     measureComposerDock();
   }, [composer, hasMessages, measureComposerDock]);
 
+  useLayoutEffect(() => {
+    if (!hasMessages || userReadingHistoryRef.current) return;
+    const promptId = activeTurnPromptRef.current;
+    if (promptId && scrollToPromptTopNow(promptId)) return;
+    scrollToBottom(false, 2);
+  }, [composerDockHeight, hasMessages, scrollToBottom, scrollToPromptTopNow]);
+
   useEffect(() => cancelScheduledBottomScroll, [cancelScheduledBottomScroll]);
 
   useEffect(() => {
