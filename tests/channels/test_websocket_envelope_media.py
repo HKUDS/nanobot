@@ -253,6 +253,34 @@ async def test_message_rejected_when_more_than_four_images(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_rejected_when_too_many_total_attachments(tmp_path) -> None:
+    channel = _make_channel()
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "mixed",
+        "media": [
+            {"data_url": _tiny_png_data_url()},
+            {"data_url": _tiny_png_data_url()},
+            {"data_url": _tiny_png_data_url()},
+            {"data_url": _tiny_png_data_url()},
+            {"data_url": _data_url("application/pdf", b"%PDF-1.4"), "name": "report.pdf"},
+        ],
+    }
+
+    with patch(
+        "nanobot.channels.websocket.get_media_dir", return_value=tmp_path
+    ):
+        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_not_awaited()
+    err = json.loads(mock_conn.send.call_args[0][0])
+    assert err["detail"] == "image_rejected"
+    assert err["reason"] == "too_many_attachments"
+
+
+@pytest.mark.asyncio
 async def test_message_rejected_on_oversize_payload(tmp_path) -> None:
     channel = _make_channel()
     mock_conn = AsyncMock()
@@ -276,14 +304,40 @@ async def test_message_rejected_on_oversize_payload(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_rejected_on_non_image_mime(tmp_path) -> None:
+async def test_message_with_pdf_forwards_saved_path(tmp_path) -> None:
     channel = _make_channel()
     mock_conn = AsyncMock()
     envelope = {
         "type": "message",
         "chat_id": "abc123",
         "content": "pdf?",
-        "media": [{"data_url": _data_url("application/pdf", b"%PDF-1.4")}],
+        "media": [{"data_url": _data_url("application/pdf", b"%PDF-1.4"), "name": "report.pdf"}],
+    }
+
+    with patch(
+        "nanobot.channels.websocket.get_media_dir", return_value=tmp_path
+    ):
+        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_awaited_once()
+    paths = channel._handle_message.call_args.kwargs["media"]
+    assert isinstance(paths, list) and len(paths) == 1
+    saved = Path(paths[0])
+    assert saved.exists()
+    assert saved.suffix == ".pdf"
+    assert saved.name.endswith("_report.pdf")
+    assert saved.read_bytes() == b"%PDF-1.4"
+
+
+@pytest.mark.asyncio
+async def test_message_rejected_on_unsupported_file_mime(tmp_path) -> None:
+    channel = _make_channel()
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "zip?",
+        "media": [{"data_url": _data_url("application/zip", b"PK")}],
     }
 
     with patch(
@@ -404,9 +458,9 @@ async def test_message_rejected_when_media_field_is_not_list() -> None:
 
 @pytest.mark.asyncio
 async def test_failed_media_does_not_partially_persist(tmp_path) -> None:
-    """If the second image is invalid, the first must not be forwarded.
+    """If the second attachment is invalid, the first must not be forwarded.
 
-    Also: images already written in this call are cleaned up on failure, so
+    Also: files already written in this call are cleaned up on failure, so
     a mixed-valid/invalid batch never leaves orphan files in the media dir.
     """
     channel = _make_channel()
@@ -417,7 +471,7 @@ async def test_failed_media_does_not_partially_persist(tmp_path) -> None:
         "content": "mixed",
         "media": [
             {"data_url": _tiny_png_data_url()},
-            {"data_url": _data_url("application/pdf", b"%PDF-1.4")},
+            {"data_url": _data_url("image/svg+xml", b"<svg/>")},
         ],
     }
 

@@ -1012,6 +1012,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Tipe file tidak didukung",
+        "too_many_attachments": "Maksimal {{max}} lampiran per pesan",
         "too_many_images": "Maksimal {{max}} gambar per pesan",
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
         "decode_failed": "Tidak dapat mendekode gambar ini",

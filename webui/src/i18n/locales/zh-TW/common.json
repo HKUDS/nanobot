@@ -1012,6 +1012,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
       "imageRejected": {
         "unsupported_type": "不支援的檔案類型",
+        "too_many_attachments": "每則訊息最多 {{max}} 個附件",
         "too_many_images": "每則訊息最多 {{max}} 張圖片",
         "magic_mismatch": "檔案看起來不像真正的圖片",
         "decode_failed": "無法解碼這張圖片",

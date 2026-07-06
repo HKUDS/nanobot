@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 import pytest
 
@@ -48,6 +49,17 @@ def test_saves_common_audio_with_api_friendly_extension(
     result = save_base64_data_url(_data_url(b"voice", mime=mime), tmp_path)
     assert result is not None
     assert result.endswith(suffix)
+
+
+def test_saves_document_with_safe_original_name(tmp_path) -> None:
+    result = save_base64_data_url(
+        _data_url(b"%PDF-1.4", mime="application/pdf"),
+        tmp_path,
+        filename="quarterly report.pdf",
+    )
+    assert result is not None
+    assert result.endswith("_quarterly report.pdf")
+    assert Path(result).read_bytes() == b"%PDF-1.4"
 
 
 def test_returns_none_for_malformed_data_url(tmp_path) -> None:

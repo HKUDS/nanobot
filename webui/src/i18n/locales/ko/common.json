@@ -1012,6 +1012,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (자동 압축)",
       "imageRejected": {
         "unsupported_type": "지원하지 않는 파일 형식입니다",
+        "too_many_attachments": "메시지당 최대 {{max}}개까지 가능합니다",
         "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
         "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
         "decode_failed": "이 이미지를 디코딩할 수 없습니다",

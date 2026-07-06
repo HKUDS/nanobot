@@ -24,6 +24,10 @@ function pngFile(name = "a.png", size = 10) {
   return new File([new Uint8Array(size)], name, { type: "image/png" });
 }
 
+function pdfFile(name = "report.pdf") {
+  return new File(["%PDF-1.4"], name, { type: "application/pdf" });
+}
+
 function resolveReady(file: File): EncodeResponse {
   return {
     id: "stub",
@@ -50,7 +54,7 @@ beforeEach(() => {
   }
 });
 
-describe("ThreadComposer — image attachments", () => {
+describe("ThreadComposer — attachments", () => {
   it("attaches a picked image and includes its data url on send", async () => {
     const file = pngFile("a.png");
     encodeImage.mockResolvedValueOnce(resolveReady(file));
@@ -81,6 +85,38 @@ describe("ThreadComposer — image attachments", () => {
     expect(images).toHaveLength(1);
     expect(images[0].media.data_url).toContain("data:image/png;base64,");
     expect(images[0].media.name).toBe("a.png");
+  });
+
+  it("attaches a picked PDF and includes its data url on send", async () => {
+    const file = pdfFile();
+    const onSend = vi.fn();
+
+    render(<ThreadComposer onSend={onSend} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-chip")).toHaveTextContent("report.pdf"),
+    );
+
+    const textarea = screen.getByLabelText(/message input/i);
+    fireEvent.change(textarea, { target: { value: "summarize" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(encodeImage).not.toHaveBeenCalled();
+    const [content, attachments] = onSend.mock.calls[0];
+    expect(content).toBe("summarize");
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0].media.data_url).toContain("data:application/pdf;base64,");
+    expect(attachments[0].media.name).toBe("report.pdf");
+    expect(attachments[0].preview.kind).toBe("file");
   });
 
   it("blocks send while an image is still encoding", async () => {

@@ -32,6 +32,22 @@ _MIME_EXTENSION_OVERRIDES = {
     "audio/x-wav": ".wav",
     "audio/vnd.wave": ".wav",
     "video/webm": ".webm",
+    "application/json": ".json",
+    "application/pdf": ".pdf",
+    "application/toml": ".toml",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/x-yaml": ".yaml",
+    "application/xhtml+xml": ".html",
+    "application/xml": ".xml",
+    "application/yaml": ".yaml",
+    "text/csv": ".csv",
+    "text/html": ".html",
+    "text/markdown": ".md",
+    "text/plain": ".txt",
+    "text/xml": ".xml",
+    "text/yaml": ".yaml",
 }
 
 
@@ -47,6 +63,7 @@ def save_base64_data_url(
     media_dir: Path,
     *,
     max_bytes: int | None = None,
+    filename: str | None = None,
 ) -> str | None:
     """Decode a ``data:<mime>;base64,<payload>`` URL and persist it.
 
@@ -66,7 +83,9 @@ def save_base64_data_url(
     if len(raw) > limit:
         raise FileSizeExceeded(f"File exceeds {limit // (1024 * 1024)}MB limit")
     ext = _MIME_EXTENSION_OVERRIDES.get(mime_type) or mimetypes.guess_extension(mime_type) or ".bin"
-    filename = f"{uuid.uuid4().hex[:12]}{ext}"
-    dest = media_dir / safe_filename(filename)
+    base = safe_filename(filename or "")
+    stem = Path(base).stem[:80] if base else ""
+    saved_name = f"{uuid.uuid4().hex[:12]}_{stem}{ext}" if stem else f"{uuid.uuid4().hex[:12]}{ext}"
+    dest = media_dir / safe_filename(saved_name)
     dest.write_bytes(raw)
     return str(dest)

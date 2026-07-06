@@ -908,7 +908,7 @@
         "edit": "编辑引导",
         "drag": "拖动排序"
       },
-      "attachImage": "添加图片",
+      "attachImage": "添加文件",
       "imageMode": {
         "label": "图片生成",
         "toggle": "切换图片生成模式",
@@ -1035,6 +1035,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（已自动压缩）",
       "imageRejected": {
         "unsupported_type": "不支持的文件类型",
+        "too_many_attachments": "每条消息最多 {{max}} 个附件",
         "too_many_images": "每条消息最多 {{max}} 张图片",
         "magic_mismatch": "文件看起来不像真实的图片",
         "decode_failed": "无法解码这张图片",

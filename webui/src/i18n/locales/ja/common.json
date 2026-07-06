@@ -1012,6 +1012,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
       "imageRejected": {
         "unsupported_type": "対応していないファイル形式です",
+        "too_many_attachments": "1 メッセージにつき最大 {{max}} 件までです",
         "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
         "magic_mismatch": "画像ファイルではないようです",
         "decode_failed": "この画像をデコードできません",

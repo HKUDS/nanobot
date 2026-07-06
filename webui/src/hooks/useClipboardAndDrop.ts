@@ -1,12 +1,14 @@
 import { useCallback, useRef, useState } from "react";
 
-/** Extract image ``File``s from a paste / drop event.
+import { acceptedAttachmentKind } from "@/hooks/useAttachedImages";
+
+/** Extract supported attachment ``File``s from a paste / drop event.
  *
  * Deliberate behaviour:
- *   - Only items whose ``kind === "file"`` and ``type`` starts with
- *     ``image/`` are returned; ``<img>`` tags inside HTML fragments are
- *     ignored (defending against remote URL fetch + XSS surfaces).
- *   - Plain text pasted alongside images is *not* consumed by this helper,
+ *   - Only items whose ``kind === "file"`` and match the Composer whitelist
+ *     are returned; HTML fragments are ignored (defending against remote URL
+ *     fetch + XSS surfaces).
+ *   - Plain text pasted alongside attachments is *not* consumed by this helper,
  *     so the caller can still let the textarea receive it naturally.
  */
 export function extractImageFilesFromPaste(
@@ -18,14 +20,13 @@ export function extractImageFilesFromPaste(
   const files: File[] = [];
   for (const item of Array.from(clipboard.items)) {
     if (item.kind !== "file") continue;
-    if (!item.type.startsWith("image/")) continue;
     const file = item.getAsFile();
-    if (file) files.push(file);
+    if (file && acceptedAttachmentKind(file)) files.push(file);
   }
   return files;
 }
 
-/** Extract dropped image files, mirroring ``extractImageFilesFromPaste``. */
+/** Extract dropped attachment files, mirroring ``extractImageFilesFromPaste``. */
 export function extractImageFilesFromDrop(
   event: DragEvent | React.DragEvent,
 ): File[] {
@@ -34,7 +35,7 @@ export function extractImageFilesFromDrop(
   if (!dt) return [];
   const files: File[] = [];
   for (const item of Array.from(dt.files)) {
-    if (item.type.startsWith("image/")) files.push(item);
+    if (acceptedAttachmentKind(item)) files.push(item);
   }
   return files;
 }

@@ -27,6 +27,7 @@ import {
   ChevronUp,
   CircleHelp,
   CornerDownRight,
+  FileText,
   GripVertical,
   History,
   ImageIcon,
@@ -58,15 +59,17 @@ import {
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
+  ACCEPT_ATTR,
+  MAX_ATTACHMENTS_PER_MESSAGE,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
-  MAX_IMAGES_PER_MESSAGE,
+  type AttachmentKind,
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
+import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
   CliAppInfo,
@@ -86,9 +89,6 @@ import {
 } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
-/** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
- * deliberately excluded to avoid an embedded-script XSS surface. */
-const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
@@ -192,7 +192,7 @@ function getVoiceShortcutLabel(): string {
 }
 
 interface ThreadComposerProps {
-  onSend: (content: string, images?: SendImage[], options?: SendOptions) => void;
+  onSend: (content: string, images?: SendAttachment[], options?: SendOptions) => void;
   disabled?: boolean;
   placeholder?: string;
   isStreaming?: boolean;
@@ -301,6 +301,7 @@ interface QueuedPrompt {
 interface QueuedPromptImage {
   dataUrl: string;
   name?: string;
+  kind?: AttachmentKind;
 }
 
 interface CliAppMentionQuery {
@@ -367,16 +368,22 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
     ? record.images.flatMap((image) => {
         if (!image || typeof image !== "object") return [];
         const candidate = image as Partial<QueuedPromptImage>;
-        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:image/")) {
+        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
           return [];
         }
+        const kind = candidate.kind === "file" || candidate.kind === "image"
+          ? candidate.kind
+          : candidate.dataUrl.startsWith("data:image/")
+            ? "image"
+            : "file";
         return [{
           dataUrl: candidate.dataUrl,
+          kind,
           ...(typeof candidate.name === "string" && candidate.name.trim()
             ? { name: candidate.name.trim() }
             : {}),
         }];
-      }).slice(0, MAX_IMAGES_PER_MESSAGE)
+      }).slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
     : [];
   if (!text && images.length === 0) return null;
   const id = typeof record.id === "string" && record.id.trim()
@@ -413,7 +420,7 @@ function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
         prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => ({
           id: prompt.id,
           text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
-          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_IMAGES_PER_MESSAGE) } : {}),
+          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
         })),
       ),
     );
@@ -427,11 +434,12 @@ function readyImagesToQueuedImages(
 ): QueuedPromptImage[] {
   return images.map((img) => ({
     dataUrl: img.dataUrl,
+    kind: img.kind,
     name: img.file.name,
   }));
 }
 
-function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | undefined {
+function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
   if (!images?.length) return undefined;
   return images.map((img) => ({
     media: {
@@ -439,6 +447,7 @@ function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | u
       ...(img.name ? { name: img.name } : {}),
     },
     preview: {
+      kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : "file"),
       url: img.dataUrl,
       ...(img.name ? { name: img.name } : {}),
     },
@@ -448,7 +457,7 @@ function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | u
 function queuedPromptLabel(prompt: QueuedPrompt): string {
   const text = prompt.text.trim();
   if (text) return text;
-  return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "Image attachment";
+  return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
 }
 
 function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
@@ -898,7 +907,10 @@ export function ThreadComposer({
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
       const key = `thread.composer.imageRejected.${reason}`;
-      return t(key, { max: MAX_IMAGES_PER_MESSAGE });
+      const fallback = reason === "too_many_attachments"
+        ? `Max ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`
+        : "Unsupported file type";
+      return t(key, { max: MAX_ATTACHMENTS_PER_MESSAGE, defaultValue: fallback });
     },
     [t],
   );
@@ -1526,18 +1538,18 @@ export function ThreadComposer({
     if (!canSend) return;
     const trimmed = value.trim();
     const content = trimmed;
-    // Share the same normalized ``data:`` URL with both the wire payload and
-    // the optimistic bubble preview: data URLs are self-contained (no blob
-    // lifetime, safe under React StrictMode double-mount) and keep the
-    // bubble in sync with whatever the backend actually sees.
-    const payload: SendImage[] | undefined =
+    // Share the same ``data:`` URL with both the wire payload and the
+    // optimistic bubble preview: data URLs are self-contained (no blob
+    // lifetime, safe under React StrictMode double-mount) and keep the bubble
+    // in sync with whatever the backend actually sees.
+    const payload: SendAttachment[] | undefined =
       readyImages.length > 0
         ? readyImages.map((img) => ({
             media: {
               data_url: img.dataUrl,
               name: img.file.name,
             },
-            preview: { url: img.dataUrl, name: img.file.name },
+            preview: { kind: img.kind, url: img.dataUrl, name: img.file.name },
           }))
         : undefined;
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
@@ -2673,7 +2685,7 @@ function AttachmentChip({
       data-testid="composer-chip"
     >
       <div className="relative h-10 w-10 overflow-hidden rounded-md bg-background">
-        {image.previewUrl ? (
+        {image.kind === "image" && image.previewUrl ? (
           <img
             src={image.previewUrl}
             alt=""
@@ -2684,7 +2696,11 @@ function AttachmentChip({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center">
-            <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            {image.kind === "image" ? (
+              <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            ) : (
+              <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
+            )}
           </div>
         )}
         {image.status === "encoding" ? (

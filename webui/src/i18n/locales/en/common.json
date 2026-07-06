@@ -909,7 +909,7 @@
         "edit": "Edit guidance",
         "drag": "Drag to reorder"
       },
-      "attachImage": "Attach image",
+      "attachImage": "Attach files",
       "imageMode": {
         "label": "Image Generation",
         "toggle": "Toggle image generation mode",
@@ -1036,6 +1036,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Unsupported file type",
+        "too_many_attachments": "Max {{max}} attachments per message",
         "too_many_images": "Max {{max}} images per message",
         "magic_mismatch": "File doesn't look like a real image",
         "decode_failed": "Couldn't decode this image",

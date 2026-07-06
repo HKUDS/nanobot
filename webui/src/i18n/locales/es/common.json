@@ -1013,6 +1013,7 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Tipo de archivo no compatible",
+        "too_many_attachments": "Máximo {{max}} adjuntos por mensaje",
         "too_many_images": "Máximo {{max}} imágenes por mensaje",
         "magic_mismatch": "El archivo no parece una imagen real",
         "decode_failed": "No se pudo decodificar esta imagen",
