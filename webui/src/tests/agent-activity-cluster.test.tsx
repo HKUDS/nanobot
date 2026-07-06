@@ -767,6 +767,31 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("url: http://localhost:3000/dashboard")).toBeInTheDocument();
   });
 
+  it("shows readable argument previews for generic tool traces", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-generic-tools",
+          role: "tool",
+          kind: "trace",
+          content: 'grep({"pattern":"dream_cursor"})',
+          traces: [
+            'find_files({"query":"thread","glob":"*.tsx"})',
+            'list_dir({"path":"memory"})',
+            'grep({"pattern":"dream_cursor"})',
+          ],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("find_files query: thread · glob: *.tsx")).toBeInTheDocument();
+    expect(screen.getByText("list_dir path: memory")).toBeInTheDocument();
+    expect(screen.getByText("grep pattern: dream_cursor")).toBeInTheDocument();
+  });
+
   it("summarizes long shell traces instead of dumping scripts", () => {
     const command = [
       "cat << 'EOF' | bash",

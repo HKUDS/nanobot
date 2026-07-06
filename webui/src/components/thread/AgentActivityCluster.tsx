@@ -986,7 +986,7 @@ function describeTraceLine(line: string): TraceDescription {
     };
   }
   if (name) {
-    return { kind: "tool", label: "Using", detail: name };
+    return { kind: "tool", label: "Using", detail: genericToolTraceDetail(name, args) };
   }
   if (/done|complete|success/i.test(trimmed)) {
     return { kind: "done", label: "Done", detail: trimmed };
@@ -1146,6 +1146,35 @@ function formatTraceUrl(url: URL): string {
   const host = displayHost(url.hostname);
   const path = url.pathname && url.pathname !== "/" ? url.pathname : "";
   return `${host}${path}`;
+}
+
+function genericToolTraceDetail(name: string, args: string): string {
+  const preview = previewGenericToolArgs(args);
+  return preview ? `${name} ${preview}` : name;
+}
+
+function previewGenericToolArgs(args: string): string {
+  const compactArgs = args.trim();
+  if (!compactArgs) return "";
+  try {
+    return previewGenericArgsObject(JSON.parse(compactArgs) as unknown);
+  } catch {
+    return compactArgs.replace(/^["']|["']$/g, "");
+  }
+}
+
+function previewGenericArgsObject(argsObject: unknown): string {
+  if (!argsObject || typeof argsObject !== "object" || Array.isArray(argsObject)) {
+    return previewScalar(argsObject) ?? "";
+  }
+  const record = argsObject as Record<string, unknown>;
+  const entries: string[] = [];
+  for (const key of ["query", "glob", "pattern", "path", "file_path", "url", "name", "id", "title"]) {
+    const preview = previewScalar(record[key]);
+    if (preview) entries.push(`${key}: ${preview}`);
+    if (entries.length >= 2) return entries.join(" · ");
+  }
+  return entries.join(" · ");
 }
 
 function previewTraceDetail(args: string, fallback: string): string {
