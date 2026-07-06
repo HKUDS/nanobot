@@ -56,6 +56,18 @@ class TestNanoTimerTimezoneMath:
             payload = tool._compute_payload()
         assert payload["user"]["offset"] == "UTC-3"
 
+    def test_diff_from_utc_hours_matches_user_timezone(self):
+        with freeze_time("2026-06-22 12:00:00", tz_offset=0):
+            tool = NanoTimerTool(timezone="America/Sao_Paulo")
+            payload = tool._compute_payload()
+        assert payload["context"]["diff_from_utc_hours"] == "-3h"
+
+    def test_diff_from_utc_hours_includes_minutes(self):
+        with freeze_time("2026-06-22 12:00:00", tz_offset=0):
+            tool = NanoTimerTool(timezone="Asia/Kolkata")
+            payload = tool._compute_payload()
+        assert payload["context"]["diff_from_utc_hours"] == "+5h30m"
+
     def test_round_trip_utc_to_user_to_utc(self):
         from datetime import datetime, timezone
         with freeze_time("2026-06-22 15:00:00", tz_offset=0):

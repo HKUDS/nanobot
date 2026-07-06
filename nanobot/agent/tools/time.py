@@ -146,12 +146,18 @@ class NanoTimerTool(Tool, ContextAware):
         user_now = now_utc.astimezone(user_tz)
         server_local = datetime.now().astimezone()
         server_label, server_offset_str = _resolve_server_tz()
-        server_offset = server_local.utcoffset()
         user_offset = user_now.utcoffset()
         same_tz = user_tz == server_local.tzinfo
-        diff_minutes = None
-        if user_offset is not None and server_offset is not None:
-            diff_minutes = int((server_offset - user_offset).total_seconds() // 60)
+        diff_from_utc = "N/A"
+        if user_offset is not None:
+            total_minutes = int(user_offset.total_seconds() // 60)
+            sign = "+" if total_minutes >= 0 else "-"
+            abs_min = abs(total_minutes)
+            hours, minutes = divmod(abs_min, 60)
+            if minutes:
+                diff_from_utc = f"{sign}{hours}h{minutes:02d}m"
+            else:
+                diff_from_utc = f"{sign}{hours}h"
         return {
             "utc": {
                 "time": now_utc.strftime("%H:%M:%S"),
@@ -175,9 +181,7 @@ class NanoTimerTool(Tool, ContextAware):
                 "server_timezone": server_label,
                 "server_offset": server_offset_str,
                 "same_timezone": same_tz,
-                "diff_from_utc_hours": (
-                    f"{diff_minutes // 60:+d}h" if diff_minutes is not None else "N/A"
-                ),
+                "diff_from_utc_hours": diff_from_utc,
             },
         }
 
