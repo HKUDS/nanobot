@@ -1002,7 +1002,7 @@ class AgentLoop:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
                     continue
 
-                raw = msg.content.strip()
+                raw = msg.content.strip() if isinstance(msg.content, str) else ""
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
@@ -1546,7 +1546,7 @@ class AgentLoop:
         return "ok"
 
     async def _state_command(self, ctx: TurnContext) -> str:
-        raw = ctx.msg.content.strip()
+        raw = ctx.msg.content.strip() if isinstance(ctx.msg.content, str) else ""
         _, automation_metadata = automation_history_overrides(ctx.msg.metadata)
         is_user_turn = (
             ctx.original_user_text is not None
