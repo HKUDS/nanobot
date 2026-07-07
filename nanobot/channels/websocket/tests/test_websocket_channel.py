@@ -51,6 +51,7 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
     WEBUI_TURN_METADATA_KEY,
 )
@@ -1348,6 +1349,35 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
     assert second["chat_id"] == "chat-1"
     assert second["stream_id"] == "sid"
     assert "text" not in second
+
+
+@pytest.mark.asyncio
+async def test_send_delta_preserves_webui_source_metadata() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-source-stream")
+    source = {"kind": "cron", "label": "Repo check"}
+    metadata = {WEBUI_MESSAGE_SOURCE_METADATA_KEY: source}
+
+    await channel.send_delta("chat-source-stream", "done", metadata=metadata, stream_id="sid")
+    await channel.send_delta(
+        "chat-source-stream",
+        "",
+        metadata=metadata,
+        stream_id="sid",
+        stream_end=True,
+    )
+
+    first = json.loads(mock_ws.send.call_args_list[0][0][0])
+    second = json.loads(mock_ws.send.call_args_list[1][0][0])
+    assert first["event"] == "delta"
+    assert first["source"] == source
+    assert second["event"] == "stream_end"
+    assert second["source"] == source
+    lines = read_transcript_lines("websocket:chat-source-stream")
+    assert lines[-2]["source"] == source
+    assert lines[-1]["source"] == source
 
 
 @pytest.mark.asyncio

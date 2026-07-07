@@ -1185,12 +1185,16 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       stream_id?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */
