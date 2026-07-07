@@ -150,6 +150,63 @@ function stubElementRect(element: HTMLElement, left: number, width: number, heig
   element.getBoundingClientRect = () => elementRect(left, width, height);
 }
 
+interface PromptRailLayoutStub {
+  scrollerWidth: number;
+  messageColumnLeft: number;
+  messageColumnWidth: number;
+}
+
+async function renderPromptRailViewport({
+  layout,
+  scrollTo,
+}: {
+  layout?: PromptRailLayoutStub;
+  scrollTo?: (options?: ScrollToOptions) => void;
+} = {}) {
+  const promptMessages = makePromptExchangeMessages(5);
+  const { container } = render(
+    <ThreadViewport
+      messages={promptMessages}
+      isStreaming={false}
+      composer={<div />}
+    />,
+  );
+
+  const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: 1800 },
+    clientHeight: { configurable: true, value: 600 },
+    scrollTop: { configurable: true, value: 0 },
+    ...(scrollTo ? { scrollTo: { configurable: true, value: scrollTo } } : {}),
+  });
+
+  if (layout) {
+    stubElementRect(scroller, 0, layout.scrollerWidth);
+    stubElementRect(
+      screen.getByTestId("thread-message-column"),
+      layout.messageColumnLeft,
+      layout.messageColumnWidth,
+    );
+  }
+
+  const promptEls = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+  );
+  promptEls.forEach((el, index) => {
+    Object.defineProperty(el, "offsetTop", {
+      configurable: true,
+      value: index * 360,
+    });
+  });
+
+  await act(async () => {
+    window.dispatchEvent(new Event("resize"));
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  });
+
+  return { promptEls };
+}
+
 function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   return (
@@ -756,39 +813,10 @@ describe("ThreadViewport", () => {
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {
-    const promptMessages = makePromptExchangeMessages(5);
-    const { container } = render(
-      <ThreadViewport
-        messages={promptMessages}
-        isStreaming={false}
-        composer={<div />}
-      />,
-    );
-
-    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
     const scrollTo = vi.fn();
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, value: 0 },
-      scrollTo: { configurable: true, value: scrollTo },
-    });
+    const { promptEls } = await renderPromptRailViewport({ scrollTo });
 
-    const promptEls = Array.from(
-      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
-    );
     expect(promptEls).toHaveLength(5);
-    promptEls.forEach((el, index) => {
-      Object.defineProperty(el, "offsetTop", {
-        configurable: true,
-        value: index * 360,
-      });
-    });
-
-    await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-    });
 
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
     const promptMarkers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
@@ -826,74 +854,24 @@ describe("ThreadViewport", () => {
   });
 
   it("positions the prompt rail in the gutter before the message column", async () => {
-    const promptMessages = makePromptExchangeMessages(5);
-    const { container } = render(
-      <ThreadViewport
-        messages={promptMessages}
-        isStreaming={false}
-        composer={<div />}
-      />,
-    );
-
-    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, value: 0 },
-    });
-    stubElementRect(scroller, 0, 1200);
-    stubElementRect(screen.getByTestId("thread-message-column"), 180, 792);
-
-    const promptEls = Array.from(
-      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
-    );
-    promptEls.forEach((el, index) => {
-      Object.defineProperty(el, "offsetTop", {
-        configurable: true,
-        value: index * 360,
-      });
-    });
-
-    await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    await renderPromptRailViewport({
+      layout: {
+        scrollerWidth: 1200,
+        messageColumnLeft: 180,
+        messageColumnWidth: 792,
+      },
     });
 
     expect(screen.getByLabelText("User prompt navigation")).toHaveStyle({ left: "124px" });
   });
 
   it("hides the prompt rail when the message column leaves no side gutter", async () => {
-    const promptMessages = makePromptExchangeMessages(5);
-    const { container } = render(
-      <ThreadViewport
-        messages={promptMessages}
-        isStreaming={false}
-        composer={<div />}
-      />,
-    );
-
-    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, value: 0 },
-    });
-    stubElementRect(scroller, 0, 560);
-    stubElementRect(screen.getByTestId("thread-message-column"), 48, 480);
-
-    const promptEls = Array.from(
-      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
-    );
-    promptEls.forEach((el, index) => {
-      Object.defineProperty(el, "offsetTop", {
-        configurable: true,
-        value: index * 360,
-      });
-    });
-
-    await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    await renderPromptRailViewport({
+      layout: {
+        scrollerWidth: 560,
+        messageColumnLeft: 48,
+        messageColumnWidth: 480,
+      },
     });
 
     expect(screen.queryByLabelText("User prompt navigation")).not.toBeInTheDocument();
