@@ -187,7 +187,7 @@ Default API endpoint:
 http://127.0.0.1:8900
 ```
 
-`nanobot serve` requires `api.apiKey`; send it as a Bearer token on API routes.
+Public binds (`0.0.0.0` or `::`) require `api.apiKey`; send it as a Bearer token on API routes.
 
 See [`openai-api.md`](./openai-api.md) for request examples.
 

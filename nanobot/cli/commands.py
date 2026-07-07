@@ -832,10 +832,10 @@ def serve(
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
     api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
-    if not api_key:
+    if host in {"0.0.0.0", "::"} and not api_key:
         console.print(
-            "[red]Error: api_key is not set. "
-            "Set api.api_key in config to prevent unauthenticated API access.[/red]"
+            "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+            "Set api.api_key in config to prevent unauthenticated access.[/red]"
         )
         raise typer.Exit(1)
     sync_workspace_templates(runtime_config.workspace_path)

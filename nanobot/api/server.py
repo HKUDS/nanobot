@@ -404,7 +404,7 @@ def create_app(
         agent_loop: An initialized AgentLoop instance.
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
-        api_key: API key for Bearer-token authentication on API routes.
+        api_key: Optional API key for Bearer-token authentication on API routes.
     """
     app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
     app["agent_loop"] = agent_loop
@@ -418,7 +418,7 @@ def create_app(
         if request.path == "/health":
             return await handler(request)
         if not api_key:
-            return _error_json(401, "API key is not configured")
+            return await handler(request)
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return _error_json(401, "Missing Authorization header. Use: Bearer <api_key>")

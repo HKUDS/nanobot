@@ -107,7 +107,7 @@ File operations have path traversal protection, but:
 **API Calls:**
 - All external API calls use HTTPS by default
 - Timeouts are configured to prevent hanging requests
-- The OpenAI-compatible API server requires `api.api_key` for API routes; only `/health` remains unauthenticated for probes and load balancers
+- The OpenAI-compatible API server must set `api.api_key` when binding to `0.0.0.0` or `::`; otherwise startup fails to prevent unauthenticated network access
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp:**

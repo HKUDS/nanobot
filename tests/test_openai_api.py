@@ -132,7 +132,7 @@ async def test_api_key_protects_api_routes_but_not_health(aiohttp_client, mock_a
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_api_routes_fail_closed_without_configured_api_key(aiohttp_client, mock_agent) -> None:
+async def test_api_routes_allow_requests_without_configured_api_key(aiohttp_client, mock_agent) -> None:
     app = create_app(mock_agent, model_name="test-model")
     client = await aiohttp_client(app)
 
@@ -144,10 +144,9 @@ async def test_api_routes_fail_closed_without_configured_api_key(aiohttp_client,
     )
 
     assert health.status == 200
-    assert models.status == 401
-    assert chat.status == 401
-    assert (await models.json())["error"]["message"] == "API key is not configured"
-    mock_agent.process_direct.assert_not_called()
+    assert models.status == 200
+    assert chat.status == 200
+    mock_agent.process_direct.assert_called_once()
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")

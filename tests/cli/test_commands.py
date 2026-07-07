@@ -2698,7 +2698,7 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     assert seen["api_key"] == "secret"
 
 
-def test_serve_rejects_loopback_without_api_key(monkeypatch, tmp_path: Path) -> None:
+def test_serve_allows_loopback_without_api_key(monkeypatch, tmp_path: Path) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     seen: dict[str, object] = {}
@@ -2707,10 +2707,9 @@ def test_serve_rejects_loopback_without_api_key(monkeypatch, tmp_path: Path) -> 
 
     result = runner.invoke(app, ["serve", "--config", str(config_file)])
 
-    assert result.exit_code == 1
-    assert "api_key is not set" in result.stdout
-    assert "workspace" not in seen
-    assert "api_app" not in seen
+    assert result.exit_code == 0
+    assert seen["host"] == "127.0.0.1"
+    assert seen["api_key"] == ""
 
 
 def test_serve_passes_configured_api_key(monkeypatch, tmp_path: Path) -> None:
