@@ -831,6 +831,13 @@ def serve(
     host = host if host is not None else api_cfg.host
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
+    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
+    if not api_key:
+        console.print(
+            "[red]Error: api_key is not set. "
+            "Set api.api_key in config to prevent unauthenticated API access.[/red]"
+        )
+        raise typer.Exit(1)
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
@@ -850,13 +857,6 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
-    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
-    if not api_key:
-        console.print(
-            "[red]Error: api_key is not set. "
-            "Set api.api_key in config to prevent unauthenticated API access.[/red]"
-        )
-        raise typer.Exit(1)
     if host in {"0.0.0.0", "::"}:
         console.print(
             "[yellow]API is bound to all interfaces "

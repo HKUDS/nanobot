@@ -2709,6 +2709,7 @@ def test_serve_rejects_loopback_without_api_key(monkeypatch, tmp_path: Path) -> 
 
     assert result.exit_code == 1
     assert "api_key is not set" in result.stdout
+    assert "workspace" not in seen
     assert "api_app" not in seen
 
 
@@ -2737,6 +2738,7 @@ def test_serve_rejects_wildcard_host_without_api_key(monkeypatch, tmp_path: Path
 
     assert result.exit_code == 1
     assert "api_key is not set" in result.stdout
+    assert "workspace" not in seen
     assert "api_app" not in seen
 
 
