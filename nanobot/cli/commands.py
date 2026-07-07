@@ -200,7 +200,6 @@ app = typer.Typer(
 )
 
 console = Console()
-_IS_WINDOWS = sys.platform == "win32"
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 _REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 _REASONING_FLUSH_CHARS = 60
@@ -1626,29 +1625,6 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
-    async def _zombie_reaper() -> None:
-        """Periodically reap zombie child processes.
-
-        asyncio's child-watcher *should* reap all children, but inside
-        Docker containers the pidfd / SIGCHLD mechanism can miss exits.
-        This task runs every 30 s and calls ``os.waitpid(-1, WNOHANG)``
-        in a loop to collect any zombies that slipped through.
-        """
-        _INTERVAL = 30
-        while True:
-            await asyncio.sleep(_INTERVAL)
-            reaped = 0
-            while True:
-                try:
-                    pid, _ = os.waitpid(-1, os.WNOHANG)
-                    if pid == 0:
-                        break  # no more zombie children
-                    reaped += 1
-                except ChildProcessError:
-                    break  # no child processes at all
-            if reaped:
-                logger.info("Zombie reaper: reaped {} defunct child process(es)", reaped)
-
     async def _health_server(host: str, health_port: int):
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
@@ -1774,11 +1750,6 @@ def _run_gateway(
                     name="nanobot-local-triggers",
                 ),
             ]
-            if not _IS_WINDOWS:
-                tasks.append(asyncio.create_task(
-                    _zombie_reaper(),
-                    name="nanobot-zombie-reaper",
-                ))
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
