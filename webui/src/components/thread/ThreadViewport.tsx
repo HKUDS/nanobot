@@ -122,7 +122,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const messageColumnRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
@@ -502,7 +501,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   }, [maybeLoadEarlierFromScroll]);
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="thread-viewport relative flex min-h-0 flex-1 overflow-hidden">
       <div
         ref={scrollRef}
         className={cn(
@@ -520,11 +519,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className="flex min-h-0 flex-1 flex-col justify-start px-3 pb-4 pt-4 sm:px-4"
             >
-              <div
-                ref={messageColumnRef}
-                data-testid="thread-message-column"
-                className="mx-auto w-full max-w-[49.5rem]"
-              >
+              <div className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
                   messages={visibleMessages}
                   isStreaming={isStreaming}
@@ -572,7 +567,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         <PromptRail
           messages={visibleMessages}
           scrollRef={scrollRef}
-          contentRef={messageColumnRef}
           bottomOffset={scrollButtonBottom}
         />
       ) : null}

@@ -132,35 +132,9 @@ function makePromptExchangeMessages(count: number): UIMessage[] {
   ])).flat();
 }
 
-function elementRect(left: number, width: number, height = 600): DOMRect {
-  return {
-    x: left,
-    y: 0,
-    left,
-    top: 0,
-    right: left + width,
-    bottom: height,
-    width,
-    height,
-    toJSON: () => ({}),
-  } as DOMRect;
-}
-
-function stubElementRect(element: HTMLElement, left: number, width: number, height = 600) {
-  element.getBoundingClientRect = () => elementRect(left, width, height);
-}
-
-interface PromptRailLayoutStub {
-  scrollerWidth: number;
-  messageColumnLeft: number;
-  messageColumnWidth: number;
-}
-
 async function renderPromptRailViewport({
-  layout,
   scrollTo,
 }: {
-  layout?: PromptRailLayoutStub;
   scrollTo?: (options?: ScrollToOptions) => void;
 } = {}) {
   const promptMessages = makePromptExchangeMessages(5);
@@ -179,15 +153,6 @@ async function renderPromptRailViewport({
     scrollTop: { configurable: true, value: 0 },
     ...(scrollTo ? { scrollTo: { configurable: true, value: scrollTo } } : {}),
   });
-
-  if (layout) {
-    stubElementRect(scroller, 0, layout.scrollerWidth);
-    stubElementRect(
-      screen.getByTestId("thread-message-column"),
-      layout.messageColumnLeft,
-      layout.messageColumnWidth,
-    );
-  }
 
   const promptEls = Array.from(
     container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
@@ -851,30 +816,6 @@ describe("ThreadViewport", () => {
       top: 1064,
       behavior: "smooth",
     });
-  });
-
-  it("positions the prompt rail in the gutter before the message column", async () => {
-    await renderPromptRailViewport({
-      layout: {
-        scrollerWidth: 1200,
-        messageColumnLeft: 180,
-        messageColumnWidth: 792,
-      },
-    });
-
-    expect(screen.getByLabelText("User prompt navigation")).toHaveStyle({ left: "124px" });
-  });
-
-  it("hides the prompt rail when the message column leaves no side gutter", async () => {
-    await renderPromptRailViewport({
-      layout: {
-        scrollerWidth: 560,
-        messageColumnLeft: 48,
-        messageColumnWidth: 480,
-      },
-    });
-
-    expect(screen.queryByLabelText("User prompt navigation")).not.toBeInTheDocument();
   });
 
   it("opens a prompt navigator list and jumps to a selected prompt", async () => {

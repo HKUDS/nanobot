@@ -568,4 +568,30 @@
   .thread-viewport-scrollbar {
     overflow-x: hidden;
   }
+
+  .thread-viewport {
+    --thread-message-column-half: 24.75rem;
+    --thread-prompt-rail-offset: 3.5rem;
+    container-name: thread-viewport;
+    container-type: inline-size;
+  }
+
+  .thread-prompt-rail {
+    display: none;
+    left: calc(
+      50% - var(--thread-message-column-half) - var(--thread-prompt-rail-offset)
+    );
+  }
+
+  @media (min-width: 768px) {
+    .thread-prompt-rail {
+      display: block;
+    }
+  }
+
+  @container thread-viewport (max-width: 58rem) {
+    .thread-prompt-rail {
+      display: none;
+    }
+  }
 }
