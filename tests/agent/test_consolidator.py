@@ -76,8 +76,8 @@ def _tool_round(call_id: str) -> list[dict]:
     ]
 
 
-def test_get_lock_keeps_same_lock_after_gc(consolidator):
-    """Per-session locks must stay strongly referenced by the consolidator."""
+def test_get_lock_persists_lock_reference(consolidator):
+    """Per-session locks persist across GC cycles so the same lock is always returned for a given session key."""
     lock = consolidator.get_lock("cli:lock")
     lock_ref = weakref.ref(lock)
     assert consolidator.get_lock("cli:lock") is lock
