@@ -291,9 +291,7 @@ def _build_cli_key_bindings() -> KeyBindings:
       * Enter       -> submit the current input (keeps the familiar
                        single-line Enter-to-send feel even though the buffer
                        is multiline-capable).
-      * Alt+Enter   -> insert a newline. Universally supported across
-                       terminal emulators, so this is the reliable way to
-                       compose multi-line input.
+      * Alt+Enter   -> insert a newline for multi-line input.
     """
     kb = KeyBindings()
 
@@ -305,11 +303,7 @@ def _build_cli_key_bindings() -> KeyBindings:
     def _(event):
         event.current_buffer.insert_text("\n")
 
-    # On the same LF-as-Enter terminals (WSL) we preserve plain Enter for,
-    # Alt+Enter arrives as ESC + LF ("\x1b\x0a" = Escape + ControlJ) rather than
-    # ESC + CR, so the "escape","enter" binding above never matches: Escape is
-    # swallowed and the bare LF triggers prompt_toolkit's default submit. Bind
-    # ESC + ControlJ too so Alt+Enter reliably inserts a newline there as well.
+    # LF-as-Enter terminals send Alt+Enter as ESC + LF rather than ESC + CR.
     @kb.add("escape", Keys.ControlJ)  # Alt+Enter on LF-as-Enter terminals
     def _(event):
         event.current_buffer.insert_text("\n")

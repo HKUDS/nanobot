@@ -112,13 +112,7 @@ async def test_raw_lf_enter_still_submits_like_wsl_terminals():
 
 @pytest.mark.asyncio
 async def test_alt_enter_inserts_newline_on_lf_terminals():
-    """On LF-as-Enter terminals (WSL), Alt+Enter arrives as ESC + LF
-    ("\\x1b\\x0a" = Escape + ControlJ) rather than the ESC + CR that the
-    "escape","enter" binding matches. Without a dedicated ESC + ControlJ
-    binding the Escape is swallowed and the bare LF submits, so the documented
-    Alt+Enter newline fallback breaks on exactly the terminal path plain Enter
-    is preserved for. Drive a real PromptSession to prove it inserts a newline.
-    """
+    """LF-as-Enter terminals send Alt+Enter as ESC + LF, which needs its own binding."""
     from prompt_toolkit.application import create_app_session
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput

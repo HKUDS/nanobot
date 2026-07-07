@@ -278,6 +278,8 @@ Then update ~/.nanobot/config.json to add a model preset named "primary" for my 
 Tell me exactly what changed and whether I need to run /restart.
 ```
 
+In interactive mode, `Enter` sends the current message. Press `Alt+Enter` to add a newline before sending.
+
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ## 7. Choose Your Next Step
