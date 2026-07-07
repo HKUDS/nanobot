@@ -895,7 +895,7 @@
         "commands": {
           "new": {
             "title": "Nouvelle discussion",
-            "description": "Arrêter la tâche en cours et démarrer une nouvelle conversation."
+            "description": "Réinitialiser cette discussion et démarrer une nouvelle conversation."
           },
           "stop": {
             "title": "Arrêter la tâche en cours",

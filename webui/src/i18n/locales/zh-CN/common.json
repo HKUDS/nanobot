@@ -904,7 +904,7 @@
         "commands": {
           "new": {
             "title": "新建对话",
-            "description": "停止当前任务，并开始一个新的对话。"
+            "description": "重置当前对话，并开始一个新的对话。"
           },
           "stop": {
             "title": "停止当前任务",

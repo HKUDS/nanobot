@@ -895,7 +895,7 @@
         "commands": {
           "new": {
             "title": "Nuevo chat",
-            "description": "Detiene la tarea actual e inicia una conversación nueva."
+            "description": "Restablece este chat e inicia una conversación nueva."
           },
           "stop": {
             "title": "Detener tarea actual",

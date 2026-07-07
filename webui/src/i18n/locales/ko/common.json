@@ -895,7 +895,7 @@
         "commands": {
           "new": {
             "title": "새 채팅",
-            "description": "현재 작업을 중지하고 새 대화를 시작합니다."
+            "description": "이 채팅을 초기화하고 새 대화를 시작합니다."
           },
           "stop": {
             "title": "현재 작업 중지",

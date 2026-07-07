@@ -58,7 +58,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/new",
         "New chat",
-        "Stop the current task and start a fresh conversation.",
+        "Reset this chat and start a fresh conversation.",
         "square-pen",
         lifecycle="finalize_active_turn",
     ),

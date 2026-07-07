@@ -895,7 +895,7 @@
         "commands": {
           "new": {
             "title": "新增對話",
-            "description": "停止目前任務，並開始新的對話。"
+            "description": "重置目前對話，並開始新的對話。"
           },
           "stop": {
             "title": "停止目前任務",

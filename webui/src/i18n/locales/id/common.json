@@ -895,7 +895,7 @@
         "commands": {
           "new": {
             "title": "Obrolan baru",
-            "description": "Hentikan tugas saat ini dan mulai percakapan baru."
+            "description": "Reset chat ini dan mulai percakapan baru."
           },
           "stop": {
             "title": "Hentikan tugas saat ini",

@@ -895,7 +895,7 @@
         "commands": {
           "new": {
             "title": "Cuộc trò chuyện mới",
-            "description": "Dừng tác vụ hiện tại và bắt đầu một cuộc trò chuyện mới."
+            "description": "Đặt lại cuộc trò chuyện này và bắt đầu một cuộc trò chuyện mới."
           },
           "stop": {
             "title": "Dừng tác vụ hiện tại",

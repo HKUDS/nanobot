@@ -975,12 +975,13 @@ export function ThreadComposer({
   }, [cursorPosition, disabled, slashMenuDismissed, value]);
 
   const visibleSlashCommands = useMemo(() => {
-    const baseCommands = slashCommands.filter(
-      (command) => command.command !== "/stop" && command.command !== "/restart",
-    );
-    if (!(isStreaming && onStop)) return baseCommands;
+    if (!(isStreaming && onStop)) return slashCommands;
     const stopCommand = slashCommands.find((command) => command.command === "/stop");
-    return stopCommand ? [stopCommand, ...baseCommands] : baseCommands;
+    if (!stopCommand) return slashCommands;
+    return [
+      stopCommand,
+      ...slashCommands.filter((command) => command.command !== "/stop"),
+    ];
   }, [isStreaming, onStop, slashCommands]);
 
   const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
@@ -1012,6 +1013,15 @@ export function ThreadComposer({
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands
       .filter((command) => {
+        if (
+          slashQuery === ""
+          && (
+            command.command === "/restart"
+            || (command.command === "/stop" && !(isStreaming && onStop))
+          )
+        ) {
+          return false;
+        }
         const commandKey = slashCommandI18nKey(command.command);
         const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
           defaultValue: command.title,

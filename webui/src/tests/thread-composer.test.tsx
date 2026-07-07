@@ -854,6 +854,29 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
+  it("offers stop autocomplete once the user starts typing it", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/sto" } });
+
+    expect(screen.getByRole("option", { name: /\/stop/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("/stop");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("renders slash commands as direct actions with current status", () => {
     render(
       <ThreadComposer
@@ -1363,7 +1386,7 @@ describe("ThreadComposer", () => {
           {
             command: "/new",
             title: "New chat",
-            description: "Stop the current task and start a fresh conversation.",
+            description: "Reset this chat and start a fresh conversation.",
             icon: "square-pen",
             lifecycle: "finalize_active_turn",
             acceptsArgs: false,
@@ -1393,7 +1416,7 @@ describe("ThreadComposer", () => {
           {
             command: "/new",
             title: "New chat",
-            description: "Stop the current task and start a fresh conversation.",
+            description: "Reset this chat and start a fresh conversation.",
             icon: "square-pen",
             lifecycle: "finalize_active_turn",
             acceptsArgs: false,

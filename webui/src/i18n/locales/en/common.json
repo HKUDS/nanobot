@@ -905,7 +905,7 @@
         "commands": {
           "new": {
             "title": "New chat",
-            "description": "Stop the current task and start a fresh conversation."
+            "description": "Reset this chat and start a fresh conversation."
           },
           "stop": {
             "title": "Stop current task",
