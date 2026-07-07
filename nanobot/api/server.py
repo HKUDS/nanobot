@@ -404,7 +404,7 @@ def create_app(
         agent_loop: An initialized AgentLoop instance.
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
-        api_key: Optional API key for Bearer-token authentication.
+        api_key: API key for Bearer-token authentication on API routes.
     """
     app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
     app["agent_loop"] = agent_loop
