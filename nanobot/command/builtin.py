@@ -9,12 +9,21 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Literal
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+
+CommandLifecycle = Literal[
+    "side_channel",
+    "finalize_active_turn",
+    "stop_active_turn",
+    "agent_turn",
+    "agent_turn_with_args",
+]
 
 
 @dataclass(frozen=True)
@@ -24,14 +33,18 @@ class BuiltinCommandSpec:
     description: str
     icon: str
     arg_hint: str = ""
+    lifecycle: CommandLifecycle = "side_channel"
+    accepts_args: bool = False
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, str | bool]:
         return {
             "command": self.command,
             "title": self.title,
             "description": self.description,
             "icon": self.icon,
             "arg_hint": self.arg_hint,
+            "lifecycle": self.lifecycle,
+            "accepts_args": self.accepts_args,
         }
 
 
@@ -41,12 +54,14 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "New chat",
         "Stop the current task and start a fresh conversation.",
         "square-pen",
+        lifecycle="finalize_active_turn",
     ),
     BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",
         "square",
+        lifecycle="stop_active_turn",
     ),
     BuiltinCommandSpec(
         "/restart",
@@ -66,6 +81,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Show or switch the active model preset.",
         "brain",
         "[preset]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/history",
@@ -73,6 +89,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Print the last N persisted conversation messages.",
         "history",
         "[n]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/goal",
@@ -80,6 +97,8 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Tell the agent to treat the request as a long-running goal.",
         "activity",
         "<goal>",
+        lifecycle="agent_turn_with_args",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/trigger",
@@ -87,6 +106,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Create a named CLI trigger bound to this chat session.",
         "zap",
         "<name>",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream",
@@ -99,12 +119,14 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Show Dream log",
         "Show what the last Dream consolidation changed.",
         "book-open",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream-restore",
         "Restore memory",
         "Revert memory to a previous Dream snapshot.",
         "undo-2",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream-prompt",
@@ -112,6 +134,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Tell Dream how to organize this workspace's memory.",
         "file-text",
         "[init]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/skill",
@@ -131,11 +154,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "List, approve, deny or revoke pairing requests.",
         "shield",
         "[list|approve <code>|deny <code>|revoke <user_id>]",
+        accepts_args=True,
     ),
 )
 
 
-def builtin_command_palette() -> list[dict[str, str]]:
+def builtin_command_palette() -> list[dict[str, str | bool]]:
     """Return structured command metadata for UI command palettes."""
     return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
 

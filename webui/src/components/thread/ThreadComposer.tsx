@@ -90,47 +90,49 @@ import { cn } from "@/lib/utils";
 const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
-const FALLBACK_SIDE_CHANNEL_COMMANDS = new Set([
-  "/new",
-  "/stop",
-  "/restart",
-  "/status",
-  "/model",
-  "/history",
-  "/goal",
-  "/trigger",
-  "/dream",
-  "/dream-log",
-  "/dream-restore",
-  "/dream-prompt",
-  "/skill",
-  "/help",
-  "/pairing",
-]);
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
+type ResolvedSlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn";
 
 function slashCommandName(content: string): string {
   return content.split(/\s+/, 1)[0];
 }
 
-function isExactSlashCommand(content: string, commandName: string): boolean {
-  if (slashCommandName(content) !== commandName) return false;
-  return content.slice(commandName.length).trim().length === 0;
+function slashCommandArgs(content: string, commandName: string): string {
+  return content.slice(commandName.length).trim();
 }
 
-function shouldFinalizeActiveTurn(content: string): boolean {
-  return isExactSlashCommand(content, "/new");
-}
-
-function isSlashCommandSideChannel(content: string, visibleSlashCommands: SlashCommand[]): boolean {
+function matchingSlashCommand(content: string, slashCommands: SlashCommand[]): SlashCommand | null {
   const commandName = slashCommandName(content);
-  if (!commandName.startsWith("/")) return false;
-  if (commandName === "/goal" && content.slice(commandName.length).trim().length > 0) {
-    return false;
+  if (!commandName.startsWith("/")) return null;
+  const command = slashCommands.find((item) => item.command === commandName);
+  if (!command) return null;
+  if (slashCommandArgs(content, command.command).length > 0 && !command.acceptsArgs) return null;
+  return command;
+}
+
+function slashCommandLifecycle(
+  content: string,
+  slashCommands: SlashCommand[],
+): ResolvedSlashCommandLifecycle | null {
+  const command = matchingSlashCommand(content, slashCommands);
+  if (!command) return null;
+  if (command.lifecycle === "agent_turn_with_args") {
+    return slashCommandArgs(content, command.command).length > 0
+      ? "agent_turn"
+      : "side_channel";
   }
+  return command.lifecycle;
+}
+
+function isSideChannelLifecycle(lifecycle: ResolvedSlashCommandLifecycle | null): boolean {
   return (
-    FALLBACK_SIDE_CHANNEL_COMMANDS.has(commandName)
-    || visibleSlashCommands.some((command) => command.command === commandName)
+    lifecycle === "side_channel"
+    || lifecycle === "finalize_active_turn"
+    || lifecycle === "stop_active_turn"
   );
 }
 
@@ -310,7 +312,12 @@ type MentionCandidate =
   | { kind: "cli"; name: string; app: CliAppInfo }
   | { kind: "mcp"; name: string; preset: McpPresetInfo };
 
-interface SlashPaletteCommand extends SlashCommand {
+interface SlashPaletteCommand {
+  command: string;
+  title: string;
+  description: string;
+  icon: string;
+  argHint?: string;
   detail: string;
   badge?: string;
   recent: boolean;
@@ -968,18 +975,12 @@ export function ThreadComposer({
   }, [cursorPosition, disabled, slashMenuDismissed, value]);
 
   const visibleSlashCommands = useMemo(() => {
-    const baseCommands = slashCommands.filter((command) => command.command !== "/stop");
+    const baseCommands = slashCommands.filter(
+      (command) => command.command !== "/stop" && command.command !== "/restart",
+    );
     if (!(isStreaming && onStop)) return baseCommands;
-    const stopCommand = slashCommands.find((command) => command.command === "/stop") ?? {
-      command: "/stop",
-      title: "Stop current task",
-      description: "Cancel the active agent turn for this chat.",
-      icon: "square",
-    };
-    return [
-      stopCommand,
-      ...baseCommands,
-    ];
+    const stopCommand = slashCommands.find((command) => command.command === "/stop");
+    return stopCommand ? [stopCommand, ...baseCommands] : baseCommands;
   }, [isStreaming, onStop, slashCommands]);
 
   const filteredSlashCommands = useMemo<SlashPaletteCommand[]>(() => {
@@ -1526,11 +1527,13 @@ export function ThreadComposer({
       payload === undefined
       && attachedCliApps.length === 0
       && attachedMcpPresets.length === 0;
+    const slashLifecycle = hasPlainTextCommandPayload
+      ? slashCommandLifecycle(content, slashCommands)
+      : null;
     if (
-      hasPlainTextCommandPayload
+      slashLifecycle === "stop_active_turn"
       && isStreaming
       && onStop
-      && isExactSlashCommand(content, "/stop")
     ) {
       handleStop();
       setQueuedPrompts([]);
@@ -1538,11 +1541,9 @@ export function ThreadComposer({
       clearComposerText();
       return;
     }
-    const isSlashSideChannel =
-      hasPlainTextCommandPayload
-      && isSlashCommandSideChannel(content, visibleSlashCommands);
+    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
-      isSlashSideChannel && shouldFinalizeActiveTurn(content);
+      slashLifecycle === "finalize_active_turn";
     onSend(
       content,
       payload,
@@ -1572,8 +1573,8 @@ export function ThreadComposer({
     onSend,
     onStop,
     readyImages,
+    slashCommands,
     value,
-    visibleSlashCommands,
   ]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {

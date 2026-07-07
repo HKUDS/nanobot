@@ -781,12 +781,21 @@ export interface TranscriptionSettingsUpdate {
   maxUploadMb: number;
 }
 
+export type SlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn"
+  | "agent_turn_with_args";
+
 export interface SlashCommand {
   command: string;
   title: string;
   description: string;
   icon: string;
   argHint?: string;
+  lifecycle: SlashCommandLifecycle;
+  acceptsArgs: boolean;
 }
 
 export type ConnectionStatus =

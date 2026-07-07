@@ -19,6 +19,8 @@ const COMMANDS: SlashCommand[] = [
     title: "Stop current task",
     description: "Cancel the active agent turn.",
     icon: "square",
+    lifecycle: "stop_active_turn",
+    acceptsArgs: false,
   },
   {
     command: "/history",
@@ -26,6 +28,8 @@ const COMMANDS: SlashCommand[] = [
     description: "Print the last N persisted messages.",
     icon: "history",
     argHint: "[n]",
+    lifecycle: "side_channel",
+    acceptsArgs: true,
   },
 ];
 
@@ -863,6 +867,8 @@ describe("ThreadComposer", () => {
             description: "Show or switch the active model preset.",
             icon: "brain",
             argHint: "[preset]",
+            lifecycle: "side_channel",
+            acceptsArgs: true,
           },
           COMMANDS[1],
         ]}
@@ -886,7 +892,7 @@ describe("ThreadComposer", () => {
         onStop={onStop}
         isStreaming
         placeholder="Type your message..."
-        slashCommands={[COMMANDS[1]]}
+        slashCommands={COMMANDS}
       />,
     );
 
@@ -940,6 +946,8 @@ describe("ThreadComposer", () => {
             title: `Command ${index}`,
             description: `Description ${index}`,
             icon: "activity",
+            lifecycle: "side_channel",
+            acceptsArgs: false,
           }))}
         />,
       );
@@ -1329,7 +1337,7 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
   });
 
-  it("marks builtin slash commands as side-channel sends before command metadata loads", () => {
+  it("does not infer side-channel behavior before command metadata loads", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
@@ -1342,7 +1350,7 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "/status" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("/status", undefined, { sideChannel: true });
+    expect(onSend).toHaveBeenCalledWith("/status", undefined, undefined);
   });
 
   it("marks new chat commands as side-channel sends that finalize the active turn", () => {
@@ -1351,6 +1359,16 @@ describe("ThreadComposer", () => {
       <ThreadComposer
         onSend={onSend}
         placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/new",
+            title: "New chat",
+            description: "Stop the current task and start a fresh conversation.",
+            icon: "square-pen",
+            lifecycle: "finalize_active_turn",
+            acceptsArgs: false,
+          },
+        ]}
       />,
     );
 
@@ -1365,6 +1383,32 @@ describe("ThreadComposer", () => {
     );
   });
 
+  it("does not classify exact-only slash commands with arguments", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/new",
+            title: "New chat",
+            description: "Stop the current task and start a fresh conversation.",
+            icon: "square-pen",
+            lifecycle: "finalize_active_turn",
+            acceptsArgs: false,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/new with a title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
+  });
+
   it("routes a manually submitted stop command through the stop handler", () => {
     const onSend = vi.fn();
     const onStop = vi.fn();
@@ -1374,6 +1418,7 @@ describe("ThreadComposer", () => {
         onStop={onStop}
         isStreaming
         placeholder="Type your message..."
+        slashCommands={COMMANDS}
       />,
     );
 
@@ -1399,6 +1444,8 @@ describe("ThreadComposer", () => {
             description: "Tell the agent to treat the request as a long-running goal.",
             icon: "activity",
             argHint: "<goal>",
+            lifecycle: "agent_turn_with_args",
+            acceptsArgs: true,
           },
         ]}
       />,
@@ -1413,6 +1460,33 @@ describe("ThreadComposer", () => {
       undefined,
       undefined,
     );
+  });
+
+  it("keeps goal usage commands on the side-channel path", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/goal",
+            title: "Start long-running goal",
+            description: "Tell the agent to treat the request as a long-running goal.",
+            icon: "activity",
+            argHint: "<goal>",
+            lifecycle: "agent_turn_with_args",
+            acceptsArgs: true,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/goal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/goal", undefined, { sideChannel: true });
   });
 
   it("shows a stop button while streaming", () => {

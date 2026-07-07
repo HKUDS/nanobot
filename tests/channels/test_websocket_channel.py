@@ -2075,7 +2075,13 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> No
         body = response.json()
         commands = {row["command"]: row for row in body["commands"]}
         assert commands["/stop"]["title"] == "Stop current task"
+        assert commands["/new"]["lifecycle"] == "finalize_active_turn"
+        assert commands["/stop"]["lifecycle"] == "stop_active_turn"
+        assert commands["/history"]["lifecycle"] == "side_channel"
         assert commands["/history"]["arg_hint"] == "[n]"
+        assert commands["/history"]["accepts_args"] is True
+        assert commands["/goal"]["lifecycle"] == "agent_turn_with_args"
+        assert commands["/goal"]["accepts_args"] is True
         assert all("description" in row for row in body["commands"])
     finally:
         await channel.stop()
