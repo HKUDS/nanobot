@@ -505,8 +505,6 @@ class MCPToolWrapper(_MCPWrapperBase):
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
 
-        return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
-
     def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
         """Turn MCP content blocks into a tool result string.
 
@@ -658,8 +656,6 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         parts.append(str(block))
                 return "\n".join(parts) or "(no output)"
 
-        return "(MCP resource read failed)"  # Unreachable
-
 
 class MCPPromptWrapper(_MCPWrapperBase):
     """Wraps an MCP prompt as a read-only nanobot Tool."""
@@ -793,8 +789,6 @@ class MCPPromptWrapper(_MCPWrapperBase):
                     else:
                         parts.append(str(content))
                 return "\n".join(parts) or "(no output)"
-
-        return "(MCP prompt call failed)"  # Unreachable
 
 
 async def connect_mcp_servers(
@@ -1117,17 +1111,14 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         connected = await connect_mcp_servers(missing_servers, registry)
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
-        state._mcp_connected = bool(state._mcp_stacks)
         if connected:
             logger.info("MCP connected servers: {}", sorted(connected))
         else:
             logger.warning("No MCP servers connected successfully (will retry next message)")
     except asyncio.CancelledError:
         logger.warning("MCP connection cancelled (will retry next message)")
-        state._mcp_connected = bool(state._mcp_stacks)
     except BaseException as e:
         logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
-        state._mcp_connected = bool(state._mcp_stacks)
     finally:
         state._mcp_connecting = False
 
@@ -1179,7 +1170,6 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
             state._mcp_stacks.update(connected)
             _attach_reconnect_handlers(state, registry, connected)
 
-        state._mcp_connected = bool(state._mcp_stacks)
         failed = sorted(set(to_connect) - set(connected))
         unchanged = not removed and not added and not changed and not retry_missing
         ok = not failed
@@ -1333,7 +1323,6 @@ async def _refresh_terminated_server(
         connected = await connect_mcp_servers({server_name: cfg}, registry)
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
-        state._mcp_connected = bool(state._mcp_stacks)
         if server_name not in connected:
             logger.warning("MCP server '{}' reconnect failed after session termination", server_name)
             return None

@@ -4,7 +4,7 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { CliAppInfo, McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type CliAppMentionSegment =
+type CliAppMentionSegment =
   | { kind: "text"; text: string }
   | { kind: "cli"; text: string; app: CliAppInfo };
 
@@ -34,42 +34,6 @@ export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_
       .map((part) => part[0]?.toUpperCase())
       .join("") || preset.name.slice(0, 2).toUpperCase()
   );
-}
-
-export function splitCliAppMentionSegments(
-  value: string,
-  cliApps: CliAppInfo[],
-): CliAppMentionSegment[] {
-  if (!value || cliApps.length === 0) return value ? [{ kind: "text", text: value }] : [];
-  const appsByName = new Map(
-    cliApps
-      .filter((app) => app.installed)
-      .map((app) => [app.name.toLowerCase(), app]),
-  );
-  if (appsByName.size === 0) return [{ kind: "text", text: value }];
-
-  const segments: CliAppMentionSegment[] = [];
-  const mentionRe = /(^|[\s([{])@([a-z0-9_-]+)\b/gi;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-  while ((match = mentionRe.exec(value)) !== null) {
-    const prefix = match[1] ?? "";
-    const name = match[2] ?? "";
-    const app = appsByName.get(name.toLowerCase());
-    if (!app) continue;
-
-    const mentionStart = match.index + prefix.length;
-    const mentionEnd = mentionStart + name.length + 1;
-    if (mentionStart > cursor) {
-      segments.push({ kind: "text", text: value.slice(cursor, mentionStart) });
-    }
-    segments.push({ kind: "cli", text: value.slice(mentionStart, mentionEnd), app });
-    cursor = mentionEnd;
-  }
-  if (cursor < value.length) {
-    segments.push({ kind: "text", text: value.slice(cursor) });
-  }
-  return segments.length ? segments : [{ kind: "text", text: value }];
 }
 
 export function splitCapabilityMentionSegments(

@@ -131,7 +131,6 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     await loop._connect_mcp()
 
     assert attempts == 2
-    assert loop._mcp_connected is False
     assert loop._mcp_stacks == {}
 
 

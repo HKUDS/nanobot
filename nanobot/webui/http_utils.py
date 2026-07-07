@@ -107,10 +107,6 @@ def parse_request_path(path_with_query: str) -> tuple[str, QueryParams]:
     return path, parse_qs(parsed.query, keep_blank_values=True)
 
 
-def normalize_http_path(path_with_query: str) -> str:
-    return parse_request_path(path_with_query)[0]
-
-
 def parse_query(path_with_query: str) -> QueryParams:
     return parse_request_path(path_with_query)[1]
 

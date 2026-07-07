@@ -311,7 +311,6 @@ class AgentLoop:
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
-        self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
