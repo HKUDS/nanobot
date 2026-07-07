@@ -570,17 +570,13 @@
   }
 
   .thread-viewport {
-    --thread-message-column-half: 24.75rem;
-    --thread-prompt-rail-offset: 3.5rem;
     container-name: thread-viewport;
     container-type: inline-size;
   }
 
   .thread-prompt-rail {
     display: none;
-    left: calc(
-      50% - var(--thread-message-column-half) - var(--thread-prompt-rail-offset)
-    );
+    left: 1.75rem;
   }
 
   @media (min-width: 768px) {
@@ -589,7 +585,7 @@
     }
   }
 
-  @container thread-viewport (max-width: 58rem) {
+  @container thread-viewport (max-width: 59rem) {
     .thread-prompt-rail {
       display: none;
     }
