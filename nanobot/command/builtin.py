@@ -17,6 +17,12 @@ from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 
+# WebUI protocol contract for how a slash command participates in turn state:
+# - side_channel: returns control text without starting or ending an agent turn.
+# - finalize_active_turn: side-channel command that also closes the active UI turn.
+# - stop_active_turn: cancels the active turn; WebUI may intercept exact submits.
+# - agent_turn: always enters the normal agent path.
+# - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
 CommandLifecycle = Literal[
     "side_channel",
     "finalize_active_turn",
