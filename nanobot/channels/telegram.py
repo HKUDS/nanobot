@@ -1077,13 +1077,14 @@ class TelegramChannel(BaseChannel):
                 self._app.bot.send_message,
                 chat_id=chat_id, text=chunk, parse_mode="HTML", **thread_kwargs,
             )
-        tail = html_chunks[-1]
+        markdown_tail = chunks[-1]
+        tail_html = html_chunks[-1]
         sent = await self._call_with_retry(
             self._app.bot.send_message,
-            chat_id=chat_id, text=tail, parse_mode="HTML", **thread_kwargs,
+            chat_id=chat_id, text=tail_html, parse_mode="HTML", **thread_kwargs,
         )
         buf.message_id = sent.message_id
-        buf.text = tail
+        buf.text = markdown_tail
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
