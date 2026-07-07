@@ -12,6 +12,7 @@ import {
 
 interface PromptRailProps {
   bottomOffset: number;
+  contentRef: RefObject<HTMLElement>;
   messages: UIMessage[];
   scrollRef: RefObject<HTMLDivElement>;
 }
@@ -42,9 +43,19 @@ const MARKER_STACK_GAP_PX = 16;
 const RAIL_FALLBACK_HEIGHT_PX = 300;
 const MEASURE_RETRY_FRAMES = 4;
 const HOVER_MARKER_WIDTHS_PX = [28, 22, 16, 11];
+const RAIL_WIDTH_PX = 36;
+const RAIL_MIN_EDGE_GAP_PX = 12;
+const RAIL_COLUMN_GAP_PX = 20;
+const RAIL_REQUIRED_GUTTER_PX = RAIL_MIN_EDGE_GAP_PX + RAIL_WIDTH_PX + RAIL_COLUMN_GAP_PX;
+
+interface RailLayout {
+  visible: boolean;
+  left: number | null;
+}
 
 export function PromptRail({
   bottomOffset,
+  contentRef,
   messages,
   scrollRef,
 }: PromptRailProps) {
@@ -53,12 +64,41 @@ export function PromptRail({
   const [markers, setMarkers] = useState<PromptMarker[]>([]);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [focusedMarkerIndex, setFocusedMarkerIndex] = useState<number | null>(null);
+  const [railLayout, setRailLayout] = useState<RailLayout>({ visible: true, left: null });
+
+  const measureRailLayout = useCallback((): RailLayout => {
+    const scrollEl = scrollRef.current;
+    const contentEl = contentRef.current;
+    if (!scrollEl || !contentEl) return { visible: true, left: null };
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const contentRect = contentEl.getBoundingClientRect();
+    if (scrollRect.width <= 0 || contentRect.width <= 0) {
+      return { visible: true, left: null };
+    }
+
+    const leftGutter = contentRect.left - scrollRect.left;
+    if (leftGutter < RAIL_REQUIRED_GUTTER_PX) {
+      return { visible: false, left: null };
+    }
+
+    return {
+      visible: true,
+      left: Math.round(leftGutter - RAIL_WIDTH_PX - RAIL_COLUMN_GAP_PX),
+    };
+  }, [contentRef, scrollRef]);
 
   const updateMarkers = useCallback(() => {
     const scrollEl = scrollRef.current;
     const nextRailHeight = railRef.current?.clientHeight ?? 0;
+    const nextRailLayout = measureRailLayout();
+    setRailLayout((current) =>
+      current.visible === nextRailLayout.visible && current.left === nextRailLayout.left
+        ? current
+        : nextRailLayout,
+    );
 
-    if (!scrollEl || promptAnchors.length < MIN_PROMPTS_FOR_RAIL) {
+    if (!nextRailLayout.visible || !scrollEl || promptAnchors.length < MIN_PROMPTS_FOR_RAIL) {
       setMarkers([]);
       setActivePromptId(null);
       return;
@@ -75,7 +115,7 @@ export function PromptRail({
     const grouped = groupPromptMarkers(measured, nextRailHeight);
     setMarkers(distributeMarkerPositions(grouped, nextRailHeight));
     setActivePromptId(activePromptForScroll(measured, scrollEl.scrollTop));
-  }, [promptAnchors, scrollRef]);
+  }, [measureRailLayout, promptAnchors, scrollRef]);
 
   useEffect(() => {
     let frame = 0;
@@ -116,10 +156,11 @@ export function PromptRail({
     const observer = new ResizeObserver(() => updateMarkers());
     observer.observe(scrollEl);
     if (scrollEl.firstElementChild) observer.observe(scrollEl.firstElementChild);
+    if (contentRef.current) observer.observe(contentRef.current);
     return () => observer.disconnect();
-  }, [scrollRef, updateMarkers]);
+  }, [contentRef, scrollRef, updateMarkers]);
 
-  if (markers.length === 0) return null;
+  if (!railLayout.visible || markers.length === 0) return null;
 
   return (
     <div
@@ -131,7 +172,10 @@ export function PromptRail({
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
       )}
       onPointerLeave={() => setFocusedMarkerIndex(null)}
-      style={{ bottom: Math.max(80, bottomOffset) }}
+      style={{
+        bottom: Math.max(80, bottomOffset),
+        ...(railLayout.left == null ? {} : { left: railLayout.left }),
+      }}
     >
       {markers.map((marker, index) => {
         const active = marker.ids.includes(activePromptId ?? "");

@@ -132,6 +132,24 @@ function makePromptExchangeMessages(count: number): UIMessage[] {
   ])).flat();
 }
 
+function elementRect(left: number, width: number, height = 600): DOMRect {
+  return {
+    x: left,
+    y: 0,
+    left,
+    top: 0,
+    right: left + width,
+    bottom: height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function stubElementRect(element: HTMLElement, left: number, width: number, height = 600) {
+  element.getBoundingClientRect = () => elementRect(left, width, height);
+}
+
 function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   return (
@@ -805,6 +823,80 @@ describe("ThreadViewport", () => {
       top: 1064,
       behavior: "smooth",
     });
+  });
+
+  it("positions the prompt rail in the gutter before the message column", async () => {
+    const promptMessages = makePromptExchangeMessages(5);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+    });
+    stubElementRect(scroller, 0, 1200);
+    stubElementRect(screen.getByTestId("thread-message-column"), 180, 792);
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 360,
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.getByLabelText("User prompt navigation")).toHaveStyle({ left: "124px" });
+  });
+
+  it("hides the prompt rail when the message column leaves no side gutter", async () => {
+    const promptMessages = makePromptExchangeMessages(5);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+    });
+    stubElementRect(scroller, 0, 560);
+    stubElementRect(screen.getByTestId("thread-message-column"), 48, 480);
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 360,
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.queryByLabelText("User prompt navigation")).not.toBeInTheDocument();
   });
 
   it("opens a prompt navigator list and jumps to a selected prompt", async () => {
