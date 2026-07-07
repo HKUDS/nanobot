@@ -727,17 +727,8 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-_GOAL_PROMPT_TEMPLATE = """The user declared a sustained objective for this thread.
-
-Inspect or clarify if needed, then call `long_task` with the refined objective (and optional short ui_summary). Work proceeds as normal assistant turns using your usual tools. When the objective is fully done and verified, call `complete_goal` with a brief recap. If the user later cancels or changes direction, still call `complete_goal` with an honest recap (then `long_task` again only after there is no active goal). Do not use `long_task` / `complete_goal` for trivial one-shot answers.
-
-Goal:
-{goal}
-"""
-
-
 async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
-    """Rewrite /goal into a normal agent turn that nudges long_task use."""
+    """Mark this turn as an explicit sustained-goal request."""
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
@@ -761,9 +752,10 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
         **dict(ctx.msg.metadata or {}),
         "original_command": "/goal",
         "original_content": ctx.raw,
+        "goal_requested": True,
         "goal_started_at": time.time(),
     }
-    ctx.msg.content = _GOAL_PROMPT_TEMPLATE.format(goal=goal)
+    ctx.msg.content = goal
     return None
 
 

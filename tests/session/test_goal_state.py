@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from nanobot.session.goal_state import (
+    CREATE_GOAL_TOOL,
     GOAL_STATE_KEY,
+    UPDATE_GOAL_TOOL,
     discard_legacy_goal_state_key,
+    explicit_goal_requested,
+    goal_runtime_mode,
     goal_state_runtime_lines,
     goal_state_ws_blob,
+    goal_tool_names_for_turn,
     parse_goal_state,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
@@ -107,6 +112,30 @@ def test_sustained_goal_active_true_when_active():
 def test_sustained_goal_active_respects_legacy_thread_goal_key():
     meta = {"thread_goal": {"status": "active", "objective": "Legacy."}}
     assert sustained_goal_active(meta) is True
+
+
+def test_goal_runtime_mode_and_visible_tools_for_normal_turn():
+    assert explicit_goal_requested({}) is False
+    assert goal_runtime_mode({}, message_metadata={}) == "normal"
+    assert goal_tool_names_for_turn({}, message_metadata={}) == frozenset()
+
+
+def test_goal_runtime_mode_and_visible_tools_for_goal_command():
+    message_meta = {"original_command": "/goal", "goal_requested": True}
+    assert explicit_goal_requested(message_meta) is True
+    assert goal_runtime_mode({}, message_metadata=message_meta) == "create"
+    assert goal_tool_names_for_turn({}, message_metadata=message_meta) == frozenset({
+        CREATE_GOAL_TOOL,
+    })
+
+
+def test_goal_runtime_mode_active_takes_precedence_over_goal_command():
+    meta = {GOAL_STATE_KEY: {"status": "active", "objective": "Existing."}}
+    message_meta = {"original_command": "/goal", "goal_requested": True}
+    assert goal_runtime_mode(meta, message_metadata=message_meta) == "active"
+    assert goal_tool_names_for_turn(meta, message_metadata=message_meta) == frozenset({
+        UPDATE_GOAL_TOOL,
+    })
 
 
 def test_runner_wall_llm_timeout_uses_metadata_override(tmp_path):

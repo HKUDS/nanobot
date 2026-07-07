@@ -179,15 +179,15 @@ async def test_goal_command_rejects_mid_turn_without_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_command_rewrites_to_agent_prompt(tmp_path) -> None:
+async def test_goal_command_marks_turn_without_rewriting_prompt(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal audit the repo", args="audit the repo")
     out = await cmd_goal(ctx)
     assert out is None
-    assert "audit the repo" in ctx.msg.content
-    assert "long_task" in ctx.msg.content
+    assert ctx.msg.content == "audit the repo"
     assert ctx.msg.metadata.get("original_command") == "/goal"
     assert ctx.msg.metadata.get("original_content") == "/goal audit the repo"
+    assert ctx.msg.metadata.get("goal_requested") is True
     assert isinstance(ctx.msg.metadata.get("goal_started_at"), int | float)
 
 

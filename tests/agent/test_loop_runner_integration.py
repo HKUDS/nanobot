@@ -10,6 +10,7 @@ import pytest
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.session.goal_state import GOAL_STATE_KEY
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -28,6 +29,142 @@ def _make_loop(tmp_path):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
+
+
+def _tool_schema_names(definitions: list[dict]) -> set[str]:
+    names: set[str] = set()
+    for schema in definitions:
+        fn = schema.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            names.add(fn["name"])
+        elif isinstance(schema.get("name"), str):
+            names.add(schema["name"])
+    return names
+
+
+def test_goal_tools_hidden_in_normal_turn(tmp_path):
+    loop = _make_loop(tmp_path)
+
+    view = loop._goal_filtered_tools(loop.tools, session_metadata={}, message_metadata={})
+    names = _tool_schema_names(view.get_definitions())
+
+    assert "create_goal" not in names
+    assert "update_goal" not in names
+
+
+def test_goal_command_turn_exposes_only_create_goal(tmp_path):
+    loop = _make_loop(tmp_path)
+
+    view = loop._goal_filtered_tools(
+        loop.tools,
+        session_metadata={},
+        message_metadata={"original_command": "/goal", "goal_requested": True},
+    )
+    names = _tool_schema_names(view.get_definitions())
+
+    assert "create_goal" in names
+    assert "update_goal" not in names
+
+
+def test_active_goal_turn_exposes_only_update_goal(tmp_path):
+    loop = _make_loop(tmp_path)
+
+    view = loop._goal_filtered_tools(
+        loop.tools,
+        session_metadata={GOAL_STATE_KEY: {"status": "active", "objective": "Ship it."}},
+        message_metadata={},
+    )
+    names = _tool_schema_names(view.get_definitions())
+
+    assert "create_goal" not in names
+    assert "update_goal" in names
+
+
+def test_goal_tool_view_tracks_session_metadata_changes(tmp_path):
+    loop = _make_loop(tmp_path)
+    session_meta: dict = {}
+    view = loop._goal_filtered_tools(
+        loop.tools,
+        session_metadata=session_meta,
+        message_metadata={"original_command": "/goal", "goal_requested": True},
+    )
+
+    names = _tool_schema_names(view.get_definitions())
+    assert "create_goal" in names
+    assert "update_goal" not in names
+
+    session_meta[GOAL_STATE_KEY] = {"status": "active", "objective": "Ship it."}
+    names = _tool_schema_names(view.get_definitions())
+    assert "create_goal" not in names
+    assert "update_goal" in names
+
+    session_meta[GOAL_STATE_KEY]["status"] = "completed"
+    names = _tool_schema_names(view.get_definitions())
+    assert "create_goal" not in names
+    assert "update_goal" not in names
+
+
+@pytest.mark.asyncio
+async def test_goal_tool_visibility_changes_within_runner_turn(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    seen_tools: list[set[str]] = []
+
+    async def chat_with_retry(**kwargs):
+        names = _tool_schema_names(kwargs.get("tools") or [])
+        seen_tools.append(names)
+        if len(seen_tools) == 1:
+            assert "create_goal" in names
+            assert "update_goal" not in names
+            return LLMResponse(
+                content="recording goal",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_create",
+                        name="create_goal",
+                        arguments={"objective": "Ship it.", "ui_summary": "ship"},
+                    )
+                ],
+                usage={},
+            )
+        if len(seen_tools) == 2:
+            assert "create_goal" not in names
+            assert "update_goal" in names
+            return LLMResponse(
+                content="closing goal",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_update",
+                        name="update_goal",
+                        arguments={"action": "complete", "recap": "Done."},
+                    )
+                ],
+                usage={},
+            )
+        assert "create_goal" not in names
+        assert "update_goal" not in names
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    session = loop.sessions.get_or_create("cli:direct")
+
+    final_content, tools_used, _messages, _stop_reason, _had_injections = await loop._run_agent_loop(
+        [],
+        session=session,
+        channel="cli",
+        chat_id="direct",
+        session_key="cli:direct",
+        metadata={"original_command": "/goal", "goal_requested": True},
+    )
+
+    assert final_content == "done"
+    assert tools_used == ["create_goal", "update_goal"]
+    assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
+    assert len(seen_tools) == 3
 
 @pytest.mark.asyncio
 async def test_loop_max_iterations_message_stays_stable(tmp_path):

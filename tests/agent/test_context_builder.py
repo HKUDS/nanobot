@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
@@ -335,6 +336,61 @@ class TestBuildMessages:
         )
         user_msg = str(messages[-1]["content"])
         assert "Goal (active):" in user_msg
+        assert "Finish docs migration." in user_msg
+
+    def test_normal_turn_does_not_include_goal_runtime_prompt(self, tmp_path):
+        builder = _builder(tmp_path)
+        messages = builder.build_messages([], "hi", channel="cli", chat_id="x")
+
+        system_msg = str(messages[0]["content"])
+        assert "# Goal Runtime" not in system_msg
+        assert "create_goal" not in system_msg
+        assert "update_goal" not in system_msg
+        assert "long-goal" not in system_msg
+
+    def test_goal_command_turn_injects_create_goal_runtime_prompt(self, tmp_path):
+        builder = _builder(tmp_path)
+        inbound = InboundMessage(
+            channel="cli",
+            sender_id="user",
+            chat_id="direct",
+            content="audit the repo",
+            metadata={"original_command": "/goal", "goal_requested": True},
+        )
+
+        messages = builder.build_messages(
+            [],
+            "audit the repo",
+            channel="cli",
+            chat_id="direct",
+            inbound_message=inbound,
+            session_metadata={},
+        )
+
+        system_msg = str(messages[0]["content"])
+        assert "# Goal Runtime" in system_msg
+        assert "create_goal" in system_msg
+        assert "Do not create goals from ordinary non-`/goal` messages." in system_msg
+
+    def test_active_goal_turn_injects_update_goal_runtime_prompt(self, tmp_path):
+        builder = _builder(tmp_path)
+        meta = {
+            GOAL_STATE_KEY: {"status": "active", "objective": "Finish docs migration."},
+        }
+
+        messages = builder.build_messages(
+            [],
+            "continue",
+            channel="cli",
+            chat_id="direct",
+            session_metadata=meta,
+        )
+
+        system_msg = str(messages[0]["content"])
+        user_msg = str(messages[-1]["content"])
+        assert "# Goal Runtime" in system_msg
+        assert "update_goal" in system_msg
+        assert "create_goal" not in system_msg
         assert "Finish docs migration." in user_msg
 
     def test_goal_state_does_not_leak_without_session_metadata(self, tmp_path):

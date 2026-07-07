@@ -29,7 +29,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, ToolRegistryView
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -58,7 +58,9 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
+    GOAL_TOOL_NAMES,
     goal_state_runtime_lines,
+    goal_tool_names_for_turn,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
@@ -573,6 +575,31 @@ class AgentLoop:
                 tool.set_context(request_ctx)
 
     @staticmethod
+    def _goal_filtered_tools(
+        tools: ToolRegistry,
+        *,
+        session_metadata: dict[str, Any] | None,
+        message_metadata: dict[str, Any] | None,
+    ) -> ToolRegistryView:
+        seen_active_goal = sustained_goal_active(session_metadata)
+
+        def _allow(name: str) -> bool:
+            nonlocal seen_active_goal
+            if name not in GOAL_TOOL_NAMES:
+                return True
+            active_now = sustained_goal_active(session_metadata)
+            if active_now:
+                seen_active_goal = True
+            if seen_active_goal and not active_now:
+                return False
+            return name in goal_tool_names_for_turn(
+                session_metadata,
+                message_metadata=message_metadata,
+            )
+
+        return ToolRegistryView(tools, allow=_allow)
+
+    @staticmethod
     def _runtime_chat_id(msg: InboundMessage) -> str:
         """Return the chat id shown in runtime metadata for the model."""
         return str(msg.metadata.get("context_chat_id") or msg.chat_id)
@@ -857,7 +884,7 @@ class AgentLoop:
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
-        # Compute lazily because long_task may create goal metadata during this run.
+        # Compute lazily because create_goal may create goal metadata during this run.
         def _goal_continue() -> str | None:
             _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
             if not _goal_lines:
@@ -866,14 +893,19 @@ class AgentLoop:
                 "You have an active sustained goal:\n\n"
                 + "\n".join(_goal_lines)
                 + "\n\nPlease continue working toward the objective using your tools, "
-                "or call complete_goal if the work is truly finished."
+                "or call update_goal with action='complete' if the work is truly finished."
             )
 
         session_metadata = session.metadata if session is not None else None
+        turn_tools = self._goal_filtered_tools(
+            tools or self.tools,
+            session_metadata=session_metadata,
+            message_metadata=metadata,
+        )
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
-                tools=tools or self.tools,
+                tools=turn_tools,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,

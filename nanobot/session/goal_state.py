@@ -1,4 +1,4 @@
-"""Session metadata helpers for sustained goals (e.g. ``long_task`` / ``complete_goal``).
+"""Session metadata helpers for explicit sustained goals.
 
 Tools set ``metadata[GOAL_STATE_KEY]``. Reads accept the legacy session key ``thread_goal``
 for older sessions. Callers use ``goal_state_runtime_lines``, ``goal_state_ws_blob``, and
@@ -13,6 +13,10 @@ from typing import Any, Mapping, MutableMapping
 from nanobot.session.manager import SessionManager
 
 GOAL_STATE_KEY = "goal_state"
+GOAL_COMMAND = "/goal"
+CREATE_GOAL_TOOL = "create_goal"
+UPDATE_GOAL_TOOL = "update_goal"
+GOAL_TOOL_NAMES = frozenset({CREATE_GOAL_TOOL, UPDATE_GOAL_TOOL})
 # Older builds stored the same JSON blob under this key.
 _LEGACY_GOAL_STATE_SESSION_KEY = "thread_goal"
 _MAX_OBJECTIVE_IN_RUNTIME = 4000
@@ -38,9 +42,50 @@ def goal_state_raw(metadata: Mapping[str, Any] | None) -> Any:
 
 
 def sustained_goal_active(metadata: Mapping[str, Any] | None) -> bool:
-    """True when this session has an active sustained objective (``long_task`` bookkeeping)."""
+    """True when this session has an active sustained objective."""
     goal = parse_goal_state(goal_state_raw(metadata))
     return isinstance(goal, dict) and goal.get("status") == "active"
+
+
+def explicit_goal_requested(message_metadata: Mapping[str, Any] | None) -> bool:
+    """True when this turn was explicitly started by the ``/goal`` command."""
+    if not message_metadata:
+        return False
+    if message_metadata.get("goal_requested") is True:
+        return True
+    return str(message_metadata.get("original_command") or "").strip() == GOAL_COMMAND
+
+
+def goal_runtime_mode(
+    metadata: Mapping[str, Any] | None,
+    *,
+    message_metadata: Mapping[str, Any] | None = None,
+) -> str:
+    """Return the model-facing goal mode for this turn.
+
+    ``active`` takes precedence over ``create`` so a new ``/goal`` request in a
+    session with an existing objective becomes an explicit replacement/update
+    flow instead of stacking a second active goal.
+    """
+    if sustained_goal_active(metadata):
+        return "active"
+    if explicit_goal_requested(message_metadata):
+        return "create"
+    return "normal"
+
+
+def goal_tool_names_for_turn(
+    metadata: Mapping[str, Any] | None,
+    *,
+    message_metadata: Mapping[str, Any] | None = None,
+) -> frozenset[str]:
+    """Return the goal tool names visible for one runner invocation."""
+    mode = goal_runtime_mode(metadata, message_metadata=message_metadata)
+    if mode == "active":
+        return frozenset({UPDATE_GOAL_TOOL})
+    if mode == "create":
+        return frozenset({CREATE_GOAL_TOOL})
+    return frozenset()
 
 
 def sustained_goal_turn(
@@ -49,11 +94,7 @@ def sustained_goal_turn(
     message_metadata: Mapping[str, Any] | None = None,
 ) -> bool:
     """True when this turn should use sustained-goal runtime limits."""
-    if sustained_goal_active(metadata):
-        return True
-    if not message_metadata:
-        return False
-    return str(message_metadata.get("original_command") or "").strip() == "/goal"
+    return goal_runtime_mode(metadata, message_metadata=message_metadata) != "normal"
 
 
 def parse_goal_state(blob: Any) -> dict[str, Any] | None:

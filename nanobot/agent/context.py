@@ -12,7 +12,7 @@ from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
-from nanobot.session.goal_state import goal_state_runtime_lines
+from nanobot.session.goal_state import goal_runtime_mode, goal_state_runtime_lines
 from nanobot.utils.helpers import (
     current_time_str,
     detect_image_mime,
@@ -72,6 +72,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        goal_runtime_section: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -82,6 +83,9 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         parts.append(render_template("agent/tool_contract.md"))
+
+        if goal_runtime_section:
+            parts.append(goal_runtime_section)
 
         memory = self.memory.get_memory_context()
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
@@ -115,6 +119,22 @@ class ContextBuilder:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
         return "\n\n---\n\n".join(parts)
+
+    def _build_goal_runtime_section(
+        self,
+        session_metadata: Mapping[str, Any] | None,
+        message_metadata: Mapping[str, Any] | None,
+    ) -> str | None:
+        mode = goal_runtime_mode(session_metadata, message_metadata=message_metadata)
+        if mode == "normal":
+            return None
+        objective_guidance = render_template("agent/goal_objective.md", strip=True)
+        template = "agent/goal_active.md" if mode == "active" else "agent/goal_create.md"
+        return render_template(
+            template,
+            objective_guidance=objective_guidance,
+            strip=True,
+        )
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""
@@ -222,6 +242,15 @@ class ContextBuilder:
             supplemental_lines=extra or None,
         )
         user_content = self._build_user_content(current_message, media)
+        inbound_metadata = (
+            inbound_message.metadata
+            if inbound_message is not None and isinstance(inbound_message.metadata, Mapping)
+            else None
+        )
+        goal_runtime_section = self._build_goal_runtime_section(
+            session_metadata,
+            inbound_metadata,
+        )
 
         # Merge runtime context and user content into a single user message
         # to avoid consecutive same-role messages that some providers reject.
@@ -242,6 +271,7 @@ class ContextBuilder:
                     include_memory_recent_history=include_memory_recent_history,
                     session_key=session_key,
                     unified_session=unified_session,
+                    goal_runtime_section=goal_runtime_section,
                 ),
             },
             *history,

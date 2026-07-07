@@ -1,6 +1,7 @@
 """Tool registry for dynamic tool management."""
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -188,3 +189,90 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+class ToolRegistryView:
+    """Per-run filtered view over a shared :class:`ToolRegistry`.
+
+    The underlying registry owns tool instances and request context.  This view
+    only changes what schemas and calls are visible for one runner invocation.
+    """
+
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        *,
+        include: set[str] | frozenset[str] | None = None,
+        exclude: set[str] | frozenset[str] | None = None,
+        allow: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._registry = registry
+        self._include = frozenset(include) if include is not None else None
+        self._exclude = frozenset(exclude or ())
+        self._allow = allow
+
+    def _allowed(self, name: str) -> bool:
+        if self._include is not None:
+            base_allowed = name in self._include
+        else:
+            base_allowed = name not in self._exclude
+        if not base_allowed:
+            return False
+        if self._allow is None:
+            return True
+        return self._allow(name)
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        definitions = [
+            schema
+            for schema in self._registry.get_definitions()
+            if self._allowed(ToolRegistry._schema_name(schema))
+        ]
+        builtins: list[dict[str, Any]] = []
+        mcp_tools: list[dict[str, Any]] = []
+        for schema in definitions:
+            name = ToolRegistry._schema_name(schema)
+            if name.startswith("mcp_"):
+                mcp_tools.append(schema)
+            else:
+                builtins.append(schema)
+        builtins.sort(key=ToolRegistry._schema_name)
+        mcp_tools.sort(key=ToolRegistry._schema_name)
+        return builtins + mcp_tools
+
+    def get(self, name: str) -> Tool | None:
+        if not self._allowed(name):
+            return None
+        return self._registry.get(name)
+
+    def prepare_call(
+        self,
+        name: str,
+        params: Any,
+    ) -> tuple[Tool | None, Any, str | None]:
+        if not self._allowed(name):
+            return None, params, (
+                ToolResult.error(
+                    f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+                )
+            )
+        return self._registry.prepare_call(name, params)
+
+    async def execute(self, name: str, params: Any) -> Any:
+        hint = "\n\n[Analyze the error above and try a different approach.]"
+        if not self._allowed(name):
+            return ToolResult.error(
+                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+                + hint
+            )
+        return await self._registry.execute(name, params)
+
+    @property
+    def tool_names(self) -> list[str]:
+        return [name for name in self._registry.tool_names if self._allowed(name)]
+
+    def __len__(self) -> int:
+        return len(self.tool_names)
+
+    def __contains__(self, name: str) -> bool:
+        return self._allowed(name) and name in self._registry

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, ToolRegistryView
 
 
 class _FakeTool(Tool):
@@ -57,6 +57,43 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
         "mcp_fs_list",
         "mcp_git_status",
     ]
+
+
+def test_tool_registry_view_filters_definitions() -> None:
+    registry = _registry_with_names(["read_file", "create_goal", "update_goal", "mcp_fs_list"])
+    view = ToolRegistryView(registry, exclude=frozenset({"create_goal", "update_goal"}))
+
+    assert _tool_names(view.get_definitions()) == ["read_file", "mcp_fs_list"]
+    assert view.tool_names == ["read_file", "mcp_fs_list"]
+
+
+def test_tool_registry_view_can_use_dynamic_allow_predicate() -> None:
+    registry = _registry_with_names(["read_file", "create_goal", "update_goal"])
+    visible_goal_tools = {"create_goal"}
+    view = ToolRegistryView(
+        registry,
+        allow=lambda name: name == "read_file" or name in visible_goal_tools,
+    )
+
+    assert _tool_names(view.get_definitions()) == ["create_goal", "read_file"]
+
+    visible_goal_tools.clear()
+    visible_goal_tools.add("update_goal")
+
+    assert _tool_names(view.get_definitions()) == ["read_file", "update_goal"]
+
+
+async def test_tool_registry_view_rejects_hidden_tool() -> None:
+    registry = _registry_with_names(["read_file", "create_goal"])
+    view = ToolRegistryView(registry, exclude=frozenset({"create_goal"}))
+
+    result = await view.execute("create_goal", {"objective": "x"})
+
+    assert isinstance(result, ToolResult)
+    assert result.is_error
+    assert "Tool 'create_goal' not found" in str(result)
+    assert "read_file" in str(result)
+    assert "create_goal" not in str(result).split("Available:", 1)[1]
 
 
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:
