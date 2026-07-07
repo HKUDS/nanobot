@@ -127,6 +127,29 @@ async def test_alt_enter_inserts_newline_on_lf_terminals():
     assert result == "foo\nbar"
 
 
+@pytest.mark.asyncio
+async def test_csi_u_shift_enter_inserts_newline_not_raw_escape():
+    """Terminals speaking the CSI-u (kitty / fixterms) keyboard protocol send
+    Shift+Enter as "\\x1b[13;2u". prompt_toolkit has no support for that protocol
+    and would otherwise dump the raw escape bytes ("^[[13;2u") into the buffer;
+    the binding must instead parse it as one keypress and insert a newline. Only
+    a real PromptSession/parser exercises the ANSI_SEQUENCES registration.
+    """
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("foo\x1b[13;2ubar\r")
+            result = await session.prompt_async("> ")
+
+    # A newline is inserted and no raw escape bytes leak into the result.
+    assert result == "foo\nbar"
+
+
 def test_thinking_spinner_pause_stops_and_restarts():
     """Pause should stop the active spinner and restart it afterward."""
     spinner = MagicMock()

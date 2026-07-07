@@ -309,8 +309,33 @@ def _build_cli_key_bindings() -> KeyBindings:
       * Enter       -> submit the current input (keeps the familiar
                        single-line Enter-to-send feel even though the buffer
                        is multiline-capable).
-      * Alt+Enter   -> insert a newline for multi-line input.
+      * Alt+Enter   -> insert a newline for multi-line input. Universally
+                       supported, so this is the reliable multiline shortcut.
+      * Shift+Enter -> insert a newline on terminals that emit the CSI-u
+                       (kitty / fixterms) keyboard-protocol encoding for it.
     """
+    # Terminals speaking the CSI-u (kitty / fixterms) keyboard protocol -- e.g.
+    # kitty, Ghostty and WezTerm when it is enabled -- send Shift+Enter as the
+    # escape sequence "\x1b[13;2u". prompt_toolkit 3.0 has no support for that
+    # protocol (no way to negotiate it, no default mapping for the sequence), so
+    # when such a terminal sends it the Vt100Parser fails to recognise the
+    # sequence and dumps the raw bytes ("^[[13;2u") straight into the buffer.
+    #
+    # Register the sequence so it parses as one keypress bound to insert a
+    # newline instead. "\x1b[13;2u" is absent from prompt_toolkit's default
+    # ANSI_SEQUENCES table, so this is a pure addition -- setdefault() overrides
+    # nothing -- carried on Keys.ControlF3, an enum member prompt_toolkit
+    # declares but never wires to a default sequence or binding.
+    #
+    # This is best-effort: without protocol negotiation we can only *react* to a
+    # CSI-u sequence a terminal already emits, not *request* one. Terminals that
+    # collapse Shift+Enter into a plain Enter are indistinguishable and fall back
+    # to Alt+Enter, which is why Alt+Enter stays the primary shortcut.
+    with suppress(Exception):
+        from prompt_toolkit.input import ansi_escape_sequences as _aes
+
+        _aes.ANSI_SEQUENCES.setdefault("\x1b[13;2u", Keys.ControlF3)
+
     kb = KeyBindings()
 
     @kb.add("enter")
@@ -323,6 +348,10 @@ def _build_cli_key_bindings() -> KeyBindings:
 
     # LF-as-Enter terminals send Alt+Enter as ESC + LF rather than ESC + CR.
     @kb.add("escape", Keys.ControlJ)  # Alt+Enter on LF-as-Enter terminals
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    @kb.add(Keys.ControlF3)  # Shift+Enter on CSI-u capable terminals
     def _(event):
         event.current_buffer.insert_text("\n")
 
