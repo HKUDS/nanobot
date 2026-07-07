@@ -279,6 +279,48 @@ class TestNanoTimerIANAValidation:
         assert "Server timezone" in out
         assert "BRT" not in out
 
+    @pytest.mark.asyncio
+    async def test_invalid_iana_user_block_says_utc_not_input(self):
+        # Regression: the User Local Time block used to echo the invalid
+        # input back ("Timezone: BRT"). It must report "UTC" instead,
+        # while the warning footer still names the bad value.
+        tool = NanoTimerTool(timezone="BRT")
+        with freeze_time("2026-06-22 15:00:00", tz_offset=0):
+            out = await tool.execute(info_type="all")
+        assert "  Timezone: UTC" in out
+        assert "  Timezone: BRT" not in out
+        # The warning still names the bad value for traceability.
+        assert "BRT" in out
+
+    @pytest.mark.asyncio
+    async def test_empty_string_iana_user_block_says_utc(self):
+        tool = NanoTimerTool(timezone="")
+        with freeze_time("2026-06-22 15:00:00", tz_offset=0):
+            out = await tool.execute(info_type="all")
+        assert "  Timezone: UTC" in out
+        # No echoed empty value (which would render as just "Timezone: ").
+        assert "Timezone: \n" not in out
+        # The warning footer must still render (it would have been suppressed
+        # if we used a truthiness check on _tz_fallback_name).
+        assert "invalid" in out.lower()
+        assert "<empty>" in out or "''" in out
+
+    @pytest.mark.asyncio
+    async def test_lowercase_iana_user_block_says_utc(self):
+        tool = NanoTimerTool(timezone="america/sao_paulo")
+        with freeze_time("2026-06-22 15:00:00", tz_offset=0):
+            out = await tool.execute(info_type="all")
+        assert "  Timezone: UTC" in out
+        assert "america/sao_paulo" in out  # echoed in warning, not in user block
+
+    @pytest.mark.asyncio
+    async def test_numeric_iana_user_block_says_utc(self):
+        tool = NanoTimerTool(timezone="42")
+        with freeze_time("2026-06-22 15:00:00", tz_offset=0):
+            out = await tool.execute(info_type="all")
+        assert "  Timezone: UTC" in out
+        assert "  Timezone: 42" not in out
+
     def test_lowercase_iana_is_case_sensitive(self):
         # Python's ZoneInfo is case-sensitive; this documents the behavior.
         with pytest.raises(Exception):

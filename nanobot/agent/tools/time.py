@@ -99,7 +99,9 @@ class NanoTimerTool(Tool, ContextAware):
 
     def __init__(self, timezone: str = "UTC"):
         self._timezone = timezone
-        self._tz_fallback: str | None = None
+        # _tz_fallback_name is the bad input string (or None if tz was OK).
+        # Use a separate bool check in _format() because empty-string is falsy.
+        self._tz_fallback_name: str | None = None
         self._channel: str = ""
         self._chat_id: str = ""
 
@@ -135,14 +137,16 @@ class NanoTimerTool(Tool, ContextAware):
         now_utc = datetime.now(timezone.utc)
         try:
             user_tz = ZoneInfo(self._timezone)
-            self._tz_fallback = None
+            self._tz_fallback_name = None
         except (ZoneInfoNotFoundError, ValueError):
             logger.warning(
                 "Invalid IANA timezone '{}' in nano_timer; falling back to UTC",
                 self._timezone,
             )
             user_tz = ZoneInfo("UTC")
-            self._tz_fallback = self._timezone
+            # Preserve the raw input (even empty string) so the warning footer
+            # can name it. The renderer checks `is not None`, not truthiness.
+            self._tz_fallback_name = self._timezone
         user_now = now_utc.astimezone(user_tz)
         server_local = datetime.now().astimezone()
         server_label, server_offset_str = _resolve_server_tz()
@@ -168,7 +172,9 @@ class NanoTimerTool(Tool, ContextAware):
             "user": {
                 "time": user_now.strftime("%H:%M:%S"),
                 "date": user_now.strftime("%Y-%m-%d"),
-                "timezone": self._tz_fallback or str(user_tz),
+                # When the configured tz was invalid we fell back to UTC;
+                # report "UTC" rather than echoing the bad input back.
+                "timezone": "UTC" if self._tz_fallback_name is not None else str(user_tz),
                 "offset": _format_offset(user_offset),
             },
             "calendar": {
@@ -224,11 +230,14 @@ class NanoTimerTool(Tool, ContextAware):
             lines.append(
                 f"  Difference from UTC: {ctx_block['diff_from_utc_hours']}"
             )
-        if self._tz_fallback:
+        if self._tz_fallback_name is not None:
             if lines and lines[-1] != "":
                 lines.append("")
+            # Use a quoted placeholder for the empty-string case so the
+            # warning line is still informative (rather than `''`).
+            label = self._tz_fallback_name if self._tz_fallback_name else "<empty>"
             lines.append(
-                f"  ⚠️ timezone '{self._tz_fallback}' invalid; using UTC"
+                f"  ⚠️ timezone '{label}' invalid; using UTC"
             )
         return "\n".join(lines)
 
