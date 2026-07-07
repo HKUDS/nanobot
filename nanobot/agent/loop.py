@@ -311,6 +311,7 @@ class AgentLoop:
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
+        self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
@@ -953,7 +954,7 @@ class AgentLoop:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
                     continue
 
-                raw = msg.content.strip()
+                raw = msg.content.strip() if isinstance(msg.content, str) else ""
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
@@ -1484,7 +1485,7 @@ class AgentLoop:
         return "ok"
 
     async def _state_command(self, ctx: TurnContext) -> str:
-        raw = ctx.msg.content.strip()
+        raw = ctx.msg.content.strip() if isinstance(ctx.msg.content, str) else ""
         cmd_ctx = CommandContext(
             msg=ctx.msg, session=ctx.session, key=ctx.session_key, raw=raw, loop=self
         )
