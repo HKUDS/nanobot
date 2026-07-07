@@ -1060,25 +1060,27 @@ class TelegramChannel(BaseChannel):
         chunks = _split_telegram_markdown(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
         if len(chunks) <= 1:
             return
+        html_chunks = [_markdown_to_telegram_html(chunk) for chunk in chunks]
         try:
             await self._call_with_retry(
                 self._app.bot.edit_message_text,
                 chat_id=chat_id, message_id=buf.message_id,
-                text=chunks[0],
+                text=html_chunks[0],
+                parse_mode="HTML",
             )
         except Exception as e:
             if not self._is_not_modified_error(e):
                 self.logger.warning("Stream overflow edit failed: {}", e)
                 raise
-        for chunk in chunks[1:-1]:
+        for chunk in html_chunks[1:-1]:
             await self._call_with_retry(
                 self._app.bot.send_message,
-                chat_id=chat_id, text=chunk, **thread_kwargs,
+                chat_id=chat_id, text=chunk, parse_mode="HTML", **thread_kwargs,
             )
-        tail = chunks[-1]
+        tail = html_chunks[-1]
         sent = await self._call_with_retry(
             self._app.bot.send_message,
-            chat_id=chat_id, text=tail, **thread_kwargs,
+            chat_id=chat_id, text=tail, parse_mode="HTML", **thread_kwargs,
         )
         buf.message_id = sent.message_id
         buf.text = tail
