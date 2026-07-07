@@ -47,11 +47,17 @@ def _reap_pid(pid: int) -> None:
     Call this after killing or after normal completion of any subprocess
     as a safety net — asyncio's child-watcher *should* have reaped it,
     but in containers / edge-cases it sometimes doesn't.
+
+    Uses ``os`` capability checks rather than ``_IS_WINDOWS`` so this is
+    safe when tests patch the platform flag while still running on Windows
+    (``os.waitpid`` / ``os.WNOHANG`` do not exist there).
     """
-    if _IS_WINDOWS:
+    waitpid = getattr(os, "waitpid", None)
+    wnohang = getattr(os, "WNOHANG", None)
+    if waitpid is None or wnohang is None:
         return
     try:
-        os.waitpid(pid, os.WNOHANG)
+        waitpid(pid, wnohang)
     except (ProcessLookupError, ChildProcessError):
         # Already reaped, or not our child — both are fine.
         pass
