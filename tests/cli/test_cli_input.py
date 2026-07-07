@@ -46,8 +46,8 @@ def test_init_prompt_session_creates_session():
     # Ensure global is None before test
     commands._PROMPT_SESSION = None
 
-    with patch("nanobot.cli.commands.PromptSession") as MockSession, \
-         patch("nanobot.cli.commands.FileHistory") as MockHistory, \
+    with patch("nanobot.cli.commands.PromptSession") as mock_session_cls, \
+         patch("nanobot.cli.commands.FileHistory"), \
          patch("pathlib.Path.home") as mock_home:
 
         mock_home.return_value = MagicMock()
@@ -55,17 +55,17 @@ def test_init_prompt_session_creates_session():
         commands._init_prompt_session()
 
         assert commands._PROMPT_SESSION is not None
-        MockSession.assert_called_once()
-        _, kwargs = MockSession.call_args
-        # Buffer is multiline-capable so Shift+Enter / Alt+Enter can insert
-        # newlines; Enter-to-submit is restored via custom key bindings.
+        mock_session_cls.assert_called_once()
+        _, kwargs = mock_session_cls.call_args
+        # Buffer is multiline-capable so Alt+Enter can insert newlines;
+        # Enter-to-submit is restored via custom key bindings.
         assert kwargs["multiline"] is True
         assert kwargs["enable_open_in_editor"] is False
         assert kwargs.get("key_bindings") is not None
 
 
 def test_cli_key_bindings_enter_submits_and_alt_enter_newlines():
-    """Enter submits the buffer; Alt+Enter and Shift+Enter insert a newline."""
+    """Enter submits the buffer; Alt+Enter inserts a newline."""
     from prompt_toolkit.keys import Keys
 
     kb = commands._build_cli_key_bindings()
@@ -88,14 +88,6 @@ def test_cli_key_bindings_enter_submits_and_alt_enter_newlines():
     alt_enter.call(MagicMock(current_buffer=buf))
     buf.insert_text.assert_called_once_with("\n")
 
-    # ControlF3 (synthetic carrier for the Shift+Enter CSI-u sequence) -> newline.
-    # Not ControlJ: that's also the literal LF byte some terminals (e.g. WSL)
-    # send for a plain Enter keypress, so binding it would break submit there.
-    shift_enter = bound[(Keys.ControlF3.value,)]
-    buf = MagicMock()
-    shift_enter.call(MagicMock(current_buffer=buf))
-    buf.insert_text.assert_called_once_with("\n")
-
 
 @pytest.mark.asyncio
 async def test_raw_lf_enter_still_submits_like_wsl_terminals():
@@ -116,28 +108,6 @@ async def test_raw_lf_enter_still_submits_like_wsl_terminals():
             result = await session.prompt_async("> ")
 
     assert result == "hello"
-
-
-@pytest.mark.asyncio
-async def test_xterm_modifyotherkeys_shift_enter_inserts_newline():
-    """"\\x1b[27;2;13~" (the older xterm modifyOtherKeys/rxvt encoding of
-    Shift+Enter) is registered by prompt_toolkit *by default* as plain
-    Enter/submit, so a `setdefault()`-based override would silently no-op
-    against it. This must actually insert a newline like the kitty CSI-u
-    encoding does, which only a real PromptSession/parser can confirm.
-    """
-    from prompt_toolkit.application import create_app_session
-    from prompt_toolkit.input import create_pipe_input
-    from prompt_toolkit.output import DummyOutput
-
-    with create_pipe_input() as pipe_input:
-        with create_app_session(input=pipe_input, output=DummyOutput()):
-            commands._init_prompt_session()
-            session = commands._PROMPT_SESSION
-            pipe_input.send_text("foo\x1b[27;2;13~bar\r")
-            result = await session.prompt_async("> ")
-
-    assert result == "foo\nbar"
 
 
 @pytest.mark.asyncio

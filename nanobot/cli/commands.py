@@ -294,34 +294,7 @@ def _build_cli_key_bindings() -> KeyBindings:
       * Alt+Enter   -> insert a newline. Universally supported across
                        terminal emulators, so this is the reliable way to
                        compose multi-line input.
-      * Shift+Enter -> insert a newline *if* the terminal sends a dedicated
-                       sequence for it (kitty / iTerm2 with the CSI-u /
-                       fixterms keyboard protocol). Plain terminals collapse
-                       Shift+Enter into Enter and cannot be distinguished, in
-                       which case Alt+Enter is the fallback.
     """
-    # prompt_toolkit has no symbolic Keys.ShiftEnter and @kb.add() rejects raw
-    # escape strings, so register the CSI-u Shift+Enter sequences against
-    # Keys.ControlF3 -- an enum member prompt_toolkit declares but never wires
-    # to a default ANSI sequence or key binding, unlike e.g. Keys.ControlJ,
-    # which is also the literal LF byte ("\x0a") that some terminals (WSL is
-    # the case prompt_toolkit itself calls out) send for a plain Enter
-    # keypress. Aliasing to ControlJ made Enter stop submitting there, since
-    # our handler shadowed prompt_toolkit's own "treat \n as \r" fallback.
-    #
-    # "\x1b[27;2;13~" (the older xterm modifyOtherKeys / rxvt encoding of
-    # Shift+Enter) is already registered by prompt_toolkit by default -- as
-    # Keys.ControlM, i.e. plain Enter/submit. A plain setdefault() would be a
-    # no-op against that existing entry, silently leaving this Shift+Enter
-    # variant behaving like a submit instead of inserting a newline. Assign
-    # directly to override it, since inserting a newline is the whole point
-    # of a Shift+Enter binding here.
-    with suppress(Exception):
-        from prompt_toolkit.input import ansi_escape_sequences as _aes
-
-        for _seq in ("\x1b[13;2u", "\x1b[27;2;13~"):
-            _aes.ANSI_SEQUENCES[_seq] = Keys.ControlF3
-
     kb = KeyBindings()
 
     @kb.add("enter")
@@ -338,10 +311,6 @@ def _build_cli_key_bindings() -> KeyBindings:
     # swallowed and the bare LF triggers prompt_toolkit's default submit. Bind
     # ESC + ControlJ too so Alt+Enter reliably inserts a newline there as well.
     @kb.add("escape", Keys.ControlJ)  # Alt+Enter on LF-as-Enter terminals
-    def _(event):
-        event.current_buffer.insert_text("\n")
-
-    @kb.add(Keys.ControlF3)  # Shift+Enter on CSI-u capable terminals
     def _(event):
         event.current_buffer.insert_text("\n")
 
@@ -367,8 +336,7 @@ def _init_prompt_session() -> None:
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
         # Multiline-capable buffer; Enter still submits via the custom key
-        # bindings, while Shift+Enter (supported terminals) or Alt+Enter adds
-        # a newline.
+        # bindings, while Alt+Enter adds a newline.
         multiline=True,
         key_bindings=_build_cli_key_bindings(),
     )
