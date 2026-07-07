@@ -21,6 +21,13 @@ from nanobot.security.workspace_access import (
 )
 
 _REAL_GETADDRINFO = socket.getaddrinfo
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -29,6 +36,49 @@ def _fake_resolve_private(hostname, port, family=0, type_=0):
 
 def _fake_resolve_public(hostname, port, family=0, type_=0):
     return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+
+
+def _patch_web_fetch_fake_client(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    client_kwargs: list[dict] = []
+
+    class FakeStreamResponse:
+        status_code = 200
+        headers = {"content-type": "text/html"}
+        url = "https://example.com/page"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeJinaResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"title": "Example", "content": "Hello", "url": "https://example.com/page"}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            client_kwargs.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None, **kwargs):
+            return FakeStreamResponse()
+
+        async def get(self, url, headers=None, **kwargs):
+            return FakeJinaResponse()
+
+    monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
+    return client_kwargs
 
 
 @pytest.mark.asyncio
@@ -148,16 +198,80 @@ async def test_safe_redirect_requests_use_independent_pinned_dns_concurrently(mo
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_rejects_proxy_because_upstream_dns_cannot_be_pinned():
-    tool = WebFetchTool(proxy="http://proxy.example:8080")
+async def test_web_fetch_proxy_remains_supported(monkeypatch):
+    tool = WebFetchTool(proxy="http://config-proxy.example:7890")
+    client_kwargs = _patch_web_fetch_fake_client(monkeypatch)
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://env-proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "example.com")
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/page")
 
     data = json.loads(result)
+    assert data["extractor"] == "jina"
+    assert all(kwargs["proxy"] == "http://config-proxy.example:7890" for kwargs in client_kwargs)
+    assert all("mounts" not in kwargs for kwargs in client_kwargs)
+    assert all("transport" not in kwargs for kwargs in client_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_env_proxy_adds_proxy_mounts_and_keeps_pinned_transport(monkeypatch):
+    tool = WebFetchTool()
+    client_kwargs = _patch_web_fetch_fake_client(monkeypatch)
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page")
+
+    data = json.loads(result)
+    assert data["extractor"] == "jina"
+    fetch_kwargs = [kwargs for kwargs in client_kwargs if kwargs.get("timeout") == 15.0]
+    assert fetch_kwargs
+    assert all("transport" in kwargs for kwargs in fetch_kwargs)
+    assert all("mounts" in kwargs for kwargs in fetch_kwargs)
+
+
+def test_web_fetch_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "example.com")
+
+    kwargs = web_module._fetch_client_kwargs(None, 15.0)
+
+    assert "transport" in kwargs
+    assert any(transport is None for transport in kwargs["mounts"].values())
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_does_not_fallback_after_pinned_dns_rebind_rejection(monkeypatch):
+    calls = {"evil.example": 0}
+
+    def _rebinding_resolver(hostname, port, family=0, type_=0, proto=0, flags=0):
+        host = str(hostname).rstrip(".").lower()
+        calls[host] += 1
+        ip = "93.184.216.34" if calls[host] <= 2 else "169.254.169.254"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0))]
+
+    tool = WebFetchTool()
+
+    async def _unexpected_jina(*args, **kwargs):
+        raise AssertionError("Jina fallback should not run after an SSRF rejection")
+
+    async def _unexpected_readability(*args, **kwargs):
+        raise AssertionError("Readability fallback should not run after an SSRF rejection")
+
+    monkeypatch.setattr(tool, "_fetch_jina", _unexpected_jina)
+    monkeypatch.setattr(tool, "_fetch_readability", _unexpected_readability)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver):
+        result = await tool.execute(url="http://evil.example/page")
+
+    data = json.loads(result)
     assert "error" in data
-    assert "proxy" in data["error"].lower()
-    assert "dns-pinned" in data["error"].lower()
+    assert "blocked" in data["error"].lower()
+    assert calls["evil.example"] == 3
 
 
 @pytest.mark.asyncio

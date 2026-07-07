@@ -24,6 +24,8 @@ from nanobot.bus.events import (
 )
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
+    env_proxy_applies_to_url,
+    httpx_env_proxy_mounts,
     resolve_url_target,
     validate_url_target,
 )
@@ -159,21 +161,24 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     port = parsed.port
     if not port:
         port = 443 if parsed.scheme == "https" else 80
-    ok, _, resolved_ips = resolve_url_target(url, allow_loopback=True)
+    ok, _, resolved_ips = resolve_url_target(url)
     if not ok:
         return False
-    try:
-        target_host = resolved_ips[0] if resolved_ips else host
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(target_host, port),
-            timeout=timeout,
-        )
-        writer.close()
-        with suppress(OSError, asyncio.TimeoutError):
-            await asyncio.wait_for(writer.wait_closed(), timeout=0.2)
+    if env_proxy_applies_to_url(url):
         return True
-    except (OSError, asyncio.TimeoutError):
-        return False
+    for target_host in resolved_ips or (host,):
+        try:
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(target_host, port),
+                timeout=timeout,
+            )
+            writer.close()
+            with suppress(OSError, asyncio.TimeoutError):
+                await asyncio.wait_for(writer.wait_closed(), timeout=0.2)
+            return True
+        except (OSError, asyncio.TimeoutError):
+            continue
+    return False
 
 
 def _redact_url(url: str) -> str:
@@ -195,9 +200,17 @@ def _redact_url(url: str) -> str:
         return "<redacted-url>"
 
 
+def _pinned_transport_kwargs() -> dict[str, object]:
+    kwargs: dict[str, object] = {"transport": PinnedDNSAsyncTransport()}
+    mounts = httpx_env_proxy_mounts()
+    if mounts:
+        kwargs["mounts"] = mounts
+    return kwargs
+
+
 async def _validate_mcp_request_url(request: httpx.Request) -> None:
     """Validate each outgoing MCP HTTP request, including redirect targets."""
-    ok, error = validate_url_target(str(request.url), allow_loopback=True)
+    ok, error = validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
@@ -864,7 +877,7 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
-                        transport=PinnedDNSAsyncTransport(allow_loopback=True),
+                        **_pinned_transport_kwargs(),
                     )
 
                 read, write = await server_stack.enter_async_context(
@@ -882,7 +895,7 @@ async def connect_mcp_servers(
                         event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
                         timeout=httpx.Timeout(30.0, connect=10.0),
-                        transport=PinnedDNSAsyncTransport(allow_loopback=True),
+                        **_pinned_transport_kwargs(),
                     )
                 )
                 read, write, _ = await server_stack.enter_async_context(

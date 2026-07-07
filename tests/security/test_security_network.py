@@ -11,10 +11,20 @@ import pytest
 from nanobot.security.network import (
     configure_ssrf_whitelist,
     contains_internal_url,
+    env_proxy_applies_to_url,
+    httpx_env_proxy_mounts,
     pin_resolved_url_dns,
     resolve_url_target,
     validate_url_target,
 )
+
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -182,6 +192,18 @@ def test_allows_normal_https():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("github.com", ["140.82.121.3"])):
         ok, err = validate_url_target("https://github.com/HKUDS/nanobot")
         assert ok
+
+
+def test_env_proxy_helpers_respect_no_proxy(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+
+    assert env_proxy_applies_to_url("https://example.com/page")
+    assert not env_proxy_applies_to_url("http://localhost:8765/mcp")
+
+    mounts = httpx_env_proxy_mounts()
+    assert any(transport is None for transport in mounts.values())
+    assert any(transport is not None for transport in mounts.values())
 
 
 # ---------------------------------------------------------------------------

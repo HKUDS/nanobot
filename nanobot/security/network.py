@@ -8,6 +8,7 @@ import re
 import socket
 from contextlib import contextmanager, suppress
 from urllib.parse import urlparse
+from urllib.request import getproxies, proxy_bypass
 
 import httpx
 
@@ -25,7 +26,6 @@ _BLOCKED_NETWORKS = [
 ]
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
-
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
 
@@ -113,6 +113,66 @@ def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool
     return ok, error
 
 
+def env_proxy_applies_to_url(url: str) -> bool:
+    """Return True when process proxy settings would proxy this URL."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+
+    proxies = getproxies()
+    proxy_url = proxies.get(parsed.scheme) or proxies.get("all")
+    if not proxy_url:
+        return False
+
+    host = parsed.hostname
+    if parsed.port is not None:
+        host = f"[{host}]:{parsed.port}" if ":" in host else f"{host}:{parsed.port}"
+    return not proxy_bypass(host)
+
+
+def httpx_env_proxy_mounts() -> dict[str, httpx.AsyncBaseTransport | None]:
+    """Build HTTPX proxy mounts while leaving direct routes to the base transport."""
+    proxies = getproxies()
+    mounts: dict[str, httpx.AsyncBaseTransport | None] = {}
+    for scheme in ("http", "https", "all"):
+        proxy_url = proxies.get(scheme)
+        if proxy_url:
+            if "://" not in proxy_url:
+                proxy_url = f"http://{proxy_url}"
+            mounts[f"{scheme}://"] = httpx.AsyncHTTPTransport(proxy=httpx.Proxy(proxy_url))
+
+    if not mounts:
+        return {}
+
+    no_proxy = proxies.get("no", "")
+    if no_proxy == "*":
+        return {}
+    for entry in no_proxy.split(","):
+        pattern = _no_proxy_mount_pattern(entry.strip())
+        if pattern:
+            mounts[pattern] = None
+    return mounts
+
+
+def _no_proxy_mount_pattern(hostname: str) -> str | None:
+    if not hostname:
+        return None
+    if "://" in hostname:
+        return hostname
+
+    unbracketed = hostname.strip("[]")
+    with suppress(ValueError):
+        addr = ipaddress.ip_address(unbracketed)
+        return f"all://[{addr}]" if addr.version == 6 else f"all://{addr}"
+
+    if hostname.lower() == "localhost":
+        return "all://localhost"
+    return f"all://*{hostname}"
+
+
 @contextmanager
 def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
     """Pin DNS lookups for the URL hostname to previously validated IPs.
@@ -152,6 +212,10 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
         socket.getaddrinfo = original_getaddrinfo
 
 
+class UnsafeURLRequestError(httpx.RequestError):
+    """Raised when an outgoing request is rejected by URL safety validation."""
+
+
 class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
     """HTTPX transport that pins each request to the IPs validated for its URL."""
 
@@ -170,7 +234,7 @@ class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
         url = str(request.url)
         ok, error, resolved_ips = resolve_url_target(url, allow_loopback=self._allow_loopback)
         if not ok:
-            raise httpx.RequestError(error, request=request)
+            raise UnsafeURLRequestError(error, request=request)
         async with self._resolver_lock:
             with pin_resolved_url_dns(url, resolved_ips):
                 return await self._inner.handle_async_request(request)
