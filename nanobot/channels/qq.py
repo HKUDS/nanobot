@@ -211,14 +211,17 @@ class QQChannel(BaseChannel):
 
     async def _run_bot(self) -> None:
         """Run the bot connection with auto-reconnect."""
+        backoff = 2.0
         while self._running:
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+                backoff = 2.0
             except Exception as e:
                 self.logger.warning("bot error: {}", e)
             if self._running:
-                self.logger.info("Reconnecting bot in 5 seconds...")
-                await asyncio.sleep(5)
+                self.logger.info("Reconnecting bot in {:.0f} seconds...", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
 
     async def stop(self) -> None:
         """Stop bot and cleanup resources."""
