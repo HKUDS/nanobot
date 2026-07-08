@@ -25,7 +25,7 @@ Examples:
 - Default (LLM decides): `nano_timer_config: "auto"`
 - Force before scheduling: `nano_timer_config: "always"`
 - Manual only: `nano_timer_config: "never"`
-- Natural language: `nano_timer_config: "Chame nano_timer antes de toda operação com datas/horas"`
+- Natural language: `nano_timer_config: "Call nano_timer before any time-sensitive operation"` (the hint is sent to the model verbatim, so it can be written in any language)
 
 **Note:** This is a natural-language hint to the model, not a code hook. The `nano_timer` tool is always available in the tool registry; this section only affects when the model decides to call it.
 
@@ -35,7 +35,8 @@ Examples:
 - `calendar`: Weekday, week number, day of year, weekend flag
 - `context`: Server timezone, offset, and same-timezone flag
 
-**Exemplo de output quando IANA é inválida** (mostra warning inline, não só em log):
+**Example output when the IANA timezone is invalid** (the warning is
+rendered inline, not just in logs):
 
 ```markdown
 **Context**
