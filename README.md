@@ -158,7 +158,7 @@
 - **2026-03-16** 🚀 Released **v0.1.4.post5** — a refinement-focused release with stronger reliability and channel support, and a more dependable day-to-day experience. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5) for details.
 - **2026-03-15** 🧩 DingTalk rich media, smarter built-in skills, and cleaner model compatibility.
 - **2026-03-14** 💬 Channel plugins, Feishu replies, and steadier MCP, QQ, and media handling.
-- **2026-03-13** 🌐 Multi-provider web search, LangSmith, and broader reliability improvements.
+- **2026-03-13** 🌐 Multi-provider web search and broader reliability improvements. (Note: LangSmith integration is being updated, see [#2493](https://github.com/HKUDS/nanobot/issues/2493))
 - **2026-03-12** 🚀 VolcEngine support, Telegram reply context, `/restart`, and sturdier memory.
 - **2026-03-11** 🔌 WeCom, Ollama, cleaner discovery, and safer tool behavior.
 - **2026-03-10** 🧠 Token-based memory, shared retries, and cleaner gateway and Telegram behavior.
