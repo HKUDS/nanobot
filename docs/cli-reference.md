@@ -8,6 +8,7 @@ Use this page when you know what you want to run and need the command shape. For
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
+| Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
 | Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
 | Check config without calling a model | `nanobot status` | Summarizes the selected config, workspace, active model, and providers |
@@ -58,6 +59,7 @@ with `--background`, use `nanobot gateway stop`.
 | Command | Description |
 |---|---|
 | `nanobot onboard` | Initialize or refresh the default config and workspace |
+| `nanobot onboard --refresh` | Refresh an existing config without prompting, preserving existing values |
 | `nanobot onboard --wizard` | Use the interactive setup wizard |
 | `nanobot onboard --config <path> --workspace <path>` | Initialize or refresh a specific instance |
 

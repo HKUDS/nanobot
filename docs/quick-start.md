@@ -115,7 +115,7 @@ Initialization creates:
 | `~/.nanobot/config.json` | Main settings file for providers, models, channels, tools, gateway, and API |
 | `~/.nanobot/workspace/` | Agent workspace for memory, sessions, heartbeat tasks, skills, and artifacts |
 
-If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values.
+If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values. Use `nanobot onboard --refresh` to do the same refresh without an interactive prompt.
 
 ## 3. Configure a Provider
 
