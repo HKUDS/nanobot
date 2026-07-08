@@ -1971,6 +1971,7 @@ class _FakeReq:
 _REMOTE = _FakeConn(("192.168.1.5", 12345))
 _LOCAL = _FakeConn(("127.0.0.1", 12345))
 _NO_HEADERS = _FakeReq()
+_LOCAL_BROWSER_REQ = _FakeReq({"Host": "127.0.0.1:8765"})
 
 
 def test_local_browser_request_requires_loopback_host_and_forwarded_origin() -> None:
@@ -2058,10 +2059,16 @@ def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
 
 
 def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
-    channel = _ch(bus, host="127.0.0.1", port=29931)
+    channel = _ch(bus, host="127.0.0.1", port=29931, tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
         _LOCAL,
-        _FakeReq({"Host": "nanobot.example", "X-Forwarded-Proto": "https"}),
+        _FakeReq(
+            {
+                "Authorization": "Bearer s3cret",
+                "Host": "nanobot.example",
+                "X-Forwarded-Proto": "https",
+            }
+        ),
     )
     assert resp.status_code == 200
     body = json.loads(resp.body)
@@ -2074,9 +2081,18 @@ def test_bootstrap_without_auth_rejects_remote_requests(bus: MagicMock) -> None:
     assert resp.status_code == 403
 
 
+def test_bootstrap_without_auth_rejects_reverse_proxy_remote_headers(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+    resp = channel.gateway.http._handle_bootstrap(
+        _LOCAL,
+        _FakeReq({"Host": "nanobot.example", "X-Forwarded-For": "203.0.113.42"}),
+    )
+    assert resp.status_code == 403
+
+
 def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
-    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _LOCAL_BROWSER_REQ)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["token"].startswith("nbwt_")
@@ -2114,7 +2130,7 @@ def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytes
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "  live/model  ")
-    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _LOCAL_BROWSER_REQ)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["model_name"] == "live/model"
@@ -2126,7 +2142,7 @@ def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeyp
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "   ")
-    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _LOCAL_BROWSER_REQ)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["model_name"] == "from-disk"
@@ -2142,7 +2158,7 @@ def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: p
         raise RuntimeError("resolver failed")
 
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=boom)
-    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _LOCAL_BROWSER_REQ)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["model_name"] == "from-disk"

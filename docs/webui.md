@@ -33,9 +33,9 @@ nanobot webui --background
 Manage the background gateway with `nanobot gateway status`, `nanobot gateway
 logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
 
-Manual config still works. Localhost WebUI access can run without a browser
-password. Set `tokenIssueSecret` when you intentionally expose the WebUI beyond
-localhost or want a browser password:
+Manual config still works. Same-machine localhost WebUI access can run without
+a browser password. Set `tokenIssueSecret` when you intentionally expose the
+WebUI beyond localhost or want a browser password:
 
 ```json
 {
