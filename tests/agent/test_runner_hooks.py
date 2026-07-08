@@ -47,6 +47,12 @@ async def test_runner_calls_hooks_in_order():
                 [tc.name for tc in context.tool_calls],
             ))
 
+        async def before_execute_tool(self, context, tool_call, tool, params) -> None:
+            events.append(("before_execute_tool", context.iteration, tool_call.name, params))
+
+        async def after_execute_tool(self, context, tool_call, tool, params, result) -> None:
+            events.append(("after_execute_tool", context.iteration, tool_call.name, result))
+
         async def after_iteration(self, context: AgentHookContext) -> None:
             events.append((
                 "after_iteration",
@@ -75,6 +81,8 @@ async def test_runner_calls_hooks_in_order():
     assert events == [
         ("before_iteration", 0),
         ("before_execute_tools", 0, ["list_dir"]),
+        ("before_execute_tool", 0, "list_dir", {"path": "."}),
+        ("after_execute_tool", 0, "list_dir", "tool result"),
         (
             "after_iteration",
             0,

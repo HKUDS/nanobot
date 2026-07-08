@@ -73,6 +73,9 @@ async def test_composite_fans_out_all_async_methods():
         async def emit_reasoning(self, reasoning_content: str | None) -> None:
             events.append(f"emit_reasoning:{reasoning_content}")
 
+        async def emit_reasoning_end(self) -> None:
+            events.append("emit_reasoning_end")
+
         async def on_stream(self, context: AgentHookContext, delta: str) -> None:
             events.append(f"on_stream:{delta}")
 
@@ -81,6 +84,15 @@ async def test_composite_fans_out_all_async_methods():
 
         async def before_execute_tools(self, context: AgentHookContext) -> None:
             events.append("before_execute_tools")
+
+        async def before_execute_tool(self, context, tool_call, tool, params) -> None:
+            events.append("before_execute_tool")
+
+        async def after_execute_tool(self, context, tool_call, tool, params, result) -> None:
+            events.append("after_execute_tool")
+
+        async def on_execute_tool_error(self, context, tool_call, tool, params, error) -> None:
+            events.append("on_execute_tool_error")
 
         async def after_iteration(self, context: AgentHookContext) -> None:
             events.append("after_iteration")
@@ -101,9 +113,13 @@ async def test_composite_fans_out_all_async_methods():
     await hook.before_run(run_ctx)
     await hook.before_iteration(ctx)
     await hook.emit_reasoning("thinking...")
+    await hook.emit_reasoning_end()
     await hook.on_stream(ctx, "hi")
     await hook.on_stream_end(ctx, resuming=True)
     await hook.before_execute_tools(ctx)
+    await hook.before_execute_tool(ctx, object(), object(), {})
+    await hook.after_execute_tool(ctx, object(), object(), {}, "ok")
+    await hook.on_execute_tool_error(ctx, object(), object(), {}, "err")
     await hook.after_iteration(ctx)
     await hook.after_run(run_ctx)
     await hook.on_error(run_ctx)
@@ -113,9 +129,13 @@ async def test_composite_fans_out_all_async_methods():
         "before_run", "before_run",
         "before_iteration", "before_iteration",
         "emit_reasoning:thinking...", "emit_reasoning:thinking...",
+        "emit_reasoning_end", "emit_reasoning_end",
         "on_stream:hi", "on_stream:hi",
         "on_stream_end:True", "on_stream_end:True",
         "before_execute_tools", "before_execute_tools",
+        "before_execute_tool", "before_execute_tool",
+        "after_execute_tool", "after_execute_tool",
+        "on_execute_tool_error", "on_execute_tool_error",
         "after_iteration", "after_iteration",
         "after_run", "after_run",
         "on_error", "on_error",
@@ -172,9 +192,19 @@ async def test_composite_error_isolation_all_async():
             raise RuntimeError("err")
         async def emit_reasoning(self, reasoning_content):
             raise RuntimeError("err")
+        async def emit_reasoning_end(self):
+            raise RuntimeError("err")
+        async def on_stream(self, context, delta):
+            raise RuntimeError("err")
         async def on_stream_end(self, context, *, resuming):
             raise RuntimeError("err")
         async def before_execute_tools(self, context):
+            raise RuntimeError("err")
+        async def before_execute_tool(self, context, tool_call, tool, params):
+            raise RuntimeError("err")
+        async def after_execute_tool(self, context, tool_call, tool, params, result):
+            raise RuntimeError("err")
+        async def on_execute_tool_error(self, context, tool_call, tool, params, error):
             raise RuntimeError("err")
         async def after_iteration(self, context):
             raise RuntimeError("err")
@@ -190,10 +220,20 @@ async def test_composite_error_isolation_all_async():
             calls.append("before_run")
         async def emit_reasoning(self, reasoning_content):
             calls.append("emit_reasoning")
+        async def emit_reasoning_end(self):
+            calls.append("emit_reasoning_end")
+        async def on_stream(self, context, delta):
+            calls.append("on_stream")
         async def on_stream_end(self, context, *, resuming):
             calls.append("on_stream_end")
         async def before_execute_tools(self, context):
             calls.append("before_execute_tools")
+        async def before_execute_tool(self, context, tool_call, tool, params):
+            calls.append("before_execute_tool")
+        async def after_execute_tool(self, context, tool_call, tool, params, result):
+            calls.append("after_execute_tool")
+        async def on_execute_tool_error(self, context, tool_call, tool, params, error):
+            calls.append("on_execute_tool_error")
         async def after_iteration(self, context):
             calls.append("after_iteration")
         async def after_run(self, context):
@@ -208,8 +248,13 @@ async def test_composite_error_isolation_all_async():
     run_ctx = _run_ctx()
     await hook.before_run(run_ctx)
     await hook.emit_reasoning("test")
+    await hook.emit_reasoning_end()
+    await hook.on_stream(ctx, "delta")
     await hook.on_stream_end(ctx, resuming=False)
     await hook.before_execute_tools(ctx)
+    await hook.before_execute_tool(ctx, object(), object(), {})
+    await hook.after_execute_tool(ctx, object(), object(), {}, "ok")
+    await hook.on_execute_tool_error(ctx, object(), object(), {}, "err")
     await hook.after_iteration(ctx)
     await hook.after_run(run_ctx)
     await hook.on_error(run_ctx)
@@ -217,8 +262,13 @@ async def test_composite_error_isolation_all_async():
     assert calls == [
         "before_run",
         "emit_reasoning",
+        "emit_reasoning_end",
+        "on_stream",
         "on_stream_end",
         "before_execute_tools",
+        "before_execute_tool",
+        "after_execute_tool",
+        "on_execute_tool_error",
         "after_iteration",
         "after_run",
         "on_error",
@@ -313,6 +363,9 @@ async def test_composite_empty_hooks_no_ops():
     await hook.on_stream(ctx, "delta")
     await hook.on_stream_end(ctx, resuming=False)
     await hook.before_execute_tools(ctx)
+    await hook.before_execute_tool(ctx, object(), object(), {})
+    await hook.after_execute_tool(ctx, object(), object(), {}, None)
+    await hook.on_execute_tool_error(ctx, object(), object(), {}, "err")
     await hook.after_iteration(ctx)
     await hook.after_run(run_ctx)
     await hook.on_error(run_ctx)

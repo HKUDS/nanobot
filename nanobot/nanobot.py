@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.hook import AgentHook, SDKCaptureHook
+from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.config.schema import Config
 from nanobot.providers.image_generation import image_gen_provider_configs
@@ -120,6 +121,7 @@ class Nanobot:
         loop = AgentLoop.from_config(
             config,
             image_generation_provider_configs=image_gen_provider_configs(config),
+            hook_factories=[create_file_edit_activity_hook],
         )
         return cls(loop, config=config)
 

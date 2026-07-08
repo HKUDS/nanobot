@@ -111,6 +111,14 @@ import {
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import {
+  LOCAL_PREFS_STORAGE_KEY,
+  readLocalPreferences,
+  type FileEditDisplayMode,
+  type LocalActivityMode,
+  type LocalDensity,
+  type LocalPreferences,
+} from "@/lib/local-preferences";
 import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
@@ -155,8 +163,6 @@ export type SettingsSectionKey =
   | "runtime"
   | "advanced";
 
-type LocalDensity = "comfortable" | "compact";
-type LocalActivityMode = "auto" | "expanded";
 type AppsKindFilter = "all" | "nanobot" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
 type AutomationSort = "next" | "last" | "updated" | "name";
@@ -165,13 +171,6 @@ type AppsCatalogItem =
   | { id: string; kind: "nanobot"; feature: NanobotFeatureInfo }
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
-
-interface LocalPreferences {
-  density: LocalDensity;
-  activityMode: LocalActivityMode;
-  codeWrap: boolean;
-  brandLogos: boolean;
-}
 
 interface AgentSettingsDraft {
   model: string;
@@ -259,14 +258,6 @@ interface CustomMcpForm {
   toolTimeout: string;
 }
 
-const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
-
-const DEFAULT_LOCAL_PREFS: LocalPreferences = {
-  density: "comfortable",
-  activityMode: "auto",
-  codeWrap: true,
-  brandLogos: false,
-};
 const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
   { value: "auto", label: "Auto" },
   { value: "chat_completions", label: "Chat Completions" },
@@ -316,22 +307,6 @@ interface SettingsViewProps {
   onNativeEngineRestart?: () => Promise<string>;
   isRestarting?: boolean;
   hostChromeInset?: boolean;
-}
-
-function readLocalPreferences(): LocalPreferences {
-  try {
-    const raw = window.localStorage.getItem(LOCAL_PREFS_STORAGE_KEY);
-    if (!raw) return DEFAULT_LOCAL_PREFS;
-    const parsed = JSON.parse(raw) as Partial<LocalPreferences>;
-    return {
-      density: parsed.density === "compact" ? "compact" : "comfortable",
-      activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
-      codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos === true,
-    };
-  } catch {
-    return DEFAULT_LOCAL_PREFS;
-  }
 }
 
 function modelPresetValue(payload: SettingsPayload): string {
@@ -2334,6 +2309,25 @@ function AppearanceSettings({
               ]}
               onChange={(activityMode) =>
                 onChangeLocalPrefs((prev) => ({ ...prev, activityMode: activityMode as LocalActivityMode }))
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.fileEditDisplay", "File edit display")}
+            description={tx("settings.help.fileEditDisplay", "Choose whether file edit activity opens as line counts or a diff.")}
+          >
+            <SegmentedControl
+              value={localPrefs.fileEditDisplayMode}
+              options={[
+                { value: "summary", label: tx("settings.values.summary", "Summary") },
+                { value: "diff", label: tx("settings.values.diff", "Diff") },
+                { value: "collapsed_diff", label: tx("settings.values.collapsedDiff", "Collapsed diff") },
+              ]}
+              onChange={(fileEditDisplayMode) =>
+                onChangeLocalPrefs((prev) => ({
+                  ...prev,
+                  fileEditDisplayMode: fileEditDisplayMode as FileEditDisplayMode,
+                }))
               }
             />
           </SettingsRow>

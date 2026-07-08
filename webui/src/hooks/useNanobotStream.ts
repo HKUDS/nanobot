@@ -346,6 +346,44 @@ function stripCoveredFileEditToolHints(message: UIMessage, edits: UIFileEdit[]):
   };
 }
 
+function traceMessageIsEmpty(message: UIMessage): boolean {
+  const traces = message.traces;
+  const hasTrace = traces?.length
+    ? traces.some((line) => line.trim().length > 0)
+    : (message.content ?? "").trim().length > 0;
+  return (
+    message.kind === "trace"
+    && !hasTrace
+    && !message.toolEvents?.length
+    && !message.fileEdits?.length
+    && !message.media?.length
+  );
+}
+
+function stripCoveredFileEditToolHintsFromMessages(
+  messages: UIMessage[],
+  edits: UIFileEdit[],
+  turn: UIMessageTurnFields,
+): UIMessage[] {
+  if (edits.length === 0) return messages;
+  let next = messages;
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const candidate = next[i];
+    if (candidate.role === "user") break;
+    if (candidate.kind !== "trace") continue;
+    if (!matchesTurn(candidate, turn)) continue;
+    const cleaned = stripCoveredFileEditToolHints(candidate, edits);
+    if (cleaned === candidate) continue;
+    if (next === messages) next = [...messages];
+    if (traceMessageIsEmpty(cleaned)) {
+      next.splice(i, 1);
+    } else {
+      next[i] = cleaned;
+    }
+  }
+  return next;
+}
+
 function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
   if (!edit || !edit.tool || (!edit.path && !edit.pending)) return null;
   const inferredStatus =
@@ -416,10 +454,6 @@ function findFileEditTraceIndex(
           && incomingToolEventKeys.has(fileEditToolEventKey(existing))
         )
       ) return i;
-    }
-    for (const event of candidate.toolEvents ?? []) {
-      const key = toolEventFileEditKey(event);
-      if (key && incomingToolEventKeys.has(key)) return i;
     }
   }
   return null;
@@ -1040,16 +1074,15 @@ export function useNanobotStream(
         }
         setMessages((prev) => {
           let segmentId = eventSegmentId;
-          const base = prev;
+          const base = stripCoveredFileEditToolHintsFromMessages(prev, normalized, turn);
           const targetIndex = findFileEditTraceIndex(base, segmentId, normalized);
           if (targetIndex !== null) {
             const target = base[targetIndex];
             segmentId = target.activitySegmentId ?? segmentId ?? detachedActivitySegmentId();
             if (opensFileEditPhase) fileEditSegmentRef.current = segmentId;
-            const cleanedTarget = stripCoveredFileEditToolHints(target, normalized);
             const merged: UIMessage = {
-              ...cleanedTarget,
-              fileEdits: mergeFileEdits(cleanedTarget.fileEdits, normalized),
+              ...target,
+              fileEdits: mergeFileEdits(target.fileEdits, normalized),
               activitySegmentId: segmentId,
               ...turn,
             };

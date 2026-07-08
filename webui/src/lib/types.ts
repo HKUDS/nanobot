@@ -210,6 +210,13 @@ export interface ToolProgressEvent {
   embeds?: unknown[];
 }
 
+export interface UIFileDiff {
+  format: "unified" | string;
+  context?: number;
+  truncated?: boolean;
+  text?: string;
+}
+
 export interface UIFileEdit {
   version?: number;
   call_id: string;
@@ -225,6 +232,7 @@ export interface UIFileEdit {
   binary?: boolean;
   error?: string;
   pending?: boolean;
+  diff?: UIFileDiff;
 }
 
 export interface ChatSummary {
