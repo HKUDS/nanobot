@@ -12,6 +12,59 @@ describe("MarkdownTextRenderer", () => {
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
   });
 
+  it("reveals appended streaming text after markdown parsing", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streamRevealFrom={6} streamVisibleUntil={15} streamRevealKey={1}>
+        {"hello **world**"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container).toHaveTextContent("hello world");
+    expect(container).not.toHaveTextContent("**");
+    expect(container.querySelector("strong")).toHaveTextContent("world");
+    expect(screen.getByTestId("streaming-reveal-segment")).toHaveTextContent("world");
+  });
+
+  it("hides unrevealed markdown text after parsing instead of exposing raw markers", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streamRevealFrom={6} streamVisibleUntil={10} streamRevealKey={1}>
+        {"hello **world**"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container).not.toHaveTextContent("**");
+    expect(container.querySelector("strong")).toHaveTextContent("world");
+    expect(screen.getByTestId("streaming-reveal-segment")).toHaveTextContent("wo");
+    expect(screen.getByTestId("streaming-hidden-tail")).toHaveTextContent("rld");
+  });
+
+  it("applies streaming reveal inside fenced code blocks without breaking the code shell", () => {
+    const source = "```ts\nconst visible = 1;\nconst hidden = 2;\n```";
+    const revealFrom = source.indexOf("const visible");
+    const visibleUntil = source.indexOf("hidden");
+    const { container } = render(
+      <MarkdownTextRenderer
+        highlightCode={false}
+        streamRevealFrom={revealFrom}
+        streamVisibleUntil={visibleUntil}
+        streamRevealKey={1}
+      >
+        {source}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll("pre")).toHaveLength(1);
+    expect(container.querySelector("pre code")).toBeInTheDocument();
+    expect(container.querySelector("pre div")).toBeNull();
+    expect(container.querySelector("pre code .streaming-reveal-segment")).toHaveTextContent(
+      "const visible = 1;",
+    );
+    expect(container.querySelector("pre code .streaming-hidden-tail")).toHaveTextContent(
+      "hidden = 2;",
+    );
+    expect(container).not.toHaveTextContent("[object Object]");
+  });
+
   it("renders local file links as previewable file references", () => {
     const onOpenFilePreview = vi.fn();
     render(

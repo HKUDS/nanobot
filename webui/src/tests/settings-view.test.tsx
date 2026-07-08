@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
+import { LOCAL_PREFS_STORAGE_KEY } from "@/lib/localPreferences";
 import type { SettingsPayload } from "@/lib/types";
+import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -159,7 +161,7 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models" | "browser";
+    initialSection?: SettingsSectionKey;
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -187,6 +189,37 @@ describe("SettingsView Apps catalog", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    window.localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY);
+  });
+
+  it("stores the local streaming pace preference from Appearance settings", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({
+      initialSection: "appearance",
+      initialSettings: settingsPayload(),
+    });
+
+    expect(await screen.findByText("Local preferences")).toBeInTheDocument();
+    const streamingPace = screen.getByRole("switch", { name: "Streaming pace" });
+    expect(streamingPace).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(streamingPace);
+
+    expect(screen.getByRole("switch", { name: "Streaming pace" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(JSON.parse(window.localStorage.getItem(LOCAL_PREFS_STORAGE_KEY) ?? "{}")).toEqual(
+      expect.objectContaining({ streamingNaturalPacing: false }),
+    );
   });
 
   it("does not show the Settings kicker on the standalone Automations surface", async () => {
