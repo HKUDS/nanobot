@@ -112,8 +112,8 @@ import {
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import {
-  LOCAL_PREFS_STORAGE_KEY,
   readLocalPreferences,
+  writeLocalPreferences,
   type FileEditDisplayMode,
   type LocalActivityMode,
   type LocalDensity,
@@ -812,11 +812,7 @@ export function SettingsView({
   }, [activeSection, token]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(localPrefs));
-    } catch {
-      // Browser-only preferences should never block settings.
-    }
+    writeLocalPreferences(localPrefs);
   }, [localPrefs]);
 
   useEffect(() => {

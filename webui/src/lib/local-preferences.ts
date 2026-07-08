@@ -11,6 +11,7 @@ export interface LocalPreferences {
 }
 
 export const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
+export const LOCAL_PREFS_CHANGED_EVENT = "nanobot-webui.local-preferences-changed";
 
 export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
@@ -39,4 +40,16 @@ export function readLocalPreferences(): LocalPreferences {
   } catch {
     return DEFAULT_LOCAL_PREFS;
   }
+}
+
+export function writeLocalPreferences(preferences: LocalPreferences): void {
+  try {
+    window.localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // Browser-only preferences should never block settings.
+  }
+  window.dispatchEvent(new CustomEvent<LocalPreferences>(
+    LOCAL_PREFS_CHANGED_EVENT,
+    { detail: preferences },
+  ));
 }
