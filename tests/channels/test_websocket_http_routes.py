@@ -660,7 +660,7 @@ async def test_nanobot_feature_remote_install_requires_opt_in(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    token = channel.gateway.tokens.issue_api_token(300)
     path = "/api/settings/nanobot-features/enable?name=matrix"
     request = _FakeReq({"Authorization": f"Bearer {token}"}, path=path)
 
@@ -707,7 +707,7 @@ async def test_nanobot_feature_local_install_allowed_by_default(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    token = channel.gateway.tokens.issue_api_token(300)
     request = _FakeReq(
         {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
         path="/api/settings/nanobot-features/enable?name=matrix",
@@ -743,7 +743,7 @@ async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    token = channel.gateway.tokens.issue_api_token(300)
     request = _FakeReq(
         {
             "Authorization": f"Bearer {token}",
@@ -795,7 +795,7 @@ async def test_nanobot_feature_remote_enable_without_install_is_allowed(
         install_calls=install_calls,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    token = channel.gateway.tokens.issue_api_token(300)
     request = _FakeReq(
         {"Authorization": f"Bearer {token}"},
         path="/api/settings/nanobot-features/enable?name=matrix",
@@ -829,7 +829,7 @@ async def test_nanobot_feature_remote_disable_does_not_need_install_policy(
     _stub_matrix_feature(monkeypatch, config_path, deps=["matrix-nio>=0.25.2"], installed=False)
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
-    token = channel.gateway.tokens.issue_token(300, api_token=True)
+    token = channel.gateway.tokens.issue_api_token(300)
     request = _FakeReq(
         {"Authorization": f"Bearer {token}"},
         path="/api/settings/nanobot-features/disable?name=matrix",

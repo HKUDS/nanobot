@@ -175,6 +175,12 @@ vi.mock("@/hooks/useTheme", async () => {
 });
 
 vi.mock("@/lib/bootstrap", () => ({
+  BootstrapAuthRequiredError: class BootstrapAuthRequiredError extends Error {
+    constructor(message = "bootstrap authentication required") {
+      super(message);
+      this.name = "BootstrapAuthRequiredError";
+    }
+  },
   fetchBootstrap: vi.fn().mockResolvedValue({
     token: "tok",
     api_token: "api-tok",
@@ -217,7 +223,11 @@ vi.mock("@/lib/nanobot-client", () => {
   return { NanobotClient: MockClient };
 });
 
-import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import {
+  BootstrapAuthRequiredError,
+  deriveWsUrl,
+  fetchBootstrap,
+} from "@/lib/bootstrap";
 import App from "@/App";
 
 describe("App layout", () => {
@@ -262,6 +272,20 @@ describe("App layout", () => {
   it("shows the auth form without an invalid-password error on first load", async () => {
     vi.mocked(fetchBootstrap).mockRejectedValueOnce(
       new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
+    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows the auth form when bootstrap does not issue an API token", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new BootstrapAuthRequiredError(
+        "bootstrap authentication required: missing api_token",
+      ),
     );
 
     render(<App />);

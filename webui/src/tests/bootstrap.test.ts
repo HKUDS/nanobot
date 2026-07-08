@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { consumeUrlBootstrapSecret, deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import {
+  BootstrapAuthRequiredError,
+  consumeUrlBootstrapSecret,
+  deriveWsUrl,
+  fetchBootstrap,
+} from "@/lib/bootstrap";
 
 describe("bootstrap helpers", () => {
   afterEach(() => {
@@ -51,7 +56,7 @@ describe("bootstrap helpers", () => {
     await pending;
   });
 
-  it("rejects bootstrap responses without an API token", async () => {
+  it("treats bootstrap responses without an API token as auth-required", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -60,9 +65,12 @@ describe("bootstrap helpers", () => {
       })),
     );
 
-    await expect(fetchBootstrap()).rejects.toThrow(
-      "bootstrap response missing api_token",
-    );
+    const promise = fetchBootstrap();
+    await expect(promise).rejects.toMatchObject({
+      name: "BootstrapAuthRequiredError",
+      message: "bootstrap authentication required: missing api_token",
+    });
+    await expect(promise).rejects.toBeInstanceOf(BootstrapAuthRequiredError);
   });
 
   it("consumes bootstrap secrets from the URL fragment", () => {

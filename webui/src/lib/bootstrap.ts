@@ -4,6 +4,13 @@ import { fetchWithTimeout } from "./http";
 const SECRET_STORAGE_KEY = "nanobot-webui.bootstrap-secret";
 const URL_SECRET_PARAM = "bootstrapSecret";
 
+export class BootstrapAuthRequiredError extends Error {
+  constructor(message = "bootstrap authentication required") {
+    super(message);
+    this.name = "BootstrapAuthRequiredError";
+  }
+}
+
 /** Read a previously saved bootstrap secret from localStorage. */
 export function loadSavedSecret(): string {
   if (typeof window === "undefined") return "";
@@ -74,6 +81,9 @@ export async function fetchBootstrap(
     headers,
   }, timeoutMs);
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new BootstrapAuthRequiredError(`bootstrap failed: HTTP ${res.status}`);
+    }
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }
   const body = (await res.json()) as BootstrapResponse;
@@ -81,7 +91,9 @@ export async function fetchBootstrap(
     throw new Error("bootstrap response missing token or ws_path");
   }
   if (!body.api_token) {
-    throw new Error("bootstrap response missing api_token");
+    throw new BootstrapAuthRequiredError(
+      "bootstrap authentication required: missing api_token",
+    );
   }
   return body;
 }
