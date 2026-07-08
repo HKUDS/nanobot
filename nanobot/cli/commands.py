@@ -597,6 +597,11 @@ def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Refresh config, preserving existing settings without prompting",
+    ),
 ):
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
@@ -618,6 +623,12 @@ def onboard(
     if config_path.exists():
         if wizard:
             config = _apply_workspace_override(load_config(config_path))
+        elif refresh:
+            config = _apply_workspace_override(load_config(config_path))
+            save_config(config, config_path)
+            console.print(
+                f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
+            )
         else:
             console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
             console.print(
