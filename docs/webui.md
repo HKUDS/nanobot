@@ -58,7 +58,7 @@ gateway health endpoint, `18790` by default, is not the browser UI.
 | Area | Use it for |
 |---|---|
 | Chat | Start, switch, search, fork, and delete browser sessions |
-| Agent activity | See thinking, tool calls, file activity, command output, and generated artifacts in context |
+| Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for Apps or MCP presets |
@@ -76,6 +76,16 @@ without changing the original thread.
 
 The message timeline shows both user-visible replies and agent activity. Long
 tool or reasoning sections can be expanded when you need the details.
+
+When the agent writes or edits files, the activity item shows the target path,
+status, changed line counts, and, when available, a unified diff. Use **View
+diff** to expand the change; large diffs may hide unchanged lines or truncate the
+inline preview. Use **Open file** from a file edit to open the read-only file
+preview panel.
+
+File previews follow the active session access mode. Restricted workspace access
+previews only files under the selected workspace. Full Access can preview files
+outside the workspace when that access mode is allowed by the gateway.
 
 ## Workspace and Access
 
@@ -196,6 +206,9 @@ Skills, runtime identity, and advanced safety controls.
 Some settings take effect immediately. Runtime settings that affect the gateway
 or agent process may require a restart; the WebUI shows that requirement next to
 the relevant control.
+
+Browser-only display preferences, such as file edit display mode, take effect
+immediately for the current browser and do not change gateway configuration.
 
 ## LAN Access
 
