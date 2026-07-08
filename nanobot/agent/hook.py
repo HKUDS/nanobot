@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -42,6 +44,20 @@ class AgentRunHookContext:
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
     exception: BaseException | None = None
+
+
+@dataclass(slots=True)
+class AgentTurnHookContext:
+    """Turn-local inputs available when constructing per-turn hooks."""
+
+    on_progress: Callable[..., Awaitable[None]] | None = None
+    workspace: Path | None = None
+    channel: str = "cli"
+    chat_id: str = "direct"
+    message_id: str | None = None
+    session_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    ephemeral: bool = False
 
 
 class AgentHook:
@@ -93,6 +109,9 @@ class AgentHook:
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return content
+
+
+AgentTurnHookFactory = Callable[[AgentTurnHookContext], AgentHook | None]
 
 
 class CompositeHook(AgentHook):

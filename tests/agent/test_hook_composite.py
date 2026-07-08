@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext, CompositeHook
+from nanobot.agent.hook import (
+    AgentHook,
+    AgentHookContext,
+    AgentRunHookContext,
+    AgentTurnHookContext,
+    CompositeHook,
+)
 
 
 def _ctx() -> AgentHookContext:
@@ -348,7 +354,7 @@ async def test_composite_can_wrap_another_composite():
 # ---------------------------------------------------------------------------
 
 
-def _make_loop(tmp_path, hooks=None):
+def _make_loop(tmp_path, hooks=None, hook_factories=None):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -363,7 +369,11 @@ def _make_loop(tmp_path, hooks=None):
          patch("nanobot.agent.loop.Consolidator"):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
-            bus=bus, provider=provider, workspace=tmp_path, hooks=hooks,
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            hooks=hooks,
+            hook_factories=hook_factories,
         )
     return loop
 
@@ -403,6 +413,66 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     assert "before_iter:0" in events
     assert "after_iter:0" in events
     assert "after_run:completed" in events
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
+    """Turn-scoped hooks can be supplied externally and see turn-local context."""
+    from nanobot.providers.base import LLMResponse
+
+    captured: list[tuple[str, AgentTurnHookContext]] = []
+    events: list[str] = []
+
+    class TrackingHook(AgentHook):
+        def __init__(self, label: str) -> None:
+            super().__init__()
+            self._label = label
+
+        async def before_iteration(self, context):
+            events.append(f"{self._label}:{context.iteration}")
+
+    def factory(label: str):
+        def _create(context: AgentTurnHookContext) -> AgentHook:
+            captured.append((label, context))
+            return TrackingHook(label)
+
+        return _create
+
+    loop = _make_loop(tmp_path, hook_factories=[factory("registered")])
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    async def on_progress(*args, **kwargs):
+        pass
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hi"}],
+        on_progress=on_progress,
+        channel="websocket",
+        chat_id="chat-1",
+        message_id="msg-1",
+        metadata={"source": "test"},
+        session_key="websocket:chat-1",
+        hook_factories=[factory("turn")],
+    )
+
+    assert events == ["registered:0", "turn:0"]
+    assert [label for label, _ in captured] == ["registered", "turn"]
+    assert [context.on_progress for _, context in captured] == [on_progress, on_progress]
+    assert [context.workspace for _, context in captured] == [tmp_path, tmp_path]
+    assert [context.channel for _, context in captured] == ["websocket", "websocket"]
+    assert [context.chat_id for _, context in captured] == ["chat-1", "chat-1"]
+    assert [context.message_id for _, context in captured] == ["msg-1", "msg-1"]
+    assert [context.session_key for _, context in captured] == [
+        "websocket:chat-1",
+        "websocket:chat-1",
+    ]
+    assert [context.metadata for _, context in captured] == [
+        {"source": "test"},
+        {"source": "test"},
+    ]
 
 
 @pytest.mark.asyncio

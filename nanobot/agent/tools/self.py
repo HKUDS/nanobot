@@ -68,7 +68,7 @@ class MyTool(Tool, ContextAware):
         "_session_locks", "_active_tasks", "_background_tasks",
         # Security boundaries (inspect + modify both blocked)
         "restrict_to_workspace", "channels_config",
-        "_concurrency_gate", "_unified_session", "_extra_hooks",
+        "_concurrency_gate", "_unified_session", "_extra_hooks", "_hook_factories",
     })
 
     READ_ONLY = frozenset({
