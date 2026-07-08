@@ -8,7 +8,7 @@ Automations.
 
 - a local browser workbench
 - one persistent chat session
-- a visible timeline of agent messages, tool calls, and file activity
+- a visible timeline of agent messages, tool calls, and file edit diffs
 - a gateway-backed WebSocket connection
 
 ## When to use this
@@ -36,6 +36,12 @@ nanobot webui
 
 The launcher checks setup, enables the local WebSocket channel after
 confirmation, starts the gateway, and opens the browser.
+
+When nanobot edits a file, the WebUI activity timeline can show the changed
+line counts, a unified diff, and an **Open file** action for a read-only
+preview. File previews use the chat's current workspace access mode: restricted
+access stays inside the selected workspace, while Full Access can preview files
+outside the workspace when the gateway allows it.
 
 ## Production notes
 
