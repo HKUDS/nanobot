@@ -5,12 +5,13 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 
 
 class RecordingHook(AgentHook):
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], label: str = "hook") -> None:
         super().__init__()
         self._events = events
+        self._label = label
 
     async def before_iteration(self, context: AgentHookContext) -> None:
-        self._events.append(f"hook:{context.iteration}")
+        self._events.append(f"{self._label}:{context.iteration}")
 
 
 @pytest.mark.asyncio
@@ -25,6 +26,21 @@ async def test_turn_hook_builder_runs_progress_hook_before_extra_hooks() -> None
     await hook.before_iteration(AgentHookContext(iteration=2, messages=[]))
 
     assert events == ["progress:2", "hook:2"]
+
+
+@pytest.mark.asyncio
+async def test_turn_hook_builder_runs_registered_hooks_before_turn_hooks() -> None:
+    events: list[str] = []
+
+    hook = build_agent_turn_hook(AgentTurnHookSpec(
+        on_iteration=lambda iteration: events.append(f"progress:{iteration}"),
+        registered_hooks=[RecordingHook(events, "registered")],
+        turn_hooks=[RecordingHook(events, "turn")],
+    ))
+
+    await hook.before_iteration(AgentHookContext(iteration=2, messages=[]))
+
+    assert events == ["progress:2", "registered:2", "turn:2"]
 
 
 @pytest.mark.asyncio
