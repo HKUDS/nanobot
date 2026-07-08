@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from loguru import logger
 
 from nanobot.utils.helpers import stringify_text_blocks
 
-_MAX_REPEAT_EXTERNAL_LOOKUPS = 2
+_MAX_REPEAT_ATTEMPTS = 2
 
 # Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
@@ -103,6 +104,14 @@ def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:
     return None
 
 
+def _over_repeat_budget(signature: str | None, seen_counts: dict[str, int]) -> int | None:
+    if signature is None:
+        return None
+    count = seen_counts.get(signature, 0) + 1
+    seen_counts[signature] = count
+    return count if count > _MAX_REPEAT_ATTEMPTS else None
+
+
 def repeated_external_lookup_error(
     tool_name: str,
     arguments: Any,
@@ -110,11 +119,8 @@ def repeated_external_lookup_error(
 ) -> str | None:
     """Block repeated external lookups after a small retry budget."""
     signature = external_lookup_signature(tool_name, arguments)
-    if signature is None:
-        return None
-    count = seen_counts.get(signature, 0) + 1
-    seen_counts[signature] = count
-    if count <= _MAX_REPEAT_EXTERNAL_LOOKUPS:
+    count = _over_repeat_budget(signature, seen_counts)
+    if count is None:
         return None
     logger.warning(
         "Blocking repeated external lookup {} on attempt {}",
@@ -124,6 +130,33 @@ def repeated_external_lookup_error(
     return (
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
+    )
+
+
+def repeated_tool_result_hint(
+    tool_name: str,
+    result: Any,
+    seen_counts: dict[str, int],
+) -> str | None:
+    """Hint when a successful tool keeps returning the exact same text in one turn."""
+    if isinstance(result, str):
+        text = result
+    elif isinstance(result, list):
+        text = stringify_text_blocks(result)
+    else:
+        text = None
+    if text is None:
+        return None
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    signature = f"tool_result:{tool_name}:{len(text)}:{digest}"
+    count = _over_repeat_budget(signature, seen_counts)
+    if count is None:
+        return None
+    logger.warning("Hinting repeated {} result on attempt {}", tool_name, count)
+    return (
+        f"\n\n[Repeated {tool_name} result: this exact output has already been "
+        "returned in this turn. Use the existing evidence, or change the tool input "
+        "if you need new information.]"
     )
 
 

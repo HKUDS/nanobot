@@ -53,6 +53,7 @@ from nanobot.utils.runtime import (
     build_length_recovery_message,
     is_blank_text,
     repeated_external_lookup_error,
+    repeated_tool_result_hint,
     repeated_workspace_violation_error,
 )
 
@@ -354,6 +355,7 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        repeated_result_counts: dict[str, int] = {}
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
@@ -471,17 +473,29 @@ class AgentRunner:
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
+                for tool_call, result, event in zip(response.tool_calls, results, new_events):
+                    content = self.context_governor.normalize_tool_result(
+                        governance_config,
+                        tool_call.id,
+                        tool_call.name,
+                        result,
+                    )
+                    if event.get("status") == "ok":
+                        result_hint = repeated_tool_result_hint(
+                            tool_call.name,
+                            content,
+                            repeated_result_counts,
+                        )
+                        if result_hint:
+                            if isinstance(content, str):
+                                content = content + result_hint
+                            elif isinstance(content, list):
+                                content = [*content, {"type": "text", "text": result_hint.strip()}]
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": self.context_governor.normalize_tool_result(
-                            governance_config,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
+                        "content": content,
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
@@ -1138,7 +1152,10 @@ class AgentRunner:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
                     self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        spec,
+                        tool_call,
+                        external_lookup_counts,
+                        workspace_violation_counts,
                     )
                     for tool_call in batch
                 ))
@@ -1147,7 +1164,10 @@ class AgentRunner:
                 batch_results = []
                 for tool_call in batch:
                     result = await self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        spec,
+                        tool_call,
+                        external_lookup_counts,
+                        workspace_violation_counts,
                     )
                     tool_results.append(result)
                     batch_results.append(result)
