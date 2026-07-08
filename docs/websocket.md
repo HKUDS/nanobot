@@ -221,7 +221,7 @@ All fields go under `channels.websocket` in `config.json`.
 | `token` | string | `""` | Static shared secret. When set, clients must provide `?token=<value>` matching this secret (timing-safe comparison). Issued tokens are also accepted as a fallback. |
 | `websocketRequiresToken` | bool | `true` | When `true` and no static `token` is configured, clients must still present a valid issued token. Set to `false` to allow unauthenticated connections (only safe for local/trusted networks). |
 | `tokenIssuePath` | string | `""` | HTTP path for issuing short-lived tokens. Must differ from `path`. See [Token Issuance](#token-issuance). |
-| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning), and `/webui/bootstrap` will not return a WebUI REST API token. |
+| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` still issues WebUI REST API tokens for localhost requests; remote bootstrap requires `tokenIssueSecret` or `token`. |
 | `tokenTtlS` | int | `300` | Time-to-live for issued tokens in seconds (30 – 86,400). |
 
 ### Access Control
@@ -267,8 +267,8 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 4. The token is consumed (single use) and cannot be reused.
 
 The embedded WebUI's `/webui/bootstrap` route also returns a WebSocket token.
-It returns a separate `api_token` for REST routes only after the request proves
-knowledge of `tokenIssueSecret` or the static `token`.
+It returns a separate `api_token` for REST routes to localhost requests, or
+after the request proves knowledge of `tokenIssueSecret` or the static `token`.
 
 ### Example setup
 

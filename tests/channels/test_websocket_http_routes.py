@@ -203,7 +203,8 @@ async def test_bootstrap_returns_token_for_localhost(
         assert resp.status_code == 200
         body = resp.json()
         assert body["token"].startswith("nbwt_")
-        assert "api_token" not in body
+        assert body["api_token"].startswith("nbwt_")
+        assert body["api_token"] != body["token"]
         assert body["ws_path"] == "/"
         assert body["ws_url"] == "ws://127.0.0.1:29901/"
         assert body["expires_in"] > 0
@@ -2067,15 +2068,25 @@ def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
     assert body["ws_url"] == "wss://nanobot.example/"
 
 
+def test_bootstrap_without_auth_rejects_remote_requests(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+    resp = channel.gateway.http._handle_bootstrap(_REMOTE, _NO_HEADERS)
+    assert resp.status_code == 403
+
+
 def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["token"].startswith("nbwt_")
-    assert "api_token" not in body
+    assert body["api_token"].startswith("nbwt_")
+    assert body["api_token"] != body["token"]
     assert not channel.gateway.tokens.check_api_token(
         _FakeReq({"Authorization": f"Bearer {body['token']}"})
+    )
+    assert channel.gateway.tokens.check_api_token(
+        _FakeReq({"Authorization": f"Bearer {body['api_token']}"})
     )
 
 

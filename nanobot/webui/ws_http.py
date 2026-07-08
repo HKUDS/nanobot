@@ -306,13 +306,14 @@ class GatewayHTTPHandler:
 
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
-        api_token_allowed = bool(secret)
+        is_local = _is_localhost(connection)
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not _is_localhost(connection):
+        elif not is_local:
             return _http_error(403, "bootstrap is localhost-only")
 
+        api_token_allowed = bool(secret) or is_local
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
