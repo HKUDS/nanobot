@@ -9,7 +9,10 @@ a focused setup path for one platform, start with a guide:
 | Telegram | [Build a Telegram AI Agent with nanobot](./guides/telegram-ai-agent.md) |
 | Discord | [Build a Discord AI Agent with nanobot](./guides/discord-ai-agent.md) |
 | Slack | [Build a Slack AI Agent with nanobot](./guides/slack-ai-agent.md) |
+| Feishu | [Build a Feishu AI Agent with nanobot](./guides/feishu-ai-agent.md) |
+| WhatsApp | [Build a WhatsApp AI Agent with nanobot](./guides/whatsapp-ai-agent.md) |
 | WeChat | [Build a WeChat AI Agent with nanobot](./guides/wechat-ai-agent.md) |
+| QQ | [Build a QQ AI Agent with nanobot](./guides/qq-ai-agent.md) |
 | Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
 | Mattermost | [Build a Mattermost AI Agent with nanobot](./guides/mattermost-ai-agent.md) |
 

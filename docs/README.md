@@ -52,7 +52,10 @@ Platform-specific chat guides:
 [`Telegram`](./guides/telegram-ai-agent.md),
 [`Discord`](./guides/discord-ai-agent.md),
 [`Slack`](./guides/slack-ai-agent.md),
+[`Feishu`](./guides/feishu-ai-agent.md),
+[`WhatsApp`](./guides/whatsapp-ai-agent.md),
 [`WeChat`](./guides/wechat-ai-agent.md),
+[`QQ`](./guides/qq-ai-agent.md),
 [`Email`](./guides/email-ai-agent.md), and
 [`Mattermost`](./guides/mattermost-ai-agent.md).
 

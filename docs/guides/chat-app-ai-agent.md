@@ -29,7 +29,10 @@ Then choose one platform guide:
 - [Telegram AI agent](./telegram-ai-agent.md)
 - [Discord AI agent](./discord-ai-agent.md)
 - [Slack AI agent](./slack-ai-agent.md)
+- [Feishu AI agent](./feishu-ai-agent.md)
+- [WhatsApp AI agent](./whatsapp-ai-agent.md)
 - [WeChat AI agent](./wechat-ai-agent.md)
+- [QQ AI agent](./qq-ai-agent.md)
 - [Email AI agent](./email-ai-agent.md)
 - [Mattermost AI agent](./mattermost-ai-agent.md)
 
