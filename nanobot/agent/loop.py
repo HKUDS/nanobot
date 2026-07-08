@@ -21,9 +21,8 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
-from nanobot.agent.hook import AgentHook, CompositeHook
+from nanobot.agent.hook import AgentHook
 from nanobot.agent.memory import Consolidator
-from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -31,6 +30,7 @@ from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, res
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
+from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
     RetryWaitEvent,
@@ -753,7 +753,7 @@ class AgentLoop:
         """
         self._sync_subagent_runtime_limits()
 
-        loop_hook = AgentProgressHook(
+        hook = build_agent_turn_hook(AgentTurnHookSpec(
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
@@ -765,11 +765,11 @@ class AgentLoop:
             tool_hint_max_length=self.tool_hint_max_length,
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
-        )
-        run_hooks = [*self._extra_hooks, *(hooks or [])]
-        hook: AgentHook = loop_hook
-        if run_hooks and (not ephemeral or run_extra_hooks_for_ephemeral):
-            hook = CompositeHook([loop_hook, *run_hooks])
+            registered_hooks=self._extra_hooks,
+            turn_hooks=list(hooks or []),
+            ephemeral=ephemeral,
+            run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+        ))
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
