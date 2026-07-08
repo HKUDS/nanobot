@@ -41,6 +41,7 @@ class FileEditTracker:
     path: Path
     display_path: str
     before: FileSnapshot
+    progress_id: str | None = None
 
 
 def is_file_edit_tool(tool_name: str | None) -> bool:
@@ -151,6 +152,7 @@ def prepare_file_edit_tracker(
     tool: Any,
     workspace: Path | None,
     params: dict[str, Any] | None,
+    progress_id: str | None = None,
 ) -> FileEditTracker | None:
     trackers = prepare_file_edit_trackers(
         call_id=call_id,
@@ -158,6 +160,7 @@ def prepare_file_edit_tracker(
         tool=tool,
         workspace=workspace,
         params=params,
+        progress_id=progress_id,
     )
     return trackers[0] if trackers else None
 
@@ -169,6 +172,7 @@ def prepare_file_edit_trackers(
     tool: Any,
     workspace: Path | None,
     params: dict[str, Any] | None,
+    progress_id: str | None = None,
 ) -> list[FileEditTracker]:
     if not is_file_edit_tool(tool_name):
         return []
@@ -190,6 +194,7 @@ def prepare_file_edit_trackers(
             path=path,
             display_path=display_file_edit_path(path, workspace),
             before=before,
+            progress_id=progress_id,
         ))
     return trackers
 
@@ -350,6 +355,7 @@ def build_file_edit_pending_event(
     return {
         "version": 1,
         "call_id": str(call_id or ""),
+        "progress_id": str(call_id or ""),
         "tool": tool_name,
         "path": "",
         "phase": "start",
@@ -421,6 +427,7 @@ class StreamingFileEditTracker:
                 tool=tool,
                 workspace=self._workspace,
                 params={"path": state.path},
+                progress_id=state.call_id or state.key,
             )
             if state.tracker is None:
                 return
@@ -474,6 +481,7 @@ class StreamingFileEditTracker:
                     path=path,
                     display_path=display_file_edit_path(path, self._workspace),
                     before=read_file_snapshot(path),
+                    progress_id=state.call_id or state.key,
                 )
                 file_state = _StreamingPatchFileState(tracker=tracker)
                 state.patch_files[raw_path] = file_state
@@ -525,20 +533,16 @@ class StreamingFileEditTracker:
         if events:
             await self._emit(events)
 
+    def progress_id_for(self, tool_call: Any) -> str | None:
+        """Return the UI correlation key for a final file-edit tool call."""
+        name = getattr(tool_call, "name", None)
+        if not is_file_edit_tool(name):
+            return None
+        return self.canonical_call_id_for(tool_call)
+
     def apply_final_call_ids(self, final_tool_calls: list[Any]) -> None:
-        """Keep final start/end events keyed to any earlier streamed placeholder."""
-        used_canonicals: set[str] = set()
-        for tool_call in final_tool_calls:
-            name = getattr(tool_call, "name", None)
-            if not is_file_edit_tool(name):
-                continue
-            canonical = self.canonical_call_id_for(tool_call)
-            if canonical and canonical not in used_canonicals:
-                try:
-                    tool_call.id = canonical
-                    used_canonicals.add(canonical)
-                except (AttributeError, TypeError):
-                    pass
+        """Deprecated compatibility hook; provider tool-call IDs stay immutable."""
+        return None
 
     def canonical_call_id_for(self, tool_call: Any) -> str | None:
         for state in self._states.values():
@@ -933,6 +937,8 @@ def _event_payload(
         "approximate": bool(approximate),
         "status": status,
     }
+    if tracker.progress_id:
+        payload["progress_id"] = tracker.progress_id
     if binary:
         payload["binary"] = True
     if operation:

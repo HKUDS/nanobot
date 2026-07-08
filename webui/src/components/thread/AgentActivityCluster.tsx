@@ -1552,8 +1552,9 @@ function fileActivityManySummaryKey(editing: boolean, failed: boolean, deleted: 
 }
 
 function fileEditCallKey(edit: UIFileEdit): string {
-  if (edit.call_id && edit.path) return `${edit.call_id}|${edit.tool}|${edit.path}`;
-  if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
+  const id = edit.progress_id || edit.call_id;
+  if (id && edit.path) return `${id}|${edit.tool}|${edit.path}`;
+  if (id) return `${id}|${edit.tool}`;
   return `${edit.tool}|${edit.path}`;
 }
 

@@ -272,10 +272,15 @@ function absorbCompleteAssistantMessage(
   ];
 }
 
-function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
-  if (edit.call_id && edit.path) return `${edit.call_id}|${edit.tool}|${edit.path}`;
-  if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
+function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "progress_id" | "tool" | "path">): string {
+  const id = edit.progress_id || edit.call_id;
+  if (id && edit.path) return `${id}|${edit.tool}|${edit.path}`;
+  if (id) return `${id}|${edit.tool}`;
   return `${edit.tool}|${edit.path}`;
+}
+
+function fileEditProgressKey(edit: Pick<UIFileEdit, "call_id" | "progress_id" | "tool">): string {
+  return `${edit.progress_id || edit.call_id}|${edit.tool}`;
 }
 
 function fileEditToolEventKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
@@ -376,9 +381,9 @@ function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit
     const key = fileEditKey(edit);
     let existingIndex = indexByKey.get(key);
     if (existingIndex === undefined && edit.path) {
-      const eventKey = fileEditToolEventKey(edit);
+      const eventKey = fileEditProgressKey(edit);
       const pendingIndex = next.findIndex((existing) =>
-        !existing.path && existing.pending && fileEditToolEventKey(existing) === eventKey,
+        !existing.path && existing.pending && fileEditProgressKey(existing) === eventKey,
       );
       if (pendingIndex >= 0) existingIndex = pendingIndex;
     }
@@ -402,6 +407,7 @@ function findFileEditTraceIndex(
 ): number | null {
   const incomingKeys = new Set(incoming.map(fileEditKey));
   const incomingToolEventKeys = new Set(incoming.map(fileEditToolEventKey));
+  const incomingProgressKeys = new Set(incoming.map(fileEditProgressKey));
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
     if (candidate.role === "user") break;
@@ -413,7 +419,7 @@ function findFileEditTraceIndex(
         || (
           !existing.path
           && existing.pending
-          && incomingToolEventKeys.has(fileEditToolEventKey(existing))
+          && incomingProgressKeys.has(fileEditProgressKey(existing))
         )
       ) return i;
     }
