@@ -20,7 +20,6 @@ nanobot agent -m "Hello!"
 
 - Access to the Discord Developer Portal.
 - A Discord server where you can invite a bot.
-- Your Discord user ID.
 
 ## Install nanobot
 
@@ -48,7 +47,6 @@ Merge this snippet into `~/.nanobot/config.json`:
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"],
       "allowChannels": [],
       "groupPolicy": "mention",
       "streaming": true
@@ -56,6 +54,9 @@ Merge this snippet into `~/.nanobot/config.json`:
   }
 }
 ```
+
+Omitting `allowFrom` enables pairing-only mode. A new user should DM the bot
+first, get a pairing code, and be approved before using the bot in servers.
 
 Invite the bot with permissions to read history and send messages.
 
@@ -68,8 +69,14 @@ nanobot gateway
 
 ## Test a message
 
-Send the bot a DM from your allowed account, or mention it in an allowed server
-channel:
+Send the bot a DM first. It should return a pairing code. Approve it from a
+trusted local surface:
+
+```bash
+nanobot agent -m "/pairing approve ABCD-EFGH"
+```
+
+After approval, mention it in an allowed server channel:
 
 ```text
 @your-bot Hello from Discord
@@ -79,13 +86,16 @@ channel:
 
 - Keep `groupPolicy` as `mention` for first deployment.
 - Use `allowChannels` for server channels where the bot should operate.
+- Prefer pairing-only mode for user access; add `allowFrom` only when you want a
+  static allowlist.
 - Avoid open group behavior in busy channels until session routing is clear.
 - Review tool access before inviting the bot into shared servers.
 
 ## Troubleshooting
 
 - If no messages arrive, confirm Message Content intent is enabled.
-- If server messages are ignored, check `allowFrom`, `allowChannels`, and
+- If a DM returns a pairing code, approve it before testing normal replies.
+- If server messages are ignored, check pairing approval, `allowChannels`, and
   whether the bot was mentioned.
 - If the bot cannot reply, confirm the invite permissions and channel overrides.
 

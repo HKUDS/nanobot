@@ -1,17 +1,19 @@
-# How to Deploy nanobot Gateway
+# How to Deploy a Long-Running nanobot AI Agent Gateway
 
-The nanobot gateway is the process that keeps WebUI, chat apps, automations,
-heartbeat jobs, Dream, and WebSocket delivery online.
+The nanobot gateway is the long-running self-hosted AI agent process that keeps
+WebUI sessions, chat apps, automations, local triggers, heartbeat jobs, Dream,
+and WebSocket delivery online.
 
 ## What you will build
 
 - a verified nanobot config
 - a gateway process
-- an optional Docker, systemd, or macOS LaunchAgent deployment
+- a service or container deployment path with Docker, systemd, or macOS
+  LaunchAgent
 
 ## When to use this
 
-Use this when nanobot should keep running after a single CLI turn: chat apps,
+Use this when nanobot should keep running after a single CLI turn. Chat apps,
 browser sessions, background automations, local triggers, and server-side
 integrations all depend on a live gateway.
 
@@ -69,7 +71,6 @@ nanobot gateway logs
 
 ## Related nanobot docs
 
-- [Deploy a long-running AI agent gateway](./deploy-ai-agent-gateway.md)
 - [Deployment](../deployment.md)
 - [Multiple Instances](../multiple-instances.md)
 - [Configuration](../configuration.md)

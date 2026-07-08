@@ -72,7 +72,8 @@ gateway running long enough for the polling interval to receive it.
 
 - Use a dedicated mailbox, not your primary personal inbox.
 - Set `consentGranted` to `false` to fully disable mailbox access.
-- Keep `allowFrom` narrow; `["*"]` accepts mail from anyone.
+- Email does not use DM pairing. Keep `allowFrom` narrow; `["*"]` accepts mail
+  from anyone.
 - Use environment variables for mailbox passwords.
 - Enable attachment types only when the agent needs them.
 

@@ -8,7 +8,7 @@ channel, using WebSocket events and the Mattermost REST API.
 - a Mattermost bot account or token
 - the `mattermost` channel enabled in nanobot
 - mention-only group behavior for first deployment
-- one DM or mention test
+- one pairing-approved DM or mention test
 
 ## Prerequisites
 
@@ -20,8 +20,6 @@ nanobot agent -m "Hello!"
 
 - A Mattermost server URL.
 - A bot token or personal access token for the bot account.
-- Your Mattermost user ID, username, or email depending on
-  `allowFromMatchMode`.
 
 ## Install nanobot
 
@@ -42,10 +40,11 @@ Merge this snippet into `~/.nanobot/config.json`:
       "serverUrl": "https://mattermost.example.com",
       "token": "YOUR_MATTERMOST_TOKEN",
       "teamId": "YOUR_TEAM_ID",
-      "allowFromMatchMode": "id",
-      "allowFrom": ["YOUR_USER_ID"],
       "groupPolicy": "mention",
-      "replyInThread": true
+      "replyInThread": true,
+      "dm": {
+        "policy": "allowlist"
+      }
     }
   }
 }
@@ -53,6 +52,10 @@ Merge this snippet into `~/.nanobot/config.json`:
 
 `teamId` scopes the channel to a Mattermost team. Keep `groupPolicy` as
 `mention` for the first test.
+
+Mattermost DMs are open by default. Setting `dm.policy` to `"allowlist"` with no
+`dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the
+code before using the bot normally.
 
 ## Run nanobot gateway
 
@@ -63,7 +66,14 @@ nanobot gateway
 
 ## Test a message
 
-DM the bot account or mention it in a channel where the bot has access:
+DM the bot account. It should return a pairing code. Approve it from a trusted
+local surface:
+
+```bash
+nanobot agent -m "/pairing approve ABCD-EFGH"
+```
+
+Then DM the bot again, or mention it in a channel where the bot has access:
 
 ```text
 @nanobot Hello from Mattermost
@@ -72,7 +82,7 @@ DM the bot account or mention it in a channel where the bot has access:
 ## Security notes
 
 - Store the Mattermost token in an environment variable for deployed services.
-- Keep `allowFrom` narrow until pairing or team policy is intentional.
+- Keep `dm.policy` as `"allowlist"` when you want pairing-based approval.
 - Use mention-only group behavior before opening the bot to busy channels.
 - Review file and shell tools before inviting broad channel access.
 
@@ -80,7 +90,7 @@ DM the bot account or mention it in a channel where the bot has access:
 
 - If startup logs say `serverUrl and token must be configured`, check the
   camelCase config keys.
-- If DMs are ignored, review the `dm` policy and `allowFrom` values.
+- If DMs are ignored, review the `dm` policy and pairing approval state.
 - If channel messages are ignored, confirm the bot is mentioned and belongs to
   the team/channel.
 - If thread replies are surprising, review `replyInThread` and

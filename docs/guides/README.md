@@ -13,7 +13,7 @@ edge cases.
 | Use the browser workbench | [AI agent WebUI](./ai-agent-webui.md) |
 | Run long-running tasks | [Long-running AI agent](./long-running-ai-agent.md) |
 | Add memory | [AI agent memory](./ai-agent-memory.md) |
-| Deploy a gateway | [Deploy an AI agent gateway](./deploy-ai-agent-gateway.md) |
+| Deploy a gateway | [Deploy a long-running nanobot AI agent gateway](./deploy-nanobot-gateway.md) |
 
 ## Connect and integrate
 

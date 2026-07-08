@@ -23,7 +23,11 @@ nanobot agent -m "Hello!"
 
 If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `nanobot gateway` to stay running after the channel is configured.
 
-Most examples below are snippets to merge into `~/.nanobot/config.json`.
+Most examples below are snippets to merge into `~/.nanobot/config.json`. When a
+snippet includes `allowFrom`, it is showing a static allowlist. For
+pairing-based access on supported channels, omit `allowFrom`; Slack and
+Mattermost also need `dm.policy` set to `"allowlist"` for DMs to issue pairing
+codes.
 
 > [!NOTE]
 > If you are upgrading from a version where chat app SDKs were installed by default,
@@ -47,24 +51,25 @@ Every chat app uses the same shape:
 1. Create or prepare the bot/account in the chat platform.
 2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
 3. Merge that platform's JSON snippet into `~/.nanobot/config.json`.
-4. Keep access control narrow at first with `allowFrom` or the platform-specific allow list.
-5. Check that nanobot can see the configured channel:
+4. Prefer pairing for DM-capable channels: omit `allowFrom`, let the first DM receive a pairing code, then approve it with `/pairing approve <code>`.
+5. For channels without pairing, such as Email, keep access narrow with `allowFrom` or the platform-specific allow list.
+6. Check that nanobot can see the configured channel:
 
 ```bash
 nanobot channels status
 ```
 
-6. Start the gateway and leave that terminal running:
+7. Start the gateway and leave that terminal running:
 
 ```bash
 nanobot gateway
 ```
 
-7. Send a message from the allowed account. In group chats, follow that channel's `groupPolicy` behavior: many channels default to mention-only, while Matrix and WhatsApp default to open group replies.
+8. Send a test DM. If the bot returns a pairing code, approve it and send the message again. In group chats, follow that channel's `groupPolicy` behavior: many channels default to mention-only, while Matrix and WhatsApp default to open group replies.
 
 If `nanobot channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one nanobot is reading. If the channel is enabled but messages do not arrive, run `nanobot gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
 
-> `["*"]` allows anyone who can reach that channel to talk to the bot. Use it only when that is intentional, or temporarily while testing in a private sandbox.
+> `allowFrom: ["*"]` bypasses pairing and allows anyone who can reach that channel to talk to the bot. Use it only when that is intentional, or temporarily while testing in a private sandbox.
 
 | Channel | What you need |
 |---------|---------------|

@@ -47,7 +47,9 @@ Start with workspace restriction:
 - Use environment variables for provider keys, bot tokens, and mailbox
   passwords.
 - Keep one workspace per trust boundary.
-- Use `allowFrom`, pairing, and mention-only group policy for chat apps.
+- Prefer pairing for DM-capable chat apps, use narrow `allowFrom` lists only
+  when static allowlists are intentional, and keep group policy mention-only at
+  first.
 - Bind WebUI, WebSocket, and API services to localhost unless remote access is
   intentional.
 
@@ -57,8 +59,8 @@ Start with workspace restriction:
 - `tools.exec.enable: false` removes shell execution entirely.
 - HTTP web fetch and HTTP MCP use SSRF protections by default.
 - Adding broad `tools.ssrfWhitelist` ranges increases exposure.
-- `allowFrom: ["*"]` means anyone who can reach that channel can talk to the
-  bot.
+- `allowFrom: ["*"]` bypasses pairing and means anyone who can reach that
+  channel can talk to the bot.
 
 ## Troubleshooting
 

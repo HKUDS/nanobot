@@ -57,7 +57,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Add fallback models | `modelPresets.<fallback>`, `agents.defaults.fallbackModels` | `nanobot status`, then a normal agent run | [Model Fallbacks](#model-fallbacks) |
 | Keep secrets out of the config file | `${ENV_VAR}` placeholders inside any string value | Start nanobot from the same environment that sets the variable | [Environment Variables for Secrets](#environment-variables-for-secrets) |
 | Open the bundled WebUI | `channels.websocket.enabled`, optional `channels.websocket.port`, `channels.websocket.tokenIssueSecret` | `nanobot webui` | [Channel Settings](#channel-settings), [WebSocket docs](./websocket.md) |
-| Connect one chat app | `channels.<channel>.enabled`, channel credentials, `channels.<channel>.allowFrom` | `nanobot channels status`, then `nanobot gateway --verbose` | [Channel Settings](#channel-settings), [Chat Apps](./chat-apps.md) |
+| Connect one chat app | `channels.<channel>.enabled`, channel credentials, optional pairing or `channels.<channel>.allowFrom` | `nanobot channels status`, then `nanobot gateway --verbose` | [Channel Settings](#channel-settings), [Chat Apps](./chat-apps.md) |
 | Enable voice transcription | `transcription.enabled`, `transcription.provider`, matching `providers.<name>.apiKey` | Send or upload a short voice message through a configured surface | [Transcription Settings](#transcription-settings) |
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
@@ -1968,7 +1968,7 @@ Pairing lets users get access to the bot through a simple code exchange — no c
 
 ### How it works
 
-1. A user sends a DM to the bot on any channel (Telegram, Discord, Slack, or Mattermost) where they aren't yet approved.
+1. A user sends a DM to the bot on a pairing-capable channel where they aren't yet approved. This includes Telegram, Discord, WeChat, and channels such as Slack or Mattermost when their DM policy is set to `allowlist`.
 2. The bot replies with a pairing code (like `ABCD-EFGH`) and tells them to forward it to you.
 3. You approve the code:
 
@@ -1982,13 +1982,28 @@ Pairing only works in **DMs** — unapproved users in group chats are silently i
 
 ### Pairing-only mode
 
-By default, if you don't set `allowFrom`, anyone who isn't approved yet will get a pairing code when they DM the bot. This means you can skip `allowFrom` entirely and manage all access through pairing:
+By default, if you don't set `allowFrom`, pairing-capable channels can issue a pairing code when an unapproved user DMs the bot. This means you can skip `allowFrom` entirely and manage access through pairing:
 
 ```json
 {
   "channels": {
     "telegram": {
       "enabled": true
+    }
+  }
+}
+```
+
+Slack and Mattermost DMs are open by default. To use pairing there, set the
+channel's `dm.policy` to `"allowlist"` and leave `dm.allowFrom` empty until you
+approve users:
+
+```json
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "dm": { "policy": "allowlist" }
     }
   }
 }

@@ -61,7 +61,8 @@ process running for messages.
 
 - Bind local-only services to `127.0.0.1` unless you intentionally expose them.
 - Set an API key before binding the OpenAI-compatible API to a public interface.
-- Keep `allowFrom` or pairing rules strict on every chat app.
+- Prefer pairing for DM-capable chat apps, and keep any static `allowFrom`
+  allowlists strict.
 - Enable `tools.restrictToWorkspace`; on Linux, use the bubblewrap sandbox for
   shell execution.
 

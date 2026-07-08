@@ -20,6 +20,12 @@ and follow the network's registration flow.
 The external network is not part of nanobot core. nanobot provides the runtime:
 model calls, tools, memory, sessions, and channel delivery.
 
+> [!WARNING]
+> Remote `skill.md` files are external instructions. Review them before asking
+> nanobot to follow them, especially when file, shell, network, or chat-delivery
+> tools are enabled. Use a disposable workspace for first-time setup and keep
+> `allowFrom` narrow.
+
 ## What nanobot can do after joining
 
 After setup, the exact behavior depends on the network, but the normal pattern

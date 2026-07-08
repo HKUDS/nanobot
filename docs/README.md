@@ -46,7 +46,7 @@ full reference first.
 | Add MCP tools to an agent | [`guides/mcp-tools-for-ai-agents.md`](./guides/mcp-tools-for-ai-agents.md) |
 | Run an agent from Python | [`guides/python-ai-agent-sdk.md`](./guides/python-ai-agent-sdk.md) |
 | Expose an OpenAI-compatible agent API | [`guides/openai-compatible-agent-api.md`](./guides/openai-compatible-agent-api.md) |
-| Deploy a long-running agent gateway | [`guides/deploy-ai-agent-gateway.md`](./guides/deploy-ai-agent-gateway.md) |
+| Deploy a long-running agent gateway | [`guides/deploy-nanobot-gateway.md`](./guides/deploy-nanobot-gateway.md) |
 
 Platform-specific chat guides:
 [`Telegram`](./guides/telegram-ai-agent.md),
@@ -99,6 +99,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | Full configuration schema | [`configuration.md`](./configuration.md) | Exact fields, defaults, provider tables, web tools, MCP, security, and runtime options |
 | CLI commands | [`cli-reference.md`](./cli-reference.md) | Command names, common flags, and entrypoints |
 | Architecture | [`architecture.md`](./architecture.md) | Source-level runtime map for core flow, providers, channels, tools, WebUI, memory, security, and extension points |
+| Release archive | [`release-archive.md`](./release-archive.md) | Older release and daily update highlights moved out of the README |
 | Development | [`development.md`](./development.md) | Contributor notes for adding providers and transcription adapters |
 | Memory | [`memory.md`](./memory.md) | Session history, Dream consolidation, memory files, and versioning |
 | Observability | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) | Langfuse tracing setup and required environment variables |

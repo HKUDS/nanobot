@@ -60,7 +60,8 @@ sessions for longer work.
 ## Security notes
 
 - Do not store API keys directly in shared files; use environment variables.
-- Keep chat app `allowFrom` lists narrow.
+- Prefer chat app pairing for first setup. Use `allowFrom` only for static
+  allowlists, and keep those lists narrow.
 - Enable workspace restriction before exposing file or shell tools to other
   users.
 - Use a separate workspace for experiments that can modify files.

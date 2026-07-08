@@ -9,7 +9,7 @@ messages, runs the agent, and sends replies back to the same channel.
 - a working local agent
 - one enabled chat channel
 - a running gateway
-- a narrow access-control rule for the first test user
+- a pairing-based approval flow or a narrow static allowlist
 
 ## When to use this
 
@@ -39,31 +39,37 @@ Every channel follows the same pattern:
 
 1. Get the platform token, login state, webhook, or mailbox credentials.
 2. Merge the channel snippet into `~/.nanobot/config.json`.
-3. Keep access narrow with `allowFrom`, `allowChannels`, or pairing.
-4. Check status:
+3. Prefer pairing for DM-capable channels: omit `allowFrom`, then approve the
+   first DM's pairing code.
+4. For channels without pairing, such as Email, keep access narrow with
+   `allowFrom` or platform-specific allow lists.
+5. Check status:
 
 ```bash
 nanobot channels status
 ```
 
-5. Start the gateway:
+6. Start the gateway:
 
 ```bash
 nanobot gateway
 ```
 
-6. Send a test message from an allowed account.
+7. Send a test DM, approve the pairing code when prompted, then send the test
+   message again.
 
 ## Production notes
 
 - Keep the gateway running as a service for always-on chat apps.
 - Use mention-only group policies before opening a bot to busy channels.
 - Use one channel at a time while debugging.
-- Prefer DMs for first tests; group chats add permissions and routing behavior.
+- Prefer DMs for first tests; pairing only works in DMs, and group chats add
+  permissions and routing behavior.
 
 ## Security notes
 
-- Do not use `allowFrom: ["*"]` outside an intentional sandbox.
+- Prefer pairing or explicit allowlists; do not use `allowFrom: ["*"]` outside
+  an intentional sandbox.
 - Rotate bot tokens if they are pasted into logs or shared files.
 - Review file, shell, and web tool access before inviting other users.
 
@@ -71,6 +77,8 @@ nanobot gateway
 
 - If `nanobot channels status` does not show the channel, the config key or
   optional dependency is likely missing.
+- If the first DM returns a pairing code, approve it with
+  `/pairing approve <code>` before expecting normal replies.
 - If messages do not arrive, run `nanobot gateway --verbose` and compare
   platform credentials, event permissions, and allow lists.
 - If group replies are unexpected, review that channel's group policy.

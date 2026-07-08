@@ -8,7 +8,7 @@ is required for the first working setup.
 - a Slack app with Socket Mode
 - a bot token and app-level token
 - the `slack` channel enabled in nanobot
-- a DM or mention test from an allowed Slack user
+- a DM pairing flow and mention test from an approved Slack user
 
 ## Prerequisites
 
@@ -19,7 +19,6 @@ nanobot agent -m "Hello!"
 ```
 
 - Permission to create a Slack app in a workspace.
-- Your Slack user ID.
 
 ## Install nanobot
 
@@ -49,12 +48,18 @@ Merge this snippet into `~/.nanobot/config.json`:
       "enabled": true,
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
-      "allowFrom": ["YOUR_SLACK_USER_ID"],
-      "groupPolicy": "mention"
+      "groupPolicy": "mention",
+      "dm": {
+        "policy": "allowlist"
+      }
     }
   }
 }
 ```
+
+Slack DMs are open by default. Setting `dm.policy` to `"allowlist"` with no
+`dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the
+code before using the bot normally.
 
 ## Run nanobot gateway
 
@@ -65,7 +70,14 @@ nanobot gateway
 
 ## Test a message
 
-DM the Slack bot directly, or mention it in a channel:
+DM the Slack bot directly. It should return a pairing code. Approve it from a
+trusted local surface:
+
+```bash
+nanobot agent -m "/pairing approve ABCD-EFGH"
+```
+
+Then DM the bot again, or mention it in a channel:
 
 ```text
 @nanobot Hello from Slack
@@ -75,6 +87,7 @@ DM the Slack bot directly, or mention it in a channel:
 
 - Keep `groupPolicy` as `mention` unless the bot is intentionally listening to
   every channel message.
+- Keep `dm.policy` as `"allowlist"` when you want pairing-based approval.
 - Use `groupAllowFrom` with allowlist mode for approved channels.
 - Reinstall the Slack app after changing scopes.
 - Keep bot and app tokens out of committed config files.
@@ -84,6 +97,8 @@ DM the Slack bot directly, or mention it in a channel:
 - If Socket Mode fails, confirm the app-level token starts with `xapp-`.
 - If the bot cannot send files, add `files:write`, reinstall the app, and
   restart nanobot.
+- If a DM responds normally without pairing, check that `dm.policy` is
+  `"allowlist"`.
 - If channel messages are ignored, check event subscriptions and group policy.
 
 ## Next: memory, automations, MCP tools

@@ -34,16 +34,16 @@ with ones you control:
   "modelPresets": {
     "fast": {
       "label": "Fast",
-      "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4.5",
+      "provider": "primary-provider",
+      "model": "primary-model-id",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
     },
     "deep": {
       "label": "Deep",
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-5",
+      "provider": "fallback-provider",
+      "model": "fallback-model-id",
       "maxTokens": 4096,
       "contextWindowTokens": 200000,
       "temperature": 0.1
@@ -59,6 +59,9 @@ with ones you control:
 ```
 
 String entries in `fallbackModels` are preset names, not raw model IDs.
+Replace the placeholder model IDs with currently supported model IDs from your
+provider. The [Provider Cookbook](../provider-cookbook.md) has concrete recipes
+for common providers.
 
 ## Production notes
 
