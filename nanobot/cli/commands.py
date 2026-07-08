@@ -945,19 +945,20 @@ def _webui_display_url(url: str) -> str:
     return f"{prefix}{marker}<redacted>"
 
 
-def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) -> bool:
+def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) -> tuple[bool, bool]:
     """Enable the local WebUI channel with safe localhost defaults."""
     from nanobot.channels.websocket import WebSocketConfig
 
     current = getattr(config.channels, "websocket", None) or {}
     model = WebSocketConfig.model_validate(current)
     changed = False
+    generated_secret = False
 
     needs_enable = not model.enabled
     needs_port = port is not None and model.port != port
     needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
     if not needs_enable and not needs_port and not needs_secret:
-        return False
+        return False, False
 
     target_port = port if port is not None else model.port
     console.print()
@@ -987,9 +988,10 @@ def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) 
 
         model.token_issue_secret = secrets.token_urlsafe(32)
         changed = True
+        generated_secret = True
 
     setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
-    return changed
+    return changed, generated_secret
 
 
 def _warn_webui_bind_scope(config: Config) -> None:
@@ -1250,7 +1252,11 @@ def webui(
             setup_config.agents.defaults.workspace = workspace
 
     try:
-        changed_webui = _ensure_local_webui_channel(setup_config, port=port, yes=yes)
+        changed_webui, generated_bootstrap_secret = _ensure_local_webui_channel(
+            setup_config,
+            port=port,
+            yes=yes,
+        )
         _warn_webui_bind_scope(setup_config)
         webui_url = _webui_browser_url(setup_config)
     except ValueError as exc:
@@ -1273,6 +1279,14 @@ def webui(
     console.print(f"Gateway health: [cyan]http://{runtime_config.gateway.host}:{effective_gateway_port}/health[/cyan]")
     if no_open:
         console.print("[dim]Browser opening disabled by --no-open.[/dim]")
+        if generated_bootstrap_secret:
+            console.print(
+                "[yellow]A WebUI bootstrap secret was generated and saved in this config.[/yellow]"
+            )
+            console.print(
+                "[dim]Open the WebUI and enter channels.websocket.tokenIssueSecret from "
+                f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
+            )
 
     if background:
         config_arg = str(config_path)
@@ -1284,18 +1298,27 @@ def webui(
                 config_path=config_arg,
             )
         )
-        result = runtime.start_background(
-            GatewayStartOptions(
-                port=effective_gateway_port,
-                workspace=workspace_arg,
-                config_path=config_arg,
-            )
+        start_options = GatewayStartOptions(
+            port=effective_gateway_port,
+            workspace=workspace_arg,
+            config_path=config_arg,
         )
-        if not result.ok and result.message != "gateway_already_running":
-            console.print(f"[yellow]Gateway was not started: {result.message}[/yellow]")
+        result = runtime.start_background(start_options)
+        restarted = False
+        restart_attempted = False
+        if not result.ok and result.message == "gateway_already_running" and changed_webui:
+            restart_attempted = True
+            console.print("[yellow]WebUI config changed; restarting the background gateway.[/yellow]")
+            result = runtime.restart(start_options, timeout_s=20)
+            restarted = result.ok
+        if not result.ok and (restart_attempted or result.message != "gateway_already_running"):
+            action = "restarted" if restart_attempted else "started"
+            console.print(f"[yellow]Gateway was not {action}: {result.message}[/yellow]")
             console.print(f"Logs: {result.status.log_path}")
             raise typer.Exit(1)
-        if result.ok:
+        if restarted:
+            console.print("[green]Gateway restarted in the background.[/green]")
+        elif result.ok:
             console.print("[green]Gateway started in the background.[/green]")
         else:
             console.print("[yellow]Gateway is already running in the background.[/yellow]")
