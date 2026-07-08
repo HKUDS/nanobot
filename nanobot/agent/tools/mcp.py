@@ -1177,7 +1177,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         tools_removed = 0
         for name in [*removed, *changed]:
             tools_removed += _unregister_server_tools(state, registry, name)
-            await _close_server(state, name)
+            _retire_server_stack(state, name)
 
         state._mcp_servers = next_servers
         retry_missing = sorted(
@@ -1341,7 +1341,7 @@ async def _refresh_terminated_server(
 
         logger.warning("MCP server '{}' session terminated; refreshing connection", server_name)
         _unregister_server_tools(state, registry, server_name)
-        await _close_server(state, server_name)
+        _retire_server_stack(state, server_name)
 
         connected = await connect_mcp_servers({server_name: cfg}, registry)
         state._mcp_stacks.update(connected)
@@ -1378,11 +1378,17 @@ def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: st
     return removed
 
 
-async def _close_server(state: Any, server_name: str) -> None:
+def _retire_server_stack(state: Any, server_name: str) -> None:
+    """Remove a stale MCP stack from active use without closing it mid-turn.
+
+    MCP stream transports use AnyIO cancel scopes.  Closing a stack from the
+    reconnecting dispatch task can inject ``CancelledError`` into the task that
+    originally opened it (often ``AgentLoop.run``), which crashes the gateway.
+    Retired stacks are closed later by ``AgentLoop.close_mcp`` during shutdown.
+    """
     stack = state._mcp_stacks.pop(server_name, None)
     if stack is None:
         return
-    try:
-        await stack.aclose()
-    except (RuntimeError, BaseExceptionGroup):
-        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+    retired = getattr(state, "_mcp_retired_stacks", None)
+    if retired is not None:
+        retired.append((server_name, stack))

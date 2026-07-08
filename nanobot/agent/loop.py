@@ -361,6 +361,7 @@ class AgentLoop:
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
+        self._mcp_retired_stacks: list[tuple[str, AsyncExitStack]] = []
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
@@ -1177,9 +1178,15 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        for name, stack in self._mcp_stacks.items():
+        stacks = [*self._mcp_retired_stacks, *self._mcp_stacks.items()]
+        self._mcp_retired_stacks.clear()
+        for name, stack in stacks:
             try:
                 await stack.aclose()
+            except asyncio.CancelledError as exc:
+                if not str(exc).startswith("Cancelled via cancel scope"):
+                    raise
+                logger.debug("MCP server '{}' cleanup cancelled by SDK (can be ignored)", name)
             except (RuntimeError, BaseExceptionGroup):
                 logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
         self._mcp_stacks.clear()
