@@ -1,5 +1,6 @@
 """Tests for provider progress delta routing in the shared runner."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -279,4 +280,73 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
     assert progress_events[-1]["path"] == "aborted.txt"
     assert progress_events[-1]["phase"] == "error"
     assert progress_events[-1]["status"] == "error"
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
+    provider = MagicMock()
+    provider.supports_progress_deltas = True
+    progress_events: list[dict] = []
+    executing = asyncio.Event()
+    target = tmp_path / "cancelled.txt"
+    target.write_text("old\n", encoding="utf-8")
+
+    async def progress_cb(content, *, file_edit_events=None, **kwargs):
+        if file_edit_events:
+            progress_events.extend(file_edit_events)
+
+    class SlowWriteTool(WriteFileTool):
+        async def execute(self, path=None, content=None, **kwargs):
+            executing.set()
+            await asyncio.sleep(60)
+            return "ok"
+
+    tool = SlowWriteTool(workspace=tmp_path)
+
+    class Tools:
+        def get_definitions(self):
+            return [{"type": "function", "function": {"name": "write_file"}}]
+
+        def prepare_call(self, name, params):
+            return tool, params, None
+
+    async def chat_stream_with_retry(**kwargs):
+        return LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call-write",
+                    name="write_file",
+                    arguments={"path": "cancelled.txt", "content": "new\n"},
+                )
+            ],
+            usage={},
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = Tools()
+
+    runner = AgentRunner(provider)
+    task = asyncio.create_task(runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "write a file"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        progress_callback=progress_cb,
+        workspace=tmp_path,
+        hook=FileEditActivityHook(on_progress=progress_cb, workspace=tmp_path),
+    )))
+    await asyncio.wait_for(executing.wait(), timeout=1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert [event["phase"] for event in progress_events] == ["start", "error"]
+    assert progress_events[-1]["path"] == "cancelled.txt"
+    assert progress_events[-1]["status"] == "error"
+    assert progress_events[-1]["error"] == "Task interrupted before this tool finished."
     provider.chat_with_retry.assert_not_awaited()

@@ -6,7 +6,12 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.hook import AgentHook, AgentHookContext, AgentTurnHookContext
+from nanobot.agent.hook import (
+    AgentHook,
+    AgentHookContext,
+    AgentRunHookContext,
+    AgentTurnHookContext,
+)
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.file_edit_events import (
     FileEditTracker,
@@ -71,9 +76,11 @@ class FileEditActivityHook(AgentHook):
         params: Any,
         result: Any,
     ) -> None:
-        trackers = self._trackers_by_call.pop(self._tool_call_key(tool_call), [])
+        key = self._tool_call_key(tool_call)
+        trackers = self._trackers_by_call.get(key, [])
         if trackers:
             await self._emit([build_file_edit_end_event(tracker) for tracker in trackers])
+            self._trackers_by_call.pop(key, None)
 
     async def on_execute_tool_error(
         self,
@@ -83,11 +90,30 @@ class FileEditActivityHook(AgentHook):
         params: Any,
         error: Any,
     ) -> None:
-        trackers = self._trackers_by_call.pop(self._tool_call_key(tool_call), [])
+        key = self._tool_call_key(tool_call)
+        trackers = self._trackers_by_call.get(key, [])
         if trackers:
             await self._emit([
                 build_file_edit_error_event(tracker, str(error)) for tracker in trackers
             ])
+            self._trackers_by_call.pop(key, None)
+
+    async def on_finally(self, context: AgentRunHookContext) -> None:
+        if context.stop_reason != "cancelled" or not self._trackers_by_call:
+            return
+        trackers = [
+            tracker
+            for trackers in self._trackers_by_call.values()
+            for tracker in trackers
+        ]
+        self._trackers_by_call.clear()
+        await self._emit([
+            build_file_edit_error_event(
+                tracker,
+                "Task interrupted before this tool finished.",
+            )
+            for tracker in trackers
+        ])
 
     async def _emit(self, events: list[dict[str, Any]]) -> None:
         if self._on_progress is not None:
