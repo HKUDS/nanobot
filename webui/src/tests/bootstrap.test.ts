@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import { consumeUrlBootstrapSecret, deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 
 describe("bootstrap helpers", () => {
   afterEach(() => {
@@ -49,5 +49,30 @@ describe("bootstrap helpers", () => {
     await vi.advanceTimersByTimeAsync(25);
 
     await pending;
+  });
+
+  it("rejects bootstrap responses without an API token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ token: "ws-token", ws_path: "/", expires_in: 300 }),
+      })),
+    );
+
+    await expect(fetchBootstrap()).rejects.toThrow(
+      "bootstrap response missing api_token",
+    );
+  });
+
+  it("consumes bootstrap secrets from the URL fragment", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/#/settings?bootstrapSecret=s3cret&section=models",
+    );
+
+    expect(consumeUrlBootstrapSecret()).toBe("s3cret");
+    expect(window.location.hash).toBe("#/settings?section=models");
   });
 });

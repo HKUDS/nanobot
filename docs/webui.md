@@ -17,9 +17,10 @@ nanobot webui
 
 `nanobot webui` creates the config/workspace when needed, checks provider setup,
 offers Quick Start when the model provider is not ready, enables the local
-WebSocket channel after confirmation, starts the gateway, and opens the browser.
-The first-run path binds the WebUI to `127.0.0.1` by default, so it is not
-available from other devices on your LAN.
+WebSocket channel after confirmation, generates a WebUI bootstrap secret when
+one is missing, starts the gateway, and opens the browser. The first-run path
+binds the WebUI to `127.0.0.1` by default, so it is not available from other
+devices on your LAN.
 
 Run it in the background when you do not want to keep a terminal open:
 
@@ -30,8 +31,9 @@ nanobot webui --background
 Manage the background gateway with `nanobot gateway status`, `nanobot gateway
 logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
 
-Manual config still works. Set `tokenIssueSecret` when you intentionally expose
-the WebUI beyond localhost or want a browser password:
+Manual config still works. Set `tokenIssueSecret` for full WebUI access; it is
+required before `/webui/bootstrap` returns a REST API token for session, settings,
+Apps, Skills, and automation routes:
 
 ```json
 {

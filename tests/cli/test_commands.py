@@ -1652,6 +1652,8 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert websocket["host"] == "127.0.0.1"
     assert websocket["port"] == 8899
     assert websocket["websocketRequiresToken"] is True
+    assert isinstance(websocket["tokenIssueSecret"], str)
+    assert len(websocket["tokenIssueSecret"]) >= 32
     assert data["agents"]["defaults"]["workspace"] == str(workspace)
     assert seen["templates"] == workspace
     assert seen["gateway_kwargs"] == {"port": 18888, "open_browser_url": None}
@@ -1729,7 +1731,11 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
     assert options.port == 18889
     assert options.config_path == str(config_file.resolve(strict=False))
     assert options.workspace == str(workspace.resolve(strict=False))
-    assert seen["opened_url"] == "http://127.0.0.1:8765"
+    opened_url = seen["opened_url"]
+    assert isinstance(opened_url, str)
+    assert opened_url.startswith("http://127.0.0.1:8765/#/?bootstrapSecret=")
+    assert "bootstrapSecret=<redacted>" in compact_output
+    assert "bootstrapSecret=" in opened_url
 
 
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:

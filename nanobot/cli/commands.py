@@ -919,11 +919,30 @@ def _host_for_local_browser(host: str) -> str:
     return host
 
 
+def _webui_bootstrap_secret(config: Config) -> str:
+    ws_cfg = _webui_config_dict(config)
+    return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
+
+
 def _webui_browser_url(config: Config) -> str:
+    from urllib.parse import quote
+
     ws_cfg = _webui_config_dict(config)
     host = _host_for_local_browser(str(ws_cfg.get("host") or "127.0.0.1"))
     port = int(ws_cfg.get("port") or 8765)
-    return f"http://{host}:{port}"
+    base_url = f"http://{host}:{port}"
+    secret = _webui_bootstrap_secret(config)
+    if not secret:
+        return base_url
+    return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"
+
+
+def _webui_display_url(url: str) -> str:
+    marker = "bootstrapSecret="
+    if marker not in url:
+        return url
+    prefix, _ = url.split(marker, 1)
+    return f"{prefix}{marker}<redacted>"
 
 
 def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) -> bool:
@@ -936,7 +955,8 @@ def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) 
 
     needs_enable = not model.enabled
     needs_port = port is not None and model.port != port
-    if not needs_enable and not needs_port:
+    needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
+    if not needs_enable and not needs_port and not needs_secret:
         return False
 
     target_port = port if port is not None else model.port
@@ -944,11 +964,11 @@ def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) 
     console.print("[bold]Local WebUI setup[/bold]")
     console.print(f"  URL: [cyan]http://127.0.0.1:{target_port}[/cyan]")
     console.print("  Bind: [cyan]127.0.0.1 only[/cyan] (not exposed to your LAN)")
-    console.print("  Auth: localhost bootstrap issues short-lived WebSocket tokens")
+    console.print("  Auth: generated WebUI bootstrap secret stored in config")
     console.print(
         "  LAN access requires an explicit host change plus a WebUI password in config."
     )
-    _confirm_webui_action("Enable the local WebUI channel in this config?", yes=yes)
+    _confirm_webui_action("Update the local WebUI channel in this config?", yes=yes)
 
     if not model.enabled:
         model.enabled = True
@@ -961,6 +981,11 @@ def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) 
         changed = True
     if not model.websocket_requires_token:
         model.websocket_requires_token = True
+        changed = True
+    if needs_secret:
+        import secrets
+
+        model.token_issue_secret = secrets.token_urlsafe(32)
         changed = True
 
     setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
@@ -1244,7 +1269,7 @@ def webui(
     effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
 
     console.print()
-    console.print(f"WebUI: [cyan]{webui_url}[/cyan]")
+    console.print(f"WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
     console.print(f"Gateway health: [cyan]http://{runtime_config.gateway.host}:{effective_gateway_port}/health[/cyan]")
     if no_open:
         console.print("[dim]Browser opening disabled by --no-open.[/dim]")

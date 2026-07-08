@@ -24,6 +24,7 @@ import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import {
   clearSavedSecret,
+  consumeUrlBootstrapSecret,
   deriveWsUrl,
   fetchBootstrap,
   loadSavedSecret,
@@ -361,14 +362,14 @@ export default function App() {
         current.status === "ready" && current.client === client
           ? {
               ...current,
-              token: boot.token,
+              token: boot.api_token,
               tokenExpiresAt,
               modelName: boot.model_name ?? current.modelName,
               runtimeSurface,
             }
           : current,
       );
-      return { token: boot.token, url };
+      return { token: boot.api_token, url };
     },
     [],
   );
@@ -402,7 +403,7 @@ export default function App() {
           setState({
             status: "ready",
             client,
-            token: boot.token,
+            token: boot.api_token,
             tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
             modelName: boot.model_name ?? null,
             runtimeSurface,
@@ -441,7 +442,7 @@ export default function App() {
   }, [refreshReadyClient, state]);
 
   useEffect(() => {
-    const saved = loadSavedSecret();
+    const saved = consumeUrlBootstrapSecret() || loadSavedSecret();
     return bootstrapWithSecret(saved);
   }, [bootstrapWithSecret]);
 

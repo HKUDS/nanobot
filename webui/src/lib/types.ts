@@ -296,6 +296,7 @@ export interface SidebarStatePayload {
 
 export interface BootstrapResponse {
   token: string;
+  api_token: string;
   ws_path: string;
   ws_url?: string | null;
   expires_in: number;

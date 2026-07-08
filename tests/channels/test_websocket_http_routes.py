@@ -203,6 +203,7 @@ async def test_bootstrap_returns_token_for_localhost(
         assert resp.status_code == 200
         body = resp.json()
         assert body["token"].startswith("nbwt_")
+        assert "api_token" not in body
         assert body["ws_path"] == "/"
         assert body["ws_url"] == "ws://127.0.0.1:29901/"
         assert body["expires_in"] > 0
@@ -225,9 +226,8 @@ async def test_sessions_routes_require_bearer_token(
         deny = await _http_get("http://127.0.0.1:29902/api/sessions")
         assert deny.status_code == 401
 
-        # Mint a token via bootstrap, then call the API with it.
-        boot = await _http_get("http://127.0.0.1:29902/webui/bootstrap")
-        token = boot.json()["token"]
+        # Directly mint an API token for route-level auth checks.
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         listing = await _http_get("http://127.0.0.1:29902/api/sessions", headers=auth)
@@ -303,8 +303,7 @@ async def test_session_automations_route_filters_by_webui_session(
         )
         assert deny.status_code == 401
 
-        boot = await _http_get("http://127.0.0.1:29914/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
         resp = await _http_get(
             "http://127.0.0.1:29914/api/sessions/websocket%3Aabc/automations",
@@ -356,8 +355,7 @@ async def test_session_automations_route_ignores_unified_owner(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29917/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         resp = await _http_get(
@@ -403,8 +401,7 @@ async def test_session_automations_route_lists_local_triggers(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get(f"{base_url}/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         resp = await _http_get(
@@ -469,8 +466,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         deny_detail = await _http_get("http://127.0.0.1:29920/api/webui/skills/workspace-skill")
         assert deny_detail.status_code == 401
 
-        boot = await _http_get("http://127.0.0.1:29920/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         resp = await _http_get(
             "http://127.0.0.1:29920/api/webui/skills",
             headers={"Authorization": f"Bearer {token}"},
@@ -566,8 +562,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
         deny = await _http_get("http://127.0.0.1:29912/api/settings/cli-apps")
         assert deny.status_code == 401
 
-        boot = await _http_get("http://127.0.0.1:29912/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         catalog = await _http_get(
@@ -603,8 +598,7 @@ async def test_nanobot_feature_routes_require_token_and_enable(
         deny = await _http_get("http://127.0.0.1:29916/api/settings/nanobot-features")
         assert deny.status_code == 401
 
-        boot = await _http_get("http://127.0.0.1:29916/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         catalog = await _http_get(
@@ -875,8 +869,7 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29935/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         catalog_task = asyncio.create_task(
@@ -917,8 +910,7 @@ async def test_cli_apps_route_supports_installed_only_payload(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29936/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         resp = await _http_get(
@@ -1014,8 +1006,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         deny = await _http_get("http://127.0.0.1:29913/api/settings/mcp-presets")
         assert deny.status_code == 401
 
-        boot = await _http_get("http://127.0.0.1:29913/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         catalog = await _http_get(
@@ -1104,8 +1095,7 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29906/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         listing = await _http_get(
@@ -1131,8 +1121,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29911/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         initial = await _http_get(
@@ -1183,8 +1172,7 @@ async def test_session_delete_removes_file(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29903/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         path = sm._get_session_path("websocket:doomed")
@@ -1267,8 +1255,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         deny = await _http_get(f"{base_url}/api/webui/automations")
         assert deny.status_code == 401, deny.text
 
-        boot = await _http_get(f"{base_url}/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
         resp = await _http_get(
             f"{base_url}/api/webui/automations",
@@ -1480,8 +1467,7 @@ async def test_webui_automations_route_manages_local_triggers(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get(f"{base_url}/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         listed = await _http_get(f"{base_url}/api/webui/automations", headers=auth)
@@ -1559,8 +1545,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29915/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         path = sm._get_session_path("websocket:doomed")
@@ -1605,8 +1590,7 @@ async def test_session_delete_blocks_and_cascades_local_triggers(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get(f"{base_url}/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         blocked = await _http_get(
@@ -1655,8 +1639,7 @@ async def test_session_delete_can_cascade_bound_automations(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29916/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         path = sm._get_session_path("websocket:doomed")
@@ -1699,8 +1682,7 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29918/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         path = sm._get_session_path("websocket:doomed")
@@ -1732,8 +1714,7 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29910/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         msgs = await _http_get(
@@ -1794,8 +1775,7 @@ async def test_webui_thread_resigns_assistant_media_urls(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29914/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
         resp = await _http_get(
             "http://127.0.0.1:29914/api/sessions/websocket:video-replay/webui-thread",
@@ -1833,8 +1813,7 @@ async def test_session_routes_reject_non_websocket_keys(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29909/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         # The webui list already hides non-websocket sessions; handcrafted URLs
@@ -1867,8 +1846,7 @@ async def test_session_routes_reject_invalid_key(
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        boot = await _http_get("http://127.0.0.1:29904/webui/bootstrap")
-        token = boot.json()["token"]
+        token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
         # Invalid characters in the key -> regex match fails -> 404
@@ -2074,6 +2052,8 @@ def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["token"].startswith("nbwt_")
+    assert body["api_token"].startswith("nbwt_")
+    assert body["api_token"] != body["token"]
 
 
 def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
@@ -2091,6 +2071,30 @@ def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+    assert "api_token" not in body
+    assert not channel.gateway.tokens.check_api_token(
+        _FakeReq({"Authorization": f"Bearer {body['token']}"})
+    )
+
+
+def test_authenticated_bootstrap_returns_distinct_api_token(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1", tokenIssueSecret="s3cret")
+    resp = channel.gateway.http._handle_bootstrap(
+        _LOCAL, _FakeReq({"Authorization": "Bearer s3cret"})
+    )
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+    assert body["api_token"].startswith("nbwt_")
+    assert body["api_token"] != body["token"]
+    assert not channel.gateway.tokens.check_api_token(
+        _FakeReq({"Authorization": f"Bearer {body['token']}"})
+    )
+    assert channel.gateway.tokens.check_api_token(
+        _FakeReq({"Authorization": f"Bearer {body['api_token']}"})
+    )
 
 
 def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:

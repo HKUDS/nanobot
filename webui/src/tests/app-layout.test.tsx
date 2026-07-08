@@ -177,10 +177,12 @@ vi.mock("@/hooks/useTheme", async () => {
 vi.mock("@/lib/bootstrap", () => ({
   fetchBootstrap: vi.fn().mockResolvedValue({
     token: "tok",
+    api_token: "api-tok",
     ws_path: "/",
     expires_in: 300,
   }),
   deriveWsUrl: vi.fn(() => "ws://test"),
+  consumeUrlBootstrapSecret: vi.fn(() => ""),
   loadSavedSecret: vi.fn(() => ""),
   saveSecret: vi.fn(),
   clearSavedSecret: vi.fn(),
@@ -239,6 +241,7 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
+      api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
     });
@@ -723,6 +726,7 @@ describe("App layout", () => {
     ];
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok",
+      api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
       runtime_surface: "native",
@@ -2147,11 +2151,13 @@ describe("App layout", () => {
     vi.mocked(fetchBootstrap)
       .mockResolvedValueOnce({
         token: "tok-1",
+        api_token: "api-tok-1",
         ws_path: "/",
         expires_in: 30,
       })
       .mockResolvedValueOnce({
         token: "tok-2",
+        api_token: "api-tok-2",
         ws_path: "/",
         expires_in: 300,
       });
