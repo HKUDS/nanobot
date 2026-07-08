@@ -632,9 +632,18 @@ class ExecTool(Tool):
 
     @staticmethod
     async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies."""
-        process.kill()
+        """Kill a subprocess and reap it to prevent zombies.
+
+        Safe to call when the process has already exited (e.g. generic
+        exception handlers after a successful ``communicate()``): skips
+        ``kill()`` and only runs the safety-net reap.
+        """
+        if process.returncode is not None:
+            _reap_pid(process.pid)
+            return
         try:
+            with suppress(ProcessLookupError):
+                process.kill()
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=5.0)
         finally:
