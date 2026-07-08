@@ -82,6 +82,11 @@ from nanobot.utils.restart import (  # noqa: E402
     format_restart_completed_message,
     should_show_cli_restart_notice,
 )
+from nanobot.webui.build import (  # noqa: E402
+    BuildMode,
+    WebUIBuildError,
+    ensure_webui_bundle,
+)
 from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
 
@@ -856,11 +861,7 @@ def _confirm_webui_action(message: str, *, yes: bool) -> None:
     """Confirm a WebUI first-run mutation or fail clearly in non-interactive shells."""
     if yes:
         return
-    try:
-        interactive = sys.stdin.isatty()
-    except Exception:
-        interactive = False
-    if not interactive:
+    if not _cli_can_prompt():
         console.print(
             "[red]Error: WebUI setup needs confirmation. Re-run with --yes or use "
             "`nanobot onboard --wizard`.[/red]"
@@ -869,6 +870,19 @@ def _confirm_webui_action(message: str, *, yes: bool) -> None:
     if not typer.confirm(message, default=True):
         console.print("[yellow]WebUI setup cancelled.[/yellow]")
         raise typer.Exit(1)
+
+
+def _cli_can_prompt() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _webui_build_mode_for_interactive(*, yes: bool = False) -> BuildMode:
+    if yes:
+        return "auto"
+    return "prompt" if _cli_can_prompt() else "warn"
 
 
 def _resolve_webui_config_path(config: str | None) -> Path:
@@ -913,6 +927,43 @@ def _webui_config_dict(config: Config) -> dict[str, Any]:
     current = getattr(config.channels, "websocket", None) or {}
     model = WebSocketConfig.model_validate(current)
     return model.model_dump(by_alias=True, exclude_none=True)
+
+
+def _webui_channel_enabled(config: Config) -> bool:
+    from nanobot.channels.websocket import WebSocketConfig
+
+    current = getattr(config.channels, "websocket", None) or {}
+    return bool(WebSocketConfig.model_validate(current).enabled)
+
+
+def _prepare_webui_bundle_for_gateway(
+    config: Config,
+    *,
+    mode: BuildMode,
+    webui_static_dist: bool = True,
+) -> None:
+    """Refresh or warn about stale bundled WebUI assets before gateway startup."""
+    if not webui_static_dist or not _webui_channel_enabled(config):
+        return
+
+    def _print(message: str) -> None:
+        console.print(f"[yellow]{escape(message)}[/yellow]")
+
+    def _confirm(message: str) -> bool:
+        return typer.confirm(message, default=True)
+
+    try:
+        ensure_webui_bundle(
+            mode=mode,
+            confirm=_confirm if mode == "prompt" else None,
+            output=_print,
+        )
+    except WebUIBuildError as exc:
+        if mode == "warn":
+            console.print(f"[yellow]Warning: {escape(str(exc))}[/yellow]")
+            return
+        console.print(f"[red]Error: {escape(str(exc))}[/red]")
+        raise typer.Exit(1) from exc
 
 
 def _host_for_local_browser(host: str) -> str:
@@ -1014,7 +1065,6 @@ def _warn_webui_bind_scope(config: Config) -> None:
 
 def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
     """Best-effort wait for the WebUI listener before opening a browser."""
-    import socket
     import time
     from urllib.parse import urlparse
 
@@ -1023,11 +1073,75 @@ def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.2):
-                return
-        except OSError:
-            time.sleep(0.1)
+        if _tcp_endpoint_reachable(host, port, timeout_s=0.2):
+            return
+        time.sleep(0.1)
+
+
+def _tcp_endpoint_reachable(host: str, port: int, *, timeout_s: float = 0.25) -> bool:
+    """Return whether a local TCP endpoint accepts connections."""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
+def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bool:
+    """Return whether the nanobot gateway health endpoint responds OK."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    browser_host = _host_for_local_browser(host)
+    try:
+        with urllib.request.urlopen(
+            f"http://{browser_host}:{port}/health",
+            timeout=timeout_s,
+        ) as response:
+            if response.status != 200:
+                return False
+            body = response.read(1024)
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return payload.get("status") == "ok"
+
+
+def _webui_endpoint_reachable(url: str, *, timeout_s: float = 0.25) -> bool:
+    """Return whether the WebUI URL's TCP endpoint is already listening."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return _tcp_endpoint_reachable(host, port, timeout_s=timeout_s)
+
+
+def _print_foreground_port_conflict(
+    *,
+    webui_url: str,
+    gateway_host: str,
+    gateway_port: int,
+) -> None:
+    console.print(
+        "[red]Error: nanobot cannot start because one of its local ports is already in use.[/red]"
+    )
+    console.print(f"  WebUI: [cyan]{webui_url}[/cyan]")
+    console.print(
+        f"  Gateway health: [cyan]http://{_host_for_local_browser(gateway_host)}:{gateway_port}/health[/cyan]"
+    )
+    console.print()
+    console.print("If this is an existing nanobot instance, use it or stop it first:")
+    console.print("  [cyan]nanobot gateway status[/cyan]")
+    console.print("  [cyan]nanobot gateway stop[/cyan]")
+    console.print("Or choose different ports with [cyan]--port[/cyan] and [cyan]--gateway-port[/cyan].")
 
 
 def _open_webui_browser(url: str, *, wait: bool = True) -> None:
@@ -1296,7 +1410,10 @@ def webui(
                 f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
             )
 
+    webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
+
     if background:
+        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
         config_arg = str(config_path)
         workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
         runtime = GatewayRuntime(
@@ -1342,10 +1459,36 @@ def webui(
             _open_webui_browser(webui_url)
         return
 
+    gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
+    webui_ready = _webui_endpoint_reachable(webui_url)
+    if gateway_ready and webui_ready:
+        console.print("[yellow]Gateway is already running; opening the existing WebUI.[/yellow]")
+        console.print(
+            "Restart the gateway if you need it to pick up local source changes: "
+            f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
+        if not no_open:
+            _open_webui_browser(webui_url, wait=False)
+        return
+
+    gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
+        _host_for_local_browser(runtime_config.gateway.host),
+        effective_gateway_port,
+    )
+    webui_port_taken = webui_ready
+    if gateway_port_taken or webui_port_taken:
+        _print_foreground_port_conflict(
+            webui_url=webui_url,
+            gateway_host=runtime_config.gateway.host,
+            gateway_port=effective_gateway_port,
+        )
+        raise typer.Exit(1)
+
     _run_gateway(
         runtime_config,
         port=effective_gateway_port,
         open_browser_url=None if no_open else webui_url,
+        webui_bundle_mode=webui_bundle_mode,
     )
 
 
@@ -1360,6 +1503,7 @@ def _run_gateway(
     port: int | None = None,
     open_browser_url: str | None = None,
     webui_static_dist: bool = True,
+    webui_bundle_mode: BuildMode = "warn",
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
@@ -1382,8 +1526,29 @@ def _run_gateway(
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
+    webui_url = _webui_browser_url(config)
+    gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
+    if health_server_enabled and _tcp_endpoint_reachable(gateway_host_for_browser, port):
+        _print_foreground_port_conflict(
+            webui_url=webui_url,
+            gateway_host=config.gateway.host,
+            gateway_port=port,
+        )
+        raise typer.Exit(1)
+    if _webui_channel_enabled(config) and _webui_endpoint_reachable(webui_url):
+        _print_foreground_port_conflict(
+            webui_url=webui_url,
+            gateway_host=config.gateway.host,
+            gateway_port=port,
+        )
+        raise typer.Exit(1)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    _prepare_webui_bundle_for_gateway(
+        config,
+        mode=webui_bundle_mode,
+        webui_static_dist=webui_static_dist,
+    )
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
@@ -1873,6 +2038,10 @@ app.add_typer(
         log_handler_id=_log_handler_id,
         load_runtime_config=_load_runtime_config,
         run_gateway=_run_gateway,
+        prepare_webui_bundle=lambda config, mode: _prepare_webui_bundle_for_gateway(
+            config,
+            mode=mode,
+        ),
     ),
     name="gateway",
 )

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
@@ -97,6 +97,15 @@ function settingsPayload(): SettingsPayload {
       exec_path_append_set: false,
     },
     requires_restart: false,
+    version: {
+      current: "0.2.2",
+    },
+    docs: {
+      version: "0.2.2",
+      base_url: "https://nanobot.wiki/docs/0.2.2",
+      chat_apps_url: "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps",
+      latest_url: "https://nanobot.wiki/docs/latest",
+    },
   };
 }
 
@@ -159,7 +168,15 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "appearance" | "apps" | "automations" | "advanced" | "models" | "browser";
+    initialSection?:
+      | "overview"
+      | "appearance"
+      | "apps"
+      | "channels"
+      | "automations"
+      | "advanced"
+      | "models"
+      | "browser";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -341,11 +358,14 @@ describe("SettingsView Apps catalog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderSettingsView();
+    renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByText("Matrix")).toBeInTheDocument();
+    const matrixRow = await screen.findByRole("button", { name: "View Matrix settings" });
+    expect(matrixRow).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByText("Matrix")).toHaveLength(2);
+    expect(screen.getAllByText("Use nanobot from Matrix rooms.")).toHaveLength(2);
     expect(screen.queryByText(/Enabling Nanobot features may install Python packages/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Install support" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
     expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
     expect(screen.getByText("nanobot will add what Matrix needs, then turn it on. Continue?")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -362,10 +382,18 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
-    expect(await screen.findByText("Enabled channel 'matrix'")).toBeInTheDocument();
-    expect(screen.getByText("Restart nanobot to apply updated apps and features.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "true"),
+    );
+    expect(screen.queryByText("Enabled channel 'matrix'")).not.toBeInTheDocument();
+    expect(screen.queryByText("Restart nanobot to apply updated channel support.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("On").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+    expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
+    expect(screen.getByLabelText("User ID")).toBeInTheDocument();
+    expect(screen.queryByText("channels.matrix.homeserver")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -375,7 +403,10 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
-    expect(await screen.findByText("Disabled channel 'matrix'")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "false"),
+    );
+    expect(screen.queryByText("Disabled channel 'matrix'")).not.toBeInTheDocument();
   });
 
   it("shows enabled nanobot channels with missing support as enabled", async () => {
@@ -421,12 +452,14 @@ describe("SettingsView Apps catalog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderSettingsView();
+    renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByText("Matrix")).toBeInTheDocument();
-    expect(screen.getByText("1 Plugin · 0 CLI · 0 MCP")).toBeInTheDocument();
-    expect(screen.getByText("Support missing")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View Matrix settings" })).toBeInTheDocument();
+    expect(screen.getByText("1 enabled · 1 channels")).toBeInTheDocument();
+    expect(screen.getAllByText("On").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Enabled, support needs install")).not.toBeInTheDocument();
 
+    expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: "Install support" }));
     fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
 
@@ -438,6 +471,683 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
+  });
+
+  it("starts Feishu connect in WebUI instead of showing a CLI command", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "feishu",
+            display_name: "Feishu",
+            type: "channel",
+            enabled: false,
+            configured: false,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+        });
+      }
+      if (url === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace") {
+        return jsonResponse({
+          session_id: "feishu-session",
+          status: "pending",
+          qr_url: "https://accounts.feishu.cn/login?device_code=device",
+          domain: "feishu",
+          interval_ms: 5000,
+          expires_at_ms: Date.now() + 600_000,
+          message: "Scan with Feishu or Lark to connect.",
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Feishu settings" })).toBeInTheDocument();
+    expect(screen.queryByText("nanobot channels login feishu")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(await screen.findByText("Scan with Feishu")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for authorization...")).toBeInTheDocument();
+  });
+
+  it("starts Feishu connect from the default assistant action", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "feishu",
+            display_name: "Feishu",
+            type: "channel",
+            enabled: false,
+            configured: false,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+        });
+      }
+      if (url === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace") {
+        return jsonResponse({
+          session_id: "feishu-switch-session",
+          status: "pending",
+          qr_url: "https://accounts.feishu.cn/login?device_code=switch-device",
+          domain: "feishu",
+          interval_ms: 5000,
+          expires_at_ms: Date.now() + 600_000,
+          message: "Scan with Feishu or Lark to connect.",
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Feishu settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(await screen.findByText("Scan with Feishu")).toBeInTheDocument();
+  });
+
+  it("enables configured Feishu assistant without starting a new connect flow", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "feishu",
+            display_name: "Feishu",
+            type: "channel",
+            enabled: false,
+            configured: true,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+        });
+      }
+      if (url === "/api/settings/nanobot-features/enable?name=feishu&instance_id=default") {
+        return jsonResponse({
+          features: [{
+            name: "feishu",
+            display_name: "Feishu",
+            type: "channel",
+            enabled: true,
+            configured: true,
+            instances: [{
+              id: "default",
+              runtime_name: "feishu",
+              name: "nanobot",
+              domain: "feishu",
+              enabled: true,
+              configured: true,
+              app_id: "cli_test",
+            }],
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+          requires_restart: false,
+          last_action: { ok: true, message: "Enabled channel 'feishu'", enabled: true },
+        });
+      }
+      if (url === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace") {
+        throw new Error("Feishu connect should not start when credentials are already configured");
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "nanobot" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "nanobot assistant" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=feishu&instance_id=default",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(fetchMock.mock.calls.some(([input]) =>
+      String(input) === "/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default&mode=replace",
+    )).toBe(false);
+    expect(screen.getByRole("switch", { name: "nanobot assistant" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("shows Feishu assistant instances in the channel details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "feishu",
+              display_name: "Feishu",
+              type: "channel",
+              enabled: true,
+              configured: true,
+              installed: true,
+              ready: true,
+              status: "enabled",
+              install_supported: true,
+              requires_restart: true,
+              instances: [
+                {
+                  id: "default",
+                  runtime_name: "feishu",
+                  name: "nanobot",
+                  display_name: "Support Bot",
+                  avatar_url: "https://example.com/support.png",
+                  identity_source: "feishu",
+                  domain: "feishu",
+                  enabled: true,
+                  configured: true,
+                  app_id: "cli_default",
+                },
+                {
+                  id: "product",
+                  runtime_name: "feishu.product",
+                  name: "Product bot",
+                  display_name: "Product Helper",
+                  avatar_url: "https://example.com/product.png",
+                  identity_source: "feishu",
+                  domain: "feishu",
+                  enabled: false,
+                  configured: true,
+                  app_id: "cli_product",
+                },
+              ],
+            }],
+            enabled_count: 1,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByText("Product Helper")).toBeInTheDocument();
+    expect(screen.getAllByText("Support Bot")).toHaveLength(1);
+    expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
+
+    expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: /Product Helper/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    expect(screen.queryByText("cli_def...ault")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Support Bot/ }));
+    expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getAllByText("cli_def...ault").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Product Helper/ }));
+    expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: /Product Helper/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("shows a single Feishu assistant without a duplicate assistant list", async () => {
+    const reconnectUrls: string[] = [];
+    const feishuPayload = {
+      features: [{
+        name: "feishu",
+        display_name: "Feishu",
+        type: "channel",
+        enabled: true,
+        configured: true,
+        installed: true,
+        ready: true,
+        status: "enabled",
+        install_supported: true,
+        requires_restart: true,
+        instances: [{
+          id: "default",
+          runtime_name: "feishu",
+          name: "nanobot",
+          display_name: "Support Bot",
+          avatar_url: "https://example.com/support.png",
+          identity_source: "feishu",
+          domain: "feishu",
+          enabled: true,
+          configured: true,
+          app_id: "cli_support",
+        }],
+      }],
+      enabled_count: 1,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") return jsonResponse(feishuPayload);
+        if (url === "/api/settings/nanobot-features/enable?name=feishu&instance_id=default") {
+          reconnectUrls.push(url);
+          return jsonResponse(feishuPayload);
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    await screen.findByText("Support Bot");
+    expect(screen.getAllByText("Support Bot")).toHaveLength(1);
+    expect(screen.getByText("1 assistant connected")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Support Bot assistant" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.queryByText("cli_sup...port")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Support Bot" }));
+    expect(screen.getByText("cli_sup...port")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replace assistant" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    await waitFor(() => expect(reconnectUrls).toHaveLength(1));
+    expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
+  });
+
+  it("shows group behavior fields as options", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "discord",
+              display_name: "Discord",
+              type: "channel",
+              enabled: true,
+              installed: true,
+              ready: true,
+              status: "enabled",
+              install_supported: true,
+              requires_restart: true,
+            }],
+            enabled_count: 1,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Advanced"));
+
+    const behavior = screen.getByRole("radiogroup", { name: "Group behavior" });
+    expect(within(behavior).getByRole("radio", { name: "Mention only" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("mention")).not.toBeInTheDocument();
+
+    fireEvent.click(within(behavior).getByRole("radio", { name: "All messages" }));
+
+    expect(within(behavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("saves Discord credentials from the channel setup panel", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "discord",
+            display_name: "Discord",
+            type: "channel",
+            enabled: false,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 0,
+        });
+      }
+      if (url === "/api/settings/channels/configure?name=discord&enable=true") {
+        return jsonResponse({
+          name: "discord",
+          saved: true,
+          saved_keys: [
+            "channels.discord.token",
+            "channels.discord.allowChannels",
+            "channels.discord.groupPolicy",
+          ],
+          nanobot_features: {
+            features: [{
+              name: "discord",
+              display_name: "Discord",
+              type: "channel",
+              enabled: true,
+              installed: true,
+              ready: true,
+              status: "enabled",
+              install_supported: true,
+              requires_restart: true,
+            }],
+            enabled_count: 1,
+            requires_restart: false,
+          },
+        });
+      }
+      if (url === "/api/settings/channels/validate?name=discord") {
+        return jsonResponse({
+          name: "discord",
+          status: "configured",
+          checks: [{ id: "bot_token", label: "Bot token", status: "pass" }],
+          identity: { name: "nanobot-test", account: "123" },
+          missing_fields: [],
+          can_enable: true,
+          requires_restart: false,
+          message: "Configuration is present.",
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Discord setup" })).toHaveAttribute(
+      "href",
+      "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#discord",
+    );
+    fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
+      target: { value: "discord-token" },
+    });
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.change(screen.getByLabelText("Allowed channels"), {
+      target: { value: "123, 456" },
+    });
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
+      "radio",
+      { name: "All messages" },
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Check and enable" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) => String(input) === "/api/settings/channels/configure?name=discord&enable=true",
+        ),
+      ).toBe(true),
+    );
+    const configureCall = fetchMock.mock.calls.find(
+      ([input]) => String(input) === "/api/settings/channels/configure?name=discord&enable=true",
+    );
+    expect((configureCall?.[1] as RequestInit | undefined)?.method).toBe("POST");
+    const headers = (configureCall?.[1] as RequestInit | undefined)?.headers as Record<string, string>;
+    expect(JSON.parse(headers["X-Nanobot-Channel-Values"])).toEqual({
+      "channels.discord.token": "discord-token",
+      "channels.discord.allowChannels": "123, 456",
+      "channels.discord.groupPolicy": "open",
+    });
+    expect(await screen.findByText("Checked and enabled.")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("shows an actionable credential guide for Telegram", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "telegram",
+              display_name: "Telegram",
+              type: "channel",
+              enabled: false,
+              installed: true,
+              ready: false,
+              status: "not_enabled",
+              install_supported: true,
+              requires_restart: true,
+            }],
+            enabled_count: 0,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Telegram settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Telegram setup" })).toHaveAttribute(
+      "href",
+      "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#telegram",
+    );
+  });
+
+  it("shows branded setup guide links for supported WebUI channels", async () => {
+    const channels = [
+      ["websocket", "WebSocket", "Open WebSocket setup"],
+      ["telegram", "Telegram", "Open Telegram setup"],
+      ["feishu", "Feishu", "Open Feishu setup"],
+      ["slack", "Slack", "Open Slack setup"],
+      ["discord", "Discord", "Open Discord setup"],
+      ["email", "Email", "Open Email setup"],
+      ["matrix", "Matrix", "Open Matrix setup"],
+      ["whatsapp", "WhatsApp", "Open WhatsApp setup"],
+      ["dingtalk", "DingTalk", "Open DingTalk setup"],
+      ["wecom", "WeCom", "Open WeCom setup"],
+      ["weixin", "WeChat", "Open WeChat setup"],
+      ["qq", "QQ", "Open QQ setup"],
+      ["signal", "Signal", "Open Signal setup"],
+      ["msteams", "Microsoft Teams", "Open Teams setup"],
+      ["napcat", "NapCat", "Open NapCat setup"],
+    ] as const;
+    const hiddenChannels = [["mochat", "MoChat"]] as const;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: channels.map(([name, displayName]) => ({
+              name,
+              display_name: displayName,
+              type: "channel",
+              enabled: name === "websocket",
+              installed: true,
+              ready: name === "websocket",
+              status: name === "websocket" ? "enabled" : "not_enabled",
+              install_supported: true,
+              requires_restart: true,
+            })).concat(hiddenChannels.map(([name, displayName]) => ({
+              name,
+              display_name: displayName,
+              type: "channel",
+              enabled: false,
+              installed: true,
+              ready: false,
+              status: "not_enabled",
+              install_supported: true,
+              requires_restart: true,
+            }))),
+            enabled_count: 1,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    for (const [, displayName, guideLabel] of channels) {
+      fireEvent.click(await screen.findByRole("button", { name: `View ${displayName} settings` }));
+      if (displayName === "Feishu") {
+        fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+      }
+      const guide = screen.getByRole("link", { name: guideLabel });
+      expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
+      expect(guide.querySelector("span[aria-hidden] img, span[aria-hidden] svg")).not.toBeNull();
+    }
+    expect(screen.queryByRole("button", { name: "View MoChat settings" })).not.toBeInTheDocument();
+  });
+
+  it("uses choices for channel enum and boolean fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: ["email", "feishu", "matrix", "qq"].map((name) => ({
+              name,
+              display_name: name === "qq" ? "QQ" : name[0].toUpperCase() + name.slice(1),
+              type: "channel",
+              enabled: true,
+              installed: true,
+              ready: true,
+              status: "enabled",
+              install_supported: true,
+              requires_restart: true,
+            })),
+            enabled_count: 4,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
+    const consent = screen.getByRole("radiogroup", { name: "Consent granted" });
+    expect(within(consent).getByRole("radio", { name: "Not granted" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(consent).getByRole("radio", { name: "Granted" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("true")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+    fireEvent.click(screen.getByText("Advanced"));
+    const region = screen.getByRole("radiogroup", { name: "Region" });
+    expect(within(region).getByRole("radio", { name: "Feishu" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(region).getByRole("radio", { name: "Lark" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
+    fireEvent.click(screen.getByText("Advanced"));
+    const matrixBehavior = screen.getByRole("radiogroup", { name: "Group behavior" });
+    expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(matrixBehavior).getByRole("radio", { name: "Allowlist" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
+    fireEvent.click(screen.getByText("Advanced"));
+    const format = screen.getByRole("radiogroup", { name: "Message format" });
+    expect(within(format).getByRole("radio", { name: "Plain text" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(format).getByRole("radio", { name: "Markdown" })).toBeInTheDocument();
   });
 
   it("does not offer to disable the websocket channel", async () => {
@@ -466,12 +1176,16 @@ describe("SettingsView Apps catalog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderSettingsView();
+    renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByText("Websocket")).toBeInTheDocument();
-    expect(screen.getByText("Required for WebUI")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Required for WebUI" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "View WebSocket settings" })).toBeInTheDocument();
+    expect(screen.getAllByText("WebSocket")).toHaveLength(2);
+    expect(screen.queryByText("Required for WebUI")).not.toBeInTheDocument();
+    expect(screen.getAllByText("On").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("button", { name: "Disable channel" })).not.toBeInTheDocument();
+    const websocketSwitch = screen.getByRole("switch", { name: "WebSocket channel" });
+    expect(websocketSwitch).toBeDisabled();
+    expect(websocketSwitch).toHaveAttribute("aria-checked", "true");
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/settings/nanobot-features/disable?name=websocket",
       expect.anything(),

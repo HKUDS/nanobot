@@ -24,6 +24,7 @@ from nanobot.bus.outbound_events import (
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels._feishu_instances import ChannelInstanceSpec, feishu_instance_specs
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
@@ -61,6 +62,10 @@ def _default_channel_config(name: str) -> dict[str, Any] | None:
 
 
 def _channel_config_enabled(name: str, section: Any) -> bool:
+    if name == "feishu":
+        from nanobot.channels.feishu import FeishuChannel
+
+        return bool(feishu_instance_specs(section, FeishuChannel.default_config(), enabled_only=True))
     default_enabled = name in DEFAULT_ENABLED_CHANNELS
     if isinstance(section, dict):
         return bool(section.get("enabled", default_enabled))
@@ -104,10 +109,107 @@ class ChannelManager:
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
         self.channels: dict[str, BaseChannel] = {}
+        self._channel_tasks: dict[str, asyncio.Task] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._started = False
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
 
         self._init_channels()
+
+    def _config_extra_channel_names(self, config: Config | None = None) -> set[str]:
+        extra = getattr((config or self.config).channels, "__pydantic_extra__", None) or {}
+        return set(extra.keys())
+
+    def _channel_section(
+        self,
+        name: str,
+        *,
+        config: Config | None = None,
+        default_sections: dict[str, Any] | None = None,
+    ) -> Any:
+        config = config or self.config
+        section = getattr(config.channels, name, None)
+        if section is not None or name not in DEFAULT_ENABLED_CHANNELS:
+            return section
+        if default_sections is None:
+            return _default_channel_config(name)
+        if name not in default_sections:
+            default = _default_channel_config(name)
+            if default is not None:
+                default_sections[name] = default
+        return default_sections.get(name)
+
+    def _channel_instance_specs(
+        self,
+        name: str,
+        cls: type[BaseChannel],
+        section: Any,
+        *,
+        enabled_only: bool = True,
+    ) -> list[ChannelInstanceSpec]:
+        if name == "feishu":
+            return feishu_instance_specs(
+                section,
+                cls.default_config(),
+                enabled_only=enabled_only,
+            )
+        return [
+            ChannelInstanceSpec(
+                base_name=name,
+                instance_id="default",
+                runtime_name=name,
+                config=section,
+            )
+        ]
+
+    def _build_channel(
+        self,
+        name: str,
+        cls: type[BaseChannel],
+        section: Any,
+        *,
+        runtime_name: str | None = None,
+    ) -> BaseChannel:
+        kwargs: dict[str, Any] = {}
+        if cls.name == "websocket":
+            from nanobot.channels.websocket import WebSocketConfig
+            from nanobot.webui.gateway_services import build_gateway_services
+
+            parsed = WebSocketConfig.model_validate(section)
+            static_path = _default_webui_dist() if self._webui_static_dist else None
+            workspace = Path(self.config.workspace_path)
+            gateway = build_gateway_services(
+                config=parsed,
+                bus=self.bus,
+                session_manager=self._session_manager,
+                static_dist_path=static_path,
+                workspace_path=workspace,
+                default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                disabled_skills=set(self.config.agents.defaults.disabled_skills),
+                runtime_model_name=self._webui_runtime_model_name,
+                runtime_surface=self._webui_runtime_surface,
+                runtime_capabilities_overrides=self._webui_runtime_capabilities,
+                cron_service=self._cron_service,
+                local_trigger_store=self._local_trigger_store,
+                cron_pending_job_ids=self._webui_cron_pending_job_ids,
+                local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
+                channel_feature_action=self.apply_channel_feature_action,
+                logger=logger,
+            )
+            kwargs["gateway"] = gateway
+        channel = cls(section, self.bus, **kwargs)
+        if runtime_name and runtime_name != channel.name:
+            channel.name = runtime_name
+        channel.send_progress = self._resolve_bool_override(
+            section, "send_progress", self.config.channels.send_progress,
+        )
+        channel.send_tool_hints = self._resolve_bool_override(
+            section, "send_tool_hints", self.config.channels.send_tool_hints,
+        )
+        channel.show_reasoning = self._resolve_bool_override(
+            section, "show_reasoning", self.config.channels.show_reasoning,
+        )
+        return channel
 
     def _init_channels(self) -> None:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
@@ -118,24 +220,12 @@ class ChannelManager:
         # extra="allow"), so we enumerate candidates from pkgutil scan
         # (cheap, no imports) and any plugin keys in __pydantic_extra__.
         names = discover_channel_names()
-        candidate_names = set(names)
-        extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
-        candidate_names.update(extra.keys())
+        candidate_names = set(names) | self._config_extra_channel_names()
         default_sections: dict[str, Any] = {}
-
-        def section_for(name: str) -> Any:
-            section = getattr(self.config.channels, name, None)
-            if section is not None or name not in DEFAULT_ENABLED_CHANNELS:
-                return section
-            if name not in default_sections:
-                default = _default_channel_config(name)
-                if default is not None:
-                    default_sections[name] = default
-            return default_sections.get(name)
 
         enabled_names: set[str] = set()
         for name in candidate_names:
-            section = section_for(name)
+            section = self._channel_section(name, default_sections=default_sections)
             if section is None:
                 continue
             if _channel_config_enabled(name, section):
@@ -146,48 +236,18 @@ class ChannelManager:
             _names=names,
             warn_import_errors=True,
         ).items():
-            section = section_for(name)
+            section = self._channel_section(name, default_sections=default_sections)
             if section is None:
                 continue
             try:
-                kwargs: dict[str, Any] = {}
-                if cls.name == "websocket":
-                    from nanobot.channels.websocket import WebSocketConfig
-                    from nanobot.webui.gateway_services import build_gateway_services
-
-                    parsed = WebSocketConfig.model_validate(section)
-                    static_path = _default_webui_dist() if self._webui_static_dist else None
-                    workspace = Path(self.config.workspace_path)
-                    gateway = build_gateway_services(
-                        config=parsed,
-                        bus=self.bus,
-                        session_manager=self._session_manager,
-                        static_dist_path=static_path,
-                        workspace_path=workspace,
-                        default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
-                        disabled_skills=set(self.config.agents.defaults.disabled_skills),
-                        runtime_model_name=self._webui_runtime_model_name,
-                        runtime_surface=self._webui_runtime_surface,
-                        runtime_capabilities_overrides=self._webui_runtime_capabilities,
-                        cron_service=self._cron_service,
-                        local_trigger_store=self._local_trigger_store,
-                        cron_pending_job_ids=self._webui_cron_pending_job_ids,
-                        local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
-                        logger=logger,
+                for spec in self._channel_instance_specs(name, cls, section):
+                    self.channels[spec.runtime_name] = self._build_channel(
+                        name,
+                        cls,
+                        spec.config,
+                        runtime_name=spec.runtime_name,
                     )
-                    kwargs["gateway"] = gateway
-                channel = cls(section, self.bus, **kwargs)
-                channel.send_progress = self._resolve_bool_override(
-                    section, "send_progress", self.config.channels.send_progress,
-                )
-                channel.send_tool_hints = self._resolve_bool_override(
-                    section, "send_tool_hints", self.config.channels.send_tool_hints,
-                )
-                channel.show_reasoning = self._resolve_bool_override(
-                    section, "show_reasoning", self.config.channels.show_reasoning,
-                )
-                self.channels[name] = channel
-                logger.info("{} channel enabled", cls.display_name)
+                    logger.info("{} channel enabled as {}", cls.display_name, spec.runtime_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
@@ -243,20 +303,174 @@ class ChannelManager:
         except Exception:
             logger.exception("Failed to start channel {}", name)
 
+    def _start_channel_task(self, name: str, channel: BaseChannel) -> asyncio.Task:
+        logger.info("Starting {} channel...", name)
+        task = asyncio.create_task(self._start_channel(name, channel))
+        if not hasattr(self, "_channel_tasks"):
+            self._channel_tasks = {}
+        self._channel_tasks[name] = task
+        return task
+
+    async def _stop_channel(self, name: str) -> bool:
+        if not hasattr(self, "_channel_tasks"):
+            self._channel_tasks = {}
+        channel = self.channels.get(name)
+        if channel is None:
+            self._channel_tasks.pop(name, None)
+            return False
+
+        task = self._channel_tasks.pop(name, None)
+        try:
+            await channel.stop()
+            logger.info("Stopped {} channel", name)
+        except asyncio.CancelledError:
+            if asyncio.current_task() and asyncio.current_task().cancelling():
+                raise
+            logger.debug("Channel {} stop task was already cancelled", name)
+        except Exception:
+            logger.exception("Error stopping {}", name)
+
+        if task is not None and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        return True
+
+    def _is_known_channel_name(self, name: str) -> bool:
+        from nanobot.channels.registry import discover_channel_names, discover_plugins
+
+        return name in set(discover_channel_names()) or name in discover_plugins()
+
+    def _load_channel_class(self, name: str) -> type[BaseChannel] | None:
+        from nanobot.channels.registry import discover_channel_names, discover_enabled
+
+        names = discover_channel_names()
+        return discover_enabled({name}, _names=names, warn_import_errors=True).get(name)
+
+    async def apply_channel_feature_action(self, action: str, name: str) -> dict[str, Any]:
+        """Apply a WebUI channel enable/disable action without restarting the gateway.
+
+        Returns a small transport-neutral result. ``handled=False`` means the
+        optional feature is not a channel and should keep the default feature
+        response semantics.
+        """
+        name = name.strip()
+        instance_id = ""
+        if "." in name:
+            name, instance_id = name.split(".", 1)
+        if not name or not self._is_known_channel_name(name):
+            return {"handled": False}
+        if name == "websocket":
+            return {
+                "handled": True,
+                "ok": False,
+                "requires_restart": True,
+                "message": "WebSocket hosts the WebUI and is applied on restart.",
+            }
+
+        from nanobot.config.loader import load_config
+
+        self.config = load_config()
+        section = self._channel_section(name)
+        if action == "disable":
+            runtime_names = [name if not instance_id else f"{name}.{instance_id}"]
+            if name == "feishu" and not instance_id:
+                runtime_names = [
+                    runtime_name
+                    for runtime_name in self.channels
+                    if runtime_name == "feishu" or runtime_name.startswith("feishu.")
+                ]
+            stopped = False
+            for runtime_name in runtime_names:
+                stopped = await self._stop_channel(runtime_name) or stopped
+                self.channels.pop(runtime_name, None)
+            return {
+                "handled": True,
+                "ok": True,
+                "requires_restart": False,
+                "message": f"{name} channel stopped." if stopped else f"{name} channel disabled.",
+            }
+
+        if action != "enable":
+            return {"handled": True, "ok": False, "requires_restart": True}
+
+        if section is None or not _channel_config_enabled(name, section):
+            return {
+                "handled": True,
+                "ok": False,
+                "requires_restart": True,
+                "message": f"{name} channel config was not enabled.",
+            }
+
+        cls = self._load_channel_class(name)
+        if cls is None:
+            return {
+                "handled": True,
+                "ok": False,
+                "requires_restart": True,
+                "message": f"{name} channel could not be loaded.",
+            }
+
+        specs = self._channel_instance_specs(name, cls, section)
+        if instance_id:
+            specs = [spec for spec in specs if spec.instance_id == instance_id]
+        if not specs:
+            return {
+                "handled": True,
+                "ok": False,
+                "requires_restart": True,
+                "message": f"{name} channel config was not enabled.",
+            }
+
+        try:
+            built: list[tuple[str, BaseChannel]] = []
+            for spec in specs:
+                if spec.runtime_name in self.channels:
+                    await self._stop_channel(spec.runtime_name)
+                built.append((
+                    spec.runtime_name,
+                    self._build_channel(
+                        name,
+                        cls,
+                        spec.config,
+                        runtime_name=spec.runtime_name,
+                    ),
+                ))
+        except Exception as exc:
+            logger.exception("Failed to build {} channel after settings change", name)
+            return {
+                "handled": True,
+                "ok": False,
+                "requires_restart": True,
+                "message": f"{name} channel could not be started: {exc}",
+            }
+
+        for runtime_name, channel in built:
+            self.channels[runtime_name] = channel
+            if self._started:
+                self._start_channel_task(runtime_name, channel)
+            logger.info("{} channel applied without restart", runtime_name)
+        return {
+            "handled": True,
+            "ok": True,
+            "requires_restart": False,
+            "message": f"{cls.display_name} channel applied without restart.",
+        }
+
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
         if not self.channels:
             logger.warning("No channels enabled")
             return
 
+        self._started = True
         # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
 
         # Start channels
         tasks = []
         for name, channel in self.channels.items():
-            logger.info("Starting {} channel...", name)
-            tasks.append(asyncio.create_task(self._start_channel(name, channel)))
+            tasks.append(self._start_channel_task(name, channel))
 
         self._notify_restart_done_if_needed()
 
@@ -284,6 +498,7 @@ class ChannelManager:
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
         logger.info("Stopping all channels...")
+        self._started = False
 
         # Stop dispatcher
         if self._dispatch_task:
@@ -292,16 +507,8 @@ class ChannelManager:
                 await self._dispatch_task
 
         # Stop all channels
-        for name, channel in self.channels.items():
-            try:
-                await channel.stop()
-                logger.info("Stopped {} channel", name)
-            except asyncio.CancelledError:
-                if asyncio.current_task() and asyncio.current_task().cancelling():
-                    raise
-                logger.debug("Channel {} stop task was already cancelled", name)
-            except Exception:
-                logger.exception("Error stopping {}", name)
+        for name in list(self.channels):
+            await self._stop_channel(name)
 
     @staticmethod
     def _fingerprint_content(content: str) -> str:

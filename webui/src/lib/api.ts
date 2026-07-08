@@ -1,8 +1,12 @@
 import type {
   AutomationsPayload,
   AutomationUpdatePayload,
+  ChannelConfigurePayload,
+  ChannelConnectPayload,
+  ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
+  FeishuConnectPayload,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
@@ -10,6 +14,7 @@ import type {
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
+  PairingPayload,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
   SessionDeleteResult,
@@ -44,6 +49,7 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
     && SLASH_COMMAND_LIFECYCLES.has(value as SlashCommandLifecycle)
   );
 }
+const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -389,10 +395,12 @@ export async function fetchNanobotFeatures(
 export async function enableNanobotFeature(
   token: string,
   name: string,
+  options: { instanceId?: string } = {},
   base: string = "",
 ): Promise<NanobotFeaturesPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features/enable?${query}`,
     token,
@@ -402,13 +410,163 @@ export async function enableNanobotFeature(
 export async function disableNanobotFeature(
   token: string,
   name: string,
+  options: { instanceId?: string } = {},
   base: string = "",
 ): Promise<NanobotFeaturesPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features/disable?${query}`,
     token,
+  );
+}
+
+export async function fetchPairingRequests(
+  token: string,
+  base: string = "",
+): Promise<PairingPayload> {
+  return request<PairingPayload>(
+    `${base}/api/settings/pairing`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runPairingAction(
+  token: string,
+  action: "approve" | "deny",
+  code: string,
+  base: string = "",
+): Promise<PairingPayload> {
+  const query = new URLSearchParams();
+  query.set("code", code);
+  return request<PairingPayload>(
+    `${base}/api/settings/pairing/${action}?${query}`,
+    token,
+  );
+}
+
+export async function startFeishuConnect(
+  token: string,
+  domain: "feishu" | "lark" = "feishu",
+  instanceId: string = "default",
+  mode: "replace" | "create" = "replace",
+  base: string = "",
+): Promise<FeishuConnectPayload> {
+  return startChannelConnect(token, "feishu", { domain, instanceId, mode }, base);
+}
+
+export async function pollFeishuConnect(
+  token: string,
+  sessionId: string,
+  base: string = "",
+): Promise<FeishuConnectPayload> {
+  return pollChannelConnect(token, "feishu", sessionId, base);
+}
+
+export async function cancelFeishuConnect(
+  token: string,
+  sessionId: string,
+  base: string = "",
+): Promise<FeishuConnectPayload> {
+  return cancelChannelConnect(token, "feishu", sessionId, base);
+}
+
+export async function startChannelConnect(
+  token: string,
+  channel: "feishu" | "weixin",
+  options: {
+    domain?: "feishu" | "lark";
+    instanceId?: string;
+    mode?: "replace" | "create";
+    force?: boolean;
+  } = {},
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  if (options.domain) query.set("domain", options.domain);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  if (options.mode) query.set("mode", options.mode);
+  if (options.force) query.set("force", "true");
+  const suffix = query.toString();
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/start${suffix ? `?${suffix}` : ""}`,
+    token,
+  );
+}
+
+export async function pollChannelConnect(
+  token: string,
+  channel: "feishu" | "weixin",
+  sessionId: string,
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  query.set("session_id", sessionId);
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/poll?${query}`,
+    token,
+  );
+}
+
+export async function cancelChannelConnect(
+  token: string,
+  channel: "feishu" | "weixin",
+  sessionId: string,
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  query.set("session_id", sessionId);
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/cancel?${query}`,
+    token,
+  );
+}
+
+export async function configureChannel(
+  token: string,
+  name: string,
+  values: Record<string, string>,
+  options: { enable?: boolean; instanceId?: string } = {},
+  base: string = "",
+): Promise<ChannelConfigurePayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  if (options.enable !== undefined) query.set("enable", String(options.enable));
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  return request<ChannelConfigurePayload>(
+    `${base}/api/settings/channels/configure?${query}`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
+      },
+    },
+  );
+}
+
+export async function validateChannel(
+  token: string,
+  name: string,
+  values: Record<string, string> = {},
+  options: { instanceId?: string } = {},
+  base: string = "",
+): Promise<ChannelValidationPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  return request<ChannelValidationPayload>(
+    `${base}/api/settings/channels/validate?${query}`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
+      },
+    },
   );
 }
 

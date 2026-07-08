@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -13,6 +14,11 @@ from loguru import logger
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from nanobot.channels._feishu_instances import (
+    DEFAULT_INSTANCE_ID,
+    feishu_instance_specs,
+    set_feishu_instance_enabled,
+)
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
 
@@ -282,6 +288,21 @@ def enable_channel_config(config_path: Path, channel_name: str, defaults: dict[s
     write_config_data(config_path, data)
 
 
+def enable_feishu_instance_config(
+    config_path: Path,
+    defaults: dict[str, Any],
+    *,
+    instance_id: str = DEFAULT_INSTANCE_ID,
+) -> None:
+    data = read_config_data(config_path)
+    channels = data.setdefault("channels", {})
+    existing = channels.get("feishu", {})
+    if not isinstance(existing, dict):
+        existing = {}
+    channels["feishu"] = set_feishu_instance_enabled(existing, defaults, instance_id, True)
+    write_config_data(config_path, data)
+
+
 def disable_channel_config(config_path: Path, channel_name: str) -> None:
     data = read_config_data(config_path)
     channels = data.setdefault("channels", {})
@@ -293,14 +314,88 @@ def disable_channel_config(config_path: Path, channel_name: str) -> None:
     write_config_data(config_path, data)
 
 
+def disable_feishu_instance_config(
+    config_path: Path,
+    defaults: dict[str, Any],
+    *,
+    instance_id: str = DEFAULT_INSTANCE_ID,
+) -> None:
+    data = read_config_data(config_path)
+    channels = data.setdefault("channels", {})
+    existing = channels.get("feishu", {})
+    if not isinstance(existing, dict):
+        existing = {}
+    channels["feishu"] = set_feishu_instance_enabled(existing, defaults, instance_id, False)
+    write_config_data(config_path, data)
+
+
 def channel_enabled(config: Config, name: str) -> bool:
     section = getattr(config.channels, name, None)
+    if name == "feishu":
+        from nanobot.channels.feishu import FeishuChannel
+
+        return bool(feishu_instance_specs(section, FeishuChannel.default_config(), enabled_only=True))
     default_enabled = name in DEFAULT_ENABLED_CHANNELS
     if section is None:
         return default_enabled
     if isinstance(section, dict):
         return bool(section.get("enabled", default_enabled))
     return bool(getattr(section, "enabled", default_enabled))
+
+
+_CHANNEL_CONFIGURED_KEYS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "feishu": (("app_id", "appId"), ("app_secret", "appSecret")),
+}
+
+
+def _channel_section_value(section: Any, aliases: tuple[str, ...]) -> Any:
+    if isinstance(section, dict):
+        for alias in aliases:
+            value = section.get(alias)
+            if value:
+                return value
+        return None
+    for alias in aliases:
+        value = getattr(section, alias, None)
+        if value:
+            return value
+    return None
+
+
+def _feishu_instance_display_name(config: dict[str, Any]) -> str:
+    display_name = str(config.get("displayName") or "").strip()
+    if display_name:
+        return display_name
+    local_name = str(config.get("name") or "").strip()
+    return local_name or "nanobot"
+
+
+def _feishu_instance_identity_source(config: dict[str, Any]) -> str:
+    if str(config.get("displayName") or "").strip() or str(config.get("avatarUrl") or "").strip():
+        return "feishu"
+    if str(config.get("name") or "").strip():
+        return "local"
+    return "fallback"
+
+
+def channel_configured(config: Config, name: str) -> bool:
+    """Return whether a channel has enough saved setup to be enabled directly."""
+    section = getattr(config.channels, name, None)
+    if section is None:
+        return False
+
+    if name == "feishu":
+        from nanobot.channels.feishu import FeishuChannel
+
+        return any(
+            all(_channel_section_value(spec.config, aliases) for aliases in _CHANNEL_CONFIGURED_KEYS["feishu"])
+            for spec in feishu_instance_specs(section, FeishuChannel.default_config())
+        )
+
+    required_keys = _CHANNEL_CONFIGURED_KEYS.get(name)
+    if not required_keys:
+        return channel_enabled(config, name)
+    return all(_channel_section_value(section, aliases) for aliases in required_keys)
 
 
 def optional_features_payload(
@@ -311,7 +406,14 @@ def optional_features_payload(
     from nanobot.channels.registry import discover_channel_names, discover_plugins
     from nanobot.config.loader import load_config
 
+    config_provided = config is not None
     config = config or load_config()
+    if not config_provided:
+        with suppress(Exception):
+            from nanobot.channels.feishu import refresh_saved_feishu_identities
+
+            if refresh_saved_feishu_identities(config):
+                config = load_config()
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
     plugin_channels = discover_plugins()
@@ -321,21 +423,50 @@ def optional_features_payload(
         is_channel = name in builtin_channels or name in plugin_channels
         installed = extra_installed(name, extras[name]) if name in extras else True
         enabled = channel_enabled(config, name) if is_channel else installed
+        configured = channel_configured(config, name) if is_channel else installed
         ready = bool(enabled and installed)
         status = "enabled" if ready else "missing_dependency" if not installed else "not_enabled"
-        features.append(
-            {
-                "name": name,
-                "display_name": name.replace("_", " ").title(),
-                "type": "channel" if is_channel else "feature",
-                "enabled": enabled,
-                "installed": installed,
-                "ready": ready,
-                "status": status,
-                "install_supported": name in extras or is_channel,
-                "requires_restart": is_channel or name in extras,
-            }
-        )
+        feature = {
+            "name": name,
+            "display_name": name.replace("_", " ").title(),
+            "type": "channel" if is_channel else "feature",
+            "enabled": enabled,
+            "configured": configured,
+            "installed": installed,
+            "ready": ready,
+            "status": status,
+            "install_supported": name in extras or is_channel,
+            "requires_restart": is_channel or name in extras,
+        }
+        if name == "feishu" and is_channel:
+            from nanobot.channels.feishu import FeishuChannel
+
+            specs = feishu_instance_specs(
+                getattr(config.channels, "feishu", None),
+                FeishuChannel.default_config(),
+            )
+            feature["instances"] = [
+                {
+                    "id": spec.instance_id,
+                    "runtime_name": spec.runtime_name,
+                    "name": spec.config.get("name") or "nanobot",
+                    "display_name": _feishu_instance_display_name(spec.config),
+                    "avatar_url": spec.config.get("avatarUrl") or "",
+                    "identity_source": _feishu_instance_identity_source(spec.config),
+                    "domain": spec.config.get("domain") or "feishu",
+                    "enabled": bool(spec.config.get("enabled", False)),
+                    "configured": all(
+                        _channel_section_value(spec.config, aliases)
+                        for aliases in _CHANNEL_CONFIGURED_KEYS["feishu"]
+                    ),
+                    "app_id": spec.config.get("appId") or spec.config.get("app_id") or "",
+                    "group_policy": spec.config.get("groupPolicy") or "mention",
+                    "topic_isolation": bool(spec.config.get("topicIsolation", True)),
+                    "allow_from": list(spec.config.get("allowFrom") or []),
+                }
+                for spec in specs
+            ]
+        features.append(feature)
 
     payload = {
         "features": features,
@@ -351,6 +482,7 @@ def enable_optional_feature(
     *,
     config_path: Path | None = None,
     allow_install: bool = True,
+    instance_id: str = DEFAULT_INSTANCE_ID,
     runner: Any = run_install_command,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import (
@@ -394,7 +526,10 @@ def enable_optional_feature(
                 f"Channel '{name}' is not importable after enable: {exc}",
                 status=500,
             ) from exc
-        enable_channel_config(config_path, name, channel_cls.default_config())
+        if name == "feishu":
+            enable_feishu_instance_config(config_path, channel_cls.default_config(), instance_id=instance_id)
+        else:
+            enable_channel_config(config_path, name, channel_cls.default_config())
         message = f"Enabled channel '{name}'"
     elif name in plugin_channels:
         enable_channel_config(config_path, name, plugin_channels[name].default_config())
@@ -411,6 +546,7 @@ def disable_optional_feature(
     name: str,
     *,
     config_path: Path | None = None,
+    instance_id: str = DEFAULT_INSTANCE_ID,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import discover_channel_names, discover_plugins
     from nanobot.config.loader import get_config_path
@@ -426,7 +562,13 @@ def disable_optional_feature(
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
     if name not in known_channels:
         raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
-    disable_channel_config(config_path, name)
+    if name == "feishu":
+        from nanobot.channels.registry import load_channel_class
+
+        channel_cls = load_channel_class(name)
+        disable_feishu_instance_config(config_path, channel_cls.default_config(), instance_id=instance_id)
+    else:
+        disable_channel_config(config_path, name)
     payload = optional_features_payload(
         last_action={"ok": True, "message": f"Disabled channel '{name}'", "enabled": False}
     )

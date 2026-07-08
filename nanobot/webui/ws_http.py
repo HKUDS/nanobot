@@ -161,6 +161,7 @@ class GatewayHTTPHandler:
         local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        channel_feature_action: Callable[..., Any] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -193,6 +194,7 @@ class GatewayHTTPHandler:
             error_response=_http_error,
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
+            channel_feature_action=channel_feature_action,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:

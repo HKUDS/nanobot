@@ -46,6 +46,31 @@ def _version_payload() -> dict[str, Any]:
         "current": __version__,
     }
 
+
+_DOCS_STABLE_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:\.post\d+)?$")
+_DOCS_LATEST_URL = "https://nanobot.wiki/docs/latest"
+
+
+def _docs_version(version: str) -> str:
+    """Map package versions to the matching public docs path."""
+    normalized = version.strip()
+    if _DOCS_STABLE_VERSION_RE.fullmatch(normalized):
+        return normalized
+    return "latest"
+
+
+def _docs_payload() -> dict[str, Any]:
+    """Return version-aware documentation links for the WebUI."""
+    docs_version = _docs_version(__version__)
+    base_url = f"https://nanobot.wiki/docs/{docs_version}"
+    return {
+        "version": docs_version,
+        "base_url": base_url,
+        "chat_apps_url": f"{base_url}/getting-started/chat-apps",
+        "latest_url": _DOCS_LATEST_URL,
+    }
+
+
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
     "can_pick_folder": False,
@@ -850,6 +875,7 @@ def settings_payload(
         },
         "requires_restart": requires_restart,
         "version": _version_payload(),
+        "docs": _docs_payload(),
     }
     return decorate_settings_payload(
         payload,

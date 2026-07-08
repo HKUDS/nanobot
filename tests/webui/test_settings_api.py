@@ -12,6 +12,7 @@ from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
+    _docs_version,
     _model_catalog_kind,
     _oauth_provider_status,
     create_model_configuration,
@@ -29,6 +30,32 @@ from nanobot.webui.settings_api import (
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
 DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
+
+
+def test_docs_version_uses_released_versions_and_falls_back_for_dev() -> None:
+    assert _docs_version("0.2.3") == "0.2.3"
+    assert _docs_version("0.2.3.post1") == "0.2.3.post1"
+    assert _docs_version("0.2.3.dev0") == "latest"
+    assert _docs_version("0.2.3+editable") == "latest"
+
+
+def test_settings_payload_includes_versioned_docs(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.settings_api.__version__", "0.2.3")
+
+    payload = settings_payload()
+
+    assert payload["docs"] == {
+        "version": "0.2.3",
+        "base_url": "https://nanobot.wiki/docs/0.2.3",
+        "chat_apps_url": "https://nanobot.wiki/docs/0.2.3/getting-started/chat-apps",
+        "latest_url": "https://nanobot.wiki/docs/latest",
+    }
 
 
 def _dynamic_provider_config(

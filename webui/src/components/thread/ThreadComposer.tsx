@@ -65,6 +65,7 @@ import {
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
@@ -2224,14 +2225,11 @@ function ComposerModelBadge({
 }) {
   const inferredProvider = needsSetup ? null : provider || inferProviderFromModelName(label);
   const brand = providerBrand(inferredProvider);
-  const [logoIndex, setLogoIndex] = useState(0);
-  const logoUrl = brand?.logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   const showLogo = !!logoUrl;
   const title = providerLabel ? `${label} · ${providerLabel}` : label;
   const interactive = Boolean(onClick);
   const Container = interactive ? "button" : "span";
-
-  useEffect(() => setLogoIndex(0), [inferredProvider]);
 
   return (
     <Container
@@ -2269,8 +2267,11 @@ function ComposerModelBadge({
           <img
             src={logoUrl}
             alt=""
+            decoding="async"
+            loading="lazy"
             className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
-            onError={() => setLogoIndex((index) => index + 1)}
+            onLoad={onLogoLoad}
+            onError={onLogoError}
           />
         ) : brand ? (
           <span
@@ -2466,15 +2467,12 @@ function MentionCandidateLogo({
   candidate: MentionCandidate;
   selected: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const color = (candidate.kind === "cli"
     ? candidate.app.brand_color
     : candidate.preset.brand_color) || "hsl(var(--primary))";
   const rawLogoUrl = candidate.kind === "cli" ? candidate.app.logo_url : candidate.preset.logo_url;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
-  const logoUrl = logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [rawLogoUrl]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
   if (logoUrl) {
     return (
@@ -2487,8 +2485,11 @@ function MentionCandidateLogo({
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-5 w-5 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );

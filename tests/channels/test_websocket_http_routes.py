@@ -71,6 +71,7 @@ def _make_handler(
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
     local_trigger_pending_ids: Any | None = None,
+    channel_feature_action: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -88,6 +89,7 @@ def _make_handler(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        channel_feature_action=channel_feature_action,
     )
 
 
@@ -103,6 +105,7 @@ def _ch(
     local_trigger_store: LocalTriggerStore | None = None,
     cron_pending_job_ids: Any | None = None,
     local_trigger_pending_ids: Any | None = None,
+    channel_feature_action: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -124,6 +127,7 @@ def _ch(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        channel_feature_action=channel_feature_action,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -646,6 +650,83 @@ async def test_nanobot_feature_routes_require_token_and_enable(
 
 
 @pytest.mark.asyncio
+async def test_pairing_routes_require_token_and_approve_or_deny(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = [
+        {
+            "code": "ABCD-EFGH",
+            "channel": "feishu",
+            "sender_id": "ou_123",
+            "created_at": 1_000.0,
+            "expires_at": 1_600.0,
+        }
+    ]
+    approved: list[str] = []
+    denied: list[str] = []
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.list_pending", lambda: list(pending))
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.approve_code",
+        lambda code: approved.append(code) or ("feishu", "ou_123") if code == "ABCD-EFGH" else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.deny_code",
+        lambda code: denied.append(code) or code == "ABCD-EFGH",
+    )
+
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_api_token(300)
+
+    denied_response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(path="/api/settings/pairing"),
+        "/api/settings/pairing",
+    )
+    assert denied_response is not None
+    assert denied_response.status_code == 401
+
+    auth = {"Authorization": f"Bearer {token}"}
+    listed = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(auth, path="/api/settings/pairing"),
+        "/api/settings/pairing",
+    )
+    assert listed is not None
+    assert listed.status_code == 200
+    body = json.loads(listed.body.decode())
+    assert body["requests"][0]["code"] == "ABCD-EFGH"
+    assert body["requests"][0]["channel"] == "feishu"
+    assert body["requests"][0]["sender_id"] == "ou_123"
+    assert body["requests"][0]["created_at_ms"] == 1_000_000
+    assert body["requests"][0]["expires_at_ms"] == 1_600_000
+
+    approved_response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(auth, path="/api/settings/pairing/approve?code=ABCD-EFGH"),
+        "/api/settings/pairing/approve",
+    )
+    assert approved_response is not None
+    assert approved_response.status_code == 200
+    body = json.loads(approved_response.body.decode())
+    assert body["last_action"]["action"] == "approve"
+    assert body["last_action"]["sender_id"] == "ou_123"
+    assert approved == ["ABCD-EFGH"]
+
+    denied_action = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(auth, path="/api/settings/pairing/deny?code=ABCD-EFGH"),
+        "/api/settings/pairing/deny",
+    )
+    assert denied_action is not None
+    assert denied_action.status_code == 200
+    assert json.loads(denied_action.body.decode())["last_action"]["action"] == "deny"
+    assert denied == ["ABCD-EFGH"]
+
+
+@pytest.mark.asyncio
 async def test_nanobot_feature_remote_install_requires_opt_in(
     bus: MagicMock,
     tmp_path: Path,
@@ -726,6 +807,350 @@ async def test_nanobot_feature_local_install_allowed_by_default(
     assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["matrix"][
         "enabled"
     ] is True
+
+
+@pytest.mark.asyncio
+async def test_nanobot_feature_channel_action_can_apply_without_restart(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    _stub_matrix_feature(monkeypatch, config_path, deps=["matrix-nio>=0.25.2"])
+    calls: list[tuple[str, str]] = []
+
+    async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
+        calls.append((action, name))
+        return {
+            "handled": True,
+            "ok": True,
+            "requires_restart": False,
+            "message": "Matrix channel applied without restart.",
+        }
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        port=_free_port(),
+        channel_feature_action=channel_feature_action,
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"},
+        path="/api/settings/nanobot-features/enable?name=matrix",
+    )
+
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        request,
+        "/api/settings/nanobot-features/enable",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    body = json.loads(response.body.decode())
+    assert calls == [("enable", "matrix")]
+    assert body["requires_restart"] is False
+    assert body["restart_required_sections"] == []
+    assert body["last_action"]["hot_reload"] is True
+    assert body["last_action"]["message"].endswith("Matrix channel applied without restart.")
+
+
+@pytest.mark.asyncio
+async def test_feishu_connect_routes_write_config_and_hot_reload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels import feishu as feishu_module
+    from nanobot.config import loader
+    from nanobot.config.schema import Config
+
+    config_path = tmp_path / "config.json"
+    loader.save_config(Config(), config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr(feishu_module, "_init_registration", lambda _domain: None)
+    monkeypatch.setattr(
+        feishu_module,
+        "_begin_registration",
+        lambda _domain: {
+            "device_code": "device",
+            "qr_url": "https://accounts.feishu.cn/login?device_code=device",
+            "interval": 2,
+            "expire_in": 600,
+        },
+    )
+    monkeypatch.setattr(
+        feishu_module,
+        "poll_registration_once",
+        lambda *, device_code, domain: {
+            "status": "succeeded",
+            "app_id": "cli_app",
+            "app_secret": "secret",
+            "domain": "feishu",
+        },
+    )
+    monkeypatch.setattr(
+        feishu_module,
+        "fetch_feishu_app_identity",
+        lambda app_id, app_secret, domain: {
+            "displayName": "Voraflare Bot",
+            "avatarUrl": "https://example.com/feishu.png",
+            "identityFetchedAt": "2026-07-06T00:00:00Z",
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.nanobot_features_action",
+        lambda _action, _query, *, allow_install=True: {
+            "features": [{
+                "name": "feishu",
+                "display_name": "Feishu",
+                "type": "channel",
+                "enabled": True,
+                "installed": True,
+                "ready": True,
+                "status": "enabled",
+                "install_supported": True,
+                "requires_restart": True,
+            }],
+            "enabled_count": 1,
+            "requires_restart": True,
+            "last_action": {"ok": True, "message": "Enabled channel 'feishu'", "enabled": True},
+        },
+    )
+    calls: list[tuple[str, str]] = []
+
+    async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
+        calls.append((action, name))
+        return {
+            "handled": True,
+            "ok": True,
+            "requires_restart": False,
+            "message": "Feishu channel applied without restart.",
+        }
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        port=_free_port(),
+        channel_feature_action=channel_feature_action,
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    auth = {"Authorization": f"Bearer {token}", "Host": "127.0.0.1:8765"}
+
+    started = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(
+            auth,
+            path="/api/settings/channels/feishu/connect/start?domain=feishu&instance_id=default",
+        ),
+        "/api/settings/channels/feishu/connect/start",
+    )
+
+    assert started is not None
+    assert started.status_code == 200
+    start_body = json.loads(started.body.decode())
+    assert start_body["status"] == "pending"
+    assert start_body["instance_id"] == "default"
+    assert start_body["qr_url"].startswith("https://accounts.feishu.cn/")
+
+    polled = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(
+            auth,
+            path=f"/api/settings/channels/feishu/connect/poll?session_id={start_body['session_id']}",
+        ),
+        "/api/settings/channels/feishu/connect/poll",
+    )
+
+    assert polled is not None
+    assert polled.status_code == 200
+    body = json.loads(polled.body.decode())
+    assert body["status"] == "succeeded"
+    assert body["instance_id"] == "default"
+    assert "app_secret" not in body
+    assert calls == [("enable", "feishu")]
+    assert body["nanobot_features"]["requires_restart"] is False
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["feishu"]["instances"][0]["id"] == "default"
+    assert data["channels"]["feishu"]["instances"][0]["appId"] == "cli_app"
+    assert data["channels"]["feishu"]["instances"][0]["appSecret"] == "secret"
+    assert data["channels"]["feishu"]["instances"][0]["enabled"] is True
+    assert data["channels"]["feishu"]["instances"][0]["displayName"] == "Voraflare Bot"
+    assert data["channels"]["feishu"]["instances"][0]["avatarUrl"] == "https://example.com/feishu.png"
+
+
+def test_feishu_connect_create_appends_instance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels import feishu as feishu_module
+    from nanobot.config import loader
+    from nanobot.webui.channel_connect import FeishuConnectStore
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "channels": {
+                "feishu": {
+                    "instances": [{
+                        "id": "default",
+                        "name": "nanobot",
+                        "enabled": True,
+                        "appId": "cli_default",
+                        "appSecret": "default-secret",
+                    }]
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr(feishu_module, "_init_registration", lambda _domain: None)
+    monkeypatch.setattr(
+        feishu_module,
+        "_begin_registration",
+        lambda _domain: {
+            "device_code": "device",
+            "qr_url": "https://accounts.feishu.cn/login?device_code=device",
+            "interval": 2,
+            "expire_in": 600,
+        },
+    )
+    monkeypatch.setattr(
+        feishu_module,
+        "poll_registration_once",
+        lambda *, device_code, domain: {
+            "status": "succeeded",
+            "app_id": "cli_new",
+            "app_secret": "new-secret",
+            "domain": "feishu",
+        },
+    )
+    monkeypatch.setattr(
+        feishu_module,
+        "fetch_feishu_app_identity",
+        lambda app_id, app_secret, domain: {
+            "displayName": f"Assistant {app_id}",
+            "avatarUrl": f"https://example.com/{app_id}.png",
+            "identityFetchedAt": "2026-07-06T00:00:00Z",
+        },
+    )
+
+    store = FeishuConnectStore()
+    started = store.start(mode="create")
+    polled = store.poll(started["session_id"])
+
+    assert polled["status"] == "succeeded"
+    assert polled["instance_id"] != "default"
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    instances = data["channels"]["feishu"]["instances"]
+    assert [item["id"] for item in instances] == ["default", polled["instance_id"]]
+    assert instances[0]["appId"] == "cli_default"
+    assert instances[1]["appId"] == "cli_new"
+    assert instances[0].get("displayName") is None
+    assert instances[1]["displayName"] == "Assistant cli_new"
+    assert instances[1]["avatarUrl"] == "https://example.com/cli_new.png"
+
+
+@pytest.mark.asyncio
+async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.config import loader
+    from nanobot.config.schema import Config
+
+    config_path = tmp_path / "config.json"
+    loader.save_config(Config(), config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+
+    def fake_feature_action(
+        action: str,
+        query: dict[str, list[str]],
+        *,
+        allow_install: bool = True,
+    ) -> dict[str, Any]:
+        assert action == "enable"
+        assert query == {"name": ["discord"]}
+        cfg = loader.load_config()
+        section = dict(getattr(cfg.channels, "discord", {}) or {})
+        section["enabled"] = True
+        setattr(cfg.channels, "discord", section)
+        loader.save_config(cfg)
+        return {
+            "features": [{
+                "name": "discord",
+                "display_name": "Discord",
+                "type": "channel",
+                "enabled": True,
+                "installed": True,
+                "ready": True,
+                "status": "enabled",
+                "install_supported": True,
+                "requires_restart": True,
+            }],
+            "enabled_count": 1,
+            "requires_restart": True,
+            "last_action": {"ok": True, "message": "Enabled channel 'discord'", "enabled": True},
+        }
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.nanobot_features_action", fake_feature_action)
+    calls: list[tuple[str, str]] = []
+
+    async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
+        calls.append((action, name))
+        cfg = loader.load_config()
+        assert getattr(cfg.channels, "discord")["token"] == "discord-token"
+        return {
+            "handled": True,
+            "ok": True,
+            "requires_restart": False,
+            "message": "Discord channel applied without restart.",
+        }
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        port=_free_port(),
+        channel_feature_action=channel_feature_action,
+    )
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(
+            {
+                "Authorization": f"Bearer {token}",
+                "Host": "127.0.0.1:8765",
+                "X-Nanobot-Channel-Values": json.dumps(
+                    {
+                        "channels.discord.token": "discord-token",
+                        "channels.discord.allowChannels": "123, 456",
+                        "channels.discord.groupPolicy": "open",
+                    }
+                ),
+            },
+            path="/api/settings/channels/configure?name=discord&enable=true",
+        ),
+        "/api/settings/channels/configure",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    body = json.loads(response.body.decode())
+    assert body["saved"] is True
+    assert body["name"] == "discord"
+    assert "discord-token" not in response.body.decode()
+    assert calls == [("enable", "discord")]
+    assert body["nanobot_features"]["requires_restart"] is False
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["discord"] == {
+        "token": "discord-token",
+        "allowChannels": ["123", "456"],
+        "groupPolicy": "open",
+        "enabled": True,
+    }
 
 
 @pytest.mark.asyncio

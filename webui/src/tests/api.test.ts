@@ -28,6 +28,9 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  cancelChannelConnect,
+  pollChannelConnect,
+  startChannelConnect,
   updateAutomation,
   updateSidebarState,
   updateImageGenerationSettings,
@@ -37,6 +40,7 @@ import {
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
+  validateChannel,
 } from "@/lib/api";
 
 describe("webui API helpers", () => {
@@ -110,6 +114,54 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/webui/automations",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("validates channel settings with form values", async () => {
+    await validateChannel(
+      "tok",
+      "slack",
+      { "channels.slack.botToken": "xoxb-test" },
+      { instanceId: "default" },
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/channels/validate?name=slack&instance_id=default",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "X-Nanobot-Channel-Values": JSON.stringify({
+            "channels.slack.botToken": "xoxb-test",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("serializes channel QR connect helpers", async () => {
+    await startChannelConnect("tok", "weixin", { force: true });
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/settings/channels/weixin/connect/start?force=true",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await pollChannelConnect("tok", "weixin", "session+/=");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/settings/channels/weixin/connect/poll?session_id=session%2B%2F%3D",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await cancelChannelConnect("tok", "weixin", "session+/=");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/settings/channels/weixin/connect/cancel?session_id=session%2B%2F%3D",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

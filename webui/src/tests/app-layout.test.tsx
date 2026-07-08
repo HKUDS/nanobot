@@ -249,6 +249,8 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
+    localStorage.removeItem("nanobot-webui.restartStartedAt");
+    localStorage.removeItem("nanobot-webui.restartRoute");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       api_token: "api-tok",
@@ -341,6 +343,35 @@ describe("App layout", () => {
       skillsButton.compareDocumentPosition(automationsButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("restores the Settings route after a restart fallback hash", async () => {
+    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
+    localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
+    window.history.replaceState(null, "", "/#/new");
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/nanobot-features": {
+        features: [{
+          name: "websocket",
+          display_name: "Websocket",
+          type: "channel",
+          enabled: true,
+          installed: true,
+          ready: true,
+          status: "enabled",
+          install_supported: true,
+          requires_restart: true,
+        }],
+        enabled_count: 1,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect((await screen.findAllByRole("heading", { name: "Channels" })).length).toBeGreaterThan(0);
+    expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
   it("opens Skills from the main sidebar", async () => {

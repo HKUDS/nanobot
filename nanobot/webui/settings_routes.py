@@ -8,7 +8,9 @@ request mapping and response shaping.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -17,8 +19,15 @@ from websockets.http11 import Response
 
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.bus.queue import MessageBus
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_config, save_config
 from nanobot.optional_features import OptionalFeatureError
+from nanobot.pairing import approve_code, deny_code, list_pending
+from nanobot.webui.channel_connect import (
+    ChannelConnectError,
+    FeishuConnectStore,
+    WeixinConnectStore,
+)
+from nanobot.webui.channel_validation import validate_channel_config
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.http_utils import query_first as _query_first
@@ -47,6 +56,98 @@ QueryParams = dict[str, list[str]]
 
 _MCP_VALUES_HEADER = "X-Nanobot-MCP-Values"
 _MCP_VALUES_HEADER_MAX_BYTES = 64 * 1024
+_CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values"
+_CHANNEL_VALUES_HEADER_MAX_BYTES = 64 * 1024
+
+_SKIP_FIELD = object()
+
+_GROUP_POLICY_VALUES = {"mention", "open", "allowlist"}
+_CHANNEL_CONFIG_FIELDS: dict[str, dict[str, Any]] = {
+    "telegram": {
+        "token": "secret",
+        "allowFrom": "list",
+        "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
+    },
+    "slack": {
+        "appToken": "secret",
+        "botToken": "secret",
+        "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
+    },
+    "discord": {
+        "token": "secret",
+        "allowFrom": "list",
+        "allowChannels": "list",
+        "groupPolicy": ("enum", {"mention", "open"}),
+    },
+    "email": {
+        "consentGranted": "bool",
+        "imapHost": "string",
+        "imapPort": "int",
+        "imapUsername": "string",
+        "imapPassword": "secret",
+        "smtpHost": "string",
+        "smtpPort": "int",
+        "smtpUsername": "string",
+        "smtpPassword": "secret",
+        "fromAddress": "string",
+        "pollIntervalSeconds": "int",
+        "allowFrom": "list",
+        "verifyDkim": "bool",
+        "verifySpf": "bool",
+    },
+    "matrix": {
+        "homeserver": "string",
+        "userId": "string",
+        "password": "secret",
+        "accessToken": "secret",
+        "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
+    },
+    "dingtalk": {
+        "clientId": "string",
+        "clientSecret": "secret",
+        "allowFrom": "list",
+    },
+    "wecom": {
+        "botId": "string",
+        "secret": "secret",
+        "allowFrom": "list",
+    },
+    "qq": {
+        "appId": "string",
+        "secret": "secret",
+        "allowFrom": "list",
+        "msgFormat": ("enum", {"plain", "markdown"}),
+    },
+    "signal": {
+        "phoneNumber": "string",
+        "daemonHost": "string",
+        "daemonPort": "int",
+        "allowFrom": "list",
+        "dm.allowFrom": "list",
+        "group.allowFrom": "list",
+    },
+    "msteams": {
+        "appId": "string",
+        "appPassword": "secret",
+        "tenantId": "string",
+        "path": "string",
+        "allowFrom": "list",
+    },
+    "napcat": {
+        "wsUrl": "string",
+        "accessToken": "secret",
+        "allowFrom": "list",
+        "groupPolicy": ("enum", {"mention", "open"}),
+    },
+    "feishu": {
+        "appId": "string",
+        "appSecret": "secret",
+        "domain": ("enum", {"feishu", "lark"}),
+        "groupPolicy": ("enum", {"mention", "open"}),
+        "allowFrom": "list",
+        "topicIsolation": "bool",
+    },
+}
 
 _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/enable": "enable",
@@ -73,6 +174,7 @@ class WebUISettingsRouter:
         error_response: Callable[[int, str | None], Response],
         runtime_surface: str,
         runtime_capabilities: dict[str, Any],
+        channel_feature_action: Callable[..., Any] | None = None,
     ) -> None:
         self.bus = bus
         self.logger = logger
@@ -82,7 +184,10 @@ class WebUISettingsRouter:
         self._error_response = error_response
         self._runtime_surface = runtime_surface
         self._runtime_capabilities = runtime_capabilities
+        self._channel_feature_action = channel_feature_action
         self._restart_sections: set[str] = set()
+        self._feishu_connect = FeishuConnectStore()
+        self._weixin_connect = WeixinConnectStore()
 
     async def dispatch(self, connection: Any, request: WsRequest, path: str) -> Response | None:
         if path == "/api/settings":
@@ -127,6 +232,28 @@ class WebUISettingsRouter:
             return await self._handle_settings_nanobot_features_action(connection, request, "enable")
         if path == "/api/settings/nanobot-features/disable":
             return await self._handle_settings_nanobot_features_action(connection, request, "disable")
+        if path == "/api/settings/channels/feishu/connect/start":
+            return await self._handle_settings_feishu_connect_start(request)
+        if path == "/api/settings/channels/feishu/connect/poll":
+            return await self._handle_settings_feishu_connect_poll(connection, request)
+        if path == "/api/settings/channels/feishu/connect/cancel":
+            return self._handle_settings_feishu_connect_cancel(request)
+        if path == "/api/settings/channels/weixin/connect/start":
+            return await self._handle_settings_weixin_connect_start(connection, request)
+        if path == "/api/settings/channels/weixin/connect/poll":
+            return await self._handle_settings_weixin_connect_poll(connection, request)
+        if path == "/api/settings/channels/weixin/connect/cancel":
+            return await self._handle_settings_weixin_connect_cancel(request)
+        if path == "/api/settings/channels/validate":
+            return await self._handle_settings_channel_validate(request)
+        if path == "/api/settings/channels/configure":
+            return await self._handle_settings_channel_configure(connection, request)
+        if path == "/api/settings/pairing":
+            return self._handle_settings_pairing(request)
+        if path == "/api/settings/pairing/approve":
+            return self._handle_settings_pairing_action(request, "approve")
+        if path == "/api/settings/pairing/deny":
+            return self._handle_settings_pairing_action(request, "deny")
         if path == "/api/settings/mcp-presets":
             return await self._handle_settings_mcp_presets(request)
         if path == "/api/settings/version-check":
@@ -208,6 +335,46 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         return self._json_response(settings_usage_payload())
+
+    def _handle_settings_pairing(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        return self._json_response(_pairing_payload())
+
+    def _handle_settings_pairing_action(self, request: WsRequest, action: str) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        query = self._query(request)
+        code = _query_first(query, "code").strip()
+        if not code:
+            return self._error_response(400, "Missing pairing code")
+
+        if action == "approve":
+            result = approve_code(code)
+            if result is None:
+                return self._error_response(404, "Pairing code not found or expired")
+            channel, sender_id = result
+            return self._json_response(
+                _pairing_payload({
+                    "ok": True,
+                    "action": "approve",
+                    "message": f"Approved {sender_id} for {channel}",
+                    "channel": channel,
+                    "sender_id": sender_id,
+                    "code": code,
+                })
+            )
+
+        if not deny_code(code):
+            return self._error_response(404, "Pairing code not found or expired")
+        return self._json_response(
+            _pairing_payload({
+                "ok": True,
+                "action": "deny",
+                "message": f"Denied pairing code {code}",
+                "code": code,
+            })
+        )
 
     def _handle_settings_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
@@ -378,7 +545,458 @@ class WebUISettingsRouter:
             if status >= 500:
                 self.logger.exception("nanobot feature action '{}' failed", action)
             return self._error_response(status, message)
+        payload = await self._apply_nanobot_feature_runtime_change(
+            action,
+            self._query(request),
+            payload,
+        )
         return self._json_response(self._with_restart_state(payload, section="runtime"))
+
+    async def _apply_nanobot_feature_runtime_change(
+        self,
+        action: str,
+        query: QueryParams,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._channel_feature_action is None:
+            return payload
+
+        name = (_query_first(query, "name") or "").strip()
+        if not name:
+            return payload
+
+        try:
+            instance_id = (_query_first(query, "instance_id") or "").strip()
+            runtime_name = name
+            if name == "feishu" and instance_id and instance_id != "default":
+                runtime_name = f"feishu.{instance_id}"
+            result = self._channel_feature_action(action, runtime_name)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            self.logger.exception("failed to apply channel '{}' without restart", name)
+            return self._feature_runtime_fallback(
+                payload,
+                message=f"{name} channel config was saved, but hot reload failed: {exc}",
+            )
+
+        if not isinstance(result, dict) or not result.get("handled"):
+            return payload
+
+        payload = dict(payload)
+        if result.get("requires_restart"):
+            payload["requires_restart"] = True
+        else:
+            payload["requires_restart"] = False
+
+        message = result.get("message")
+        if isinstance(message, str) and message:
+            last_action = dict(payload.get("last_action") or {})
+            previous = last_action.get("message")
+            if isinstance(previous, str) and previous:
+                last_action["message"] = f"{previous}. {message}"
+            else:
+                last_action["message"] = message
+            last_action["hot_reload"] = not payload["requires_restart"]
+            payload["last_action"] = last_action
+        return payload
+
+    @staticmethod
+    def _feature_runtime_fallback(payload: dict[str, Any], *, message: str) -> dict[str, Any]:
+        payload = dict(payload)
+        payload["requires_restart"] = True
+        last_action = dict(payload.get("last_action") or {})
+        previous = last_action.get("message")
+        last_action["message"] = f"{previous}. {message}" if isinstance(previous, str) and previous else message
+        last_action["hot_reload"] = False
+        payload["last_action"] = last_action
+        return payload
+
+    async def _handle_settings_channel_configure(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        query = self._query(request)
+        name = (_query_first(query, "name") or "").strip()
+        instance_id = (_query_first(query, "instance_id") or "default").strip()
+        enable = (_query_first(query, "enable") or "").strip().lower() in {"1", "true", "yes"}
+        try:
+            saved = await asyncio.to_thread(
+                self._save_channel_config_values,
+                name,
+                self._parse_channel_values_header(request),
+                instance_id,
+            )
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        except Exception:
+            self.logger.exception("failed to save channel '{}' settings", name)
+            return self._error_response(500, "failed to save channel settings")
+
+        payload: dict[str, Any] = {
+            "name": name,
+            "saved": True,
+            "saved_keys": saved,
+        }
+        if not enable:
+            return self._json_response(payload)
+
+        feature_query = {"name": [name]}
+        if name == "feishu":
+            feature_query["instance_id"] = [instance_id]
+
+        try:
+            features = await asyncio.to_thread(
+                nanobot_features_action,
+                "enable",
+                feature_query,
+                allow_install=self._allow_feature_package_install(connection, request),
+            )
+        except OptionalFeatureError as e:
+            return self._error_response(e.status, f"Settings saved, but {e.message}")
+        except Exception as e:
+            self.logger.exception("failed to enable channel '{}' after settings save", name)
+            return self._error_response(500, f"Settings saved, but enabling {name} failed: {e}")
+
+        features = await self._apply_nanobot_feature_runtime_change(
+            "enable",
+            feature_query,
+            features,
+        )
+        payload["nanobot_features"] = self._with_restart_state(features, section="runtime")
+        return self._json_response(payload)
+
+    async def _handle_settings_channel_validate(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        query = self._query(request)
+        name = (_query_first(query, "name") or "").strip()
+        instance_id = (_query_first(query, "instance_id") or "default").strip()
+        try:
+            payload = await asyncio.to_thread(
+                validate_channel_config,
+                name,
+                self._parse_channel_values_header(request),
+                instance_id=instance_id,
+            )
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        except Exception:
+            self.logger.exception("failed to validate channel '{}' settings", name)
+            return self._error_response(500, "failed to validate channel settings")
+        return self._json_response(payload)
+
+    def _parse_channel_values_header(self, request: WsRequest) -> dict[str, Any]:
+        raw = request.headers.get(_CHANNEL_VALUES_HEADER)
+        if not raw:
+            return {}
+        if len(raw.encode("utf-8")) > _CHANNEL_VALUES_HEADER_MAX_BYTES:
+            raise WebUISettingsError("channel settings payload is too large")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise WebUISettingsError("invalid channel settings payload") from exc
+        if not isinstance(payload, dict):
+            raise WebUISettingsError("channel settings payload must be a JSON object")
+        return payload
+
+    def _save_channel_config_values(
+        self,
+        name: str,
+        raw_values: dict[str, Any],
+        instance_id: str = "default",
+    ) -> list[str]:
+        if not name:
+            raise WebUISettingsError("missing channel name")
+        field_types = _CHANNEL_CONFIG_FIELDS.get(name)
+        if field_types is None:
+            raise WebUISettingsError(f"channel '{name}' cannot be configured from WebUI", status=404)
+        if not raw_values:
+            return []
+
+        config = load_config()
+        section = getattr(config.channels, name, None)
+        if name == "feishu":
+            from nanobot.channels._feishu_instances import feishu_instance_specs
+            from nanobot.channels.feishu import FeishuChannel
+
+            specs = feishu_instance_specs(section, FeishuChannel.default_config())
+            selected = next((spec for spec in specs if spec.instance_id == instance_id), None)
+            channel_config = dict(selected.config) if selected is not None else {}
+        elif hasattr(section, "model_dump"):
+            channel_config = section.model_dump(mode="json", by_alias=True)
+        elif isinstance(section, dict):
+            channel_config = dict(section)
+        else:
+            channel_config = {}
+
+        saved: list[str] = []
+        prefix = f"channels.{name}."
+        for raw_key, raw_value in raw_values.items():
+            if not isinstance(raw_key, str) or not raw_key:
+                raise WebUISettingsError("channel settings payload contains an invalid key")
+            field = raw_key[len(prefix):] if raw_key.startswith(prefix) else raw_key
+            value_type = field_types.get(field)
+            if value_type is None:
+                raise WebUISettingsError(f"'{raw_key}' cannot be configured from WebUI")
+            value = self._coerce_channel_value(raw_key, raw_value, value_type)
+            if value is _SKIP_FIELD:
+                continue
+            self._assign_channel_config_value(channel_config, field, value)
+            saved.append(raw_key)
+
+        if name == "feishu":
+            from nanobot.channels._feishu_instances import upsert_feishu_instance
+            from nanobot.channels.feishu import FeishuChannel
+
+            existing = getattr(config.channels, name, None)
+            channel_config = upsert_feishu_instance(
+                existing if isinstance(existing, dict) else {},
+                FeishuChannel.default_config(),
+                instance_id,
+                channel_config,
+            )
+
+        setattr(config.channels, name, channel_config)
+        save_config(config)
+        return saved
+
+    @staticmethod
+    def _coerce_channel_value(raw_key: str, raw_value: Any, value_type: Any) -> Any:
+        if isinstance(value_type, tuple):
+            kind = value_type[0]
+            allowed = value_type[1]
+        else:
+            kind = value_type
+            allowed = None
+
+        if kind in {"string", "secret"}:
+            value = raw_value.strip() if isinstance(raw_value, str) else str(raw_value)
+            if kind == "secret" and not value:
+                return _SKIP_FIELD
+            return value
+
+        if kind == "list":
+            if raw_value is None:
+                return []
+            if isinstance(raw_value, str):
+                return [item.strip() for item in raw_value.split(",") if item.strip()]
+            if isinstance(raw_value, list):
+                return [str(item).strip() for item in raw_value if str(item).strip()]
+            raise WebUISettingsError(f"'{raw_key}' must be a comma-separated list")
+
+        if kind == "int":
+            if raw_value in (None, ""):
+                return _SKIP_FIELD
+            try:
+                return int(raw_value)
+            except (TypeError, ValueError) as exc:
+                raise WebUISettingsError(f"'{raw_key}' must be a number") from exc
+
+        if kind == "bool":
+            if isinstance(raw_value, bool):
+                return raw_value
+            value = str(raw_value).strip().lower()
+            if value in {"true", "1", "yes", "on"}:
+                return True
+            if value in {"false", "0", "no", "off"}:
+                return False
+            raise WebUISettingsError(f"'{raw_key}' must be true or false")
+
+        if kind == "enum":
+            value = raw_value.strip() if isinstance(raw_value, str) else str(raw_value)
+            if not value:
+                return _SKIP_FIELD
+            if value not in allowed:
+                options = ", ".join(sorted(allowed))
+                raise WebUISettingsError(f"'{raw_key}' must be one of: {options}")
+            return value
+
+        raise WebUISettingsError(f"'{raw_key}' has an unsupported field type")
+
+    @staticmethod
+    def _assign_channel_config_value(channel_config: dict[str, Any], field: str, value: Any) -> None:
+        target = channel_config
+        parts = field.split(".")
+        for part in parts[:-1]:
+            current = target.get(part)
+            if not isinstance(current, dict):
+                current = {}
+                target[part] = current
+            target = current
+        target[parts[-1]] = value
+
+    async def _handle_settings_feishu_connect_start(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        query = self._query(request)
+        domain = (_query_first(query, "domain") or "feishu").strip()
+        instance_id = (_query_first(query, "instance_id") or "default").strip()
+        mode = (_query_first(query, "mode") or "replace").strip()
+        try:
+            payload = await asyncio.to_thread(
+                self._feishu_connect.start,
+                domain=domain,
+                instance_id=instance_id,
+                mode=mode,
+            )
+        except ChannelConnectError as e:
+            return self._error_response(e.status, e.message)
+        except Exception:
+            self.logger.exception("failed to start Feishu WebUI connect")
+            return self._error_response(500, "failed to start Feishu connection")
+        return self._json_response(payload)
+
+    async def _handle_settings_feishu_connect_poll(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        session_id = (_query_first(self._query(request), "session_id") or "").strip()
+        if not session_id:
+            return self._error_response(400, "missing Feishu connect session")
+
+        try:
+            payload = await asyncio.to_thread(self._feishu_connect.poll, session_id)
+        except Exception:
+            self.logger.exception("failed to poll Feishu WebUI connect")
+            return self._error_response(500, "failed to poll Feishu connection")
+
+        if payload.get("status") == "succeeded":
+            try:
+                features = await asyncio.to_thread(
+                    nanobot_features_action,
+                    "enable",
+                    {
+                        "name": ["feishu"],
+                        "instance_id": [str(payload.get("instance_id") or "default")],
+                    },
+                    allow_install=self._allow_feature_package_install(connection, request),
+                )
+            except OptionalFeatureError as exc:
+                features = self._feature_runtime_fallback(
+                    nanobot_features_payload(),
+                    message=f"Feishu connected, but enabling channel support failed: {exc.message}",
+                )
+            else:
+                features = await self._apply_nanobot_feature_runtime_change(
+                    "enable",
+                    {
+                        "name": ["feishu"],
+                        "instance_id": [str(payload.get("instance_id") or "default")],
+                    },
+                    features,
+                )
+            payload = dict(payload)
+            payload["nanobot_features"] = self._with_restart_state(features, section="runtime")
+
+        return self._json_response(payload)
+
+    def _handle_settings_feishu_connect_cancel(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        session_id = (_query_first(self._query(request), "session_id") or "").strip()
+        if not session_id:
+            return self._error_response(400, "missing Feishu connect session")
+        return self._json_response(self._feishu_connect.cancel(session_id))
+
+    async def _handle_settings_weixin_connect_start(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        force = (_query_first(self._query(request), "force") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        try:
+            payload = await self._weixin_connect.start(force=force)
+        except ChannelConnectError as e:
+            return self._error_response(e.status, e.message)
+        except Exception:
+            self.logger.exception("failed to start WeChat WebUI connect")
+            return self._error_response(500, "failed to start WeChat connection")
+
+        if payload.get("status") == "succeeded":
+            payload = await self._with_channel_connect_success(
+                connection,
+                request,
+                "weixin",
+                payload,
+            )
+        return self._json_response(payload)
+
+    async def _handle_settings_weixin_connect_poll(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        session_id = (_query_first(self._query(request), "session_id") or "").strip()
+        if not session_id:
+            return self._error_response(400, "missing WeChat connect session")
+        try:
+            payload = await self._weixin_connect.poll(session_id)
+        except Exception:
+            self.logger.exception("failed to poll WeChat WebUI connect")
+            return self._error_response(500, "failed to poll WeChat connection")
+        if payload.get("status") == "succeeded":
+            payload = await self._with_channel_connect_success(
+                connection,
+                request,
+                "weixin",
+                payload,
+            )
+        return self._json_response(payload)
+
+    async def _handle_settings_weixin_connect_cancel(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        session_id = (_query_first(self._query(request), "session_id") or "").strip()
+        if not session_id:
+            return self._error_response(400, "missing WeChat connect session")
+        return self._json_response(await self._weixin_connect.cancel(session_id))
+
+    async def _with_channel_connect_success(
+        self,
+        connection: Any,
+        request: WsRequest,
+        channel_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            features = await asyncio.to_thread(
+                nanobot_features_action,
+                "enable",
+                {"name": [channel_name]},
+                allow_install=self._allow_feature_package_install(connection, request),
+            )
+        except OptionalFeatureError as exc:
+            features = self._feature_runtime_fallback(
+                nanobot_features_payload(),
+                message=(
+                    f"{channel_name} connected, but enabling channel support failed: "
+                    f"{exc.message}"
+                ),
+            )
+        else:
+            features = await self._apply_nanobot_feature_runtime_change(
+                "enable",
+                {"name": [channel_name]},
+                features,
+            )
+        payload = dict(payload)
+        payload["nanobot_features"] = self._with_restart_state(features, section="runtime")
+        return payload
 
     def _allow_feature_package_install(self, connection: Any, request: WsRequest) -> bool:
         if _is_local_browser_request(connection, request.headers):
@@ -423,3 +1041,23 @@ class WebUISettingsRouter:
         return self._json_response({
             "updateAvailable": update_info,
         })
+
+
+def _pairing_payload(last_action: dict[str, Any] | None = None) -> dict[str, Any]:
+    now = time.time()
+    requests = []
+    for item in list_pending():
+        expires_at = float(item.get("expires_at", 0) or 0)
+        created_at = float(item.get("created_at", 0) or 0)
+        requests.append({
+            "code": str(item.get("code", "")),
+            "channel": str(item.get("channel", "")),
+            "sender_id": str(item.get("sender_id", "")),
+            "created_at_ms": int(created_at * 1000) if created_at else None,
+            "expires_at_ms": int(expires_at * 1000) if expires_at else None,
+            "expires_in_seconds": max(0, int(expires_at - now)) if expires_at else None,
+        })
+    payload: dict[str, Any] = {"requests": requests}
+    if last_action is not None:
+        payload["last_action"] = last_action
+    return payload

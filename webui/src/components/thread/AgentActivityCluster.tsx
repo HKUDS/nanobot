@@ -30,6 +30,7 @@ import {
   type ActivityEvidence,
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { hasRenderableFileDiff } from "@/lib/file-diff";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
@@ -943,10 +944,12 @@ function TraceIconMark({
   fallbackIcon: LucideIcon;
   active: boolean;
 }) {
-  const [faviconIndex, setFaviconIndex] = useState(0);
-  const faviconUrl = trace.host ? faviconUrls(trace.host)[faviconIndex] : undefined;
-
-  useEffect(() => setFaviconIndex(0), [trace.host]);
+  const faviconCandidates = useMemo(() => (trace.host ? faviconUrls(trace.host) : []), [trace.host]);
+  const {
+    logoUrl: faviconUrl,
+    onLogoError: onFaviconError,
+    onLogoLoad: onFaviconLoad,
+  } = useLogoFallback(faviconCandidates);
 
   if (trace.url && trace.host && faviconUrl) {
     return (
@@ -962,7 +965,10 @@ function TraceIconMark({
           src={faviconUrl}
           alt=""
           className="h-3.5 w-3.5 object-contain"
-          onError={() => setFaviconIndex((index) => index + 1)}
+          decoding="async"
+          loading="lazy"
+          onLoad={onFaviconLoad}
+          onError={onFaviconError}
         />
       </span>
     );
@@ -1661,18 +1667,15 @@ function CliRunGroup({
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
   const { t } = useTranslation();
-  const [logoIndex, setLogoIndex] = useState(0);
   const args = formatCliArgs(run);
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : app?.brand_color || "#0891B2";
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const label = t(cliRunLabelKey(run, active), {
     defaultValue: cliRunLabelDefault(run, active),
   });
-
-  useEffect(() => setLogoIndex(0), [app?.logo_url]);
 
   return (
     <ActivityStep
@@ -1699,8 +1702,11 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
             <img
               src={logoUrl}
               alt=""
+              decoding="async"
+              loading="lazy"
               className="h-[78%] w-[78%] object-contain"
-              onError={() => setLogoIndex((index) => index + 1)}
+              onLoad={onLogoLoad}
+              onError={onLogoError}
             />
           ) : app ? (
             cliAppInitials(app).slice(0, 2)
@@ -1772,18 +1778,15 @@ function McpRunGroup({
 
 function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
   const { t } = useTranslation();
-  const [logoIndex, setLogoIndex] = useState(0);
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
   const logoUrls = useMemo(() => logoFallbackUrls(preset?.logo_url), [preset?.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = preset?.display_name || run.displayName;
   const label = t(mcpRunLabelKey(run, active), {
     defaultValue: mcpRunLabelDefault(run, active),
   });
-
-  useEffect(() => setLogoIndex(0), [preset?.logo_url]);
 
   return (
     <ActivityStep
@@ -1810,8 +1813,11 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
             <img
               src={logoUrl}
               alt=""
+              decoding="async"
+              loading="lazy"
               className="h-[78%] w-[78%] object-contain"
-              onError={() => setLogoIndex((index) => index + 1)}
+              onLoad={onLogoLoad}
+              onError={onLogoError}
             />
           ) : preset ? (
             mcpPresetInitials(preset).slice(0, 2)

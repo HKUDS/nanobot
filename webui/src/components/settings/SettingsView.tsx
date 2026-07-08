@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import QRCode from "qrcode";
 import {
   Activity,
   ArrowUpCircle,
@@ -36,8 +37,10 @@ import {
   Layers,
   Loader2,
   LogOut,
+  MessageCircle,
   Mic,
   Moon,
+  Network,
   PauseCircle,
   PlayCircle,
   Plus,
@@ -82,6 +85,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
+  cancelChannelConnect,
+  configureChannel,
   createModelConfiguration,
   disableNanobotFeature,
   enableNanobotFeature,
@@ -95,10 +100,13 @@ import {
   importMcpConfig,
   loginProviderOAuth,
   logoutProviderOAuth,
+  pollChannelConnect,
   runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  startChannelConnect,
+  validateChannel,
   updateAutomation,
   updateImageGenerationSettings,
   updateMcpServerTools,
@@ -122,6 +130,7 @@ import {
 import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
 import {
   logoFallbackUrls,
   providerBrand,
@@ -133,11 +142,14 @@ import { useClient } from "@/providers/ClientProvider";
 import type {
   AutomationsPayload,
   AutomationUpdatePayload,
+  ChannelConnectPayload,
+  ChannelValidationPayload,
   CliAppInfo,
   CliAppsPayload,
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
   McpPresetsPayload,
+  NanobotChannelInstanceInfo,
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
   NetworkSafetySettingsUpdate,
@@ -157,6 +169,7 @@ export type SettingsSectionKey =
   | "image"
   | "voice"
   | "browser"
+  | "channels"
   | "apps"
   | "automations"
   | "skills"
@@ -548,6 +561,7 @@ export function SettingsView({
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
   const [appsQuery, setAppsQuery] = useState("");
+  const [channelsQuery, setChannelsQuery] = useState("");
   const [automationsQuery, setAutomationsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
   const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
@@ -719,7 +733,7 @@ export function SettingsView({
   }, [activeSection, token]);
 
   useEffect(() => {
-    if (activeSection !== "apps") return;
+    if (activeSection !== "apps" && activeSection !== "channels") return;
     let cancelled = false;
     setNanobotFeaturesLoading(true);
     fetchNanobotFeatures(token)
@@ -1359,10 +1373,7 @@ export function SettingsView({
         : await disableNanobotFeature(token, name);
       setNanobotFeatures(payload);
       setNanobotFeaturesMessage(payload.last_action?.message ?? null);
-      if (
-        payload.requires_restart ||
-        payload.features.some((feature) => feature.name === name && feature.requires_restart)
-      ) {
+      if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
     } catch (err) {
@@ -1642,6 +1653,29 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.browser}
           />
         );
+      case "channels":
+        return (
+          <ChannelsSettings
+            token={token}
+            nanobotFeatures={nanobotFeatures}
+            loading={nanobotFeaturesLoading}
+            query={channelsQuery}
+            actionKey={nanobotFeatureAction}
+            chatAppsDocsUrl={settings.docs?.chat_apps_url}
+            showBrandLogos={localPrefs.brandLogos}
+            error={nanobotFeaturesError}
+            requiresRestartPending={pendingRestartSections.runtime}
+            onQueryChange={setChannelsQuery}
+            onAction={handleNanobotFeatureAction}
+            onFeaturesUpdate={setNanobotFeatures}
+            onDismissStatus={() => {
+              setNanobotFeaturesMessage(null);
+              setNanobotFeaturesError(null);
+            }}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
+          />
+        );
       case "apps":
         return (
           <AppsCatalogSettings
@@ -1810,10 +1844,17 @@ export function SettingsView({
         onSave={handleAutomationEdit}
       />
 
-      <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <main
+        className={cn(
+          "min-w-0 flex-1 [scrollbar-gutter:stable]",
+          activeSection === "channels" ? "overflow-hidden" : "overflow-y-auto",
+        )}
+      >
         <div
           className={cn(
-            "mx-auto w-full max-w-[920px] px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            activeSection === "channels" ? "max-w-[1240px] xl:px-10" : "max-w-[920px]",
+            activeSection === "channels" && "flex h-full min-h-0 flex-col",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -1850,7 +1891,12 @@ export function SettingsView({
               </SettingsRow>
             </SettingsGroup>
           ) : settings ? (
-            <div className="space-y-5">
+            <div
+              className={cn(
+                "space-y-5",
+                activeSection === "channels" && "flex min-h-0 flex-1 flex-col overflow-hidden",
+              )}
+            >
               {error ? (
                 <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
@@ -1872,6 +1918,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "voice", icon: Mic, fallback: "Voice" },
   { key: "browser", icon: Globe2, fallback: "Web" },
+  { key: "channels", icon: MessageCircle, fallback: "Channels" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Security" },
 ];
@@ -5040,6 +5087,3280 @@ function formatAutomationInterval(ms: number, locale: string): string {
   return formatAutomationUnit(ms / fallbackSize, fallbackUnit, locale, 1);
 }
 
+function DismissibleStatusMessage({
+  message,
+  isError,
+  onDismiss,
+}: {
+  message: string;
+  isError: boolean;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
+        isError
+          ? "border-destructive/20 bg-destructive/5 text-destructive"
+          : "border-border/55 bg-muted/35 text-muted-foreground",
+      )}
+    >
+      <span className="min-w-0">{message}</span>
+      <button
+        type="button"
+        aria-label={tx("settings.actions.dismiss", "Dismiss")}
+        title={tx("settings.actions.dismiss", "Dismiss")}
+        onClick={onDismiss}
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+          isError
+            ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+            : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
+        )}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function RestartRequiredNotice({
+  message,
+  onRestart,
+  isRestarting,
+}: {
+  message: string;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+      <span>{message}</span>
+      {onRestart ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onRestart}
+          disabled={isRestarting}
+          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
+        >
+          {isRestarting ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+type ChannelFilter = "all" | "on" | "off";
+
+const HIDDEN_WEBUI_CHANNELS = new Set(["mochat"]);
+
+function ChannelsSettings({
+  token,
+  nanobotFeatures,
+  loading,
+  query,
+  actionKey,
+  chatAppsDocsUrl,
+  showBrandLogos,
+  error,
+  requiresRestartPending,
+  onQueryChange,
+  onAction,
+  onFeaturesUpdate,
+  onDismissStatus,
+  onRestart,
+  isRestarting,
+}: {
+  token: string;
+  nanobotFeatures: NanobotFeaturesPayload | null;
+  loading: boolean;
+  query: string;
+  actionKey: string | null;
+  chatAppsDocsUrl?: string;
+  showBrandLogos: boolean;
+  error: string | null;
+  requiresRestartPending: boolean;
+  onQueryChange: (value: string) => void;
+  onAction: (action: "enable" | "disable", name: string) => void;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onDismissStatus: () => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const normalizedQuery = query.trim().toLowerCase();
+  const [filter, setFilter] = useState<ChannelFilter>("all");
+  const allChannels = (nanobotFeatures?.features ?? [])
+    .filter((feature) => feature.type === "channel")
+    .filter((feature) => !HIDDEN_WEBUI_CHANNELS.has(feature.name))
+    .filter((feature) => !normalizedQuery || channelSearchText(feature).includes(normalizedQuery))
+    .sort((left, right) => {
+      const rank = Number(!left.ready) - Number(!right.ready);
+      return rank || channelDisplayName(left).localeCompare(channelDisplayName(right));
+    });
+  const channels = allChannels.filter((feature) => channelMatchesFilter(feature, filter));
+  const [selectedChannelName, setSelectedChannelName] = useState<string | null>(null);
+  const selectedChannel =
+    channels.find((feature) => feature.name === selectedChannelName) ?? channels[0] ?? null;
+  const enabledCount = allChannels.filter((feature) => feature.enabled).length;
+  const offCount = Math.max(0, allChannels.length - enabledCount);
+  const filterOptions: Array<{ value: ChannelFilter; label: string; count: number }> = [
+    { value: "all", label: tx("settings.channels.filterAll", "All"), count: allChannels.length },
+    { value: "on", label: tx("settings.channels.filterOn", "On"), count: enabledCount },
+    { value: "off", label: tx("settings.channels.filterOff", "Off"), count: offCount },
+  ];
+  const statusMessage = error;
+  const statusIsError = true;
+
+  useEffect(() => {
+    if (!channels.length) {
+      if (selectedChannelName !== null) setSelectedChannelName(null);
+      return;
+    }
+    if (!selectedChannelName || !channels.some((feature) => feature.name === selectedChannelName)) {
+      setSelectedChannelName(channels[0].name);
+    }
+  }, [channels, selectedChannelName]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <section className="shrink-0 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
+            {tx(
+              "settings.channels.description",
+              "Connect chat apps, email, and WebUI to nanobot.",
+            )}
+          </p>
+          <div className="flex flex-wrap gap-2 text-[12px] font-medium text-muted-foreground">
+            <span className="rounded-full bg-muted/70 px-2.5 py-1">
+              {t("settings.channels.caption", {
+                enabled: enabledCount,
+                total: allChannels.length,
+                defaultValue: "{{enabled}} enabled · {{total}} channels",
+              })}
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder={tx("settings.channels.searchPlaceholder", "Search channels")}
+              className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
+            />
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-1.5 rounded-[14px] bg-muted/55 p-1">
+            {filterOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setFilter(option.value)}
+                className={cn(
+                  "rounded-[11px] px-3 py-1.5 text-[12px] font-medium transition-colors",
+                  filter === option.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option.label}
+                <span className="ml-1 text-[11px] text-muted-foreground">{option.count}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {statusMessage ? (
+        <div className="mt-3 shrink-0">
+          <DismissibleStatusMessage
+            message={statusMessage}
+            isError={statusIsError}
+            onDismiss={onDismissStatus}
+          />
+        </div>
+      ) : null}
+
+      {requiresRestartPending ? (
+        <div className="mt-3 shrink-0">
+          <RestartRequiredNotice
+            message={tx("settings.channels.restartRequired", "Restart nanobot to apply updated channel support.")}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
+        </div>
+      ) : null}
+
+      <section className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden">
+        {loading && !nanobotFeatures ? (
+          <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            {tx("settings.channels.loading", "Loading Channels...")}
+          </div>
+        ) : channels.length ? (
+          <div className="grid min-h-0 flex-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(400px,460px)]">
+            <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
+              {channels.map((feature) => (
+                <ChannelCatalogRow
+                  key={feature.name}
+                  feature={feature}
+                  selected={selectedChannel?.name === feature.name}
+                  showBrandLogos={showBrandLogos}
+                  onSelect={() => setSelectedChannelName(feature.name)}
+                />
+              ))}
+            </div>
+            {selectedChannel ? (
+              <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
+                <ChannelDetailsPanel
+                  token={token}
+                  feature={selectedChannel}
+                  actionKey={actionKey}
+                  chatAppsDocsUrl={chatAppsDocsUrl}
+                  showBrandLogos={showBrandLogos}
+                  onAction={onAction}
+                  onFeaturesUpdate={onFeaturesUpdate}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 px-3 py-12 text-center text-sm text-muted-foreground">
+            {tx("settings.channels.empty", "No channels match this filter.")}
+          </div>
+        )}
+      </section>
+
+      <div className="shrink-0 pt-2">
+        <ThirdPartyBrandNotice />
+      </div>
+    </div>
+  );
+}
+
+type ChannelPresentation = {
+  displayName: string;
+  description: string;
+  requirements: string;
+  initials: string;
+  color: string;
+  icon?: LucideIcon;
+  logoUrl?: string;
+  setup?: ChannelSetupPresentation;
+};
+
+type ChannelSetupPresentation = {
+  mode?: "webui" | "credentials" | "connect";
+  primaryActionLabel?: string;
+  command?: string;
+  docsUrl?: string;
+  docsLabel?: string;
+  docsLogoUrl?: string;
+  officialUrl?: string;
+  officialLabel?: string;
+  summary?: string;
+  tryIt?: string;
+  steps: string[];
+  configKeys?: string[];
+  fields?: ChannelConfigField[];
+  manualFields?: ChannelConfigField[];
+  actions?: ChannelSetupAction[];
+  presets?: ChannelProviderPreset[];
+};
+
+type ChannelSetupAction = {
+  id: string;
+  label: string;
+  url?: string;
+  copyText?: string;
+  logoUrl?: string;
+};
+
+type ChannelProviderPreset = {
+  id: string;
+  label: string;
+  values: Record<string, string>;
+};
+
+type ChannelConfigField = {
+  key: string;
+  label: string;
+  placeholder?: string;
+  secret?: boolean;
+  optional?: boolean;
+  help?: string;
+  inputType?: "text" | "number";
+  defaultValue?: string;
+  options?: ChannelConfigOption[];
+};
+
+type ChannelConfigOption = {
+  value: string;
+  label: string;
+};
+
+const GROUP_BEHAVIOR_OPTIONS: ChannelConfigOption[] = [
+  { value: "mention", label: "Mention only" },
+  { value: "open", label: "All messages" },
+];
+
+const GROUP_BEHAVIOR_ALLOWLIST_OPTIONS: ChannelConfigOption[] = [
+  ...GROUP_BEHAVIOR_OPTIONS,
+  { value: "allowlist", label: "Allowlist" },
+];
+
+const FEISHU_REGION_OPTIONS: ChannelConfigOption[] = [
+  { value: "feishu", label: "Feishu" },
+  { value: "lark", label: "Lark" },
+];
+
+const BOOLEAN_OPTIONS: ChannelConfigOption[] = [
+  { value: "true", label: "On" },
+  { value: "false", label: "Off" },
+];
+
+const CONSENT_OPTIONS: ChannelConfigOption[] = [
+  { value: "true", label: "Granted" },
+  { value: "false", label: "Not granted" },
+];
+
+const QQ_MESSAGE_FORMAT_OPTIONS: ChannelConfigOption[] = [
+  { value: "plain", label: "Plain text" },
+  { value: "markdown", label: "Markdown" },
+];
+
+const NANOBOT_DOCS_URL = "https://nanobot.wiki/docs/latest";
+const CHAT_APPS_DOCS_URL = `${NANOBOT_DOCS_URL}/getting-started/chat-apps`;
+const SLACK_APPS_URL = "https://api.slack.com/apps";
+const TELEGRAM_BOTFATHER_URL = "https://t.me/BotFather";
+const DISCORD_DEVELOPER_URL = "https://discord.com/developers/applications";
+const GMAIL_APP_PASSWORDS_URL = "https://support.google.com/accounts/answer/185833";
+const FEISHU_OPEN_PLATFORM_URL = "https://open.feishu.cn/app";
+const DINGTALK_OPEN_PLATFORM_URL = "https://open.dingtalk.com/";
+const WECOM_DEVELOPER_URL = "https://developer.work.weixin.qq.com/";
+const QQ_OPEN_PLATFORM_URL = "https://q.qq.com/";
+const MATRIX_CLIENTS_URL = "https://matrix.org/ecosystem/clients/";
+const MATTERMOST_BOT_DOCS_URL = "https://developers.mattermost.com/integrate/reference/bot-accounts/";
+const SIGNAL_CLI_URL = "https://github.com/bbernhard/signal-cli-rest-api";
+const TEAMS_DEVELOPER_URL = "https://dev.teams.microsoft.com/apps";
+const NAPCAT_DOCS_URL = "https://napneko.github.io/";
+
+const SLACK_SOCKET_MODE_MANIFEST = `display_information:
+  name: nanobot
+features:
+  bot_user:
+    display_name: nanobot
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - chat:write
+      - groups:history
+      - im:history
+      - im:write
+settings:
+  socket_mode_enabled: true
+  interactivity:
+    is_enabled: true`;
+
+const EMAIL_PROVIDER_PRESETS: ChannelProviderPreset[] = [
+  {
+    id: "gmail",
+    label: "Gmail",
+    values: {
+      "channels.email.imapHost": "imap.gmail.com",
+      "channels.email.imapPort": "993",
+      "channels.email.smtpHost": "smtp.gmail.com",
+      "channels.email.smtpPort": "587",
+    },
+  },
+  {
+    id: "outlook",
+    label: "Outlook",
+    values: {
+      "channels.email.imapHost": "outlook.office365.com",
+      "channels.email.imapPort": "993",
+      "channels.email.smtpHost": "smtp.office365.com",
+      "channels.email.smtpPort": "587",
+    },
+  },
+  {
+    id: "icloud",
+    label: "iCloud",
+    values: {
+      "channels.email.imapHost": "imap.mail.me.com",
+      "channels.email.imapPort": "993",
+      "channels.email.smtpHost": "smtp.mail.me.com",
+      "channels.email.smtpPort": "587",
+    },
+  },
+  { id: "custom", label: "Custom", values: {} },
+];
+
+function chatAppGuideUrl(sectionId: string): string {
+  return `${CHAT_APPS_DOCS_URL}#${sectionId}`;
+}
+
+function docsUrlWithBase(url: string | undefined, chatAppsDocsUrl?: string): string | undefined {
+  if (!url || !chatAppsDocsUrl) return url;
+  if (!url.startsWith(CHAT_APPS_DOCS_URL)) return url;
+  const anchor = url.includes("#") ? `#${url.split("#").pop()}` : "";
+  return `${chatAppsDocsUrl.replace(/\/$/, "")}${anchor}`;
+}
+
+const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
+  websocket: {
+    displayName: "WebSocket",
+    description: "Use nanobot from the local browser workbench.",
+    requirements: "Local gateway, WebSocket token",
+    initials: "WS",
+    color: "#111827",
+    icon: Network,
+    setup: {
+      mode: "webui",
+      docsUrl: chatAppGuideUrl("websocket"),
+      docsLabel: "Open WebSocket setup",
+      tryIt: "Open the WebUI and send a short message.",
+      summary: "WebSocket is required by the browser workbench and is prepared by the nanobot webui command.",
+      steps: [
+        "Start the workbench with nanobot webui so the local gateway and WebSocket channel are enabled together.",
+        "Keep this channel enabled while using the WebUI.",
+        "Change host, port, or token only from config.json when you need a custom local setup.",
+      ],
+      configKeys: [
+        "channels.websocket.enabled",
+        "channels.websocket.host",
+        "channels.websocket.port",
+        "channels.websocket.token",
+      ],
+    },
+  },
+  telegram: {
+    displayName: "Telegram",
+    description: "Chat with nanobot from Telegram chats.",
+    requirements: "Bot token, allowed users, gateway",
+    initials: "TG",
+    color: "#229ED9",
+    logoUrl: "https://telegram.org/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("telegram"),
+      docsLabel: "Open Telegram setup",
+      officialUrl: TELEGRAM_BOTFATHER_URL,
+      officialLabel: "Open BotFather",
+      tryIt: "Send /start or a short DM to your Telegram bot.",
+      summary: "Enable turns on Telegram support. Telegram still needs a BotFather token before messages can flow.",
+      steps: [
+        "Create a bot with BotFather and copy the bot token.",
+        "Add the token under channels.telegram.token; optionally restrict allowFrom and groupPolicy.",
+        "Restart nanobot, then send the bot a direct message or mention it in a group.",
+      ],
+      configKeys: [
+        "channels.telegram.token",
+        "channels.telegram.allowFrom",
+        "channels.telegram.groupPolicy",
+      ],
+      fields: [
+        {
+          key: "channels.telegram.token",
+          label: "Bot token",
+          placeholder: "123456:ABC...",
+          secret: true,
+          help: "Create it with BotFather.",
+        },
+        {
+          key: "channels.telegram.allowFrom",
+          label: "Allowed users",
+          placeholder: "* or Telegram user IDs",
+          optional: true,
+          help: "Leave empty to use pairing codes.",
+        },
+        {
+          key: "channels.telegram.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "mention",
+          options: GROUP_BEHAVIOR_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  feishu: {
+    displayName: "Feishu",
+    description: "Use nanobot from Feishu chats and groups.",
+    requirements: "Feishu app credentials, event subscription, gateway",
+    initials: "FS",
+    color: "#3370FF",
+    logoUrl: "https://www.feishu.cn/favicon.ico",
+    setup: {
+      mode: "connect",
+      primaryActionLabel: "Connect with Feishu",
+      command: "nanobot channels login feishu",
+      docsUrl: chatAppGuideUrl("feishu"),
+      docsLabel: "Open Feishu setup",
+      officialUrl: FEISHU_OPEN_PLATFORM_URL,
+      officialLabel: "Open Feishu console",
+      tryIt: "Send a DM or mention the Feishu assistant in a group.",
+      summary:
+        "Connect creates or links a Feishu app by QR code, then saves the app credentials for nanobot.",
+      steps: [
+        "Click Connect and scan the QR code with Feishu or Lark on your phone.",
+        "Approve the app connection. nanobot saves the App ID and Secret automatically.",
+        "Send the bot a direct message or mention it in a Feishu group to test it.",
+      ],
+      configKeys: [
+        "channels.feishu.appId",
+        "channels.feishu.appSecret",
+        "channels.feishu.groupPolicy",
+        "channels.feishu.allowFrom",
+      ],
+      manualFields: [
+        {
+          key: "channels.feishu.appId",
+          label: "App ID",
+          placeholder: "cli_xxx",
+        },
+        {
+          key: "channels.feishu.appSecret",
+          label: "App Secret",
+          placeholder: "Leave blank to keep current secret",
+          secret: true,
+          help: "Paste a new App Secret only when rotating credentials.",
+        },
+        {
+          key: "channels.feishu.domain",
+          label: "Region",
+          defaultValue: "feishu",
+          options: FEISHU_REGION_OPTIONS,
+          optional: true,
+        },
+        {
+          key: "channels.feishu.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "mention",
+          options: GROUP_BEHAVIOR_OPTIONS,
+          optional: true,
+        },
+        {
+          key: "channels.feishu.allowFrom",
+          label: "Allowed users",
+          placeholder: "User IDs, comma separated",
+          optional: true,
+        },
+      ],
+    },
+  },
+  slack: {
+    displayName: "Slack",
+    description: "Use nanobot from Slack workspaces.",
+    requirements: "Slack app token, bot token, workspace install",
+    initials: "SL",
+    color: "#4A154B",
+    logoUrl: "https://slack.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("slack"),
+      docsLabel: "Open Slack setup",
+      officialUrl: SLACK_APPS_URL,
+      officialLabel: "Open Slack apps",
+      tryIt: "Mention the Slack app or send it a direct message.",
+      actions: [
+        {
+          id: "slack-manifest",
+          label: "Copy manifest",
+          copyText: SLACK_SOCKET_MODE_MANIFEST,
+          logoUrl: "https://slack.com/favicon.ico",
+        },
+      ],
+      summary: "Slack uses Socket Mode by default, so it needs both app-level and bot-level tokens.",
+      steps: [
+        "Create a Slack app, enable Socket Mode, and install it into the workspace.",
+        "Add the app token and bot token under channels.slack.",
+        "Restart nanobot, then mention the app or send it a direct message in Slack.",
+      ],
+      configKeys: [
+        "channels.slack.appToken",
+        "channels.slack.botToken",
+        "channels.slack.groupPolicy",
+      ],
+      fields: [
+        {
+          key: "channels.slack.appToken",
+          label: "App token",
+          placeholder: "xapp-...",
+          secret: true,
+          help: "Create this from Slack Socket Mode.",
+        },
+        {
+          key: "channels.slack.botToken",
+          label: "Bot token",
+          placeholder: "xoxb-...",
+          secret: true,
+          help: "Use the bot token after installing the Slack app.",
+        },
+        {
+          key: "channels.slack.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "mention",
+          options: GROUP_BEHAVIOR_ALLOWLIST_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  discord: {
+    displayName: "Discord",
+    description: "Use nanobot from Discord servers and DMs.",
+    requirements: "Discord bot token, permissions, gateway",
+    initials: "DC",
+    color: "#5865F2",
+    logoUrl: "https://discord.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("discord"),
+      docsLabel: "Open Discord setup",
+      officialUrl: DISCORD_DEVELOPER_URL,
+      officialLabel: "Open Discord portal",
+      tryIt: "Mention the bot in a server or send it a direct message.",
+      summary: "Enable turns on Discord support. Discord still needs a bot token and server permissions.",
+      steps: [
+        "Create an application and bot in the Discord Developer Portal, then copy the bot token.",
+        "Invite the bot to your server with message read/send and slash command permissions.",
+        "Add the token under channels.discord.token; optionally restrict allowFrom and allowChannels.",
+        "Restart nanobot, then mention the bot or use its slash command in Discord.",
+      ],
+      configKeys: [
+        "channels.discord.token",
+        "channels.discord.allowFrom",
+        "channels.discord.allowChannels",
+        "channels.discord.groupPolicy",
+      ],
+      fields: [
+        {
+          key: "channels.discord.token",
+          label: "Bot token",
+          placeholder: "Discord bot token",
+          secret: true,
+          help: "Create it from the Bot page in Discord Developer Portal.",
+        },
+        {
+          key: "channels.discord.allowChannels",
+          label: "Allowed channels",
+          placeholder: "Channel IDs, comma separated",
+          optional: true,
+          help: "Leave empty to allow any channel the bot can read.",
+        },
+        {
+          key: "channels.discord.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "mention",
+          options: GROUP_BEHAVIOR_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  email: {
+    displayName: "Email",
+    description: "Let nanobot receive and answer email messages.",
+    requirements: "IMAP inbox, SMTP sender, app password, explicit consent",
+    initials: "EM",
+    color: "#64748B",
+    logoUrl: "https://gmail.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("email"),
+      docsLabel: "Open Email setup",
+      officialUrl: GMAIL_APP_PASSWORDS_URL,
+      officialLabel: "Open app password guide",
+      tryIt: "Send a test email to the connected mailbox.",
+      presets: EMAIL_PROVIDER_PRESETS,
+      summary:
+        "Email is IMAP polling plus SMTP replies. Use a dedicated mailbox when possible, and grant explicit consent before nanobot reads mail.",
+      steps: [
+        "Create or choose the mailbox nanobot will own, enable IMAP, and create an app password when the provider requires one.",
+        "Fill IMAP settings for receiving unread mail, then SMTP settings for sending replies.",
+        "Set consentGranted to true only after confirming this mailbox may be processed by nanobot.",
+        "Restart nanobot, then send a test email to the mailbox.",
+      ],
+      configKeys: [
+        "channels.email.consentGranted",
+        "channels.email.imapHost",
+        "channels.email.imapPort",
+        "channels.email.imapUsername",
+        "channels.email.imapPassword",
+        "channels.email.smtpHost",
+        "channels.email.smtpPort",
+        "channels.email.smtpUsername",
+        "channels.email.smtpPassword",
+        "channels.email.fromAddress",
+        "channels.email.allowFrom",
+        "channels.email.verifyDkim",
+        "channels.email.verifySpf",
+      ],
+      fields: [
+        {
+          key: "channels.email.consentGranted",
+          label: "Consent granted",
+          defaultValue: "false",
+          options: CONSENT_OPTIONS,
+          help: "Required safety switch. Leave false until this bot mailbox is intentionally connected.",
+        },
+        {
+          key: "channels.email.imapHost",
+          label: "IMAP host",
+          placeholder: "imap.gmail.com",
+        },
+        {
+          key: "channels.email.imapUsername",
+          label: "IMAP username",
+          placeholder: "bot@example.com",
+        },
+        {
+          key: "channels.email.imapPassword",
+          label: "IMAP password",
+          placeholder: "App password",
+          secret: true,
+          help: "Use an app password when your mail provider requires one.",
+        },
+        {
+          key: "channels.email.smtpHost",
+          label: "SMTP host",
+          placeholder: "smtp.gmail.com",
+        },
+        {
+          key: "channels.email.smtpUsername",
+          label: "SMTP username",
+          placeholder: "bot@example.com",
+        },
+        {
+          key: "channels.email.smtpPassword",
+          label: "SMTP password",
+          placeholder: "App password",
+          secret: true,
+          help: "Usually the same app password used for IMAP.",
+        },
+        {
+          key: "channels.email.imapPort",
+          label: "IMAP port",
+          placeholder: "993",
+          inputType: "number",
+          optional: true,
+        },
+        {
+          key: "channels.email.smtpPort",
+          label: "SMTP port",
+          placeholder: "587",
+          inputType: "number",
+          optional: true,
+        },
+        {
+          key: "channels.email.fromAddress",
+          label: "From address",
+          placeholder: "bot@example.com",
+          optional: true,
+        },
+        {
+          key: "channels.email.pollIntervalSeconds",
+          label: "Poll interval",
+          placeholder: "30",
+          inputType: "number",
+          optional: true,
+        },
+        {
+          key: "channels.email.allowFrom",
+          label: "Allowed senders",
+          placeholder: "Email addresses, comma separated",
+          optional: true,
+          help: "Leave empty to require pairing before a sender can use email.",
+        },
+        {
+          key: "channels.email.verifyDkim",
+          label: "Verify DKIM",
+          defaultValue: "true",
+          options: BOOLEAN_OPTIONS,
+          optional: true,
+        },
+        {
+          key: "channels.email.verifySpf",
+          label: "Verify SPF",
+          defaultValue: "true",
+          options: BOOLEAN_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  matrix: {
+    displayName: "Matrix",
+    description: "Use nanobot from Matrix rooms.",
+    requirements: "Homeserver, account token, room access",
+    initials: "MX",
+    color: "#0DBD8B",
+    logoUrl: "https://matrix.org/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("matrix"),
+      docsLabel: "Open Matrix setup",
+      officialUrl: MATRIX_CLIENTS_URL,
+      officialLabel: "Open Matrix clients",
+      tryIt: "Invite the Matrix account into a room and send a test message.",
+      summary: "Matrix needs a homeserver account and either password login or an access token.",
+      steps: [
+        "Create or choose a Matrix account for nanobot.",
+        "Add homeserver and login credentials under channels.matrix.",
+        "Invite the account into the rooms nanobot should read, then restart nanobot.",
+      ],
+      configKeys: [
+        "channels.matrix.homeserver",
+        "channels.matrix.userId",
+        "channels.matrix.password",
+        "channels.matrix.accessToken",
+      ],
+      fields: [
+        {
+          key: "channels.matrix.homeserver",
+          label: "Homeserver",
+          placeholder: "https://matrix.org",
+        },
+        {
+          key: "channels.matrix.userId",
+          label: "User ID",
+          placeholder: "@nanobot:matrix.org",
+        },
+        {
+          key: "channels.matrix.password",
+          label: "Password",
+          placeholder: "••••••",
+          secret: true,
+          optional: true,
+          help: "Use either password login or access token login.",
+        },
+        {
+          key: "channels.matrix.accessToken",
+          label: "Access token",
+          placeholder: "Optional token login",
+          secret: true,
+          optional: true,
+          help: "Preferred when your Matrix client exposes an access token.",
+        },
+        {
+          key: "channels.matrix.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "open",
+          options: GROUP_BEHAVIOR_ALLOWLIST_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  mattermost: {
+    displayName: "Mattermost",
+    description: "Use nanobot from Mattermost channels and DMs.",
+    requirements: "Mattermost server URL, bot token, channel access",
+    initials: "MM",
+    color: "#1C58D9",
+    logoUrl: "https://mattermost.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("mattermost"),
+      docsLabel: "Open Mattermost setup",
+      officialUrl: MATTERMOST_BOT_DOCS_URL,
+      officialLabel: "Open Mattermost bot guide",
+      tryIt: "Mention the bot in a Mattermost channel or send it a direct message.",
+      summary:
+        "Mattermost connects with a bot account token and listens through the Mattermost WebSocket API.",
+      steps: [
+        "Create or choose a Mattermost bot account and copy its token.",
+        "Add the Mattermost server URL and bot token.",
+        "Invite the bot to the channels it should read.",
+        "Restart nanobot, then mention the bot or send a direct message.",
+      ],
+      configKeys: [
+        "channels.mattermost.serverUrl",
+        "channels.mattermost.token",
+        "channels.mattermost.teamId",
+        "channels.mattermost.groupPolicy",
+      ],
+      fields: [
+        {
+          key: "channels.mattermost.serverUrl",
+          label: "Server URL",
+          placeholder: "https://mattermost.example.com",
+          help: "Use the base URL of your Mattermost workspace.",
+        },
+        {
+          key: "channels.mattermost.token",
+          label: "Bot token",
+          placeholder: "Mattermost bot token",
+          secret: true,
+          help: "Create this from a Mattermost bot account.",
+        },
+        {
+          key: "channels.mattermost.teamId",
+          label: "Team ID",
+          placeholder: "Optional team ID",
+          optional: true,
+        },
+        {
+          key: "channels.mattermost.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "mention",
+          options: GROUP_BEHAVIOR_ALLOWLIST_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  whatsapp: {
+    displayName: "WhatsApp",
+    description: "Use nanobot from WhatsApp conversations.",
+    requirements: "WhatsApp connection setup and gateway",
+    initials: "WA",
+    color: "#25D366",
+    logoUrl: "https://www.whatsapp.com/favicon.ico",
+    setup: {
+      mode: "connect",
+      primaryActionLabel: "Connect WhatsApp",
+      command: "nanobot channels login whatsapp",
+      docsUrl: chatAppGuideUrl("whatsapp"),
+      docsLabel: "Open WhatsApp setup",
+      tryIt: "After terminal login finishes, send a WhatsApp DM to the connected account.",
+      summary: "WhatsApp is connected by scanning a QR code from the account that should run the bot.",
+      steps: [
+        "Start the WhatsApp login flow.",
+        "Scan the QR code with WhatsApp on your phone.",
+        "Restart nanobot after the account state is saved, then send a direct test message.",
+      ],
+      configKeys: [
+        "channels.whatsapp.enabled",
+        "channels.whatsapp.allowFrom",
+        "channels.whatsapp.groupPolicy",
+        "channels.whatsapp.databasePath",
+      ],
+      manualFields: [
+        {
+          key: "channels.whatsapp.allowFrom",
+          label: "Allowed contacts",
+          placeholder: "Phone numbers or WhatsApp IDs",
+          optional: true,
+        },
+        {
+          key: "channels.whatsapp.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "open",
+          options: GROUP_BEHAVIOR_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  dingtalk: {
+    displayName: "DingTalk",
+    description: "Use nanobot from DingTalk groups.",
+    requirements: "DingTalk app credentials and gateway",
+    initials: "DT",
+    color: "#1677FF",
+    logoUrl: "https://www.dingtalk.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("dingtalk"),
+      docsLabel: "Open DingTalk setup",
+      officialUrl: DINGTALK_OPEN_PLATFORM_URL,
+      officialLabel: "Open DingTalk console",
+      tryIt: "Send a test message from the DingTalk group where the app is installed.",
+      summary: "DingTalk needs app credentials from Stream mode.",
+      steps: [
+        "Create or choose a DingTalk app with Stream mode enabled.",
+        "Add Client ID and Client Secret.",
+        "Restart nanobot, then send a test message from DingTalk.",
+      ],
+      configKeys: [
+        "channels.dingtalk.clientId",
+        "channels.dingtalk.clientSecret",
+        "channels.dingtalk.allowFrom",
+      ],
+      fields: [
+        {
+          key: "channels.dingtalk.clientId",
+          label: "Client ID",
+          placeholder: "DingTalk client ID",
+          help: "Copy it from DingTalk app credentials.",
+        },
+        {
+          key: "channels.dingtalk.clientSecret",
+          label: "Client Secret",
+          placeholder: "••••••",
+          secret: true,
+          help: "Copy it from the same DingTalk app credentials page.",
+        },
+        {
+          key: "channels.dingtalk.allowFrom",
+          label: "Allowed users",
+          placeholder: "User IDs, comma separated",
+          optional: true,
+        },
+      ],
+    },
+  },
+  wecom: {
+    displayName: "WeCom",
+    description: "Use nanobot from WeCom work chats.",
+    requirements: "WeCom app credentials and callback settings",
+    initials: "WC",
+    color: "#2F7DFF",
+    logoUrl: "https://work.weixin.qq.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("wecom"),
+      docsLabel: "Open WeCom setup",
+      officialUrl: WECOM_DEVELOPER_URL,
+      officialLabel: "Open WeCom console",
+      tryIt: "Send a test message to the WeCom bot.",
+      summary: "WeCom needs an AI bot ID and secret from the WeCom admin console.",
+      steps: [
+        "Create or choose a WeCom AI Bot.",
+        "Add Bot ID and Secret.",
+        "Restart nanobot, then send a test message from WeCom.",
+      ],
+      configKeys: ["channels.wecom.botId", "channels.wecom.secret", "channels.wecom.allowFrom"],
+      fields: [
+        {
+          key: "channels.wecom.botId",
+          label: "Bot ID",
+          placeholder: "WeCom bot ID",
+          help: "Copy it from the WeCom AI Bot API mode page.",
+        },
+        {
+          key: "channels.wecom.secret",
+          label: "Secret",
+          placeholder: "••••••",
+          secret: true,
+          help: "Keep the WeCom bot secret private.",
+        },
+        {
+          key: "channels.wecom.allowFrom",
+          label: "Allowed users",
+          placeholder: "User IDs, comma separated",
+          optional: true,
+        },
+      ],
+    },
+  },
+  weixin: {
+    displayName: "WeChat",
+    description: "Use nanobot from WeChat conversations.",
+    requirements: "WeChat channel setup and gateway",
+    initials: "WX",
+    color: "#07C160",
+    logoUrl: "https://weixin.qq.com/favicon.ico",
+    setup: {
+      mode: "connect",
+      primaryActionLabel: "Connect WeChat",
+      command: "nanobot channels login weixin",
+      docsUrl: chatAppGuideUrl("wechat"),
+      docsLabel: "Open WeChat setup",
+      tryIt: "After the QR login finishes, send a WeChat DM to the connected account.",
+      summary: "WeChat signs in with a QR code and saves the account state locally.",
+      steps: [
+        "Click Connect and scan the QR code with WeChat.",
+        "Keep the local gateway running while WeChat receives messages.",
+        "Send a direct test message to confirm the account is connected.",
+      ],
+      configKeys: ["channels.weixin.enabled", "channels.weixin.allowFrom", "channels.weixin.token"],
+      manualFields: [
+        {
+          key: "channels.weixin.allowFrom",
+          label: "Allowed users",
+          placeholder: "User IDs, comma separated",
+          optional: true,
+        },
+        {
+          key: "channels.weixin.token",
+          label: "Token",
+          placeholder: "Saved by QR login",
+          secret: true,
+          optional: true,
+        },
+      ],
+    },
+  },
+  qq: {
+    displayName: "QQ",
+    description: "Use nanobot from QQ chats.",
+    requirements: "QQ bot credentials and gateway",
+    initials: "QQ",
+    color: "#12B7F5",
+    logoUrl: "https://im.qq.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("qq"),
+      docsLabel: "Open QQ setup",
+      officialUrl: QQ_OPEN_PLATFORM_URL,
+      officialLabel: "Open QQ bot console",
+      tryIt: "Send a direct or group test message from QQ.",
+      summary: "QQ uses the official bot credentials and a long WebSocket connection.",
+      steps: [
+        "Create or choose a QQ bot application and copy its App ID and Secret.",
+        "Add appId and secret under channels.qq.",
+        "Restart nanobot, then send a direct or group test message from QQ.",
+      ],
+      configKeys: [
+        "channels.qq.appId",
+        "channels.qq.secret",
+        "channels.qq.allowFrom",
+        "channels.qq.msgFormat",
+      ],
+      fields: [
+        {
+          key: "channels.qq.appId",
+          label: "App ID",
+          placeholder: "QQ bot app ID",
+          help: "Copy it from QQ Open Platform.",
+        },
+        {
+          key: "channels.qq.secret",
+          label: "Secret",
+          placeholder: "••••••",
+          secret: true,
+          help: "Save this before leaving the QQ credentials page.",
+        },
+        {
+          key: "channels.qq.allowFrom",
+          label: "Allowed users",
+          placeholder: "Open IDs, comma separated",
+          optional: true,
+        },
+        {
+          key: "channels.qq.msgFormat",
+          label: "Message format",
+          defaultValue: "plain",
+          options: QQ_MESSAGE_FORMAT_OPTIONS,
+          optional: true,
+        },
+      ],
+    },
+  },
+  signal: {
+    displayName: "Signal",
+    description: "Use nanobot from Signal messages.",
+    requirements: "signal-cli HTTP daemon, phone number, allowlist",
+    initials: "SG",
+    color: "#3A76F0",
+    logoUrl: "https://signal.org/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("signal"),
+      docsLabel: "Open Signal setup",
+      officialUrl: SIGNAL_CLI_URL,
+      officialLabel: "Open signal-cli guide",
+      tryIt: "Send a Signal DM to the linked phone number.",
+      summary:
+        "Signal connects through a local signal-cli HTTP daemon. Run the daemon first, then point nanobot at it.",
+      steps: [
+        "Register or link the Signal account in signal-cli.",
+        "Start signal-cli in HTTP daemon mode for the same phone number.",
+        "Set phoneNumber plus daemon host and port under channels.signal.",
+        "Restart nanobot, then send a direct test message from Signal.",
+      ],
+      configKeys: [
+        "channels.signal.phoneNumber",
+        "channels.signal.daemonHost",
+        "channels.signal.daemonPort",
+        "channels.signal.allowFrom",
+        "channels.signal.dm.allowFrom",
+        "channels.signal.group.allowFrom",
+      ],
+      fields: [
+        {
+          key: "channels.signal.phoneNumber",
+          label: "Phone number",
+          placeholder: "+1234567890",
+          help: "Use the Signal number registered with signal-cli.",
+        },
+        {
+          key: "channels.signal.daemonHost",
+          label: "Daemon host",
+          placeholder: "localhost",
+          optional: true,
+        },
+        {
+          key: "channels.signal.daemonPort",
+          label: "Daemon port",
+          placeholder: "8080",
+          inputType: "number",
+          optional: true,
+        },
+        {
+          key: "channels.signal.dm.allowFrom",
+          label: "Allowed DMs",
+          placeholder: "Phone numbers or UUIDs",
+          optional: true,
+        },
+        {
+          key: "channels.signal.group.allowFrom",
+          label: "Allowed groups",
+          placeholder: "Group IDs",
+          optional: true,
+        },
+      ],
+    },
+  },
+  msteams: {
+    displayName: "Microsoft Teams",
+    description: "Use nanobot from Microsoft Teams chats.",
+    requirements: "Azure bot app credentials, public callback endpoint",
+    initials: "MS",
+    color: "#6264A7",
+    logoUrl: "https://www.microsoft.com/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("msteams"),
+      docsLabel: "Open Teams setup",
+      officialUrl: TEAMS_DEVELOPER_URL,
+      officialLabel: "Open Teams developer portal",
+      tryIt: "Install the Teams app and send a test message.",
+      summary:
+        "Teams receives messages through the Bot Framework callback URL. It needs a reachable HTTPS endpoint in production.",
+      steps: [
+        "Create an Azure Bot / Teams app and copy the Microsoft App ID and client secret.",
+        "Set the bot messaging endpoint to the nanobot Teams callback path.",
+        "Add appId and appPassword under channels.msteams.",
+        "Restart nanobot, then install the app in Teams and send a test message.",
+      ],
+      configKeys: [
+        "channels.msteams.appId",
+        "channels.msteams.appPassword",
+        "channels.msteams.tenantId",
+        "channels.msteams.host",
+        "channels.msteams.port",
+        "channels.msteams.path",
+        "channels.msteams.allowFrom",
+        "channels.msteams.validateInboundAuth",
+      ],
+      fields: [
+        {
+          key: "channels.msteams.appId",
+          label: "App ID",
+          placeholder: "Microsoft App ID",
+          help: "Copy it from the Azure Bot or Teams app registration.",
+        },
+        {
+          key: "channels.msteams.appPassword",
+          label: "Client secret",
+          placeholder: "••••••",
+          secret: true,
+          help: "Create a client secret for the Microsoft app.",
+        },
+        {
+          key: "channels.msteams.tenantId",
+          label: "Tenant ID",
+          placeholder: "Optional tenant ID",
+          optional: true,
+        },
+        {
+          key: "channels.msteams.path",
+          label: "Callback path",
+          placeholder: "/api/messages",
+          optional: true,
+        },
+        {
+          key: "channels.msteams.allowFrom",
+          label: "Allowed users",
+          placeholder: "Teams user IDs, comma separated",
+          optional: true,
+        },
+      ],
+    },
+  },
+  napcat: {
+    displayName: "NapCat",
+    description: "Connect nanobot through a NapCat gateway.",
+    requirements: "NapCat WebSocket endpoint, optional access token",
+    initials: "NC",
+    color: "#F97316",
+    logoUrl: "https://napneko.github.io/favicon.ico",
+    setup: {
+      mode: "credentials",
+      docsUrl: chatAppGuideUrl("napcat"),
+      docsLabel: "Open NapCat setup",
+      officialUrl: NAPCAT_DOCS_URL,
+      officialLabel: "Open NapCat docs",
+      tryIt: "Send a QQ test message through NapCat.",
+      summary: "NapCat connects nanobot to QQ through a local or remote OneBot WebSocket endpoint.",
+      steps: [
+        "Start NapCat and enable its OneBot WebSocket server.",
+        "Set wsUrl to the NapCat WebSocket endpoint; add accessToken if NapCat requires one.",
+        "Restart nanobot, then send a QQ test message through NapCat.",
+      ],
+      configKeys: [
+        "channels.napcat.wsUrl",
+        "channels.napcat.accessToken",
+        "channels.napcat.allowFrom",
+        "channels.napcat.groupPolicy",
+        "channels.napcat.groupPolicyOverrides",
+      ],
+      fields: [
+        {
+          key: "channels.napcat.wsUrl",
+          label: "WebSocket URL",
+          placeholder: "ws://127.0.0.1:3001",
+          help: "Use the Forward WebSocket URL from NapCat.",
+        },
+        {
+          key: "channels.napcat.accessToken",
+          label: "Access token",
+          placeholder: "Optional token",
+          secret: true,
+          optional: true,
+        },
+        {
+          key: "channels.napcat.groupPolicy",
+          label: "Group behavior",
+          defaultValue: "mention",
+          options: GROUP_BEHAVIOR_OPTIONS,
+          optional: true,
+        },
+        {
+          key: "channels.napcat.allowFrom",
+          label: "Allowed users",
+          placeholder: "QQ IDs, comma separated",
+          optional: true,
+        },
+      ],
+    },
+  },
+};
+
+function ChannelCatalogRow({
+  feature,
+  selected,
+  showBrandLogos,
+  onSelect,
+}: {
+  feature: NanobotFeatureInfo;
+  selected: boolean;
+  showBrandLogos: boolean;
+  onSelect: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+
+  return (
+    <button
+      type="button"
+      aria-label={t("settings.channels.selectChannel", {
+        name: channelDisplayName(feature),
+        defaultValue: "View {{name}} settings",
+      })}
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
+        selected
+          ? "border-border/55 bg-muted/35"
+          : "border-transparent hover:border-border/45 hover:bg-muted/25",
+      )}
+    >
+      <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
+          {channelDisplayName(feature)}
+        </h3>
+        <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">
+          {channelDescription(feature, t)}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <ChannelStatusBadge>{channelStatusLabel(feature, tx)}</ChannelStatusBadge>
+        <ChevronRight
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            selected && "translate-x-0.5 text-foreground",
+          )}
+          aria-hidden
+        />
+      </div>
+    </button>
+  );
+}
+
+function ChannelDetailsPanel({
+  token,
+  feature,
+  actionKey,
+  chatAppsDocsUrl,
+  showBrandLogos,
+  onAction,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  feature: NanobotFeatureInfo;
+  actionKey: string | null;
+  chatAppsDocsUrl?: string;
+  showBrandLogos: boolean;
+  onAction: (action: "enable" | "disable", name: string) => void;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [connectRequestId, setConnectRequestId] = useState(0);
+  if (feature.name === "feishu") {
+    return (
+      <FeishuAssistantDetailsPanel
+        token={token}
+        feature={feature}
+        showBrandLogos={showBrandLogos}
+        chatAppsDocsUrl={chatAppsDocsUrl}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />
+    );
+  }
+  const enableBusy = actionKey === `enable:${feature.name}`;
+  const disableBusy = actionKey === `disable:${feature.name}`;
+  const missingSupport = feature.enabled && !feature.installed;
+  const requiredWebui = feature.name === "websocket";
+  const channelChecked = requiredWebui || feature.enabled;
+  const channelBusy = enableBusy || disableBusy;
+  const channelToggleDisabled =
+    requiredWebui || channelBusy || (!feature.install_supported && !feature.installed && !feature.enabled);
+  const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
+  const toggleAriaLabel = t("settings.channels.toggleChannel", {
+    name: channelDisplayName(feature),
+    defaultValue: "{{name}} channel",
+  });
+
+  return (
+    <aside className="min-h-full rounded-[20px] border border-border/80 bg-background p-5 shadow-none">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
+              {channelDisplayName(feature)}
+            </h3>
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              {channelDescription(feature, t)}
+            </p>
+            {missingSupport && feature.install_supported ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={enableBusy}
+                onClick={() => onAction("enable", feature.name)}
+                className="mt-2 h-8 rounded-full px-3 text-[12px] font-semibold"
+              >
+                {enableBusy ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                )}
+                {installSupportLabel}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 pt-1">
+          <ChannelStatusBadge>{channelStatusLabel(feature, tx)}</ChannelStatusBadge>
+          {channelBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
+          ) : null}
+          <ToggleButton
+            checked={channelChecked}
+            disabled={channelToggleDisabled}
+            ariaLabel={toggleAriaLabel}
+            label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            onChange={(checked) => {
+              if (
+                feature.name === "weixin"
+                && checked
+                && !channelChecked
+                && feature.configured === false
+              ) {
+                setConnectRequestId((current) => current + 1);
+                return;
+              }
+              onAction(checked ? "enable" : "disable", feature.name);
+            }}
+          />
+        </div>
+      </div>
+
+      <ChannelSetupSurface
+        token={token}
+        feature={feature}
+        setup={channelSetup(feature)}
+        chatAppsDocsUrl={chatAppsDocsUrl}
+        connectRequestId={connectRequestId}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />
+    </aside>
+  );
+}
+
+function FeishuAssistantDetailsPanel({
+  token,
+  feature,
+  showBrandLogos,
+  chatAppsDocsUrl,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  feature: NanobotFeatureInfo;
+  showBrandLogos: boolean;
+  chatAppsDocsUrl?: string;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const instances = feishuFeatureInstances(feature);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
+  const setup = channelSetup(feature);
+  const manualFields = setup.manualFields ?? [];
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
+    feishuInstanceFieldValues(manualFields, selected),
+  );
+  const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
+  const [savingFields, setSavingFields] = useState(false);
+  const connectedAssistantCount = instances.filter((instance) => instance.configured).length;
+
+  useEffect(() => {
+    if (selectedId && !instances.some((instance) => instance.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [instances, selectedId]);
+
+  useEffect(() => {
+    setFieldValues(feishuInstanceFieldValues(manualFields, selected));
+    setVisibleSecrets({});
+  }, [
+    manualFields,
+    selected?.allow_from,
+    selected?.app_id,
+    selected?.domain,
+    selected?.group_policy,
+    selected?.id,
+  ]);
+
+  const toggleInstance = async (instance: NanobotChannelInstanceInfo, checked: boolean) => {
+    setBusyInstanceId(instance.id);
+    setNotice(null);
+    try {
+      const payload = checked
+        ? await enableNanobotFeature(token, "feishu", { instanceId: instance.id })
+        : await disableNanobotFeature(token, "feishu", { instanceId: instance.id });
+      onFeaturesUpdate(payload);
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setBusyInstanceId(null);
+    }
+  };
+
+  const reconnectInstance = async (instance: NanobotChannelInstanceInfo) => {
+    setBusyInstanceId(instance.id);
+    setNotice(null);
+    try {
+      const payload = await enableNanobotFeature(token, "feishu", { instanceId: instance.id });
+      onFeaturesUpdate(payload);
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setBusyInstanceId(null);
+    }
+  };
+
+  const saveSelectedInstanceSettings = async () => {
+    if (!selected) return;
+    setSavingFields(true);
+    setNotice(null);
+    try {
+      const payload = await configureChannel(
+        token,
+        "feishu",
+        channelValuesForSave(manualFields, fieldValues),
+        { enable: selected.enabled, instanceId: selected.id },
+      );
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
+      setNotice(tx("settings.channels.savedSettings", "Saved settings."));
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setSavingFields(false);
+    }
+  };
+
+  return (
+    <aside className="min-h-full rounded-[20px] border border-border/80 bg-background p-5 shadow-none">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
+              {channelDisplayName(feature)}
+            </h3>
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              {feishuAssistantCountLabel(connectedAssistantCount, tx)}
+            </p>
+          </div>
+        </div>
+        <ChannelStatusBadge>{channelStatusLabel(feature, tx)}</ChannelStatusBadge>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {instances.map((instance) => {
+          const expanded = selected?.id === instance.id;
+          return (
+            <article
+              key={instance.id}
+              className={cn(
+                "overflow-hidden rounded-[18px] border transition-colors",
+                expanded
+                  ? "border-border/75 bg-card/95 shadow-sm"
+                  : "border-border/55 bg-background hover:border-border/75 hover:bg-muted/15",
+              )}
+            >
+              <div className="flex items-center gap-3 px-3 py-3">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  onClick={() =>
+                    setSelectedId((current) => (current === instance.id ? null : instance.id))
+                  }
+                  aria-expanded={expanded}
+                >
+                  <FeishuAssistantAvatar
+                    feature={feature}
+                    instance={instance}
+                    showBrandLogos={showBrandLogos}
+                    size="lg"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+                    {feishuInstanceDisplayName(instance)}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                      expanded && "rotate-180",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {busyInstanceId === instance.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
+                  ) : null}
+                  <ToggleButton
+                    checked={instance.enabled}
+                    disabled={busyInstanceId === instance.id || !instance.configured}
+                    ariaLabel={t("settings.channels.toggleFeishuAssistant", {
+                      name: feishuInstanceDisplayName(instance),
+                      defaultValue: "{{name}} assistant",
+                    })}
+                    label={instance.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+                    onChange={(checked) => void toggleInstance(instance, checked)}
+                  />
+                </div>
+              </div>
+
+              {expanded ? (
+                <div className="border-t border-border/60">
+                  <section className="px-4 py-4">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
+                        {maskFeishuAppId(instance.app_id) || tx("settings.channels.noAppId", "No App ID")}
+                      </p>
+                      <FeishuAssistantConnectionBadge instance={instance} />
+                    </div>
+                    {instance.configured ? (
+                      <div className="mt-3 flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                          onClick={() => void reconnectInstance(instance)}
+                          disabled={busyInstanceId === instance.id || !instance.enabled}
+                        >
+                          {busyInstanceId === instance.id ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                          ) : (
+                            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                          )}
+                          {tx("settings.channels.reconnectAssistant", "Reconnect")}
+                        </Button>
+                      </div>
+                    ) : (
+                      <FeishuConnectFlow
+                        key={`connect-${instance.id}`}
+                        token={token}
+                        instanceId={instance.id}
+                        mode="replace"
+                        idleLabel={tx("settings.channels.connect", "Connect")}
+                        onFeaturesUpdate={onFeaturesUpdate}
+                      />
+                    )}
+                  </section>
+                  <ChannelSetupSteps
+                    featureName={feature.name}
+                    steps={setup.steps}
+                    action={
+                      <ChannelGuideLink
+                        feature={feature}
+                        setup={setup}
+                        chatAppsDocsUrl={chatAppsDocsUrl}
+                        compact
+                      />
+                    }
+                  />
+                  {manualFields.length ? (
+                    <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+                      <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
+                        <span className="inline-flex items-center gap-1.5">
+                          {tx("settings.channels.advanced", "Advanced")}
+                          <ChevronDown
+                            className="h-3.5 w-3.5 transition-transform group-open:rotate-180"
+                            aria-hidden
+                          />
+                        </span>
+                      </summary>
+                      <div className="mt-3">
+                        <ChannelCredentialFields
+                          fields={manualFields}
+                          values={fieldValues}
+                          visibleSecrets={visibleSecrets}
+                          onChange={(key, value) =>
+                            setFieldValues((current) => ({ ...current, [key]: value }))
+                          }
+                          onToggleSecret={(key) =>
+                            setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))
+                          }
+                          compact
+                        />
+                        <div className="mt-3 flex justify-end">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                            onClick={() => void saveSelectedInstanceSettings()}
+                            disabled={savingFields}
+                          >
+                            {savingFields ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                            ) : null}
+                            {tx("settings.channels.saveSettings", "Save settings")}
+                          </Button>
+                        </div>
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-[16px] border border-border/70 bg-background px-4 py-4">
+        <div className="text-[13px] font-semibold text-foreground">
+          {tx("settings.channels.createFeishuAssistant", "Create another assistant")}
+        </div>
+        <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
+          {tx(
+            "settings.channels.createFeishuAssistantHint",
+            "Create a separate Feishu bot for another team, space, or workflow.",
+          )}
+        </p>
+        <FeishuConnectFlow
+          key="create-feishu-assistant"
+          token={token}
+          instanceId="default"
+          mode="create"
+          idleLabel={tx("settings.channels.createAssistant", "Create assistant")}
+          onFeaturesUpdate={onFeaturesUpdate}
+        />
+      </div>
+
+      {notice ? (
+        <div className="mt-3 rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+          {notice}
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+function feishuFeatureInstances(feature: NanobotFeatureInfo): NanobotChannelInstanceInfo[] {
+  if (feature.instances?.length) return feature.instances;
+  return [{
+    id: "default",
+    runtime_name: "feishu",
+    name: "nanobot",
+    domain: "feishu",
+    enabled: feature.enabled,
+    configured: Boolean(feature.configured),
+    app_id: "",
+  }];
+}
+
+function feishuAssistantCountLabel(
+  count: number,
+  tx: (key: string, fallback: string) => string,
+): string {
+  if (count === 0) {
+    return tx("settings.channels.noFeishuAssistants", "No assistant connected");
+  }
+  if (count === 1) {
+    return tx("settings.channels.oneFeishuAssistant", "1 assistant connected");
+  }
+  return tx("settings.channels.manyFeishuAssistants", `${count} assistants connected`);
+}
+
+function feishuInstanceDisplayName(instance: NanobotChannelInstanceInfo): string {
+  const displayName = instance.display_name?.trim();
+  if (displayName) return displayName;
+  const localName = instance.name?.trim();
+  if (localName) return localName;
+  return instance.id === "default" ? "nanobot" : "nanobot";
+}
+
+function FeishuAssistantConnectionBadge({ instance }: { instance: NanobotChannelInstanceInfo }) {
+  const { t } = useTranslation();
+  const status = instance.configured ? "connected" : "needs_setup";
+  const label = instance.configured
+    ? t("settings.channels.feishuConfigured", { defaultValue: "Connected" })
+    : t("settings.channels.feishuNotConfigured", { defaultValue: "Needs authorization" });
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+        channelValidationStatusClass(status),
+      )}
+    >
+      {channelValidationStatusIcon(status)}
+      {label}
+    </span>
+  );
+}
+
+function FeishuAssistantAvatar({
+  feature,
+  instance,
+  showBrandLogos,
+  size,
+}: {
+  feature: NanobotFeatureInfo;
+  instance: NanobotChannelInstanceInfo;
+  showBrandLogos: boolean;
+  size: "sm" | "lg";
+}) {
+  const presentation = CHANNEL_PRESENTATION[feature.name];
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const fallbackLogoUrls = useMemo(() => logoFallbackUrls(presentation?.logoUrl), [presentation?.logoUrl]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(fallbackLogoUrls);
+  const remoteAvatarUrl = !avatarFailed ? instance.avatar_url?.trim() : "";
+  const imageUrl = remoteAvatarUrl || (showBrandLogos ? logoUrl : "");
+  const Icon = presentation?.icon;
+  const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
+  const color = presentation?.color ?? "#3370FF";
+  const frameClass = size === "lg" ? "h-11 w-11" : "h-9 w-9";
+  const fallbackImageClass = size === "lg" ? "h-6 w-6" : "h-5 w-5";
+  const iconClass = size === "lg" ? "h-5 w-5" : "h-4 w-4";
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [instance.avatar_url]);
+
+  return (
+    <span
+      className={cn(
+        "grid shrink-0 place-items-center overflow-hidden rounded-full border border-border/45 bg-background text-[10px] font-bold",
+        frameClass,
+      )}
+      style={{ color, boxShadow: `inset 0 0 0 1px ${color}18` }}
+      aria-hidden
+    >
+      {remoteAvatarUrl ? (
+        <img
+          src={remoteAvatarUrl}
+          alt=""
+          decoding="async"
+          loading="lazy"
+          className="h-full w-full object-cover"
+          onError={() => setAvatarFailed(true)}
+        />
+      ) : imageUrl ? (
+        <img
+          src={imageUrl}
+          alt=""
+          decoding="async"
+          loading="lazy"
+          className={cn("object-contain", fallbackImageClass)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
+        />
+      ) : Icon ? (
+        <Icon className={iconClass} strokeWidth={2.25} />
+      ) : (
+        initials
+      )}
+    </span>
+  );
+}
+
+function maskFeishuAppId(appId: string | undefined): string {
+  if (!appId) return "";
+  if (appId.length <= 10) return appId;
+  return `${appId.slice(0, 7)}...${appId.slice(-4)}`;
+}
+
+function feishuInstanceFieldValues(
+  fields: ChannelConfigField[],
+  instance: NanobotChannelInstanceInfo | undefined,
+): Record<string, string> {
+  const values = defaultChannelFieldValues(fields);
+  if (!instance) return values;
+  values["channels.feishu.appId"] = instance.app_id ?? "";
+  values["channels.feishu.appSecret"] = "";
+  values["channels.feishu.domain"] = instance.domain ?? values["channels.feishu.domain"] ?? "feishu";
+  values["channels.feishu.groupPolicy"] =
+    instance.group_policy ?? values["channels.feishu.groupPolicy"] ?? "mention";
+  values["channels.feishu.allowFrom"] = (instance.allow_from ?? []).join(", ");
+  return values;
+}
+
+function ChannelSetupSurface({
+  token,
+  feature,
+  setup,
+  chatAppsDocsUrl,
+  connectRequestId,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  feature: NanobotFeatureInfo;
+  setup: ChannelSetupPresentation;
+  chatAppsDocsUrl?: string;
+  connectRequestId: number;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
+  const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
+  const mode = setup.mode ?? "credentials";
+  const fields = setup.fields ?? [];
+  const requiredFields = fields.filter((field) => !field.optional);
+  const primaryFields = requiredFields.length ? requiredFields : fields.slice(0, 1);
+  const optionalFields = fields.filter((field) => field.optional);
+  const manualFields = setup.manualFields ?? [];
+  const advancedFields = mode === "connect" ? manualFields : optionalFields;
+  const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
+  const hasAdvanced = advancedFields.length > 0;
+  const requirements = channelRequirements(feature, t);
+  const summary = t(`settings.channels.items.${feature.name}.setup.summary`, {
+    defaultValue:
+      setup.summary ??
+      tx(
+        "settings.channels.setupSummary",
+        "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
+      ),
+  });
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
+    defaultChannelFieldValues(editableFields),
+  );
+
+  useEffect(() => {
+    setNotice(null);
+    setVisibleSecrets({});
+    setSaving(false);
+    setValidating(false);
+    setValidation(null);
+    setTouchedFields(new Set());
+    setFieldValues(defaultChannelFieldValues(editableFields));
+  }, [feature.name]);
+
+  const toggleSecret = (key: string) => {
+    setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const setFieldValue = (key: string, value: string) => {
+    setFieldValues((current) => ({ ...current, [key]: value }));
+    setTouchedFields((current) => new Set(current).add(key));
+  };
+
+  const applyPreset = (preset: ChannelProviderPreset) => {
+    setFieldValues((current) => ({ ...current, ...preset.values }));
+    setTouchedFields((current) => {
+      const next = new Set(current);
+      for (const key of Object.keys(preset.values)) next.add(key);
+      return next;
+    });
+  };
+
+  const copyCommand = () => {
+    if (!setup.command) return;
+    void copyTextToClipboard(setup.command).then((ok) => {
+      setNotice(
+        ok
+          ? tx("settings.channels.commandCopied", "Command copied.")
+          : tx("settings.channels.commandCopyFailed", "Could not copy command."),
+      );
+    });
+  };
+
+  const saveCredentialSettings = async () => {
+    setSaving(true);
+    setValidating(true);
+    setNotice(null);
+    const values = channelValuesForSubmit(fields, fieldValues, touchedFields);
+    try {
+      const validationPayload = await validateChannel(token, feature.name, values);
+      setValidation(validationPayload);
+      if (!validationPayload.can_enable) {
+        setNotice(
+          validationPayload.message
+            ?? tx("settings.channels.validationFailed", "Check the required setup before enabling."),
+        );
+        return;
+      }
+      const payload = await configureChannel(
+        token,
+        feature.name,
+        values,
+        { enable: true },
+      );
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
+      setNotice(tx("settings.channels.checkedAndEnabled", "Checked and enabled."));
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setSaving(false);
+      setValidating(false);
+    }
+  };
+
+  const checkCurrentSettings = async () => {
+    setValidating(true);
+    setNotice(null);
+    try {
+      const payload = await validateChannel(
+        token,
+        feature.name,
+        channelValuesForSubmit(fields, fieldValues, touchedFields),
+      );
+      setValidation(payload);
+      if (payload.message) setNotice(payload.message);
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const primaryActionLabel = feature.enabled
+    ? tx("settings.channels.checkConnection", "Check connection")
+    : tx("settings.channels.checkAndEnable", "Check and enable");
+
+  return (
+    <div className="mt-5 overflow-hidden rounded-[16px] border border-border/70 bg-background shadow-none">
+      <section className="px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-foreground">
+              {tx("settings.channels.requiredSetup", "Required setup")}
+            </div>
+            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{requirements}</p>
+          </div>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <ChannelValidationBadge validation={validation} validating={validating} feature={feature} />
+            {mode === "webui" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                {tx("settings.channels.managedByWebui", "Managed by WebUI")}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <p className="mt-3 text-[12.5px] leading-5 text-muted-foreground">{summary}</p>
+        <ChannelValidationDetails validation={validation} />
+        <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
+        <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
+
+        {mode === "connect" && feature.name === "feishu" ? (
+          <FeishuConnectFlow
+            token={token}
+            connectRequestId={connectRequestId}
+            onFeaturesUpdate={onFeaturesUpdate}
+          />
+        ) : mode === "connect" && feature.name === "weixin" ? (
+          <WeixinConnectFlow
+            token={token}
+            idleLabel={t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
+              defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
+            })}
+            connectRequestId={connectRequestId}
+            onFeaturesUpdate={onFeaturesUpdate}
+          />
+        ) : mode === "connect" ? (
+          <>
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                onClick={() =>
+                  setNotice(
+                    tx(
+                      "settings.channels.connectPreview",
+                      "The in-browser connect flow is next. For now, run the command below.",
+                    ),
+                  )
+                }
+              >
+                {t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
+                  defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
+                })}
+              </Button>
+              {setup.command ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                  onClick={copyCommand}
+                >
+                  <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.channels.copyCommand", "Copy command")}
+                </Button>
+              ) : null}
+            </div>
+            {setup.command ? (
+              <code className="mt-3 block rounded-[10px] border border-border/50 bg-muted/45 px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground">
+                {setup.command}
+              </code>
+            ) : null}
+          </>
+        ) : mode === "credentials" ? (
+          <>
+            {setup.presets?.length ? (
+              <ChannelProviderPresets
+                featureName={feature.name}
+                presets={setup.presets}
+                onApply={applyPreset}
+              />
+            ) : null}
+            {primaryFields.length ? (
+              <ChannelCredentialFields
+                fields={primaryFields}
+                values={fieldValues}
+                visibleSecrets={visibleSecrets}
+                onChange={setFieldValue}
+                onToggleSecret={toggleSecret}
+              />
+            ) : null}
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                onClick={() => void saveCredentialSettings()}
+                disabled={saving}
+              >
+                {saving || validating ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : null}
+                {primaryActionLabel}
+              </Button>
+              {feature.configured || validation ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                  onClick={() => void checkCurrentSettings()}
+                  disabled={saving || validating}
+                >
+                  {tx("settings.channels.checkOnly", "Check only")}
+                </Button>
+              ) : null}
+            </div>
+          </>
+        ) : null}
+      </section>
+
+      {notice ? (
+        <div
+          role="status"
+          className="border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground"
+        >
+          {notice}
+        </div>
+      ) : null}
+
+      {setup.steps.length ? (
+        <ChannelSetupSteps featureName={feature.name} steps={setup.steps} tryIt={setup.tryIt} />
+      ) : null}
+
+      {validation?.checks.length ? <ChannelValidationChecks validation={validation} /> : null}
+
+      {hasAdvanced ? (
+        <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+          <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              {tx("settings.channels.advanced", "Advanced")}
+              <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden />
+            </span>
+          </summary>
+          {advancedFields.length ? (
+            <div className="mt-3">
+              <ChannelCredentialFields
+                fields={advancedFields}
+                values={fieldValues}
+                visibleSecrets={visibleSecrets}
+                onChange={setFieldValue}
+                onToggleSecret={toggleSecret}
+                compact
+              />
+            </div>
+          ) : null}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+type ChannelQrConnectLabels = {
+  qrAlt: string;
+  scanTitle: string;
+  scanDescription: string;
+  waiting: string;
+  connected: string;
+  stopped: string;
+  connecting: string;
+  scanAgain: string;
+  connect: string;
+};
+
+function ChannelQrConnectFlow({
+  token,
+  channelName,
+  startOptions = {},
+  idleLabel,
+  connectRequestId,
+  labels,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  channelName: "feishu" | "weixin";
+  startOptions?: {
+    domain?: "feishu" | "lark";
+    instanceId?: string;
+    mode?: "replace" | "create";
+    force?: boolean;
+  };
+  idleLabel?: string;
+  connectRequestId?: number;
+  labels: ChannelQrConnectLabels;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [connect, setConnect] = useState<ChannelConnectPayload | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [handledRequestId, setHandledRequestId] = useState(0);
+  const startDomain = startOptions.domain;
+  const startInstanceId = startOptions.instanceId;
+  const startMode = startOptions.mode;
+  const startForce = startOptions.force;
+
+  const pending = connect?.status === "pending";
+  const succeeded = connect?.status === "succeeded";
+  const canStart = !pending && !busy;
+
+  useEffect(() => {
+    if (!connect?.qr_url) {
+      setQrDataUrl("");
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(connect.qr_url, {
+      width: 184,
+      margin: 1,
+      color: { dark: "#111827", light: "#ffffff" },
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connect?.qr_url]);
+
+  useEffect(() => {
+    if (!connect?.session_id || connect.status !== "pending") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const payload = await pollChannelConnect(token, channelName, connect.session_id);
+        if (cancelled) return;
+        setConnect((current) => ({
+          ...(current ?? payload),
+          ...payload,
+          qr_url: payload.qr_url ?? current?.qr_url,
+        }));
+        if (payload.nanobot_features) {
+          onFeaturesUpdate(payload.nanobot_features);
+        }
+        if (payload.status !== "pending") {
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      }
+    };
+    const initial = window.setTimeout(() => void poll(), 900);
+    const interval = window.setInterval(
+      () => void poll(),
+      Math.max(2500, connect.interval_ms ?? 5000),
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  }, [channelName, connect?.interval_ms, connect?.session_id, connect?.status, onFeaturesUpdate, token]);
+
+  const start = useCallback(async (force = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = await startChannelConnect(token, channelName, {
+        domain: startDomain,
+        instanceId: startInstanceId,
+        mode: startMode,
+        force: force || startForce,
+      });
+      setConnect(payload);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [channelName, startDomain, startForce, startInstanceId, startMode, token]);
+
+  useEffect(() => {
+    if (!connectRequestId || connectRequestId === handledRequestId) return;
+    setHandledRequestId(connectRequestId);
+    void start();
+  }, [connectRequestId, handledRequestId, start]);
+
+  const cancel = async () => {
+    if (!connect?.session_id) {
+      setConnect(null);
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload = await cancelChannelConnect(token, channelName, connect.session_id);
+      setConnect(payload);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-3">
+      {pending ? (
+        <div className="grid gap-4 rounded-[14px] border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
+          <div className="grid h-[196px] w-[196px] place-items-center rounded-[14px] border border-border/60 bg-background">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={labels.qrAlt}
+                className="h-[184px] w-[184px]"
+              />
+            ) : (
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+            )}
+          </div>
+          <div className="flex min-w-0 flex-col justify-center">
+            <div className="text-[13px] font-semibold text-foreground">
+              {labels.scanTitle}
+            </div>
+            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
+              {labels.scanDescription}
+            </p>
+            <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              {labels.waiting}
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                onClick={() => void cancel()}
+                disabled={busy}
+              >
+                {tx("settings.actions.cancel", "Cancel")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {succeeded ? (
+        <div className="flex items-center gap-2 rounded-[12px] border border-emerald-500/20 px-3 py-2 text-[12px] font-medium text-emerald-700 dark:text-emerald-200">
+          <Check className="h-3.5 w-3.5" aria-hidden />
+          {connect.message ?? labels.connected}
+        </div>
+      ) : null}
+
+      {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
+        <div className="rounded-[12px] border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+          {connect.message || labels.stopped}
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+          onClick={() => void start(channelName === "weixin" && succeeded)}
+          disabled={!canStart}
+        >
+          {busy ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : succeeded ? (
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Network className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {pending
+            ? labels.connecting
+            : succeeded
+              ? labels.scanAgain
+              : idleLabel ?? labels.connect}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FeishuConnectFlow({
+  token,
+  instanceId = "default",
+  mode = "replace",
+  idleLabel,
+  connectRequestId,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  instanceId?: string;
+  mode?: "replace" | "create";
+  idleLabel?: string;
+  connectRequestId?: number;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  return (
+    <ChannelQrConnectFlow
+      token={token}
+      channelName="feishu"
+      startOptions={{ domain: "feishu", instanceId, mode }}
+      idleLabel={idleLabel}
+      connectRequestId={connectRequestId}
+      onFeaturesUpdate={onFeaturesUpdate}
+      labels={{
+        qrAlt: tx("settings.channels.feishuQrAlt", "Feishu connection QR code"),
+        scanTitle: tx("settings.channels.feishuScanTitle", "Scan with Feishu"),
+        scanDescription: tx(
+          "settings.channels.feishuScanDescription",
+          "Use Feishu or Lark on your phone to scan this code. nanobot will finish setup automatically after authorization.",
+        ),
+        waiting: tx("settings.channels.feishuWaiting", "Waiting for authorization..."),
+        connected: tx("settings.channels.feishuConnected", "Feishu is connected."),
+        stopped: tx("settings.channels.feishuConnectStopped", "Connection stopped."),
+        connecting: tx("settings.channels.feishuConnecting", "Connecting..."),
+        scanAgain: tx("settings.channels.scanAgain", "Scan again"),
+        connect: tx("settings.channels.connect", "Connect"),
+      }}
+    />
+  );
+}
+
+function WeixinConnectFlow({
+  token,
+  idleLabel,
+  connectRequestId,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  idleLabel?: string;
+  connectRequestId?: number;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  return (
+    <ChannelQrConnectFlow
+      token={token}
+      channelName="weixin"
+      idleLabel={idleLabel}
+      connectRequestId={connectRequestId}
+      onFeaturesUpdate={onFeaturesUpdate}
+      labels={{
+        qrAlt: tx("settings.channels.weixinQrAlt", "WeChat login QR code"),
+        scanTitle: tx("settings.channels.weixinScanTitle", "Scan with WeChat"),
+        scanDescription: tx(
+          "settings.channels.weixinScanDescription",
+          "Use WeChat on your phone to scan this code. nanobot saves the account state locally after login.",
+        ),
+        waiting: tx("settings.channels.weixinWaiting", "Waiting for WeChat scan..."),
+        connected: tx("settings.channels.weixinConnected", "WeChat is connected."),
+        stopped: tx("settings.channels.weixinConnectStopped", "WeChat login stopped."),
+        connecting: tx("settings.channels.weixinConnecting", "Connecting..."),
+        scanAgain: tx("settings.channels.scanAgain", "Scan again"),
+        connect: tx("settings.channels.connect", "Connect"),
+      }}
+    />
+  );
+}
+
+function ChannelGuideLink({
+  feature,
+  setup,
+  chatAppsDocsUrl,
+  compact = false,
+}: {
+  feature: NanobotFeatureInfo;
+  setup: ChannelSetupPresentation;
+  chatAppsDocsUrl?: string;
+  compact?: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const presentation = CHANNEL_PRESENTATION[feature.name];
+  const logoUrls = useMemo(
+    () => logoFallbackUrls(setup.docsLogoUrl ?? presentation?.logoUrl),
+    [presentation?.logoUrl, setup.docsLogoUrl],
+  );
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const Icon = presentation?.icon;
+  const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
+  const color = presentation?.color ?? "#6B7280";
+  const docsUrl = docsUrlWithBase(setup.docsUrl, chatAppsDocsUrl);
+
+  if (!docsUrl) return null;
+
+  return (
+    <a
+      href={docsUrl}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(
+        "inline-flex max-w-full items-center gap-2 border border-border/65 bg-background/90 font-semibold text-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/45",
+        compact
+          ? "shrink-0 rounded-full py-1 pl-1 pr-2.5 text-[11.5px]"
+          : "mt-3 rounded-[12px] py-1.5 pl-1.5 pr-3 text-[12px]",
+      )}
+    >
+      <span
+        className={cn(
+          "grid shrink-0 place-items-center overflow-hidden border border-border/45 bg-background font-bold",
+          compact ? "h-5 w-5 rounded-full text-[9px]" : "h-6 w-6 rounded-[7px] text-[10px]",
+        )}
+        style={{ color, boxShadow: `inset 0 0 0 1px ${color}16` }}
+        aria-hidden
+      >
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt=""
+            decoding="async"
+            loading="lazy"
+            className={cn("object-contain", compact ? "h-3.5 w-3.5" : "h-4 w-4")}
+            onLoad={onLogoLoad}
+            onError={onLogoError}
+          />
+        ) : Icon ? (
+          <Icon className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} strokeWidth={2.25} />
+        ) : (
+          initials
+        )}
+      </span>
+      <span className="truncate">
+        {t(`settings.channels.items.${feature.name}.setup.docsLabel`, {
+          defaultValue: setup.docsLabel ?? tx("settings.channels.officialGuide", "Official guide"),
+        })}
+      </span>
+      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+    </a>
+  );
+}
+
+function ChannelSetupLinks({
+  feature,
+  setup,
+  chatAppsDocsUrl,
+}: {
+  feature: NanobotFeatureInfo;
+  setup: ChannelSetupPresentation;
+  chatAppsDocsUrl?: string;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      <ChannelOfficialLink feature={feature} setup={setup} />
+      <ChannelGuideLink feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} compact />
+    </div>
+  );
+}
+
+function ChannelOfficialLink({
+  feature,
+  setup,
+}: {
+  feature: NanobotFeatureInfo;
+  setup: ChannelSetupPresentation;
+}) {
+  const presentation = CHANNEL_PRESENTATION[feature.name];
+  const logoUrls = useMemo(
+    () => logoFallbackUrls(setup.docsLogoUrl ?? presentation?.logoUrl),
+    [presentation?.logoUrl, setup.docsLogoUrl],
+  );
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const Icon = presentation?.icon;
+  const color = presentation?.color ?? "#6B7280";
+  const label = setup.officialLabel;
+  if (!setup.officialUrl || !label) return null;
+  return (
+    <a
+      href={setup.officialUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full border border-border/65 bg-background/90 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/45"
+    >
+      <span
+        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full border border-border/45 bg-background"
+        style={{ color, boxShadow: `inset 0 0 0 1px ${color}16` }}
+        aria-hidden
+      >
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt=""
+            decoding="async"
+            loading="lazy"
+            className="h-3.5 w-3.5 object-contain"
+            onLoad={onLogoLoad}
+            onError={onLogoError}
+          />
+        ) : Icon ? (
+          <Icon className="h-3 w-3" strokeWidth={2.25} />
+        ) : null}
+      </span>
+      <span className="truncate">{label}</span>
+      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+    </a>
+  );
+}
+
+function ChannelSetupActions({
+  feature,
+  setup,
+  onNotice,
+}: {
+  feature: NanobotFeatureInfo;
+  setup: ChannelSetupPresentation;
+  onNotice: (message: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  if (!setup.actions?.length) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {setup.actions.map((action) => (
+        <Button
+          key={action.id}
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+          onClick={() => {
+            if (action.copyText) {
+              void copyTextToClipboard(action.copyText).then((ok) =>
+                onNotice(
+                  ok
+                    ? t("settings.channels.helperCopied", {
+                      name: action.label,
+                      defaultValue: "{{name}} copied.",
+                    })
+                    : t("settings.channels.helperCopyFailed", {
+                      name: action.label,
+                      defaultValue: "Could not copy {{name}}.",
+                    }),
+                ),
+              );
+            }
+          }}
+        >
+          {action.copyText ? <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : null}
+          {action.label}
+        </Button>
+      ))}
+      <span className="sr-only">{channelDisplayName(feature)}</span>
+    </div>
+  );
+}
+
+function ChannelProviderPresets({
+  featureName,
+  presets,
+  onApply,
+}: {
+  featureName: string;
+  presets: ChannelProviderPreset[];
+  onApply: (preset: ChannelProviderPreset) => void;
+}) {
+  const { t } = useTranslation();
+  const [selected, setSelected] = useState("");
+  if (!presets.length) return null;
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-[11px] font-medium text-foreground/85">
+        {t(`settings.channels.items.${featureName}.providerPreset`, {
+          defaultValue: "Provider",
+        })}
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={t(`settings.channels.items.${featureName}.providerPreset`, {
+          defaultValue: "Provider",
+        })}
+        className="grid rounded-[10px] bg-muted/75 p-0.5 text-[12px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)]"
+        style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
+      >
+        {presets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            role="radio"
+            aria-checked={selected === preset.id}
+            onClick={() => {
+              setSelected(preset.id);
+              onApply(preset);
+            }}
+            className={cn(
+              "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
+              selected === preset.id
+                && "bg-background text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.10),inset_0_0_0_1px_rgba(15,23,42,0.055)]",
+            )}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChannelValidationBadge({
+  validation,
+  validating,
+  feature,
+}: {
+  validation: ChannelValidationPayload | null;
+  validating: boolean;
+  feature: NanobotFeatureInfo;
+}) {
+  const { t } = useTranslation();
+  const status = validation?.status ?? (feature.enabled ? "configured" : "needs_setup");
+  const label = validating
+    ? t("settings.channels.checking", { defaultValue: "Checking..." })
+    : channelValidationStatusLabel(status, t);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+        channelValidationStatusClass(status),
+      )}
+    >
+      {validating ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        channelValidationStatusIcon(status)
+      )}
+      {label}
+    </span>
+  );
+}
+
+function ChannelValidationDetails({ validation }: { validation: ChannelValidationPayload | null }) {
+  const message = validation?.message;
+  if (!validation?.identity?.name && !message) return null;
+  return (
+    <div className="mt-2 truncate text-[11.5px] text-muted-foreground">
+      {validation?.identity?.name
+        ? validation.identity.workspace
+          ? `${validation.identity.name} · ${validation.identity.workspace}`
+          : validation.identity.name
+        : message}
+    </div>
+  );
+}
+
+function ChannelValidationChecks({ validation }: { validation: ChannelValidationPayload }) {
+  if (!validation.checks.length) return null;
+  return (
+    <div className="border-t border-border/60 px-4 py-4">
+      <div className="mb-2 text-[12px] font-semibold text-foreground">Connection checks</div>
+      <div className="space-y-2">
+        {validation.checks.slice(0, 6).map((check) => (
+          <div key={check.id} className="flex gap-2 text-[12px] leading-5">
+            <span className={cn("mt-0.5", channelValidationCheckIconClass(check.status))}>
+              {channelValidationCheckIcon(check.status)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-foreground/85">{check.label}</div>
+              {check.message ? (
+                <div className="text-muted-foreground">{check.message}</div>
+              ) : null}
+              {check.action_url ? (
+                <a
+                  href={check.action_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4"
+                >
+                  Open
+                  <ExternalLink className="h-3 w-3" aria-hidden />
+                </a>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChannelSetupSteps({
+  featureName,
+  steps,
+  action,
+  tryIt,
+}: {
+  featureName: string;
+  steps: string[];
+  action?: ReactNode;
+  tryIt?: string;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  return (
+    <div className="border-t border-border/60 px-4 py-4 text-[12.5px] leading-5 text-muted-foreground">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-[12px] font-semibold text-foreground">
+          {tx("settings.channels.setupSteps", "Next steps")}
+        </div>
+        {action}
+      </div>
+      <ol className="space-y-1.5">
+        {steps.map((step, index) => (
+          <li key={step} className="flex gap-2">
+            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] font-semibold text-muted-foreground shadow-sm">
+              {index + 1}
+            </span>
+            <span>
+              {t(`settings.channels.items.${featureName}.setup.steps.${index}`, {
+                defaultValue: step,
+              })}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {tryIt ? (
+        <div className="mt-3 rounded-[12px] border border-border/55 bg-background px-3 py-2 text-[12px] text-muted-foreground">
+          <span className="font-medium text-foreground">
+            {tx("settings.channels.tryIt", "Try it")}
+          </span>
+          <span className="ml-2">
+            {t(`settings.channels.items.${featureName}.setup.tryIt`, { defaultValue: tryIt })}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {
+  return values[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "";
+}
+
+function defaultChannelFieldValues(fields: ChannelConfigField[]): Record<string, string> {
+  return Object.fromEntries(
+    fields.map((field) => [field.key, field.defaultValue ?? field.options?.[0]?.value ?? ""]),
+  );
+}
+
+function channelValuesForSave(
+  fields: ChannelConfigField[],
+  values: Record<string, string>,
+): Record<string, string> {
+  const payload: Record<string, string> = {};
+  for (const field of fields) {
+    const value = channelFieldValue(field, values);
+    if (field.secret && !value.trim()) continue;
+    payload[field.key] = value;
+  }
+  return payload;
+}
+
+function channelValuesForSubmit(
+  fields: ChannelConfigField[],
+  values: Record<string, string>,
+  touchedFields: Set<string>,
+): Record<string, string> {
+  const payload: Record<string, string> = {};
+  for (const field of fields) {
+    const touched = touchedFields.has(field.key);
+    const value = channelFieldValue(field, values);
+    if (field.secret && !value.trim()) continue;
+    if (!touched && !value.trim()) continue;
+    if (!touched && field.options?.length) continue;
+    payload[field.key] = value;
+  }
+  return payload;
+}
+
+function channelValidationStatusLabel(
+  status: string,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  const labels: Record<string, string> = {
+    connected: "Connected",
+    configured: "Configured manually",
+    needs_setup: "Needs setup",
+    invalid: "Invalid",
+    unsupported: "Manual setup",
+  };
+  return t(`settings.channels.validation.${status}`, {
+    defaultValue: labels[status] ?? "Checked",
+  });
+}
+
+function channelValidationStatusClass(status: string): string {
+  if (status === "connected") {
+    return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200";
+  }
+  if (status === "configured") {
+    return "bg-blue-500/10 text-blue-700 dark:text-blue-200";
+  }
+  if (status === "invalid") {
+    return "bg-destructive/10 text-destructive";
+  }
+  return "bg-muted text-muted-foreground";
+}
+
+function channelValidationStatusIcon(status: string): ReactNode {
+  if (status === "connected" || status === "configured") {
+    return <Check className="h-3.5 w-3.5" aria-hidden />;
+  }
+  if (status === "invalid") {
+    return <X className="h-3.5 w-3.5" aria-hidden />;
+  }
+  return <CircleAlert className="h-3.5 w-3.5" aria-hidden />;
+}
+
+function channelValidationCheckIcon(status: string): ReactNode {
+  if (status === "pass") return <Check className="h-3.5 w-3.5" aria-hidden />;
+  if (status === "fail") return <X className="h-3.5 w-3.5" aria-hidden />;
+  if (status === "warn") return <CircleAlert className="h-3.5 w-3.5" aria-hidden />;
+  return <CircleAlert className="h-3.5 w-3.5" aria-hidden />;
+}
+
+function channelValidationCheckIconClass(status: string): string {
+  if (status === "pass") return "text-emerald-600";
+  if (status === "fail") return "text-destructive";
+  if (status === "warn") return "text-amber-600";
+  return "text-muted-foreground";
+}
+
+function ChannelCredentialFields({
+  fields,
+  values,
+  visibleSecrets,
+  onChange,
+  onToggleSecret,
+  compact = false,
+}: {
+  fields: ChannelConfigField[];
+  values: Record<string, string>;
+  visibleSecrets: Record<string, boolean>;
+  onChange: (key: string, value: string) => void;
+  onToggleSecret: (key: string) => void;
+  compact?: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  return (
+    <div className={cn(compact ? "space-y-2.5" : "mt-3 space-y-2.5")}>
+      {fields.map((field) => {
+        const visible = Boolean(visibleSecrets[field.key]);
+        const value = values[field.key] ?? "";
+        const showSecretToggle = Boolean(field.secret && value.trim());
+        const inputType = field.secret && !visible ? "password" : field.inputType ?? "text";
+        const selectedOption = channelFieldValue(field, values);
+        const header = (
+          <span className="flex items-center justify-between gap-2 text-[11px] font-medium text-foreground/85">
+            <span>{field.label}</span>
+            {field.optional && !compact ? (
+              <span className="font-normal text-muted-foreground">
+                {tx("settings.channels.optional", "Optional")}
+              </span>
+            ) : null}
+          </span>
+        );
+        const help = field.help ? (
+          <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+            {field.help}
+          </span>
+        ) : null;
+        if (field.options?.length) {
+          return (
+            <div key={field.key} className="block">
+              {header}
+              <span
+                role="radiogroup"
+                aria-label={field.label}
+                className="mt-1 grid rounded-[10px] bg-muted/75 p-0.5 text-[12px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)]"
+                style={{ gridTemplateColumns: `repeat(${field.options.length}, minmax(0, 1fr))` }}
+              >
+                {field.options.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selectedOption === option.value}
+                    onClick={() => onChange(field.key, option.value)}
+                    className={cn(
+                      "min-h-8 rounded-[8px] px-2 py-1.5 transition-colors hover:text-foreground",
+                      selectedOption === option.value
+                        && "bg-background text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.10),inset_0_0_0_1px_rgba(15,23,42,0.055)]",
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </span>
+              {help}
+            </div>
+          );
+        }
+        return (
+          <label key={field.key} className="block">
+            {header}
+            <span className="relative mt-1 block">
+              <Input
+                aria-label={field.label}
+                type={inputType}
+                inputMode={field.inputType === "number" ? "numeric" : undefined}
+                placeholder={field.placeholder}
+                value={values[field.key] ?? ""}
+                onChange={(event) => onChange(field.key, event.target.value)}
+                className={cn(
+                  "h-9 rounded-[10px] border-border/60 bg-muted/35 text-[13px]",
+                  showSecretToggle && "pr-9",
+                )}
+              />
+              {showSecretToggle ? (
+                <button
+                  type="button"
+                  aria-label={
+                    visible
+                      ? tx("settings.channels.hideSecret", "Hide secret")
+                      : tx("settings.channels.showSecret", "Show secret")
+                  }
+                  onClick={() => onToggleSecret(field.key)}
+                  className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                >
+                  {visible ? (
+                    <EyeOff className="h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                </button>
+              ) : null}
+              </span>
+            {help}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function channelSetup(feature: NanobotFeatureInfo): ChannelSetupPresentation {
+  return CHANNEL_PRESENTATION[feature.name]?.setup ?? {
+    summary:
+      "Enable turns on this channel in nanobot, but this integration still needs platform-specific setup before it can receive messages.",
+    steps: [
+      `Open ~/.nanobot/config.json and find channels.${feature.name}.`,
+      "Add the credentials required by that platform, using the channel documentation as the source of truth.",
+      "Restart nanobot, then send a small test message from that platform.",
+    ],
+    configKeys: [`channels.${feature.name}.enabled`],
+  };
+}
+
+function ChannelLogo({
+  feature,
+  showBrandLogos,
+}: {
+  feature: NanobotFeatureInfo;
+  showBrandLogos: boolean;
+}) {
+  const presentation = CHANNEL_PRESENTATION[feature.name];
+  const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
+  const color = presentation?.color ?? "#6B7280";
+  const Icon = presentation?.icon;
+  const logoUrls = useMemo(() => logoFallbackUrls(presentation?.logoUrl), [presentation?.logoUrl]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+
+  if (showBrandLogos && logoUrl) {
+    return (
+      <span
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] border border-border/45 bg-background"
+        style={{ boxShadow: `inset 0 0 0 1px ${color}22` }}
+      >
+        <img
+          src={logoUrl}
+          alt=""
+          decoding="async"
+          loading="lazy"
+          className="h-5.5 w-5.5 max-h-6 max-w-6 object-contain"
+          onLoad={onLogoLoad}
+          onError={onLogoError}
+        />
+      </span>
+    );
+  }
+
+  if (Icon) {
+    return (
+      <span
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background"
+        style={{ color, boxShadow: `inset 0 0 0 1px ${color}18` }}
+        aria-hidden
+      >
+        <Icon className="h-5 w-5" strokeWidth={2.25} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/45 bg-background text-[11px] font-bold"
+      style={{ color, boxShadow: `inset 0 0 0 1px ${color}18` }}
+      aria-hidden
+    >
+      {initials}
+    </span>
+  );
+}
+
+function channelDisplayName(feature: NanobotFeatureInfo): string {
+  return CHANNEL_PRESENTATION[feature.name]?.displayName ?? feature.display_name;
+}
+
+function channelDescription(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
+  const fallback =
+    CHANNEL_PRESENTATION[feature.name]?.description ??
+    `Use nanobot from ${channelDisplayName(feature)}.`;
+  return t(`settings.channels.items.${feature.name}.description`, { defaultValue: fallback });
+}
+
+function channelRequirements(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
+  const fallback =
+    CHANNEL_PRESENTATION[feature.name]?.requirements ??
+    "Channel credentials and gateway settings";
+  return t(`settings.channels.items.${feature.name}.requirements`, { defaultValue: fallback });
+}
+
+function channelMatchesFilter(feature: NanobotFeatureInfo, filter: ChannelFilter): boolean {
+  if (filter === "on") return feature.enabled;
+  if (filter === "off") return !feature.enabled;
+  return true;
+}
+
+function channelStatusLabel(
+  feature: NanobotFeatureInfo,
+  tx: (key: string, fallback: string) => string,
+): string {
+  if (feature.enabled) return tx("settings.values.on", "On");
+  return tx("settings.values.off", "Off");
+}
+
+function channelSearchText(feature: NanobotFeatureInfo): string {
+  return [
+    channelDisplayName(feature),
+    feature.display_name,
+    feature.name,
+    feature.status,
+    CHANNEL_PRESENTATION[feature.name]?.description,
+    CHANNEL_PRESENTATION[feature.name]?.requirements,
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
 function AppsCatalogSettings({
   cliApps,
   nanobotFeatures,
@@ -5128,8 +8449,11 @@ function AppsCatalogSettings({
     { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
+  const appFeatures = (nanobotFeatures?.features ?? []).filter(
+    (feature) => feature.type !== "channel",
+  );
   const items: AppsCatalogItem[] = [
-    ...(nanobotFeatures?.features ?? []).map((feature) => ({
+    ...appFeatures.map((feature) => ({
       id: `nanobot:${feature.name}`,
       kind: "nanobot" as const,
       feature,
@@ -5162,7 +8486,7 @@ function AppsCatalogSettings({
     (!focusedApp ? cliMessage || nanobotMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || nanobotError || mcpError);
   const caption = t("settings.apps.caption", {
-    plugins: nanobotFeatures?.enabled_count ?? 0,
+    plugins: appFeatures.filter((feature) => feature.enabled).length,
     cli: cliApps?.installed_count ?? 0,
     mcp: mcpPresets?.installed_count ?? 0,
     defaultValue: "{{plugins}} Plugin · {{cli}} CLI · {{mcp}} MCP",
@@ -5199,30 +8523,11 @@ function AppsCatalogSettings({
       </section>
 
       {statusMessage ? (
-        <div
-          className={cn(
-            "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
-            statusIsError
-              ? "border-destructive/20 bg-destructive/5 text-destructive"
-              : "border-border/55 bg-muted/35 text-muted-foreground",
-          )}
-        >
-          <span className="min-w-0">{statusMessage}</span>
-          <button
-            type="button"
-            aria-label={tx("settings.actions.dismiss", "Dismiss")}
-            title={tx("settings.actions.dismiss", "Dismiss")}
-            onClick={onDismissStatus}
-            className={cn(
-              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
-              statusIsError
-                ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-                : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
-            )}
-          >
-            <X className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        </div>
+        <DismissibleStatusMessage
+          message={statusMessage}
+          isError={statusIsError}
+          onDismiss={onDismissStatus}
+        />
       ) : null}
 
       {focusedApp ? (
@@ -5230,26 +8535,11 @@ function AppsCatalogSettings({
       ) : null}
 
       {requiresRestartPending ? (
-        <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-          <span>{tx("settings.apps.restartRequired", "Restart nanobot to apply updated apps and features.")}</span>
-          {onRestart ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onRestart}
-              disabled={isRestarting}
-              className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
-            >
-              {isRestarting ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              )}
-              {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-            </Button>
-          ) : null}
-        </div>
+        <RestartRequiredNotice
+          message={tx("settings.apps.restartRequired", "Restart nanobot to apply updated apps and features.")}
+          onRestart={onRestart}
+          isRestarting={isRestarting}
+        />
       ) : null}
 
       <section>
@@ -5771,6 +9061,14 @@ function AppsTypeBadge({ children }: { children: ReactNode }) {
   );
 }
 
+function ChannelStatusBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="shrink-0 rounded-full bg-muted/75 px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
 const AppsActionButton = forwardRef<HTMLButtonElement, {
   ariaLabel: string;
   busy?: boolean;
@@ -6124,18 +9422,15 @@ function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string
 }
 
 function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; showBrandLogos: boolean }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const bg = preset.brand_color || "hsl(var(--muted))";
   const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const initials = preset.display_name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || preset.name.slice(0, 2).toUpperCase();
-
-  useEffect(() => setLogoIndex(0), [preset.logo_url]);
 
   if (showBrandLogos && logoUrl) {
     return (
@@ -6146,8 +9441,11 @@ function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; show
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-6 w-6 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -6241,18 +9539,15 @@ function CliAppReadyPanel({
 }
 
 function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: boolean }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const bg = app.brand_color || "hsl(var(--muted))";
   const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const initials = app.display_name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || app.name.slice(0, 2).toUpperCase();
-
-  useEffect(() => setLogoIndex(0), [app.logo_url]);
 
   if (showBrandLogos && logoUrl) {
     return (
@@ -6263,8 +9558,11 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-6 w-6 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -7029,12 +10327,9 @@ function ProviderPickerIcon({
   showBrandLogos: boolean;
   unconfigured?: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const logoUrl = brand?.logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [provider]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
 
   if (unconfigured) {
     return (
@@ -7053,14 +10348,17 @@ function ProviderPickerIcon({
       <span
         data-testid={`provider-picker-logo-${provider}`}
         className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${brand.color}22` }}
+        style={{ boxShadow: `inset 0 0 0 1px ${(brand?.color ?? "#6B7280")}22` }}
         aria-hidden
       >
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-3.5 w-3.5 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -7316,25 +10614,25 @@ function ProviderIcon({
   provider: string;
   showBrandLogos: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const logoUrl = brand?.logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [provider]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
 
   if (showBrandLogos && logoUrl) {
     return (
       <span
         data-testid={`provider-logo-${provider}`}
         className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${brand.color}22` }}
+        style={{ boxShadow: `inset 0 0 0 1px ${(brand?.color ?? "#6B7280")}22` }}
       >
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-6 w-6 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -7377,11 +10675,8 @@ function OverviewValueLogo({
   provider: string | null | undefined;
   showBrandLogos: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const brand = provider ? providerBrand(provider) : null;
-  const logoUrl = brand?.logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [provider]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
 
   if (!provider || !showBrandLogos || !brand) return null;
 
@@ -7396,8 +10691,11 @@ function OverviewValueLogo({
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-3.5 w-3.5 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -7893,11 +11191,13 @@ function SegmentedControl({
 
 function ToggleButton({
   checked,
+  disabled,
   onChange,
   ariaLabel,
   label,
 }: {
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
   ariaLabel?: string;
   label: string;
@@ -7908,13 +11208,19 @@ function ToggleButton({
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel ?? label}
-      onClick={() => onChange(!checked)}
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
       className={cn(
         "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full p-[2px]",
         "transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         checked
           ? "bg-[#2997FF] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.035)]"
           : "bg-muted shadow-[inset_0_0_0_1px_rgba(0,0,0,0.035)] hover:bg-muted/80",
+        disabled && "cursor-default opacity-60",
+        disabled && checked && "hover:bg-[#2997FF]",
+        disabled && !checked && "hover:bg-muted",
       )}
     >
       <span

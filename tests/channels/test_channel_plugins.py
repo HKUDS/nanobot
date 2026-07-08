@@ -72,6 +72,34 @@ class _FakeTelegram(BaseChannel):
         pass
 
 
+class _FakeFeishu(BaseChannel):
+    name = "feishu"
+    display_name = "Feishu"
+
+    @classmethod
+    def default_config(cls) -> dict:
+        return {
+            "instanceId": "default",
+            "name": "nanobot",
+            "enabled": False,
+            "appId": "",
+            "appSecret": "",
+            "domain": "feishu",
+            "groupPolicy": "mention",
+            "topicIsolation": True,
+            "allowFrom": [],
+        }
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send(self, msg: OutboundMessage) -> None:
+        pass
+
+
 def _make_entry_point(name: str, cls: type):
     """Create a mock entry point that returns *cls* on load()."""
     ep = SimpleNamespace(name=name, load=lambda _cls=cls: _cls)
@@ -134,6 +162,49 @@ def test_channels_config_extract_document_text_accepts_camel_alias():
     cfg = ChannelsConfig.model_validate({"extractDocumentText": False})
 
     assert cfg.extract_document_text is False
+
+
+def test_channel_manager_expands_feishu_instances(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_enabled",
+        lambda enabled, _names=None, warn_import_errors=True: {"feishu": _FakeFeishu}
+        if "feishu" in enabled
+        else {},
+    )
+
+    cfg = Config.model_validate({
+        "channels": {
+            "feishu": {
+                "instances": [
+                    {
+                        "id": "default",
+                        "enabled": True,
+                        "appId": "cli_default",
+                        "appSecret": "secret",
+                    },
+                    {
+                        "id": "product",
+                        "enabled": True,
+                        "appId": "cli_product",
+                        "appSecret": "secret",
+                    },
+                    {
+                        "id": "off",
+                        "enabled": False,
+                        "appId": "cli_off",
+                        "appSecret": "secret",
+                    },
+                ]
+            }
+        }
+    })
+
+    manager = ChannelManager(cfg, MessageBus())
+
+    assert set(manager.channels) == {"feishu", "feishu.product"}
+    assert manager.channels["feishu"].name == "feishu"
+    assert manager.channels["feishu.product"].name == "feishu.product"
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +270,15 @@ def test_discover_all_includes_builtins():
     # So we check that all actually loaded channels are in the result
     for name in result:
         assert name in discover_channel_names()
+
+
+def test_discover_channel_names_excludes_internal_helpers():
+    from nanobot.channels.registry import discover_channel_names
+
+    names = discover_channel_names()
+
+    assert "_feishu_ws" not in names
+    assert "_feishu_instances" not in names
 
 
 def test_discover_all_includes_external_plugin():
@@ -1007,6 +1087,202 @@ def test_optional_features_payload_counts_enabled_channel_with_missing_dependenc
     assert matrix["installed"] is False
     assert matrix["ready"] is False
     assert payload["enabled_count"] == 1
+
+
+def test_optional_features_payload_marks_disabled_feishu_as_configured(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({
+        "channels": {
+            "feishu": {
+                "enabled": False,
+                "appId": "cli_test",
+                "appSecret": "secret",
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    feishu = payload["features"][0]
+    assert feishu["name"] == "feishu"
+    assert feishu["enabled"] is False
+    assert feishu["configured"] is True
+    assert feishu["ready"] is False
+    assert payload["enabled_count"] == 0
+
+
+def test_optional_features_payload_lists_feishu_instances(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({
+        "channels": {
+            "feishu": {
+                "instances": [
+                    {
+                        "id": "default",
+                        "name": "nanobot",
+                        "displayName": "Voraflare Bot",
+                        "avatarUrl": "https://example.com/bot.png",
+                        "enabled": True,
+                        "appId": "cli_default",
+                        "appSecret": "secret",
+                    },
+                    {
+                        "id": "product",
+                        "name": "Product bot",
+                        "enabled": False,
+                        "appId": "cli_product",
+                        "appSecret": "secret",
+                    },
+                ]
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    feishu = payload["features"][0]
+    assert feishu["name"] == "feishu"
+    assert feishu["enabled"] is True
+    assert feishu["configured"] is True
+    assert payload["enabled_count"] == 1
+    assert feishu["instances"] == [
+        {
+            "id": "default",
+            "runtime_name": "feishu",
+            "name": "nanobot",
+            "display_name": "Voraflare Bot",
+            "avatar_url": "https://example.com/bot.png",
+            "identity_source": "feishu",
+            "domain": "feishu",
+            "enabled": True,
+            "configured": True,
+            "app_id": "cli_default",
+            "group_policy": "mention",
+            "topic_isolation": True,
+            "allow_from": [],
+        },
+        {
+            "id": "product",
+            "runtime_name": "feishu.product",
+            "name": "Product bot",
+            "display_name": "Product bot",
+            "avatar_url": "",
+            "identity_source": "local",
+            "domain": "feishu",
+            "enabled": False,
+            "configured": True,
+            "app_id": "cli_product",
+            "group_policy": "mention",
+            "topic_isolation": True,
+            "allow_from": [],
+        },
+    ]
+
+
+def test_optional_features_payload_backfills_saved_feishu_identity(monkeypatch, tmp_path):
+    from nanobot.channels import feishu as feishu_module
+    from nanobot.config import loader
+    from nanobot.optional_features import optional_features_payload
+
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({
+            "channels": {
+                "feishu": {
+                    "instances": [{
+                        "id": "default",
+                        "name": "nanobot",
+                        "enabled": True,
+                        "appId": "cli_default",
+                        "appSecret": "secret",
+                    }]
+                }
+            }
+        }),
+        config_path,
+    )
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr(feishu_module, "FEISHU_AVAILABLE", True)
+    monkeypatch.setattr(
+        feishu_module,
+        "fetch_feishu_app_identity",
+        lambda app_id, app_secret, domain: {
+            "displayName": "Xubin Ren的智能助手",
+            "avatarUrl": "https://example.com/assistant.png",
+            "identityFetchedAt": "2026-07-06T00:00:00Z",
+        },
+    )
+
+    payload = optional_features_payload()
+
+    instance = payload["features"][0]["instances"][0]
+    assert instance["display_name"] == "Xubin Ren的智能助手"
+    assert instance["avatar_url"] == "https://example.com/assistant.png"
+    assert instance["identity_source"] == "feishu"
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    saved = data["channels"]["feishu"]["instances"][0]
+    assert saved["displayName"] == "Xubin Ren的智能助手"
+    assert saved["avatarUrl"] == "https://example.com/assistant.png"
+    assert saved["identityFetchedAt"] == "2026-07-06T00:00:00Z"
+
+
+def test_optional_features_payload_records_feishu_identity_attempt_on_empty_result(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.channels import feishu as feishu_module
+    from nanobot.config import loader
+    from nanobot.optional_features import optional_features_payload
+
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({
+            "channels": {
+                "feishu": {
+                    "instances": [{
+                        "id": "default",
+                        "name": "nanobot",
+                        "enabled": True,
+                        "appId": "cli_default",
+                        "appSecret": "secret",
+                    }]
+                }
+            }
+        }),
+        config_path,
+    )
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr(feishu_module, "FEISHU_AVAILABLE", True)
+    monkeypatch.setattr(feishu_module, "fetch_feishu_app_identity", lambda *args: {})
+    monkeypatch.setattr(feishu_module, "_identity_timestamp", lambda: "2026-07-06T00:00:00Z")
+
+    payload = optional_features_payload()
+
+    instance = payload["features"][0]["instances"][0]
+    assert instance["display_name"] == "nanobot"
+    assert instance["avatar_url"] == ""
+    assert instance["identity_source"] == "local"
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    saved = data["channels"]["feishu"]["instances"][0]
+    assert saved["identityFetchedAt"] == "2026-07-06T00:00:00Z"
+    assert "displayName" not in saved
+    assert "avatarUrl" not in saved
 
 
 def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
