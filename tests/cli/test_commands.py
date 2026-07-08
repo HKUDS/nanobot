@@ -1657,7 +1657,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert data["agents"]["defaults"]["workspace"] == str(workspace)
     assert seen["templates"] == workspace
     assert seen["gateway_kwargs"] == {"port": 18888, "open_browser_url": None}
-    compact_output = _strip_ansi(result.stdout).replace("\n", " ")
+    compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
     assert "bootstrap secret was generated" in compact_output
     assert "channels.websocket.tokenIssueSecret" in compact_output
     assert "rerun without --no-open" in compact_output
