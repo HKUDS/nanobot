@@ -47,6 +47,32 @@
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
 
+## What can nanobot do?
+
+nanobot is a self-hosted personal AI agent runtime. It can:
+
+- run in a browser WebUI or terminal
+- connect to Telegram, Discord, Slack, WeChat, Email, Mattermost, and other chat apps
+- use tools such as files, shell, web search, web fetch, MCP, cron, image generation, and subagents
+- keep session history and long-term memory through Dream
+- run long-horizon goals and scheduled automations
+- expose a Python SDK and OpenAI-compatible API for integrations
+- deploy as a long-running local or server-side agent gateway
+
+## Latest Release
+
+**v0.2.2 - Durability Release**
+
+Highlights:
+
+- Segmented WebUI transcripts
+- Python SDK runtime controls
+- Automation management
+- Search/STT provider improvements
+- Gateway/session/provider reliability
+
+[See full changelog](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2)
+
 ## Open Source Partners
 
 <p align="center">
@@ -54,7 +80,10 @@
   <a href="https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link"><img alt="MiniMax" height="40" src="https://mintcdn.com/minimax-zh/1UjvBcdoC6r0UeyA/logo/light.svg?fit=max&auto=format&n=1UjvBcdoC6r0UeyA&q=85&s=672d724b639b2d88d0702fae329ea4f8"></a>
 </p>
 
-## 📢 News
+## Release Archive
+
+<details>
+<summary>Release and daily update highlights</summary>
 
 - **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
 - **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
@@ -66,9 +95,6 @@
 - **2026-06-15** 📱 Mobile WebUI polish, optional file tools, real API usage.
 - **2026-06-14** 🖼️ Themed cover, partner links, stronger Codex image streaming.
 - **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
-
-<details>
-<summary>Earlier news</summary>
 
 - **2026-06-12** 💬 Slack allowlisted channels can require mentions.
 - **2026-06-11** ✂️ Fenced-code message splitting.
@@ -446,6 +472,7 @@ The WebUI is served by the WebSocket channel on port `8765` by default. The gate
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
+- Use task-oriented guides: [Guides](./docs/guides/README.md)
 - Start with no technical background: [Start Without Technical Background](./docs/start-without-technical-background.md)
 - Start from zero with developer basics: [Install and Quick Start](./docs/quick-start.md)
 - Understand the runtime model: [Concepts](./docs/concepts.md)
@@ -453,7 +480,7 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 - Choose a provider/model: [Providers and Models](./docs/providers.md)
 - Copy provider setup recipes: [Provider Cookbook](./docs/provider-cookbook.md)
 - Debug setup and runtime failures: [Troubleshooting](./docs/troubleshooting.md)
-- Talk to your nanobot with familiar chat apps: [Chat Apps](./docs/chat-apps.md)
+- Talk to your nanobot with familiar chat apps: [Chat App AI Agent](./docs/guides/chat-app-ai-agent.md) · [Chat Apps](./docs/chat-apps.md)
 - Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)
 - Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
 - Run nanobot with Docker or as a Linux service: [Deployment](./docs/deployment.md)

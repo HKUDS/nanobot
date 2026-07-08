@@ -30,6 +30,41 @@ If you find a docs mistake, outdated command, or confusing step, please open an 
 | Copy a provider setup recipe | [`provider-cookbook.md`](./provider-cookbook.md) | Pasteable OpenRouter, OpenAI, Anthropic, local model, fallback, and Langfuse setups |
 | Fix a first-run or runtime problem | [`troubleshooting.md`](./troubleshooting.md) | A diagnosis order and targeted checks for common failures |
 
+## Task Guides
+
+Use these pages when you know the workflow you want and do not want to scan the
+full reference first.
+
+| Goal | Guide |
+|---|---|
+| Build a personal AI agent | [`guides/build-a-personal-ai-agent.md`](./guides/build-a-personal-ai-agent.md) |
+| Run a self-hosted AI agent | [`guides/self-hosted-ai-agent.md`](./guides/self-hosted-ai-agent.md) |
+| Use a browser AI agent WebUI | [`guides/ai-agent-webui.md`](./guides/ai-agent-webui.md) |
+| Connect an AI agent to chat apps | [`guides/chat-app-ai-agent.md`](./guides/chat-app-ai-agent.md) |
+| Run long-running agent tasks | [`guides/long-running-ai-agent.md`](./guides/long-running-ai-agent.md) |
+| Add long-term agent memory | [`guides/ai-agent-memory.md`](./guides/ai-agent-memory.md) |
+| Add MCP tools to an agent | [`guides/mcp-tools-for-ai-agents.md`](./guides/mcp-tools-for-ai-agents.md) |
+| Run an agent from Python | [`guides/python-ai-agent-sdk.md`](./guides/python-ai-agent-sdk.md) |
+| Expose an OpenAI-compatible agent API | [`guides/openai-compatible-agent-api.md`](./guides/openai-compatible-agent-api.md) |
+| Deploy a long-running agent gateway | [`guides/deploy-ai-agent-gateway.md`](./guides/deploy-ai-agent-gateway.md) |
+
+Platform-specific chat guides:
+[`Telegram`](./guides/telegram-ai-agent.md),
+[`Discord`](./guides/discord-ai-agent.md),
+[`Slack`](./guides/slack-ai-agent.md),
+[`WeChat`](./guides/wechat-ai-agent.md),
+[`Email`](./guides/email-ai-agent.md), and
+[`Mattermost`](./guides/mattermost-ai-agent.md).
+
+Configuration guides:
+[`MCP tools`](./guides/configure-mcp-tools.md),
+[`web search`](./guides/configure-web-search.md),
+[`model fallback`](./guides/configure-model-fallback.md),
+[`OpenAI-compatible providers`](./guides/configure-openai-compatible-provider.md),
+[`Langfuse`](./guides/configure-langfuse-observability.md),
+[`local security`](./guides/secure-local-ai-agent.md), and
+[`gateway deployment`](./guides/deploy-nanobot-gateway.md).
+
 ## After the First Reply Works
 
 Do not configure everything at once. Pick one next surface:

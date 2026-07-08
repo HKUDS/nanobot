@@ -1,4 +1,6 @@
-# WebUI
+# Nanobot WebUI: Browser Workbench for Self-Hosted AI Agents
+
+<!-- Meta description: Run nanobot from a browser WebUI with persistent chat sessions, visible tool activity, workspace controls, Apps, MCP presets, Skills, settings, and Automations. -->
 
 The WebUI is nanobot's browser workbench for persistent chat sessions, visible
 agent activity, workspace controls, Apps, Skills, settings, and Automations in

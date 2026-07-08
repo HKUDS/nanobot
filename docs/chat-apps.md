@@ -1,6 +1,19 @@
-# Chat Apps
+# Chat Apps for Self-Hosted AI Agents
 
-Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./channel-plugin-guide.md).
+Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, and
+other chat platforms. This page is the full chat-channel reference. If you want
+a focused setup path for one platform, start with a guide:
+
+| Platform | Guide |
+|---|---|
+| Telegram | [Build a Telegram AI Agent with nanobot](./guides/telegram-ai-agent.md) |
+| Discord | [Build a Discord AI Agent with nanobot](./guides/discord-ai-agent.md) |
+| Slack | [Build a Slack AI Agent with nanobot](./guides/slack-ai-agent.md) |
+| WeChat | [Build a WeChat AI Agent with nanobot](./guides/wechat-ai-agent.md) |
+| Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
+| Mattermost | [Build a Mattermost AI Agent with nanobot](./guides/mattermost-ai-agent.md) |
+
+Want to build your own channel? See the [Channel Plugin Guide](./channel-plugin-guide.md).
 
 Before configuring a chat app, make sure the local CLI path works:
 

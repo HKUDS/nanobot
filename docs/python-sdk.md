@@ -1,4 +1,4 @@
-# Python SDK
+# Nanobot Python SDK: Run an AI Agent from Python
 
 Use nanobot as a Python library. The SDK gives you the same agent runtime used
 by the CLI, but from code: model routing, tools, workspace access, conversation

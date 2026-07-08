@@ -13,6 +13,21 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
 
+## Configuration Guides
+
+This page is the complete configuration reference. For task-oriented setup, use
+the focused guides first and come back here for exact fields and defaults.
+
+| Task | Guide |
+|---|---|
+| Add MCP tools | [`guides/configure-mcp-tools.md`](./guides/configure-mcp-tools.md) |
+| Enable web search and web fetch | [`guides/configure-web-search.md`](./guides/configure-web-search.md) |
+| Configure model fallback | [`guides/configure-model-fallback.md`](./guides/configure-model-fallback.md) |
+| Add an OpenAI-compatible provider | [`guides/configure-openai-compatible-provider.md`](./guides/configure-openai-compatible-provider.md) |
+| Add Langfuse observability | [`guides/configure-langfuse-observability.md`](./guides/configure-langfuse-observability.md) |
+| Secure a local AI agent | [`guides/secure-local-ai-agent.md`](./guides/secure-local-ai-agent.md) |
+| Deploy the gateway | [`guides/deploy-nanobot-gateway.md`](./guides/deploy-nanobot-gateway.md) |
+
 ## Quick Jump
 
 | Need | Section |
