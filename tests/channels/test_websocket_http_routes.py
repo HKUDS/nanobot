@@ -1154,6 +1154,67 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
 
 
 @pytest.mark.asyncio
+async def test_channel_configure_route_preserves_existing_channel_values(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.config import loader
+    from nanobot.config.schema import Config
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    setattr(
+        config.channels,
+        "discord",
+        {
+            "enabled": True,
+            "token": "old-discord-token",
+            "allowChannels": ["old-channel"],
+            "groupPolicy": "mention",
+            "customExtra": "keep-me",
+            "nested": {"value": 42},
+        },
+    )
+    loader.save_config(config, config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(
+            {
+                "Authorization": f"Bearer {token}",
+                "Host": "127.0.0.1:8765",
+                "X-Nanobot-Channel-Values": json.dumps(
+                    {
+                        "channels.discord.token": "",
+                        "channels.discord.allowChannels": "new-channel",
+                    }
+                ),
+            },
+            path="/api/settings/channels/configure?name=discord",
+        ),
+        "/api/settings/channels/configure",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    body = json.loads(response.body.decode())
+    assert body["saved_keys"] == ["channels.discord.allowChannels"]
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["discord"] == {
+        "enabled": True,
+        "token": "old-discord-token",
+        "allowChannels": ["new-channel"],
+        "groupPolicy": "mention",
+        "customExtra": "keep-me",
+        "nested": {"value": 42},
+    }
+
+
+@pytest.mark.asyncio
 async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
     bus: MagicMock,
     tmp_path: Path,
