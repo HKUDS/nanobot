@@ -143,7 +143,19 @@ class NanoTimerTool(Tool, ContextAware):
                 "Invalid IANA timezone '{}' in nano_timer; falling back to UTC",
                 self._timezone,
             )
-            user_tz = ZoneInfo("UTC")
+            # Defensive: even ``ZoneInfo("UTC")`` can raise on a platform
+            # with no tzdb and no ``tzdata`` package installed (notably
+            # Windows without our pinned runtime dep). In that case we
+            # fall back to the stdlib ``datetime.timezone.utc`` constant,
+            # which never depends on the tzdb.
+            try:
+                user_tz = ZoneInfo("UTC")
+            except ZoneInfoNotFoundError:
+                logger.error(
+                    "zoneinfo database not available on this system; "
+                    "nano_timer will use the stdlib UTC constant"
+                )
+                user_tz = timezone.utc
             # Preserve the raw input (even empty string) so the warning footer
             # can name it. The renderer checks `is not None`, not truthiness.
             self._tz_fallback_name = self._timezone

@@ -49,6 +49,10 @@ dependencies = [
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
     "packaging>=24.0",
+    # Ensures ``zoneinfo`` has a timezone database on platforms without
+    # system tzdb (notably Windows). Recommended by the Python docs:
+    # https://docs.python.org/3/library/zoneinfo.html
+    "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]

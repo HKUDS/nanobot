@@ -388,3 +388,66 @@ class TestNanoTimerRequestContext:
         ctx = ToolContext(config=SimpleNamespace(), workspace="/tmp")
         tool = NanoTimerTool.create(ctx)
         assert tool._timezone == "UTC"
+
+
+class TestNanoTimerTzdbResilience:
+    """Regression tests for the cross-platform tzdb gap.
+
+    Python's ``zoneinfo`` consults the system tzdb and the ``PYTHONTZPATH``
+    env var; when neither is available it raises ``ZoneInfoNotFoundError``.
+    nanobot ships Windows support and ``nano_timer`` is auto-discovered as
+    a core tool, so the UTC fallback must not itself depend on the tzdb.
+    These tests simulate the no-tzdb environment by patching ``ZoneInfo``
+    to raise for both the user's tz and the "UTC" key, forcing the tool
+    onto its stdlib ``datetime.timezone.utc`` safety net.
+    """
+
+    def test_utc_fallback_when_zoneinfo_utc_raises(self, monkeypatch):
+        from zoneinfo import ZoneInfoNotFoundError
+
+        import nanobot.agent.tools.time as time_mod
+
+        real_zoneinfo = time_mod.ZoneInfo
+
+        def fake_zoneinfo(key):
+            if key in ("America/Sao_Paulo", "UTC"):
+                raise ZoneInfoNotFoundError(f"no tzdata for {key}")
+            return real_zoneinfo(key)
+
+        monkeypatch.setattr(time_mod, "ZoneInfo", fake_zoneinfo)
+
+        tool = NanoTimerTool(timezone="America/Sao_Paulo")
+        # Should not raise — the safety net catches ZoneInfoNotFoundError
+        # on the inner UTC lookup and falls back to datetime.timezone.utc.
+        payload = tool._compute_payload()
+
+        assert payload["user"]["timezone"] == "UTC"
+        assert payload["user"]["offset"] == "UTC+0"
+        # The bad input string is still preserved for the warning footer.
+        assert tool._tz_fallback_name == "America/Sao_Paulo"
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_full_report_when_zoneinfo_utc_raises(
+        self, monkeypatch
+    ):
+        from zoneinfo import ZoneInfoNotFoundError
+
+        import nanobot.agent.tools.time as time_mod
+
+        real_zoneinfo = time_mod.ZoneInfo
+
+        def fake_zoneinfo(key):
+            if key in ("America/Sao_Paulo", "UTC"):
+                raise ZoneInfoNotFoundError(f"no tzdata for {key}")
+            return real_zoneinfo(key)
+
+        monkeypatch.setattr(time_mod, "ZoneInfo", fake_zoneinfo)
+
+        tool = NanoTimerTool(timezone="America/Sao_Paulo")
+        out = await tool.execute(info_type="all")
+        # The full markdown report is produced (no "Error getting time"
+        # fallback) and the inline warning names the bad input.
+        assert "UTC Time" in out
+        assert "User Local Time" in out
+        assert "America/Sao_Paulo" in out
+        assert "invalid" in out.lower()
