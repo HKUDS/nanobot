@@ -159,7 +159,7 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models" | "browser";
+    initialSection?: "overview" | "appearance" | "apps" | "automations" | "advanced" | "models" | "browser";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -185,8 +185,25 @@ function renderSettingsView(
 
 describe("SettingsView Apps catalog", () => {
   afterEach(() => {
+    localStorage.removeItem("nanobot-webui.settings-preferences");
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("persists the file edit display local preference", async () => {
+    renderSettingsView({
+      initialSection: "appearance",
+      initialSettings: settingsPayload(),
+      showSidebar: true,
+    });
+
+    expect(screen.getByText("File edit display")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem("nanobot-webui.settings-preferences") || "{}");
+      expect(saved.fileEditDisplayMode).toBe("diff");
+    });
   });
 
   it("does not show the Settings kicker on the standalone Automations surface", async () => {

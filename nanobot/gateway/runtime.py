@@ -127,6 +127,25 @@ class GatewayRuntime:
         self._subprocess_run = subprocess_run
         self._sleep = sleep
 
+    @classmethod
+    def refresh_state_pid(cls, *, paths: GatewayRuntimePaths) -> None:
+        """Update the PID in an existing state file to ``os.getpid()``.
+
+        Called early in gateway server startup so the state file self-heals
+        after any restart, regardless of platform or restart mechanism.
+        """
+        if not paths.state_path.exists():
+            return
+        try:
+            state = json.loads(paths.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        state["pid"] = os.getpid()
+        rt = cls(paths=paths)
+        state["identity"] = rt._process_identity(os.getpid())
+        state["started_at"] = _utc_now()
+        rt._write_state(state)
+
     def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
         """Start gateway as a detached background process."""
         current = self.status()
@@ -293,14 +312,33 @@ class GatewayRuntime:
     def _terminate_windows(self, pid: int, *, timeout_s: int) -> bool:
         ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
         if ctrl_break is not None:
-            with suppress(ProcessLookupError):
+            # Detached Windows children can reject CTRL_BREAK_EVENT with WinError 87;
+            # keep the existing taskkill fallback for that process shape.
+            ctrl_break_sent = False
+            try:
                 os.kill(pid, ctrl_break)
-            if self._wait_for_exit(pid, timeout_s):
+            except ProcessLookupError:
                 return True
-        self._subprocess_run(["taskkill", "/PID", str(pid), "/T"], check=False)
+            except OSError:
+                pass
+            else:
+                ctrl_break_sent = True
+            if ctrl_break_sent and self._wait_for_exit(pid, timeout_s):
+                return True
+        self._subprocess_run(
+            ["taskkill", "/PID", str(pid), "/T"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         if self._wait_for_exit(pid, 2):
             return True
-        self._subprocess_run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False)
+        self._subprocess_run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         return self._wait_for_exit(pid, 2)
 
     def _wait_for_exit(self, pid: int, timeout_s: int | float) -> bool:

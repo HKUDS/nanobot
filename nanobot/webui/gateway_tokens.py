@@ -42,12 +42,16 @@ class GatewayTokenStore:
             return False
         return True
 
-    def issue_token(self, ttl_s: int | float, *, api_token: bool = False) -> str:
+    def issue_token(self, ttl_s: int | float) -> str:
         token_value = f"nbwt_{secrets.token_urlsafe(32)}"
         expiry = time.monotonic() + float(ttl_s)
         self.issued_tokens[token_value] = expiry
-        if api_token:
-            self.api_tokens[token_value] = expiry
+        return token_value
+
+    def issue_api_token(self, ttl_s: int | float) -> str:
+        token_value = f"nbwt_{secrets.token_urlsafe(32)}"
+        expiry = time.monotonic() + float(ttl_s)
+        self.api_tokens[token_value] = expiry
         return token_value
 
     def take_issued_token_if_valid(self, token_value: str | None) -> bool:

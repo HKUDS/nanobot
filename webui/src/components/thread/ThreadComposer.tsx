@@ -91,6 +91,50 @@ const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
+type ResolvedSlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn";
+
+function slashCommandName(content: string): string {
+  return content.split(/\s+/, 1)[0];
+}
+
+function slashCommandArgs(content: string, commandName: string): string {
+  return content.slice(commandName.length).trim();
+}
+
+function matchingSlashCommand(content: string, slashCommands: SlashCommand[]): SlashCommand | null {
+  const commandName = slashCommandName(content);
+  if (!commandName.startsWith("/")) return null;
+  const command = slashCommands.find((item) => item.command === commandName);
+  if (!command) return null;
+  if (slashCommandArgs(content, command.command).length > 0 && !command.acceptsArgs) return null;
+  return command;
+}
+
+function slashCommandLifecycle(
+  content: string,
+  slashCommands: SlashCommand[],
+): ResolvedSlashCommandLifecycle | null {
+  const command = matchingSlashCommand(content, slashCommands);
+  if (!command) return null;
+  if (command.lifecycle === "agent_turn_with_args") {
+    return slashCommandArgs(content, command.command).length > 0
+      ? "agent_turn"
+      : "side_channel";
+  }
+  return command.lifecycle;
+}
+
+function isSideChannelLifecycle(lifecycle: ResolvedSlashCommandLifecycle | null): boolean {
+  return (
+    lifecycle === "side_channel"
+    || lifecycle === "finalize_active_turn"
+    || lifecycle === "stop_active_turn"
+  );
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -268,7 +312,12 @@ type MentionCandidate =
   | { kind: "cli"; name: string; app: CliAppInfo }
   | { kind: "mcp"; name: string; preset: McpPresetInfo };
 
-interface SlashPaletteCommand extends SlashCommand {
+interface SlashPaletteCommand {
+  command: string;
+  title: string;
+  description: string;
+  icon: string;
+  argHint?: string;
   detail: string;
   badge?: string;
   recent: boolean;
@@ -926,17 +975,12 @@ export function ThreadComposer({
   }, [cursorPosition, disabled, slashMenuDismissed, value]);
 
   const visibleSlashCommands = useMemo(() => {
-    const baseCommands = slashCommands.filter((command) => command.command !== "/stop");
-    if (!(isStreaming && onStop)) return baseCommands;
-    const stopCommand = slashCommands.find((command) => command.command === "/stop") ?? {
-      command: "/stop",
-      title: "Stop current task",
-      description: "Cancel the active agent turn for this chat.",
-      icon: "square",
-    };
+    if (!(isStreaming && onStop)) return slashCommands;
+    const stopCommand = slashCommands.find((command) => command.command === "/stop");
+    if (!stopCommand) return slashCommands;
     return [
       stopCommand,
-      ...baseCommands,
+      ...slashCommands.filter((command) => command.command !== "/stop"),
     ];
   }, [isStreaming, onStop, slashCommands]);
 
@@ -969,6 +1013,15 @@ export function ThreadComposer({
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands
       .filter((command) => {
+        if (
+          slashQuery === ""
+          && (
+            command.command === "/restart"
+            || (command.command === "/stop" && !(isStreaming && onStop))
+          )
+        ) {
+          return false;
+        }
         const commandKey = slashCommandI18nKey(command.command);
         const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
           defaultValue: command.title,
@@ -1480,7 +1533,38 @@ export function ThreadComposer({
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    onSend(content, payload, options);
+    const hasPlainTextCommandPayload =
+      payload === undefined
+      && attachedCliApps.length === 0
+      && attachedMcpPresets.length === 0;
+    const slashLifecycle = hasPlainTextCommandPayload
+      ? slashCommandLifecycle(content, slashCommands)
+      : null;
+    if (
+      slashLifecycle === "stop_active_turn"
+      && isStreaming
+      && onStop
+    ) {
+      handleStop();
+      setQueuedPrompts([]);
+      clear();
+      clearComposerText();
+      return;
+    }
+    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
+    const finalizeActiveTurn =
+      slashLifecycle === "finalize_active_turn";
+    onSend(
+      content,
+      payload,
+      isSlashSideChannel
+        ? {
+            ...options,
+            sideChannel: true,
+            ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
+          }
+        : options,
+    );
     setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
@@ -1492,10 +1576,14 @@ export function ThreadComposer({
     canSend,
     clear,
     clearComposerText,
+    handleStop,
+    isStreaming,
     modelNeedsSetup,
     onModelBadgeClick,
     onSend,
+    onStop,
     readyImages,
+    slashCommands,
     value,
   ]);
 

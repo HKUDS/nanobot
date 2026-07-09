@@ -210,6 +210,13 @@ export interface ToolProgressEvent {
   embeds?: unknown[];
 }
 
+export interface UIFileDiff {
+  format: "unified" | string;
+  context?: number;
+  truncated?: boolean;
+  text?: string;
+}
+
 export interface UIFileEdit {
   version?: number;
   call_id: string;
@@ -225,6 +232,7 @@ export interface UIFileEdit {
   binary?: boolean;
   error?: string;
   pending?: boolean;
+  diff?: UIFileDiff;
 }
 
 export interface ChatSummary {
@@ -296,6 +304,7 @@ export interface SidebarStatePayload {
 
 export interface BootstrapResponse {
   token: string;
+  api_token: string;
   ws_path: string;
   ws_url?: string | null;
   expires_in: number;
@@ -781,12 +790,30 @@ export interface TranscriptionSettingsUpdate {
   maxUploadMb: number;
 }
 
+/**
+ * Backend-owned contract for how a slash command affects WebUI turn state.
+ *
+ * - side_channel: returns control text without starting or ending an agent turn.
+ * - finalize_active_turn: side-channel command that also closes the active UI turn.
+ * - stop_active_turn: cancels the active turn; exact submits may be intercepted locally.
+ * - agent_turn: always enters the normal agent path.
+ * - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
+ */
+export type SlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn"
+  | "agent_turn_with_args";
+
 export interface SlashCommand {
   command: string;
   title: string;
   description: string;
   icon: string;
   argHint?: string;
+  lifecycle: SlashCommandLifecycle;
+  acceptsArgs: boolean;
 }
 
 export type ConnectionStatus =

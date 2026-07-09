@@ -260,6 +260,7 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
+    opencode: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (canonical provider id)
     opencode_zen: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (curated coding models)
     opencode_go: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Go (low-cost coding models)
 
@@ -401,6 +402,7 @@ class Config(BaseSettings):
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
+        serialization_alias="modelPresets",
     )
 
     def __init__(self, **values: Any) -> None:

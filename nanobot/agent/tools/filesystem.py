@@ -194,6 +194,23 @@ def _is_blocked_device(path: str | Path) -> bool:
     return False
 
 
+def _builtin_skill_read_path(path: str) -> Path | None:
+    """Map workspace-relative skills/<name>/... reads onto bundled skills."""
+    from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+    requested = Path(path)
+    if requested.is_absolute():
+        return None
+    parts = requested.parts
+    if len(parts) < 2 or parts[0] != "skills":
+        return None
+    root = BUILTIN_SKILLS_DIR.resolve()
+    candidate = (root / Path(*parts[1:])).resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
     """Parse a page range like '2-5' into 0-based (start, end) inclusive."""
     parts = pages.strip().split("-")
@@ -275,6 +292,8 @@ class ReadFileTool(_FsTool):
                 return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
 
             fp = self._resolve_read(path)
+            if not fp.exists():
+                fp = _builtin_skill_read_path(path) or fp
             if _is_blocked_device(fp):
                 return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
             if not fp.exists():

@@ -517,8 +517,7 @@ async def test_session_messages_exposes_signed_media_urls(
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            boot = await _http_get("http://127.0.0.1:29925/webui/bootstrap")
-            token = boot.json()["token"]
+            token = channel.gateway.tokens.issue_api_token(300)
             auth = {"Authorization": f"Bearer {token}"}
             resp = await _http_get(
                 "http://127.0.0.1:29925/api/sessions/websocket:media-hydrate/messages",
@@ -562,8 +561,7 @@ async def test_session_messages_skips_vanished_media(
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
-            boot = await _http_get("http://127.0.0.1:29926/webui/bootstrap")
-            token = boot.json()["token"]
+            token = channel.gateway.tokens.issue_api_token(300)
             resp = await _http_get(
                 "http://127.0.0.1:29926/api/sessions/websocket:vanished/messages",
                 headers={"Authorization": f"Bearer {token}"},

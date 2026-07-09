@@ -19,21 +19,6 @@ interface ThreadMessagesProps {
 
 export type DisplayUnit = TurnUnit;
 
-/** True when this unit index is the last assistant text slice before the next user message (or end of thread). */
-export function isFinalAssistantSliceBeforeNextUser(
-  units: DisplayUnit[],
-  index: number,
-): boolean {
-  const u = units[index];
-  if (u.type !== "message" || u.message.role !== "assistant") return true;
-  for (let j = index + 1; j < units.length; j++) {
-    const v = units[j];
-    if (v.type === "message" && v.message.role === "user") break;
-    return false;
-  }
-  return true;
-}
-
 export function buildDisplayUnits(
   messages: UIMessage[],
   isStreaming = false,

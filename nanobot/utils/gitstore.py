@@ -10,6 +10,11 @@ from pathlib import Path
 
 from loguru import logger
 
+# Cap on the unified-diff block embedded in Dream commit messages. Memory files
+# are tiny in practice, but a pathological rewrite must not blow up the audit
+# record. The structured per-file summary is always emitted in full regardless.
+_WORKING_TREE_DIFF_MAX_CHARS = 6000
+
 
 @dataclass
 class CommitInfo:
@@ -298,6 +303,119 @@ class GitStore:
         except Exception:
             logger.exception("Git diff_commits failed")
             return ""
+
+    def summarize_working_tree(self, paths: list[str]) -> str:
+        """Structured summary of working-tree changes vs HEAD for *paths*.
+
+        Pure filesystem/git ground truth — never LLM narrative — suitable as a
+        truthful audit record. Returns "" when the repo is not initialized or
+        none of *paths* differ from HEAD.
+
+        Format::
+
+            SOUL.md: +3 -1
+            memory/MEMORY.md: +12 -8
+
+            2 files changed, 15 insertions(+), 9 deletions(-)
+
+            ```diff
+            --- SOUL.md
+            +++ SOUL.md
+            @@ ...
+            - old
+            + new
+            ```
+        """
+        if not self.is_initialized():
+            return ""
+
+        try:
+            import difflib
+
+            from dulwich.repo import Repo
+        except ImportError:
+            return ""
+
+        summary_lines: list[str] = []
+        diff_lines: list[str] = []
+        total_added = 0
+        total_removed = 0
+        changed = 0
+
+        try:
+            with Repo(str(self._workspace)) as repo:
+                head_tree = self._head_tree(repo)
+                for path in paths:
+                    head_text = (
+                        self._read_blob_from_tree(repo, head_tree, path)
+                        if head_tree is not None
+                        else None
+                    )
+                    if head_text is None:
+                        head_text = ""
+                    wt_path = self._workspace / path
+                    try:
+                        wt_text = (
+                            wt_path.read_text(encoding="utf-8")
+                            if wt_path.exists()
+                            else ""
+                        )
+                    except UnicodeDecodeError:
+                        # Non-UTF-8 (binary/corrupt) working-tree file: record
+                        # the change without a unified diff, which would
+                        # otherwise be polluted with replacement characters and
+                        # misrepresent the audit record.
+                        changed += 1
+                        summary_lines.append(f"{path}: binary or non-UTF-8 file changed")
+                        continue
+                    if head_text == wt_text:
+                        continue
+                    changed += 1
+                    hunks = list(difflib.unified_diff(
+                        head_text.splitlines(),
+                        wt_text.splitlines(),
+                        fromfile=path,
+                        tofile=path,
+                        lineterm="",
+                    ))
+                    added = sum(1 for line in hunks if line.startswith("+") and not line.startswith("+++"))
+                    removed = sum(1 for line in hunks if line.startswith("-") and not line.startswith("---"))
+                    total_added += added
+                    total_removed += removed
+                    summary_lines.append(f"{path}: +{added} -{removed}")
+                    diff_lines.extend(hunks)
+        except Exception:
+            logger.exception("Git summarize_working_tree failed")
+            return ""
+
+        if changed == 0:
+            return ""
+
+        diff_text = "\n".join(diff_lines)
+        if len(diff_text) > _WORKING_TREE_DIFF_MAX_CHARS:
+            diff_text = diff_text[:_WORKING_TREE_DIFF_MAX_CHARS] + "\n...[diff truncated]"
+
+        body = "\n".join(summary_lines)
+        body += (
+            f"\n{changed} file{'s' if changed != 1 else ''} changed, "
+            f"{total_added} insertion{'s' if total_added != 1 else ''}(+), "
+            f"{total_removed} deletion{'s' if total_removed != 1 else ''}(-)"
+        )
+        if diff_lines:
+            body += f"\n\n```diff\n{diff_text}\n```"
+        return body
+
+    @staticmethod
+    def _head_tree(repo) -> object | None:
+        """Return the tree object at HEAD, or None if there are no commits."""
+        try:
+            head = repo.refs[b"HEAD"]
+        except KeyError:
+            return None
+        commit = repo[head]
+        if commit.type_name != b"commit":
+            return None
+        return repo[commit.tree]
 
     def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
         """Find a commit by short SHA prefix match."""

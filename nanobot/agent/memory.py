@@ -41,6 +41,14 @@ class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
+    # Durable files whose real working-tree delta grounds Dream commit messages
+    # and the cursor-advance gate. Deliberately excludes memory/.dream_cursor so
+    # that advancing the cursor itself is never mistaken for a productive edit.
+    _DREAM_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
+    # Per-file cap when embedding current contents into the Dream prompt. The
+    # durable files are tiny in practice (~5 KB total), but a runaway file must
+    # not unbounded the prompt.
+    _DREAM_FILE_EMBED_CAP = 8000
     _INTERNAL_HISTORY_SESSION_PREFIXES = ("cron:", "dream:")
     _INTERNAL_HISTORY_SESSION_KEYS = {"heartbeat"}
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
@@ -524,6 +532,11 @@ class MemoryStore:
         """Build the Dream prompt with unprocessed history context.
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
+
+        The current contents of the durable memory files (SOUL.md, USER.md,
+        memory/MEMORY.md) are embedded so the model edits the real files rather
+        than a stale mental model — eliminating a class of failed/out-of-bounds
+        edits that previously produced hallucinated audit records.
         """
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
@@ -536,8 +549,45 @@ class MemoryStore:
             for e in batch
         )
         template = self._dream_template()
-        prompt = f"{template}\n\n## Conversation History\n{history_text}"
+        files_section = self._render_current_memory_files()
+        prompt = (
+            f"{template}\n\n{files_section}\n\n"
+            f"## Conversation History\n{history_text}"
+        )
         return (prompt, batch[-1]["cursor"])
+
+    def _render_current_memory_files(self) -> str:
+        """Render the durable memory files' current contents for the Dream prompt.
+
+        Missing files render as ``(empty)``; oversized files are capped. The
+        section is the ground truth the model must edit against.
+        """
+        files = [
+            ("SOUL.md", self.soul_file),
+            ("USER.md", self.user_file),
+            ("memory/MEMORY.md", self.memory_file),
+        ]
+        blocks = []
+        for label, path in files:
+            try:
+                content = path.read_text(encoding="utf-8") if path.exists() else ""
+            except OSError:
+                content = ""
+            if len(content) > self._DREAM_FILE_EMBED_CAP:
+                content = truncate_text(content, self._DREAM_FILE_EMBED_CAP) + "\n...[truncated]"
+            blocks.append(f"### {label}\n{content}" if content.strip() else f"### {label}\n(empty)")
+        return "## Current Memory Files\n" + "\n\n".join(blocks)
+
+    def dream_content_diff(self) -> str:
+        """Structured summary of uncommitted changes to the durable memory files.
+
+        Returns "" when git is unavailable or no content file changed. This is
+        the ground-truth input for diff-grounded Dream commit messages and for
+        gating cursor advance on real edits (never on LLM self-report).
+        """
+        if not self._git.is_initialized():
+            return ""
+        return self._git.summarize_working_tree(list(self._DREAM_CONTENT_PATHS))
 
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
@@ -630,12 +680,22 @@ class MemoryStore:
         return f"dream:{datetime.now():%Y%m%d-%H%M%S}"
 
     @staticmethod
-    def build_dream_commit_message(prefix: str, resp: object | None) -> str:
-        """Build a Dream auto-commit message, appending the LLM summary if present."""
-        msg = prefix
-        if resp is not None and getattr(resp, "content", None):
-            msg = f"{msg}\n\n{resp.content.strip()}"
-        return msg
+    def build_dream_commit_message(prefix: str, diff_body: str) -> str:
+        """Build a Dream commit message grounded in the real working-tree diff.
+
+        *diff_body* is a structured, machine-derived summary of the actual file
+        changes (see :meth:`dream_content_diff` /
+        :meth:`GitStore.summarize_working_tree`). The LLM narrative is
+        deliberately excluded so the audit record (``/dream-log``) reflects the
+        filesystem's truth, not the model's self-report.
+
+        An empty *diff_body* yields the bare *prefix*, which ``auto_commit``
+        turns into a no-op when there is nothing to stage.
+        """
+        diff_body = (diff_body or "").strip()
+        if not diff_body:
+            return prefix
+        return f"{prefix}\n\n{diff_body}"
 
     @staticmethod
     def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:

@@ -1252,6 +1252,8 @@ describe("ThreadShell", () => {
                 description: "Print the last N persisted messages.",
                 icon: "history",
                 arg_hint: "[n]",
+                lifecycle: "side_channel",
+                accepts_args: true,
               },
             ],
           });

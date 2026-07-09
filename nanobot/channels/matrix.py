@@ -192,6 +192,10 @@ def _build_matrix_text_content(
     return content
 
 
+def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
+    return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -543,7 +547,8 @@ class MatrixChannel(BaseChannel):
         relates_to = self._build_thread_relates_to(metadata)
 
         if stream_end:
-            buf = self._stream_bufs.pop(chat_id, None)
+            stream_key = _matrix_stream_key(chat_id, stream_id)
+            buf = self._stream_bufs.pop(stream_key, None)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -557,10 +562,11 @@ class MatrixChannel(BaseChannel):
             await self._send_room_content(chat_id, content)
             return
 
-        buf = self._stream_bufs.get(chat_id)
+        stream_key = _matrix_stream_key(chat_id, stream_id)
+        buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _StreamBuf()
-            self._stream_bufs[chat_id] = buf
+            self._stream_bufs[stream_key] = buf
         buf.text += delta
 
         if not buf.text.strip():

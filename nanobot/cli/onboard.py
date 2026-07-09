@@ -1590,10 +1590,9 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
 
 def _get_quick_start_provider_choices() -> dict[str, str]:
     """Return Quick Start provider display choices."""
-    choices = {
-        info.display_name: provider_name
-        for provider_name, info in _get_quick_start_provider_info().items()
-    }
+    choices: dict[str, str] = {}
+    for provider_name, info in _get_quick_start_provider_info().items():
+        choices.setdefault(info.display_name, provider_name)
     choices[_QUICK_START_CUSTOM_PROVIDER_CHOICE] = "custom"
     return choices
 
@@ -1980,3 +1979,12 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
             return OnboardResult(config=original_config, should_save=False)
         if answer == "[A] Advanced Settings":
             _configure_advanced_settings(config)
+
+
+def run_quick_start_onboard(initial_config: Config) -> OnboardResult:
+    """Run the compact provider + local WebUI setup path directly."""
+    _get_questionary()
+    draft = initial_config.model_copy(deep=True)
+    if _configure_quick_start(draft):
+        return OnboardResult(config=draft, should_save=True)
+    return OnboardResult(config=initial_config, should_save=False)

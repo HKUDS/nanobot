@@ -1,28 +1,48 @@
-# WebUI
+# Nanobot WebUI: Browser Workbench for Self-Hosted AI Agents
 
-The WebUI is nanobot's browser workbench. Use it after a basic CLI reply already
-works, when you want a persistent chat workspace, visible agent activity,
-workspace controls, Apps, Skills, settings, and Automations in one place.
+<!-- Meta description: Run nanobot from a browser WebUI with persistent chat sessions, visible tool activity, workspace controls, Apps, MCP presets, Skills, settings, and Automations. -->
+
+The WebUI is nanobot's browser workbench for persistent chat sessions, visible
+agent activity, workspace controls, Apps, Skills, settings, and Automations in
+one place.
 
 The published `nanobot-ai` wheel already includes the WebUI bundle. You only need
 the `webui/` source directory when you are changing the frontend itself.
 
 ## Open the WebUI
 
-First confirm your provider and model can answer:
+Use the launcher:
 
 ```bash
-nanobot agent -m "Hello!"
+nanobot webui
 ```
 
-The local WebSocket channel is enabled by default because it serves the bundled
-WebUI. To require a browser login password, merge `tokenIssueSecret` into your
-existing `~/.nanobot/config.json`:
+`nanobot webui` creates the config/workspace when needed, checks provider setup,
+offers Quick Start when the model provider is not ready, enables the local
+WebSocket channel after confirmation, generates a WebUI bootstrap secret when
+one is missing, starts the gateway, and opens the browser. The first-run path
+binds the WebUI to `127.0.0.1` by default, so it is not available from other
+devices on your LAN.
+
+Run it in the background when you do not want to keep a terminal open:
+
+```bash
+nanobot webui --background
+```
+
+Manage the background gateway with `nanobot gateway status`, `nanobot gateway
+logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
+
+Manual config still works. Same-machine localhost WebUI access can run without
+a browser password. Set `tokenIssueSecret` when you intentionally expose the
+WebUI beyond localhost or want a browser password:
 
 ```json
 {
   "channels": {
     "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
       "tokenIssueSecret": "your-webui-password",
       "websocketRequiresToken": true
     }
@@ -30,27 +50,15 @@ existing `~/.nanobot/config.json`:
 }
 ```
 
-If you are new to JSON snippets, see
-[`start-without-technical-background.md#how-to-merge-json-snippets`](./start-without-technical-background.md#how-to-merge-json-snippets).
-
-Start the gateway:
-
-```bash
-nanobot gateway
-```
-
-Leave the gateway running and open
-[`http://127.0.0.1:8765`](http://127.0.0.1:8765). The WebUI is served by the
-WebSocket channel on port `8765` by default. The gateway health endpoint,
-`18790` by default, is not the browser UI.
-Enter `tokenIssueSecret` when the WebUI asks for a password.
+The WebUI is served by the WebSocket channel on port `8765` by default. The
+gateway health endpoint, `18790` by default, is not the browser UI.
 
 ## What It Is For
 
 | Area | Use it for |
 |---|---|
 | Chat | Start, switch, search, fork, and delete browser sessions |
-| Agent activity | See thinking, tool calls, file activity, command output, and generated artifacts in context |
+| Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for Apps or MCP presets |
@@ -68,6 +76,16 @@ without changing the original thread.
 
 The message timeline shows both user-visible replies and agent activity. Long
 tool or reasoning sections can be expanded when you need the details.
+
+When the agent writes or edits files, the activity item shows the target path,
+status, changed line counts, and, when available, a unified diff. Use **View
+diff** to expand the change; large diffs may hide unchanged lines or truncate the
+inline preview. Use **Open file** from a file edit to open the read-only file
+preview panel.
+
+File previews follow the active session access mode. Restricted workspace access
+previews only files under the selected workspace. Full Access can preview files
+outside the workspace when that access mode is allowed by the gateway.
 
 ## Workspace and Access
 
@@ -188,6 +206,9 @@ Skills, runtime identity, and advanced safety controls.
 Some settings take effect immediately. Runtime settings that affect the gateway
 or agent process may require a restart; the WebUI shows that requirement next to
 the relevant control.
+
+Browser-only display preferences, such as file edit display mode, take effect
+immediately for the current browser and do not change gateway configuration.
 
 ## LAN Access
 

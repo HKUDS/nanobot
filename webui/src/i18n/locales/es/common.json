@@ -121,6 +121,7 @@
       "presetModel": "Modelo del preajuste",
       "density": "Densidad",
       "activityMode": "Detalle de actividad",
+      "fileEditDisplay": "Vista de edición de archivos",
       "codeWrap": "Ajuste de código",
       "maxResults": "Resultados máximos",
       "timeout": "Tiempo de espera",
@@ -165,6 +166,7 @@
       "presetModel": "Cambia a Default para editar modelo y proveedor desde WebUI.",
       "density": "Solo se guarda en este navegador.",
       "activityMode": "Elige cuánto detalle de actividad del agente se muestra por defecto.",
+      "fileEditDisplay": "Elige si la actividad de edición muestra recuentos de líneas o el diff.",
       "codeWrap": "Mantiene legibles las líneas largas de código en pantallas pequeñas.",
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
@@ -214,6 +216,9 @@
       "compact": "Compacto",
       "auto": "Automático",
       "expanded": "Expandido",
+      "summary": "Resumen",
+      "diff": "Diff",
+      "collapsedDiff": "Diff contraído",
       "on": "Activado",
       "off": "Desactivado",
       "defaultPermission": "Permiso predeterminado",
@@ -895,7 +900,7 @@
         "commands": {
           "new": {
             "title": "Nuevo chat",
-            "description": "Detiene la tarea actual e inicia una conversación nueva."
+            "description": "Restablece este chat e inicia una conversación nueva."
           },
           "stop": {
             "title": "Detener tarea actual",
@@ -1022,6 +1027,14 @@
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
+    "fileEditViewDiff": "Ver diff",
+    "fileEditViewLargeDiff": "Ver diff grande",
+    "fileEditDiffLineCount": "{{count}} líneas",
+    "fileEditUnchangedLinesHidden": "{{count}} líneas sin cambios ocultas",
+    "fileEditShowMoreLines": "Mostrar {{count}} líneas más",
+    "fileEditShowFewerLines": "Mostrar menos líneas",
+    "fileEditOpenFile": "Abrir archivo",
+    "fileEditDiffTruncated": "Diff truncado. Abre el archivo para ver el cambio completo.",
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",
