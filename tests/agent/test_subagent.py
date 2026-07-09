@@ -25,7 +25,7 @@ async def test_subagent_uses_tool_loader():
         model="test",
         max_tool_result_chars=16_000,
     )
-    tools = sm._build_tools()
+    tools, _ = await sm._build_tools()
     assert tools.has("read_file")
     assert tools.has("write_file")
     assert not tools.has("message")
@@ -46,8 +46,8 @@ async def test_subagent_build_tools_isolates_file_read_state(tmp_path):
         max_tool_result_chars=16_000,
     )
 
-    first_read = sm._build_tools().get("read_file")
-    second_read = sm._build_tools().get("read_file")
+    first_read = (await sm._build_tools())[0].get("read_file")
+    second_read = (await sm._build_tools())[0].get("read_file")
 
     assert first_read is not second_read
     assert (await first_read.execute(path="note.txt")).startswith("1| hello")
@@ -56,7 +56,8 @@ async def test_subagent_build_tools_isolates_file_read_state(tmp_path):
     assert "File unchanged" not in second_result
 
 
-def test_subagent_respects_file_tool_toggle(tmp_path):
+@pytest.mark.asyncio
+async def test_subagent_respects_file_tool_toggle(tmp_path):
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
     sm = SubagentManager(
@@ -68,7 +69,7 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
         tools_config=ToolsConfig(file=FileToolsConfig(enable=False)),
     )
 
-    tools = sm._build_tools()
+    tools, _ = await sm._build_tools()
 
     file_tools = {
         "apply_patch",
@@ -110,3 +111,115 @@ async def test_subagent_forwards_fail_on_tool_error_to_runner(tmp_path):
 
     spec = sm.runner.run.call_args.args[0]
     assert spec.fail_on_tool_error is False
+
+
+def _make_sm_with_mcps(tmp_path):
+    """SubagentManager with generic MCP servers + a config-driven specialist map."""
+    from nanobot.config.schema import MCPServerConfig
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    return SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=MessageBus(),
+        model="test",
+        max_tool_result_chars=16_000,
+        tools_config=ToolsConfig(
+            mcp_servers={
+                "db": MCPServerConfig(command="echo"),
+                "comms": MCPServerConfig(command="echo"),
+                "media": MCPServerConfig(command="echo"),
+            },
+            subagent_specialists={
+                "analyst": ["db"],
+                "assistant": ["comms"],
+                "creator": ["media", "db"],
+            },
+        ),
+    )
+
+
+def test_specialist_from_label(tmp_path):
+    sm = _make_sm_with_mcps(tmp_path)
+    assert sm._specialist_from_label("analyst run") == "analyst"
+    assert sm._specialist_from_label("creator: promo") == "creator"
+    assert sm._specialist_from_label("Assistant") == "assistant"
+    assert sm._specialist_from_label("random task") is None
+    assert sm._specialist_from_label(None) is None
+
+
+def test_specialist_inherits_only_its_mcps(tmp_path):
+    sm = _make_sm_with_mcps(tmp_path)
+    assert set(sm._subagent_tools_config("analyst").mcp_servers) == {"db"}
+    assert set(sm._subagent_tools_config("assistant").mcp_servers) == {"comms"}
+    assert set(sm._subagent_tools_config("creator").mcp_servers) == {"media", "db"}
+
+
+def test_generic_subagent_inherits_no_mcps(tmp_path):
+    sm = _make_sm_with_mcps(tmp_path)
+    assert sm._subagent_tools_config(None).mcp_servers == {}
+    assert sm._subagent_tools_config("unknown").mcp_servers == {}
+
+
+def test_no_specialist_config_means_no_inheritance(tmp_path):
+    """With no subagent_specialists configured, behavior is the previous default."""
+    from nanobot.config.schema import MCPServerConfig
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    sm = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=MessageBus(),
+        model="test",
+        max_tool_result_chars=16_000,
+        tools_config=ToolsConfig(mcp_servers={"db": MCPServerConfig(command="echo")}),
+    )
+    assert sm._specialist_from_label("analyst run") is None
+    assert sm._subagent_tools_config("analyst").mcp_servers == {}
+
+
+def test_resolve_specialist_uses_trusted_arg_not_label(tmp_path):
+    """The trusted `specialist` argument selects; the prompt-controllable label does not."""
+    sm = _make_sm_with_mcps(tmp_path)
+    # Trusted specialist arg is honored (validated against the config map).
+    assert sm._resolve_specialist("analyst", label="whatever") == "analyst"
+    assert sm._resolve_specialist("Creator", label=None) == "creator"
+    # Unknown trusted specialist resolves to nothing.
+    assert sm._resolve_specialist("unknown", label="analyst run") is None
+    # No trusted specialist + default config => label is IGNORED (secure default).
+    assert sm._resolve_specialist(None, label="analyst run") is None
+    assert sm._resolve_specialist(None, label="creator: promo") is None
+
+
+def test_resolve_specialist_label_opt_in(tmp_path):
+    """Label-based selection only happens when the operator opts in explicitly."""
+    from nanobot.config.schema import MCPServerConfig
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    sm = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=MessageBus(),
+        model="test",
+        max_tool_result_chars=16_000,
+        tools_config=ToolsConfig(
+            mcp_servers={"db": MCPServerConfig(command="echo")},
+            subagent_specialists={"analyst": ["db"]},
+            subagent_allow_label_specialist=True,
+        ),
+    )
+    # With the opt-in enabled, the label prefix is consulted as a fallback.
+    assert sm._resolve_specialist(None, label="analyst run") == "analyst"
+    # The trusted arg still takes precedence over the label.
+    assert sm._resolve_specialist("analyst", label="random task") == "analyst"
+    # Unknown label prefix still yields no specialist.
+    assert sm._resolve_specialist(None, label="random task") is None
+
+
+def test_spawn_tool_does_not_expose_specialist():
+    """The spawn tool schema must not let the model pick a specialist."""
+    from nanobot.agent.tools.spawn import SpawnTool
+    tool = SpawnTool(manager=MagicMock())
+    props = tool.parameters.get("properties", {})
+    assert "specialist" not in props
+    assert "task" in props

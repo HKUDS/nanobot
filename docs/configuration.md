@@ -2103,6 +2103,37 @@ Subagents also stop immediately when one of their tools returns an execution err
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
+### Specialist subagents (MCP inheritance)
+
+By default, spawned subagents only get the built-in exec/web/file tools and do **not** inherit any of the main agent's MCP servers. You can promote certain subagents to "specialists" that inherit a filtered subset of your configured MCP servers, so they can use native MCP tools (for example a database or search MCP) instead of re-implementing access through raw shell calls.
+
+Declare a map of specialist slug → list of MCP server names under `tools.subagentSpecialists`:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "db": { "type": "stdio", "command": "..." },
+      "search": { "type": "stdio", "command": "..." }
+    },
+    "subagentSpecialists": {
+      "analyst": ["db"],
+      "researcher": ["search"],
+      "reporter": ["db", "search"]
+    }
+  }
+}
+```
+
+The specialist is selected through a **trusted** channel: `SubagentManager.spawn()` accepts an explicit `specialist` argument that deployment/policy code passes in. The built-in `spawn` tool deliberately does **not** expose `specialist` in its schema, so the model cannot grant a subagent MCP tools by choosing a task label. Only MCP servers listed for that specialist **and** already present in `tools.mcpServers` are inherited; an unknown/absent specialist inherits nothing (default behavior).
+
+> **Security note.** MCP inheritance is a capability boundary. Never drive it from the spawn `label`, which is a model/user-facing display field — a prompt that influences the label could otherwise self-select a privileged specialist. Keep specialist selection in trusted code.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `tools.subagentSpecialists` | `{}` | Map of specialist slug → list of MCP server names those subagents inherit. Empty means no subagent inherits MCP servers. |
+| `tools.subagentAllowLabelSpecialist` | `false` | **Opt-in, insecure.** Also derive the specialist from the spawn `label` prefix (first word before a space/colon). Only enable when the label is a trusted, non-prompt-controlled value in your setup. Leave `false` to keep specialist selection purely on the trusted `specialist` argument. |
+
 
 ## Auto Compact
 
