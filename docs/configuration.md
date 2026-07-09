@@ -2104,6 +2104,41 @@ Subagents also stop immediately when one of their tools returns an execution err
 | `agents.defaults.failOnToolError` | `true` | Stop a spawned subagent when a tool execution fails. Set to `false` to return tool errors to the subagent model so it can recover within the same run. |
 
 
+## Peer Agents (A2A Delegation)
+
+`spawn` runs a generic, anonymous subagent. To build a small **team** of named teammates with distinct roles — e.g. a Supervisor that hands research to a Researcher and drafting to a Writer — register them under `agents.peers`. Each peer can carry its own system prompt and model while reusing the shared subagent execution and message-bus infrastructure:
+
+```json
+{
+  "agents": {
+    "peers": [
+      {
+        "name": "researcher",
+        "role": "gathers and verifies primary sources",
+        "systemPrompt": "You are the Researcher. Find primary sources and cite them.",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      {
+        "name": "writer",
+        "role": "turns findings into a clear reply"
+      }
+    ],
+    "defaults": {
+      "maxConcurrentSubagents": 3,
+      "maxDelegationDepth": 3
+    }
+  }
+}
+```
+
+When at least one peer is configured, the agent gains a `delegate(peer, task)` tool. The named peer runs its task and reports back, the same way a spawned subagent does. A peer may itself `delegate` further down the chain (Supervisor → Researcher → …); `maxDelegationDepth` bounds how deep that chain can go so cross-delegation can't run away. Because delegated peers count against `maxConcurrentSubagents`, raise that limit if you expect several teammates to work at once.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.peers` | `[]` | Roster of named peer agents. Each entry needs a unique `name`; `role`, `systemPrompt`, and `model` are optional. |
+| `agents.defaults.maxDelegationDepth` | `3` | Maximum length of a chained `delegate` sequence (A→B→C…) before `delegate` refuses, to bound runaway cross-delegation. |
+
+
 ## Auto Compact
 
 When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
