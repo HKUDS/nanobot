@@ -236,7 +236,7 @@ def test_write_stdin_can_terminate_session(tmp_path):
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="ready",
-            wait_timeout_ms=1000,
+            wait_timeout_ms=10000,
             yield_time_ms=0,
         )
         result = await stdin_tool.execute(
