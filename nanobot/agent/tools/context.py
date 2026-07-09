@@ -71,6 +71,7 @@ class ToolContext:
     bus: Any | None = None
     subagent_manager: Any | None = None
     cron_service: Any | None = None
+    exec_session_manager: Any | None = None
     sessions: Any | None = None
     file_state_store: Any = field(default=None)
     provider_snapshot_loader: Callable[[], Any] | None = None

@@ -57,8 +57,8 @@ def test_tool_context_has_required_fields():
     field_names = {f.name for f in fields(ToolContext)}
     required = {
         "config", "workspace", "bus", "subagent_manager",
-        "cron_service", "file_state_store", "provider_snapshot_loader",
-        "image_generation_provider_configs", "timezone",
+        "cron_service", "exec_session_manager", "file_state_store",
+        "provider_snapshot_loader", "image_generation_provider_configs", "timezone",
     }
     assert required <= field_names
 
@@ -68,6 +68,7 @@ def test_tool_context_defaults():
     assert ctx.bus is None
     assert ctx.subagent_manager is None
     assert ctx.cron_service is None
+    assert ctx.exec_session_manager is None
     assert ctx.provider_snapshot_loader is None
     assert ctx.image_generation_provider_configs is None
     assert ctx.timezone == "UTC"
@@ -135,6 +136,32 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
 
     assert "exec" in registered
     assert registry.has("exec")
+
+
+def test_loader_wires_shared_exec_session_manager(tmp_path):
+    from types import SimpleNamespace
+
+    from nanobot.agent.tools.exec_session import ExecSessionManager
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.config.schema import ToolsConfig
+
+    manager = ExecSessionManager()
+    ctx = ToolContext(
+        config=ToolsConfig(),
+        workspace=str(tmp_path),
+        subagent_manager=SimpleNamespace(
+            get_running_count=lambda: 0,
+            max_concurrent_subagents=4,
+        ),
+        exec_session_manager=manager,
+        timezone="UTC",
+    )
+    registry = ToolRegistry()
+    ToolLoader().load(ctx, registry)
+
+    assert registry.get("exec")._session_manager is manager
+    assert registry.get("write_stdin")._manager is manager
+    assert registry.get("list_exec_sessions")._manager is manager
 
 
 # --- Task 4: _FsTool.create() ---
