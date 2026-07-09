@@ -1,11 +1,13 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import save_config
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
 from nanobot.webui.settings_api import update_agent_settings
 
@@ -99,3 +101,36 @@ def test_settings_context_window_refreshes_runtime_state(
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
     assert loop.consolidator.context_window_tokens == 262_144
+
+
+def test_spawn_presets_refresh_from_current_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.agents.defaults.provider = "openai"
+    config.agents.defaults.spawn_presets = ["fast"]
+    config.model_presets["fast"] = ModelPresetConfig(
+        model="openai/gpt-4o-mini",
+        provider="openai",
+    )
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def loader(*, preset_name: str | None = None) -> ProviderSnapshot:
+        return load_provider_snapshot(config_path, preset_name=preset_name)
+
+    loop = AgentLoop.from_config(config, provider_snapshot_loader=loader)
+    assert "fast" in SpawnTool(loop.subagents).description
+
+    config.agents.defaults.spawn_presets = []
+    save_config(config, config_path)
+
+    assert "Available model presets" not in SpawnTool(loop.subagents).description
+    result = asyncio.run(loop.subagents.spawn("task", model_preset="fast"))
+    assert "not in allowed spawn_presets" in result
+    assert loop.subagents.get_running_count() == 0

@@ -27,6 +27,13 @@ if TYPE_CHECKING:
             minimum=0.0,
             maximum=2.0,
         ),
+        model_preset=StringSchema(
+            description=(
+                "Optional model preset name to use for the subagent. "
+                "Only presets listed in the configuration are allowed. "
+                "When omitted the subagent uses the default model."
+            ),
+        ),
         required=["task"],
     )
 )
@@ -60,19 +67,28 @@ class SpawnTool(Tool, ContextAware):
 
     @property
     def description(self) -> str:
-        return (
+        base = (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )
+        try:
+            spawn_presets = self._manager.available_spawn_presets()
+        except Exception:
+            spawn_presets = {}
+        if spawn_presets:
+            names = ", ".join(sorted(spawn_presets))
+            base += f" Available model presets: [{names}]."
+        return base
 
     async def execute(
         self,
         task: str,
         label: str | None = None,
         temperature: float | None = None,
+        model_preset: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -93,4 +109,5 @@ class SpawnTool(Tool, ContextAware):
             origin_message_id=self._origin_message_id.get(),
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
+            model_preset=model_preset,
         )

@@ -148,6 +148,7 @@ class AgentDefaults(Base):
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
+    spawn_presets: list[str] = Field(default_factory=list)  # Model preset names allowed for spawn subagents; empty = no custom presets
     session_ttl_minutes: int = Field(
         default=15,
         ge=0,
@@ -420,6 +421,9 @@ class Config(BaseSettings):
         for fallback in self.agents.defaults.fallback_models:
             if isinstance(fallback, str) and fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")
+        for sp in self.agents.defaults.spawn_presets:
+            if sp not in self.model_presets:
+                raise ValueError(f"spawn_presets entry {sp!r} not found in model_presets")
         return self
 
     def resolve_default_preset(self) -> ModelPresetConfig:
