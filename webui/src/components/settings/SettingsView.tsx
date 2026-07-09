@@ -7073,6 +7073,11 @@ function ChannelSetupSurface({
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
+  const configValuesKey = JSON.stringify(feature.config_values ?? {});
+  const configuredFields = useMemo(
+    () => new Set(feature.configured_fields ?? []),
+    [feature.configured_fields],
+  );
   const mode = setup.mode ?? "credentials";
   const fields = setup.fields ?? [];
   const requiredFields = fields.filter((field) => !field.optional);
@@ -7092,7 +7097,7 @@ function ChannelSetupSurface({
       ),
   });
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    defaultChannelFieldValues(editableFields),
+    defaultChannelFieldValues(editableFields, feature.config_values),
   );
 
   useEffect(() => {
@@ -7102,8 +7107,8 @@ function ChannelSetupSurface({
     setValidating(false);
     setValidation(null);
     setTouchedFields(new Set());
-    setFieldValues(defaultChannelFieldValues(editableFields));
-  }, [feature.name]);
+    setFieldValues(defaultChannelFieldValues(editableFields, feature.config_values));
+  }, [configValuesKey, feature.name]);
 
   const toggleSecret = (key: string) => {
     setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }));
@@ -7283,6 +7288,7 @@ function ChannelSetupSurface({
               <ChannelCredentialFields
                 fields={primaryFields}
                 values={fieldValues}
+                configuredFields={configuredFields}
                 visibleSecrets={visibleSecrets}
                 onChange={setFieldValue}
                 onToggleSecret={toggleSecret}
@@ -7347,6 +7353,7 @@ function ChannelSetupSurface({
               <ChannelCredentialFields
                 fields={advancedFields}
                 values={fieldValues}
+                configuredFields={configuredFields}
                 visibleSecrets={visibleSecrets}
                 onChange={setFieldValue}
                 onToggleSecret={toggleSecret}
@@ -7921,7 +7928,7 @@ function ChannelValidationBadge({
   feature: NanobotFeatureInfo;
 }) {
   const { t } = useTranslation();
-  const status = validation?.status ?? (feature.enabled ? "configured" : "needs_setup");
+  const status = validation?.status ?? (feature.configured ? "configured" : "needs_setup");
   const label = validating
     ? t("settings.channels.checking", { defaultValue: "Checking..." })
     : channelValidationStatusLabel(status, t);
@@ -8044,9 +8051,15 @@ function channelFieldValue(field: ChannelConfigField, values: Record<string, str
   return values[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "";
 }
 
-function defaultChannelFieldValues(fields: ChannelConfigField[]): Record<string, string> {
+function defaultChannelFieldValues(
+  fields: ChannelConfigField[],
+  configValues: Record<string, string> | undefined = undefined,
+): Record<string, string> {
   return Object.fromEntries(
-    fields.map((field) => [field.key, field.defaultValue ?? field.options?.[0]?.value ?? ""]),
+    fields.map((field) => [
+      field.key,
+      configValues?.[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "",
+    ]),
   );
 }
 
@@ -8136,6 +8149,7 @@ function channelValidationCheckIconClass(status: string): string {
 function ChannelCredentialFields({
   fields,
   values,
+  configuredFields,
   visibleSecrets,
   onChange,
   onToggleSecret,
@@ -8143,6 +8157,7 @@ function ChannelCredentialFields({
 }: {
   fields: ChannelConfigField[];
   values: Record<string, string>;
+  configuredFields?: Set<string>;
   visibleSecrets: Record<string, boolean>;
   onChange: (key: string, value: string) => void;
   onToggleSecret: (key: string) => void;
@@ -8155,13 +8170,18 @@ function ChannelCredentialFields({
       {fields.map((field) => {
         const visible = Boolean(visibleSecrets[field.key]);
         const value = values[field.key] ?? "";
+        const savedSecret = Boolean(field.secret && configuredFields?.has(field.key) && !value.trim());
         const showSecretToggle = Boolean(field.secret && value.trim());
         const inputType = field.secret && !visible ? "password" : field.inputType ?? "text";
         const selectedOption = channelFieldValue(field, values);
         const header = (
           <span className="flex items-center justify-between gap-2 text-[11px] font-medium text-foreground/85">
             <span>{field.label}</span>
-            {field.optional && !compact ? (
+            {savedSecret ? (
+              <span className="font-normal text-muted-foreground">
+                {tx("settings.channels.savedSecret", "Saved")}
+              </span>
+            ) : field.optional && !compact ? (
               <span className="font-normal text-muted-foreground">
                 {tx("settings.channels.optional", "Optional")}
               </span>
@@ -8212,7 +8232,11 @@ function ChannelCredentialFields({
                 aria-label={field.label}
                 type={inputType}
                 inputMode={field.inputType === "number" ? "numeric" : undefined}
-                placeholder={field.placeholder}
+                placeholder={
+                  savedSecret
+                    ? tx("settings.channels.savedSecretPlaceholder", "Saved secret")
+                    : field.placeholder
+                }
                 value={values[field.key] ?? ""}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={cn(

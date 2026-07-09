@@ -1089,6 +1089,58 @@ def test_optional_features_payload_counts_enabled_channel_with_missing_dependenc
     assert payload["enabled_count"] == 1
 
 
+def test_optional_features_payload_reflects_saved_channel_config(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({
+        "channels": {
+            "discord": {
+                "enabled": False,
+                "token": "discord-secret-token",
+                "allowChannels": ["123", "456"],
+                "groupPolicy": "open",
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["discord"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    discord = payload["features"][0]
+    assert discord["name"] == "discord"
+    assert discord["enabled"] is False
+    assert discord["configured"] is True
+    assert discord["config_values"] == {
+        "channels.discord.allowChannels": "123, 456",
+        "channels.discord.groupPolicy": "open",
+    }
+    assert discord["configured_fields"] == [
+        "channels.discord.token",
+        "channels.discord.allowChannels",
+        "channels.discord.groupPolicy",
+    ]
+    assert "discord-secret-token" not in json.dumps(payload)
+
+
+def test_optional_features_payload_marks_enabled_channel_missing_credentials(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({"channels": {"discord": {"enabled": True}}})
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["discord"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    discord = payload["features"][0]
+    assert discord["enabled"] is True
+    assert discord["configured"] is False
+    assert "config_values" not in discord
+    assert "configured_fields" not in discord
+
+
 def test_optional_features_payload_marks_disabled_feishu_as_configured(monkeypatch):
     from nanobot.optional_features import optional_features_payload
 

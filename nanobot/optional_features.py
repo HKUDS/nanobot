@@ -344,7 +344,78 @@ def channel_enabled(config: Config, name: str) -> bool:
 
 
 _CHANNEL_CONFIGURED_KEYS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "dingtalk": (("client_id", "clientId"), ("client_secret", "clientSecret")),
+    "discord": (("token",),),
+    "email": (
+        ("consent_granted", "consentGranted"),
+        ("imap_host", "imapHost"),
+        ("imap_username", "imapUsername"),
+        ("imap_password", "imapPassword"),
+        ("smtp_host", "smtpHost"),
+        ("smtp_username", "smtpUsername"),
+        ("smtp_password", "smtpPassword"),
+    ),
     "feishu": (("app_id", "appId"), ("app_secret", "appSecret")),
+    "matrix": (
+        ("homeserver",),
+        ("user_id", "userId"),
+        ("password", "access_token", "accessToken"),
+    ),
+    "mattermost": (("server_url", "serverUrl"), ("token",)),
+    "msteams": (("app_id", "appId"), ("app_password", "appPassword")),
+    "napcat": (("ws_url", "wsUrl"),),
+    "qq": (("app_id", "appId"), ("secret",)),
+    "signal": (("phone_number", "phoneNumber"),),
+    "slack": (("app_token", "appToken"), ("bot_token", "botToken")),
+    "telegram": (("token",),),
+    "wecom": (("bot_id", "botId"), ("secret",)),
+    "weixin": (("token",),),
+}
+
+_CHANNEL_CONFIG_VALUE_FIELDS: dict[str, tuple[str, ...]] = {
+    "dingtalk": ("clientId", "clientSecret", "allowFrom"),
+    "discord": ("token", "allowChannels", "groupPolicy"),
+    "email": (
+        "consentGranted",
+        "imapHost",
+        "imapPort",
+        "imapUsername",
+        "imapPassword",
+        "smtpHost",
+        "smtpPort",
+        "smtpUsername",
+        "smtpPassword",
+        "fromAddress",
+        "pollIntervalSeconds",
+        "allowFrom",
+        "verifyDkim",
+        "verifySpf",
+    ),
+    "matrix": ("homeserver", "userId", "password", "accessToken", "groupPolicy", "allowFrom"),
+    "mattermost": ("serverUrl", "token", "teamId", "groupPolicy", "allowFrom"),
+    "msteams": ("appId", "appPassword", "tenantId", "path", "allowFrom"),
+    "napcat": ("wsUrl", "accessToken", "groupPolicy", "allowFrom"),
+    "qq": ("appId", "secret", "msgFormat", "allowFrom"),
+    "signal": ("phoneNumber", "daemonHost", "daemonPort", "dm.allowFrom", "group.allowFrom"),
+    "slack": ("appToken", "botToken", "groupPolicy"),
+    "telegram": ("token", "allowFrom", "groupPolicy"),
+    "wecom": ("botId", "secret", "allowFrom"),
+    "weixin": ("token", "allowFrom"),
+}
+
+_CHANNEL_SECRET_VALUE_FIELDS: dict[str, set[str]] = {
+    "dingtalk": {"clientSecret"},
+    "discord": {"token"},
+    "email": {"imapPassword", "smtpPassword"},
+    "matrix": {"password", "accessToken"},
+    "mattermost": {"token"},
+    "msteams": {"appPassword"},
+    "napcat": {"accessToken"},
+    "qq": {"secret"},
+    "slack": {"appToken", "botToken"},
+    "telegram": {"token"},
+    "wecom": {"secret"},
+    "weixin": {"token"},
 }
 
 
@@ -360,6 +431,82 @@ def _channel_section_value(section: Any, aliases: tuple[str, ...]) -> Any:
         if value:
             return value
     return None
+
+
+def _camel_to_snake(value: str) -> str:
+    chars: list[str] = []
+    for char in value:
+        if char.isupper():
+            if chars:
+                chars.append("_")
+            chars.append(char.lower())
+        else:
+            chars.append(char)
+    return "".join(chars)
+
+
+def _channel_field_value(section: Any, field_path: str) -> Any:
+    current = section
+    for part in field_path.split("."):
+        candidates = (part, _camel_to_snake(part))
+        if isinstance(current, dict):
+            found = False
+            for candidate in candidates:
+                if candidate in current:
+                    current = current[candidate]
+                    found = True
+                    break
+            if not found:
+                return None
+            continue
+        for candidate in candidates:
+            if hasattr(current, candidate):
+                current = getattr(current, candidate)
+                break
+        else:
+            return None
+    return current
+
+
+def _channel_value_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if value == "":
+        return False
+    if value == []:
+        return False
+    if value == {}:
+        return False
+    return True
+
+
+def _stringify_channel_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
+def _channel_config_snapshot(section: Any, name: str) -> tuple[dict[str, str], list[str]]:
+    if hasattr(section, "model_dump"):
+        section = section.model_dump(mode="json", by_alias=True)
+    if not isinstance(section, dict):
+        return {}, []
+
+    values: dict[str, str] = {}
+    configured_fields: list[str] = []
+    secret_fields = _CHANNEL_SECRET_VALUE_FIELDS.get(name, set())
+    for field in _CHANNEL_CONFIG_VALUE_FIELDS.get(name, ()):
+        value = _channel_field_value(section, field)
+        if not _channel_value_present(value):
+            continue
+        key = f"channels.{name}.{field}"
+        configured_fields.append(key)
+        if field in secret_fields:
+            continue
+        values[key] = _stringify_channel_value(value)
+    return values, configured_fields
 
 
 def _feishu_instance_display_name(config: dict[str, Any]) -> str:
@@ -438,6 +585,15 @@ def optional_features_payload(
             "install_supported": name in extras or is_channel,
             "requires_restart": is_channel or name in extras,
         }
+        if is_channel:
+            config_values, configured_fields = _channel_config_snapshot(
+                getattr(config.channels, name, None),
+                name,
+            )
+            if config_values:
+                feature["config_values"] = config_values
+            if configured_fields:
+                feature["configured_fields"] = configured_fields
         if name == "feishu" and is_channel:
             from nanobot.channels.feishu import FeishuChannel
 

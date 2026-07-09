@@ -645,6 +645,8 @@ export interface NanobotFeatureInfo {
   type: "channel" | "feature" | string;
   enabled: boolean;
   configured?: boolean;
+  config_values?: Record<string, string>;
+  configured_fields?: string[];
   instances?: NanobotChannelInstanceInfo[];
   installed: boolean;
   ready: boolean;

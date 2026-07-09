@@ -974,6 +974,62 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
+  it("prefills saved channel config without exposing secrets", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "discord",
+            display_name: "Discord",
+            type: "channel",
+            enabled: false,
+            configured: true,
+            installed: true,
+            ready: false,
+            status: "not_enabled",
+            install_supported: true,
+            requires_restart: true,
+            config_values: {
+              "channels.discord.allowChannels": "123, 456",
+              "channels.discord.groupPolicy": "open",
+            },
+            configured_fields: [
+              "channels.discord.token",
+              "channels.discord.allowChannels",
+              "channels.discord.groupPolicy",
+            ],
+          }],
+          enabled_count: 0,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByText("Configured manually")).toBeInTheDocument();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Saved secret")).toHaveValue("");
+    expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Advanced"));
+    expect(screen.getByLabelText("Allowed channels")).toHaveValue("123, 456");
+    expect(within(screen.getByRole("radiogroup", { name: "Group behavior" })).getByRole(
+      "radio",
+      { name: "All messages" },
+    )).toHaveAttribute("aria-checked", "true");
+  });
+
   it("shows an actionable credential guide for Telegram", async () => {
     vi.stubGlobal(
       "fetch",
