@@ -66,6 +66,7 @@ class TestMessageToolSuppressLogic:
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+            mt.set_outbound_authorizer(lambda *_args: None)
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send email")
         result = await loop._process_message(msg)

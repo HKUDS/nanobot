@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
-from nanobot.agent.tools.context import RequestContext
 
 
 class _ContextRecordingTool:
@@ -87,3 +87,29 @@ async def test_loop_hook_preserves_metadata_when_resetting_tool_context(tmp_path
         "metadata": metadata,
         "session_key": "slack:C123:111.222",
     }
+
+
+def test_message_tool_authorizer_uses_channel_allowlists(tmp_path: Path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        channels_config={
+            "telegram": {"allow_from": ["user-1"]},
+            "slack": {"dm": {"policy": "allowlist", "allow_from": ["U123"]}, "group_allow_from": ["C123"]},
+        },
+    )
+
+    assert loop._authorize_message_tool_target("telegram", "same", "telegram", "same") is None
+    assert loop._authorize_message_tool_target("telegram", "user-1", "cli", "direct") is None
+    assert loop._authorize_message_tool_target("slack", "U123", "cli", "direct") is None
+    assert loop._authorize_message_tool_target("slack", "C123", "cli", "direct") is None
+    assert loop._authorize_message_tool_target("telegram", "user-2", "cli", "direct") == (
+        "telegram:user-2 is not in allow_from or group_allow_from"
+    )
+    assert loop._authorize_message_tool_target("discord", "123", "cli", "direct") == (
+        "channel 'discord' is not configured"
+    )

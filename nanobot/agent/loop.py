@@ -48,6 +48,7 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.pairing import is_approved
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.security.workspace_access import (
@@ -543,6 +544,61 @@ class AgentLoop:
             registered.append("my")
 
         logger.info("Registered {} tools: {}", len(registered), registered)
+
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.set_outbound_authorizer(self._authorize_message_tool_target)
+
+    def _authorize_message_tool_target(
+        self,
+        channel: str,
+        chat_id: str,
+        default_channel: str,
+        default_chat_id: str,
+    ) -> str | None:
+        if channel == default_channel and chat_id == default_chat_id:
+            return None
+        cfg = self._channel_config(channel)
+        if cfg is None:
+            return f"channel {channel!r} is not configured"
+
+        allow_from = self._channel_list(cfg, "allow_from", "allowFrom")
+        allow_from.extend(self._channel_nested_list(cfg, "dm", "allow_from", "allowFrom"))
+        group_allow_from = self._channel_list(cfg, "group_allow_from", "groupAllowFrom")
+        if "*" in allow_from or chat_id in allow_from or chat_id in group_allow_from:
+            return None
+        if is_approved(channel, chat_id):
+            return None
+        return f"{channel}:{chat_id} is not in allow_from or group_allow_from"
+
+    def _channel_config(self, channel: str) -> Any | None:
+        cfg = self.channels_config
+        if cfg is None:
+            return None
+        if isinstance(cfg, dict):
+            return cfg.get(channel)
+        return getattr(cfg, channel, None)
+
+    @staticmethod
+    def _channel_list(cfg: Any, *names: str) -> list[str]:
+        for name in names:
+            if isinstance(cfg, dict):
+                value = cfg.get(name)
+            else:
+                value = getattr(cfg, name, None)
+            if value:
+                return [str(item) for item in value]
+        return []
+
+    @classmethod
+    def _channel_nested_list(cls, cfg: Any, section: str, *names: str) -> list[str]:
+        if isinstance(cfg, dict):
+            nested = cfg.get(section)
+        else:
+            nested = getattr(cfg, section, None)
+        if nested is None:
+            return []
+        return cls._channel_list(nested, *names)
 
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""

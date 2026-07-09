@@ -217,7 +217,7 @@ def test_image_reference_scope_restricted_blocks_outside_and_full_allows(tmp_pat
         reset_workspace_scope(token)
 
 
-def test_message_media_scope_restricted_blocks_outside_and_full_allows(tmp_path: Path) -> None:
+def test_message_media_scope_blocks_outside_even_under_full_scope(tmp_path: Path) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
     project.mkdir()
@@ -245,7 +245,8 @@ def test_message_media_scope_restricted_blocks_outside_and_full_allows(tmp_path:
     )
     token = bind_workspace_scope(full)
     try:
-        assert tool._resolve_media([str(media)]) == [str(media)]
+        with pytest.raises(PermissionError):
+            tool._resolve_media([str(media)])
     finally:
         reset_workspace_scope(token)
 
