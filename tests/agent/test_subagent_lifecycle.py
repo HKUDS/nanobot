@@ -285,80 +285,76 @@ class TestRunSubagent:
 
 class TestAnnounceResult:
     @pytest.mark.asyncio
-    async def test_publishes_inbound_message(self, tmp_path):
+    async def test_records_mailbox_result_without_publishing_inbound(self, tmp_path):
         sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        sm.bus.publish_inbound = AsyncMock()
 
         await sm._announce_result(
             "t1", "label", "task", "result text",
             {"channel": "cli", "chat_id": "direct"}, "ok",
         )
 
-        assert len(published) == 1
-        msg = published[0]
-        assert msg.channel == "system"
-        assert msg.sender_id == "subagent"
-        assert msg.metadata["injected_event"] == "subagent_result"
-        assert msg.metadata["subagent_task_id"] == "t1"
+        sm.bus.publish_inbound.assert_not_awaited()
+        snapshots = await sm.mailbox.poll("cli:direct", task_id="t1")
+        assert snapshots[0].state == "completed"
+        read = await sm.mailbox.wait_for_result("cli:direct", task_id="t1", timeout_seconds=0)
+        assert read.state == "ready"
+        assert read.result is not None
+        assert read.result.content == "result text"
+        assert read.result.metadata["subagent_task_id"] == "t1"
 
     @pytest.mark.asyncio
     async def test_session_key_override(self, tmp_path):
         sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
 
         await sm._announce_result(
             "t1", "label", "task", "result",
             {"channel": "telegram", "chat_id": "123", "session_key": "s1"}, "ok",
         )
 
-        assert published[0].session_key_override == "s1"
+        assert await sm.mailbox.poll("s1", task_id="t1")
+        assert await sm.mailbox.poll("telegram:123", task_id="t1") == []
 
     @pytest.mark.asyncio
     async def test_session_key_override_fallback(self, tmp_path):
         sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
 
         await sm._announce_result(
             "t1", "label", "task", "result",
             {"channel": "telegram", "chat_id": "123"}, "ok",
         )
 
-        assert published[0].session_key_override == "telegram:123"
+        snapshots = await sm.mailbox.poll("telegram:123", task_id="t1")
+        assert snapshots[0].session_key == "telegram:123"
 
     @pytest.mark.asyncio
-    async def test_ok_status_text(self, tmp_path):
+    async def test_ok_status_records_completed_state(self, tmp_path):
         sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
 
         await sm._announce_result(
             "t1", "label", "task", "result",
             {"channel": "cli", "chat_id": "direct"}, "ok",
         )
 
-        assert "completed successfully" in published[0].content
+        snapshots = await sm.mailbox.poll("cli:direct", task_id="t1")
+        assert snapshots[0].state == "completed"
 
     @pytest.mark.asyncio
-    async def test_error_status_text(self, tmp_path):
+    async def test_error_status_records_failed_state(self, tmp_path):
         sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
 
         await sm._announce_result(
             "t1", "label", "task", "error details",
             {"channel": "cli", "chat_id": "direct"}, "error",
         )
 
-        assert "failed" in published[0].content
+        snapshots = await sm.mailbox.poll("cli:direct", task_id="t1")
+        assert snapshots[0].state == "failed"
+        assert snapshots[0].error == "error details"
 
     @pytest.mark.asyncio
     async def test_origin_message_id_in_metadata(self, tmp_path):
         sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
 
         await sm._announce_result(
             "t1", "label", "task", "result",
@@ -366,7 +362,29 @@ class TestAnnounceResult:
             origin_message_id="msg-123",
         )
 
-        assert published[0].metadata["origin_message_id"] == "msg-123"
+        read = await sm.mailbox.wait_for_result("cli:direct", task_id="t1", timeout_seconds=0)
+        assert read.result is not None
+        assert read.result.metadata["origin_message_id"] == "msg-123"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_results_are_not_consumed_twice(self, tmp_path):
+        sm = _manager(tmp_path)
+
+        await sm._announce_result(
+            "t1", "label", "task", "first",
+            {"channel": "cli", "chat_id": "direct"}, "ok",
+        )
+        await sm._announce_result(
+            "t1", "label", "task", "second",
+            {"channel": "cli", "chat_id": "direct"}, "ok",
+        )
+
+        first = await sm.mailbox.wait_for_result("cli:direct", task_id="t1", timeout_seconds=0)
+        second = await sm.mailbox.wait_for_result("cli:direct", task_id="t1", timeout_seconds=0)
+        assert first.state == "ready"
+        assert first.result is not None
+        assert first.result.content == "first"
+        assert second.state == "consumed"
 
 
 # ---------------------------------------------------------------------------

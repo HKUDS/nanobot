@@ -14,12 +14,16 @@ from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_PENDING_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
+    SUBAGENT_RESULT_CONTINUATION_KIND,
     _save_skip_for_turn,
     internal_continuation_pending,
     internal_continuation_run_started_at,
     maybe_continue_turn,
     should_finalize_on_max_iterations,
     should_stream_budget_response,
+    subagent_result_continuation_inbound,
+    subagent_result_continuation_metadata,
+    subagent_result_continuation_task_id,
 )
 
 
@@ -157,3 +161,23 @@ def test_save_skip_unchanged_for_standalone_current_message():
         history_count=1,
         user_persisted_early=False,
     ) == 2
+
+
+def test_subagent_result_continuation_metadata():
+    meta = subagent_result_continuation_metadata(
+        {
+            "message_id": "msg-1",
+            "_stream_id": "old-stream",
+            "_stream_delta": True,
+        },
+        task_id="sub-1",
+        run_started_at=42.0,
+    )
+
+    assert meta[INTERNAL_CONTINUATION_META] is True
+    assert meta[INTERNAL_CONTINUATION_KIND_META] == SUBAGENT_RESULT_CONTINUATION_KIND
+    assert meta[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 42.0
+    assert subagent_result_continuation_inbound(meta)
+    assert subagent_result_continuation_task_id(meta) == "sub-1"
+    assert "_stream_id" not in meta
+    assert "_stream_delta" not in meta
