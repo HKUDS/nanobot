@@ -128,6 +128,10 @@ def _make_loop(tmp_path, *, mcp_servers: dict) -> AgentLoop:
 @pytest.fixture(autouse=True)
 def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
     """The repro server runs on 127.0.0.1; allow nanobot to talk to it."""
+    class TestPinnedDNSAsyncTransport(security_network.PinnedDNSAsyncTransport):
+        _resolver_lock = asyncio.Lock()
+
+    monkeypatch.setattr(mcp_module, "PinnedDNSAsyncTransport", TestPinnedDNSAsyncTransport)
     monkeypatch.setattr(
         mcp_module,
         "validate_url_target",
