@@ -129,12 +129,7 @@ async def test_alt_enter_inserts_newline_on_lf_terminals():
 
 @pytest.mark.asyncio
 async def test_csi_u_shift_enter_inserts_newline_not_raw_escape():
-    """Terminals speaking the CSI-u (kitty / fixterms) keyboard protocol send
-    Shift+Enter as "\\x1b[13;2u". prompt_toolkit has no support for that protocol
-    and would otherwise dump the raw escape bytes ("^[[13;2u") into the buffer;
-    the binding must instead parse it as one keypress and insert a newline. Only
-    a real PromptSession/parser exercises the ANSI_SEQUENCES registration.
-    """
+    """CSI-u Shift+Enter inserts a newline instead of raw escape bytes."""
     from prompt_toolkit.application import create_app_session
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
