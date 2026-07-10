@@ -188,6 +188,9 @@ rename, delete, search, and copy the command for each trigger.
 For webhooks or other external systems, run your own small service and have it
 call this CLI after it decides what message nanobot should receive.
 
+See [Automations](./automations.md) for the broader automation model, WebUI
+management, and delivery behavior.
+
 ## OpenAI-Compatible API
 
 | Command | Description |

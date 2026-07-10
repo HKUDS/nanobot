@@ -316,7 +316,16 @@ def _build_cli_key_bindings() -> KeyBindings:
                        single-line Enter-to-send feel even though the buffer
                        is multiline-capable).
       * Alt+Enter   -> insert a newline for multi-line input.
+      * Shift+Enter -> insert a newline on terminals that emit the CSI-u
+                       (kitty / fixterms) keyboard-protocol encoding for it.
     """
+    # prompt_toolkit does not recognize CSI-u, so register its Shift+Enter
+    # sequence as a best-effort addition without overriding existing mappings.
+    with suppress(Exception):
+        from prompt_toolkit.input import ansi_escape_sequences as _aes
+
+        _aes.ANSI_SEQUENCES.setdefault("\x1b[13;2u", Keys.ControlF3)
+
     kb = KeyBindings()
 
     @kb.add("enter")
@@ -329,6 +338,10 @@ def _build_cli_key_bindings() -> KeyBindings:
 
     # LF-as-Enter terminals send Alt+Enter as ESC + LF rather than ESC + CR.
     @kb.add("escape", Keys.ControlJ)  # Alt+Enter on LF-as-Enter terminals
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    @kb.add(Keys.ControlF3)  # Shift+Enter on CSI-u capable terminals
     def _(event):
         event.current_buffer.insert_text("\n")
 

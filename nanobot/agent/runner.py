@@ -30,6 +30,7 @@ from nanobot.utils.helpers import (
     strip_reasoning_tags,
     strip_think,
 )
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
@@ -61,12 +62,9 @@ class AgentRunSpec:
 
     initial_messages: list[dict[str, Any]]
     tools: ToolRegistry
-    model: str
+    runtime: LLMRuntime
     max_iterations: int
     max_tool_result_chars: int
-    temperature: float | None = None
-    max_tokens: int | None = None
-    reasoning_effort: str | None = None
     hook: AgentHook | None = None
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
@@ -74,7 +72,6 @@ class AgentRunSpec:
     fail_on_tool_error: bool = False
     workspace: Path | None = None
     session_key: str | None = None
-    context_window_tokens: int | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
@@ -105,8 +102,7 @@ class AgentRunResult:
 class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
-    def __init__(self, provider: LLMProvider):
-        self.provider = provider
+    def __init__(self) -> None:
         self.context_governor = ContextGovernor()
 
     @staticmethod
@@ -189,7 +185,7 @@ class AgentRunner:
                     {
                         "phase": "final_response",
                         "iteration": iteration,
-                        "model": spec.model,
+                        "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
                         "pending_tool_calls": [],
@@ -344,15 +340,15 @@ class AgentRunner:
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
         governance_config = ContextGovernanceConfig(
-            provider=self.provider,
-            model=spec.model,
+            provider=spec.runtime.provider,
+            model=spec.runtime.model,
             tools=spec.tools,
             workspace=spec.workspace,
             session_key=spec.session_key,
             max_tool_result_chars=spec.max_tool_result_chars,
-            context_window_tokens=spec.context_window_tokens,
+            context_window_tokens=spec.runtime.context_window_tokens,
             context_block_limit=spec.context_block_limit,
-            max_tokens=spec.max_tokens,
+            max_tokens=spec.runtime.generation.max_tokens,
             inflight_start_index=len(spec.initial_messages),
         )
 
@@ -429,7 +425,7 @@ class AgentRunner:
                     {
                         "phase": "awaiting_tools",
                         "iteration": iteration,
-                        "model": spec.model,
+                        "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
                         "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
@@ -491,7 +487,7 @@ class AgentRunner:
                     {
                         "phase": "tools_completed",
                         "iteration": iteration,
-                        "model": spec.model,
+                        "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": completed_tool_results,
                         "pending_tool_calls": [],
@@ -645,7 +641,7 @@ class AgentRunner:
                 {
                     "phase": "final_response",
                     "iteration": iteration,
-                    "model": spec.model,
+                    "model": spec.runtime.model,
                     "assistant_message": messages[-1],
                     "completed_tool_results": [],
                     "pending_tool_calls": [],
@@ -702,16 +698,14 @@ class AgentRunner:
         kwargs: dict[str, Any] = {
             "messages": messages,
             "tools": tools,
-            "model": spec.model,
+            "model": spec.runtime.model,
             "retry_mode": spec.provider_retry_mode,
             "on_retry_wait": spec.retry_wait_callback,
         }
-        if spec.temperature is not None:
-            kwargs["temperature"] = spec.temperature
-        if spec.max_tokens is not None:
-            kwargs["max_tokens"] = spec.max_tokens
-        if spec.reasoning_effort is not None:
-            kwargs["reasoning_effort"] = spec.reasoning_effort
+        generation = spec.runtime.generation
+        kwargs["temperature"] = generation.temperature
+        kwargs["max_tokens"] = generation.max_tokens
+        kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
     async def _request_model(
@@ -746,7 +740,7 @@ class AgentRunner:
             not wants_streaming
             and spec.stream_progress_deltas
             and spec.progress_callback is not None
-            and getattr(self.provider, "supports_progress_deltas", False) is True
+            and getattr(spec.runtime.provider, "supports_progress_deltas", False) is True
         )
 
         progress_state: dict[str, bool] | None = None
@@ -774,7 +768,7 @@ class AgentRunner:
             async def _stream_recover() -> None:
                 await hook.on_stream_end(context, resuming=True)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
@@ -805,12 +799,12 @@ class AgentRunner:
                     context.streamed_content = True
                     await spec.progress_callback(incremental)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
             )
         else:
-            coro = self.provider.chat_with_retry(**kwargs)
+            coro = spec.runtime.provider.chat_with_retry(**kwargs)
 
         # Streaming requests already have provider-level idle timeouts
         # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
@@ -985,7 +979,7 @@ class AgentRunner:
         messages: list[dict[str, Any]],
     ) -> LLMResponse:
         kwargs = self._build_request_kwargs(spec, messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        return await spec.runtime.provider.chat_with_retry(**kwargs)
 
     @staticmethod
     def _budget_exhausted_finalization_messages(
@@ -1033,7 +1027,12 @@ class AgentRunner:
             tools = spec.tools.get_definitions()
         except Exception:
             tools = None
-        prompt_tokens, _ = estimate_prompt_tokens_chain(self.provider, spec.model, messages, tools)
+        prompt_tokens, _ = estimate_prompt_tokens_chain(
+            spec.runtime.provider,
+            spec.runtime.model,
+            messages,
+            tools,
+        )
         assistant_message = build_assistant_message(
             response.content or "",
             tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],

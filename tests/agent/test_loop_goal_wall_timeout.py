@@ -8,14 +8,16 @@ import pytest
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.base import GenerationSettings
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @pytest.mark.asyncio
 async def test_subagent_forwards_resolver_to_agent_run_spec(tmp_path: Path) -> None:
     provider = MagicMock()
     provider.get_default_model.return_value = "m"
+    provider.generation = GenerationSettings()
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=64,
@@ -39,6 +41,7 @@ async def test_subagent_forwards_resolver_to_agent_run_spec(tmp_path: Path) -> N
         "lbl",
         {"channel": "cli", "chat_id": "direct", "session_key": "cli:direct"},
         status,
+        LLMRuntime.capture(provider, "m", context_window_tokens=128_000),
     )
     mgr.runner.run.assert_called_once()
     spec = mgr.runner.run.call_args[0][0]

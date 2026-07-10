@@ -41,6 +41,30 @@ from nanobot.security.workspace_policy import is_path_within
 _IS_WINDOWS = sys.platform == "win32"
 
 
+def _reap_pid(pid: int) -> None:
+    """Best-effort ``waitpid`` to reap a child and prevent zombies.
+
+    Call this after killing or after normal completion of any subprocess
+    as a safety net — asyncio's child-watcher *should* have reaped it,
+    but in containers / edge-cases it sometimes doesn't.
+
+    Uses ``os`` capability checks rather than ``_IS_WINDOWS`` so this is
+    safe when tests patch the platform flag while still running on Windows
+    (``os.waitpid`` / ``os.WNOHANG`` do not exist there).
+    """
+    waitpid = getattr(os, "waitpid", None)
+    wnohang = getattr(os, "WNOHANG", None)
+    if waitpid is None or wnohang is None:
+        return
+    try:
+        waitpid(pid, wnohang)
+    except (ProcessLookupError, ChildProcessError):
+        # Already reaped, or not our child — both are fine.
+        pass
+    except OSError as exc:
+        logger.debug("_reap_pid({}): {}", pid, exc)
+
+
 # Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
     "\n\nNote: this is a hard policy boundary, not a transient failure. "
@@ -283,6 +307,7 @@ class ExecTool(Tool):
         if yield_time_ms is not None:
             return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await self._spawn(
                 prepared.command,
@@ -303,6 +328,11 @@ class ExecTool(Tool):
             except asyncio.CancelledError:
                 await self._kill_process(process)
                 raise
+
+            # Safety-net reap: asyncio *should* have reaped the child via
+            # communicate(), but in containers the child-watcher sometimes
+            # misses it, leaving a zombie.
+            _reap_pid(process.pid)
 
             output_parts = []
 
@@ -330,6 +360,10 @@ class ExecTool(Tool):
             return result
 
         except Exception as e:
+            # Kill and reap the child if it was spawned but an unexpected
+            # error prevented communicate() from completing.
+            if process is not None:
+                await self._kill_process(process)
             return ToolResult.error(f"Error executing command: {str(e)}")
 
     async def _execute_session(
@@ -598,17 +632,22 @@ class ExecTool(Tool):
 
     @staticmethod
     async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies."""
-        process.kill()
+        """Kill a subprocess and reap it to prevent zombies.
+
+        Safe to call when the process has already exited (e.g. generic
+        exception handlers after a successful ``communicate()``): skips
+        ``kill()`` and only runs the safety-net reap.
+        """
+        if process.returncode is not None:
+            _reap_pid(process.pid)
+            return
         try:
+            with suppress(ProcessLookupError):
+                process.kill()
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=5.0)
         finally:
-            if not _IS_WINDOWS:
-                try:
-                    os.waitpid(process.pid, os.WNOHANG)
-                except (ProcessLookupError, ChildProcessError) as e:
-                    logger.debug("Process already reaped or not found: {}", e)
+            _reap_pid(process.pid)
 
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.

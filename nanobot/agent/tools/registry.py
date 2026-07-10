@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import ContextAware, current_request_context
 
 
 def is_tool_error_result(name: str, result: Any) -> bool:
@@ -108,6 +109,12 @@ class ToolRegistry:
                     f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
                 )
             )
+
+        # Compatibility for external tools that still implement the legacy
+        # setter protocol. Built-ins read the authoritative ContextVar
+        # directly and never copy routing state.
+        if isinstance(tool, ContextAware) and (ctx := current_request_context()) is not None:
+            tool.set_context(ctx)
 
         params = self._coerce_params(tool, params)
         if not isinstance(params, dict):

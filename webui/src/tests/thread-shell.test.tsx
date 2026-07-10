@@ -507,6 +507,71 @@ describe("ThreadShell", () => {
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
+  it("binds a pending landing message to the chat created for it", async () => {
+    const client = makeClient();
+    let resolveCreate: ((chatId: string) => void) | null = null;
+    const onCreateChat = vi.fn(() => new Promise<string>((resolve) => {
+      resolveCreate = resolve;
+    }));
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onCreateChat={onCreateChat}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "must not leak" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("existing-chat")}
+            title="Existing chat"
+            onToggleSidebar={() => {}}
+            onCreateChat={onCreateChat}
+          />,
+        ),
+      );
+    });
+
+    await act(async () => {
+      resolveCreate?.("chat-new");
+    });
+
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-new")}
+            title="New chat"
+            onToggleSidebar={() => {}}
+            onCreateChat={onCreateChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() =>
+      expectSendMessageWithTurn(client, "chat-new", "must not leak"),
+    );
+  });
+
   it("keeps the first landing message when new chat history is still empty", async () => {
     const client = makeClient();
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");

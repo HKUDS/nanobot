@@ -458,7 +458,8 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     content, tools_used, messages, _, _ = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}]
+        [{"role": "user", "content": "hi"}],
+        runtime=loop.llm_runtime(),
     )
 
     assert content == "done"
@@ -502,6 +503,7 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
 
     await loop._run_agent_loop(
         [{"role": "user", "content": "hi"}],
+        runtime=loop.llm_runtime(),
         on_progress=on_progress,
         channel="websocket",
         chat_id="chat-1",
@@ -544,7 +546,8 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     content, _, _, _, _ = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}]
+        [{"role": "user", "content": "hi"}],
+        runtime=loop.llm_runtime(),
     )
 
     assert content == "still works"
@@ -568,7 +571,9 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
         raise RuntimeError("progress failed")
 
     with pytest.raises(RuntimeError, match="progress failed"):
-        await loop._run_agent_loop([], on_progress=bad_progress)
+        await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=bad_progress
+        )
 
 
 @pytest.mark.asyncio
@@ -585,7 +590,9 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    content, tools_used, _, _, _ = await loop._run_agent_loop([])
+    content, tools_used, _, _, _ = await loop._run_agent_loop(
+        [], runtime=loop.llm_runtime()
+    )
     assert content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."

@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStatusEvent,
@@ -18,6 +19,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMResponse
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
@@ -68,8 +70,17 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
     assert runtime.model == "test-model"
 
     next_provider = MagicMock()
-    loop.provider = next_provider
-    loop.model = "next-model"
+    next_provider.generation = SimpleNamespace(
+        temperature=0.1,
+        max_tokens=4096,
+        reasoning_effort=None,
+    )
+    loop.runtime_resolver.adopt_snapshot(ProviderSnapshot(
+        provider=next_provider,
+        model="next-model",
+        context_window_tokens=runtime.context_window_tokens,
+        signature=("next-model",),
+    ))
     runtime = loop.llm_runtime()
 
     assert runtime.provider is next_provider
@@ -315,7 +326,7 @@ def test_webui_title_update_uses_captured_llm_runtime(
     coordinator.capture_title_context(
         "websocket:chat1",
         msg,
-        LLMRuntime(provider, "turn-model"),
+        LLMRuntime.capture(provider, "turn-model", context_window_tokens=32_768),
     )
     asyncio.run(coordinator.handle_turn_end(
         msg,
@@ -1054,6 +1065,7 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
 
     await loop._run_agent_loop(
         [],
+        runtime=loop.llm_runtime(),
         session=session,
         channel="websocket",
         chat_id="late-goal",
@@ -1090,20 +1102,27 @@ async def test_process_direct_skip_user_persist_does_not_save_retry_user(
     ]
 
 
-def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     spawn_tool = loop.tools.get("spawn")
     assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
 
-    loop._set_tool_context(
-        "discord",
-        "thread-777",
+    with request_context(RequestContext(
+        channel="discord",
+        chat_id="thread-777",
         session_key="discord:parent-456:thread:thread-777",
-    )
+        runtime=runtime,
+    )):
+        await spawn_tool.execute(task="inspect context")
 
-    assert spawn_tool._origin_channel.get() == "discord"  # type: ignore[attr-defined]
-    assert spawn_tool._origin_chat_id.get() == "thread-777"  # type: ignore[attr-defined]
-    assert spawn_tool._session_key.get() == "discord:parent-456:thread:thread-777"  # type: ignore[attr-defined]
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["origin_channel"] == "discord"
+    assert call["origin_chat_id"] == "thread-777"
+    assert call["session_key"] == "discord:parent-456:thread:thread-777"
+    assert call["runtime"] is runtime
 
 
 @pytest.mark.asyncio
@@ -1268,10 +1287,14 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     session.add_message("assistant", "working")
     loop.sessions.save(session)
 
-    seen: dict[str, list[dict]] = {}
+    runtime = loop.llm_runtime()
+    seen: dict[str, object] = {}
+    record_runtime = MagicMock(wraps=loop._runtime_events().record_turn_runtime)
+    loop.runtime_event_publisher.record_turn_runtime = record_runtime
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(initial_messages, **kwargs):
         seen["initial_messages"] = initial_messages
+        seen["runtime"] = kwargs["runtime"]
         return (
             "done",
             [],
@@ -1289,10 +1312,20 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
             chat_id="cli:test",
             content="subagent result",
             metadata={"subagent_task_id": "sub-1"},
-        )
+        ),
+        runtime=runtime,
     )
 
-    non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
+    assert seen["runtime"] is runtime
+    record_runtime.assert_called_once_with("cli:test", runtime)
+    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
+    assert all(
+        call.kwargs["runtime"] is runtime
+        for call in loop.consolidator.maybe_consolidate_by_tokens.call_args_list
+    )
+    initial_messages = seen["initial_messages"]
+    assert isinstance(initial_messages, list)
+    non_system = [m for m in initial_messages if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
     # Persisted timestamps stay in session records, but replay content is not
@@ -1422,21 +1455,28 @@ def test_subagent_followup_skips_empty_content() -> None:
     assert session.messages == []
 
 
-def test_set_tool_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
 
-    loop._set_tool_context(
-        "slack",
-        "C123",
+    with request_context(RequestContext(
+        channel="slack",
+        chat_id="C123",
         message_id="msg-123",
         metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
         session_key="slack:C123:1700.42",
-    )
+        runtime=runtime,
+    )):
+        await spawn_tool.execute(task="inspect thread")
 
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    assert spawn_tool._session_key.get() == "slack:C123:1700.42"
-    assert spawn_tool._origin_message_id.get() == "msg-123"
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["session_key"] == "slack:C123:1700.42"
+    assert call["origin_message_id"] == "msg-123"
+    assert call["runtime"] is runtime
 
 
 @pytest.mark.asyncio
