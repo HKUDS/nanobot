@@ -1304,6 +1304,7 @@ export function ThreadComposer({
     function onKeyDown(event: KeyboardEvent): void {
       if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
       event.preventDefault();
+      secondEnterPromptIdRef.current = null;
       voiceShortcutDownRef.current = true;
       voiceRecorder.beginShortcutHold();
     }
