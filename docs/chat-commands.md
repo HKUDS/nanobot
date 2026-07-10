@@ -15,7 +15,11 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-prompt` | Show how Dream is being guided for memory |
+| `/dream-prompt init` | Create an editable Dream memory guide at `prompts/dream.md` |
 | `/skill` | List enabled skills and their descriptions |
+| `/trigger` | Show local trigger usage |
+| `/trigger <name>` | Create a named local trigger for the current chat/session |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
@@ -54,6 +58,68 @@ To switch presets for future turns:
 ```
 
 Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
+
+## Local triggers
+
+Use `/trigger <name>` when a local script or another service should be able to
+send a message into the current chat/session later. A name is required; plain
+`/trigger` only shows the usage hint.
+
+Create the trigger from the chat where future messages should arrive:
+
+```text
+/trigger PR review
+```
+
+nanobot replies with a trigger ID and a command shaped like:
+
+```bash
+nanobot trigger trg_8K4P2Q9X "Review PR #4502"
+```
+
+Replace `"Review PR #4502"` with the message you want nanobot to receive. The
+trigger is bound to the session where it was created, so the message goes back
+to that same chat. Keep `nanobot gateway` running so trigger messages can be
+delivered. The trigger message starts an automation turn recorded in that
+session with the message you passed to the CLI; it is not treated as a normal
+user message. If that session is already running a turn, the trigger waits
+until the session is idle instead of being injected into the active turn.
+
+Trigger deliveries are stored in the workspace until their linked agent turn
+finishes successfully. If the gateway exits after claiming a delivery but before
+the turn completes, the next gateway start requeues that delivery. This is an
+at-least-once local queue: a delivery may run more than once if the process
+exits at the wrong time, so external scripts should make repeated trigger
+messages safe. If the delivery reaches the agent and the agent turn fails, the
+delivery is marked failed in Automations instead of retrying forever.
+
+For longer or generated content, omit the message argument and pipe stdin:
+
+```bash
+printf '%s\n' "Review the latest failed CI job" | nanobot trigger trg_8K4P2Q9X
+```
+
+If an external webhook should wake nanobot up, run your own small webhook
+service and have it call the trigger command after it builds the final message:
+
+```bash
+nanobot trigger <trigger-id> "<message>"
+```
+
+If you run multiple nanobot instances, pass the same config or workspace
+selector used by the gateway:
+
+```bash
+nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
+nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
+```
+
+Manage triggers from the WebUI Automations view. You can search, pause/resume,
+rename, delete, and copy the trigger command there. A session may have multiple
+triggers, just like it may have multiple scheduled automations.
+
+See [Automations](./automations.md) for how local triggers fit with scheduled
+automations, heartbeat, and gateway delivery.
 
 ## Periodic Tasks
 

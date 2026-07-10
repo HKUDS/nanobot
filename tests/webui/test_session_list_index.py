@@ -6,6 +6,8 @@ from pathlib import Path
 
 import nanobot.webui.session_list_index as session_list_index
 from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
 
 
@@ -86,6 +88,34 @@ def test_webui_session_list_skips_cron_internal_user_preview(tmp_path: Path) -> 
     manager.save(session)
 
     assert list_webui_sessions(manager)[0]["preview"] == "提醒已经到期。"
+
+
+def test_webui_session_list_skips_trigger_internal_user_preview(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:trigger-preview")
+    session.add_message(
+        "user",
+        "Local trigger received: PR review",
+        **{AUTOMATION_HISTORY_META: {"kind": "local_trigger", "trigger_id": "trg_123"}},
+    )
+    session.add_message("assistant", "PR #4502 已经开始 review。")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "PR #4502 已经开始 review。"
+
+
+def test_webui_session_list_skips_hidden_history_user_preview(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:hidden-preview")
+    session.add_message(
+        "user",
+        "internal subagent result",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result", "subagent_task_id": "sub-1"}},
+    )
+    session.add_message("assistant", "subagent summary")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "subagent summary"
 
 
 def test_webui_session_list_uses_webui_transcript_activity_for_sort(

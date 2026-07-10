@@ -5,12 +5,14 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 from nanobot.agent.tools.exec_session import (
     ExecSessionManager,
     ListExecSessionsTool,
     WriteStdinTool,
 )
+from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
 
 
@@ -73,6 +75,23 @@ def test_exec_returns_completed_session_output_when_yield_time_ms_is_used(tmp_pa
     assert "hello" in result
     assert "Exit code: 0" in result
     assert "session_id:" not in result
+
+
+def test_exec_session_yield_returns_when_process_finishes_early(tmp_path):
+    async def run() -> tuple[str, float]:
+        manager = ExecSessionManager()
+        tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        command = _python_command("import time; time.sleep(0.1); print('done')")
+        started = time.monotonic()
+        result = await tool.execute(command=command, yield_time_ms=1200)
+        return result, time.monotonic() - started
+
+    result, elapsed = asyncio.run(run())
+
+    assert "done" in result
+    assert "Exit code: 0" in result
+    assert "session_id:" not in result
+    assert elapsed < 1.0
 
 
 def test_exec_session_accepts_max_output_tokens_alias(tmp_path):
@@ -334,9 +353,10 @@ def test_write_stdin_reports_missing_session(tmp_path):
     manager = ExecSessionManager()
     tool = WriteStdinTool(manager=manager)
 
-    result = asyncio.run(tool.execute(session_id="missing", chars=""))
+    result = asyncio.run(tool.execute(session_id="missing\nExit code: 0", chars=""))
 
-    assert "exec session not found" in result
+    assert result == "Error: exec session not found: 'missing\\nExit code: 0'"
+    assert is_tool_error_result("write_stdin", result)
 
 
 def test_list_exec_sessions_reports_running_commands(tmp_path):

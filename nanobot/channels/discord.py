@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -217,6 +218,16 @@ if DISCORD_AVAILABLE:
                 command_text = f"/model {preset}" if preset else "/model"
                 await self._forward_slash_command(interaction, command_text)
 
+            @self.tree.command(name="trigger", description="Create a named local trigger for this chat")
+            @app_commands.describe(name="Trigger name")
+            async def trigger_command(
+                interaction: discord.Interaction,
+                name: str,
+            ) -> None:
+                name = name.strip()
+                command_text = f"/trigger {name}" if name else "/trigger"
+                await self._forward_slash_command(interaction, command_text)
+
             @self.tree.command(name="help", description="Show available commands")
             async def help_command(interaction: discord.Interaction) -> None:
                 sender_id = str(interaction.user.id)
@@ -394,7 +405,7 @@ class DiscordChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Discord client."""
         if not DISCORD_AVAILABLE:
-            self.logger.error("discord.py not installed. Run: pip install nanobot-ai[discord]")
+            self.logger.error("discord.py not installed. Run: nanobot plugins enable discord")
             return
 
         if not self.config.token:
@@ -458,7 +469,7 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("client not ready; dropping outbound message")
             return
 
-        is_progress = bool((msg.metadata or {}).get("_progress"))
+        is_progress = isinstance(msg.event, ProgressEvent)
 
         try:
             await client.send_outbound(msg)
@@ -471,7 +482,14 @@ class DiscordChannel(BaseChannel):
                 await self._clear_reactions(msg.chat_id)
 
     async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
     ) -> None:
         """Progressive Discord delivery: send once, then edit until the stream ends."""
         client = self._client
@@ -479,10 +497,7 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("client not ready; dropping stream delta")
             return
 
-        meta = metadata or {}
-        stream_id = meta.get("_stream_id")
-
-        if meta.get("_stream_end"):
+        if stream_end:
             buf = self._stream_bufs.get(chat_id)
             if not buf or buf.message is None or not buf.text:
                 return

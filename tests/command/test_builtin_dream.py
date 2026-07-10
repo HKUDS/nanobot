@@ -5,17 +5,32 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command.builtin import cmd_dream, cmd_dream_log, cmd_dream_restore
+from nanobot.command.builtin import (
+    build_help_text,
+    builtin_command_palette,
+    cmd_dream,
+    cmd_dream_log,
+    cmd_dream_prompt,
+    cmd_dream_restore,
+)
 from nanobot.command.router import CommandContext
 from nanobot.utils.gitstore import CommitInfo
 
 
 class _FakeStore:
-    def __init__(self, git, last_dream_cursor: int = 1, dream_prompt_result=None):
+    def __init__(
+        self,
+        git,
+        last_dream_cursor: int = 1,
+        dream_prompt_result=None,
+        content_diff: str = "",
+    ):
         self.git = git
         self._last_dream_cursor = last_dream_cursor
         self._dream_prompt_result = dream_prompt_result
+        self._content_diff = content_diff
         self.compact_history_called = False
 
     def get_last_dream_cursor(self) -> int:
@@ -29,6 +44,9 @@ class _FakeStore:
 
     def set_last_dream_cursor(self, value: int) -> None:
         self._last_dream_cursor = value
+
+    def dream_content_diff(self) -> str:
+        return self._content_diff
 
     def compact_history(self) -> None:
         self.compact_history_called = True
@@ -94,6 +112,12 @@ def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
     return ctx, bus
 
 
+def _make_dream_prompt_ctx(tmp_path, raw: str = "/dream-prompt", args: str = "") -> CommandContext:
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
+    loop = SimpleNamespace(context=SimpleNamespace(memory=MemoryStore(tmp_path)))
+    return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
+
+
 @pytest.mark.asyncio
 async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     ctx, bus = _make_dream_ctx(tmp_path)
@@ -109,6 +133,7 @@ async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     assert "idle auto-compact" in content
     assert "Dream cursor" in content
     assert "agents.defaults.idleCompactAfterMinutes" in content
+    assert "/dream-prompt" in content
 
 
 @pytest.mark.asyncio
@@ -142,6 +167,74 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
 
     assert len(calls) == 1
     assert callable(calls[0][1]["on_progress"])
+
+
+def _build_runnable_dream(
+    tmp_path,
+    *,
+    initialized: bool,
+    content_diff: str,
+    stop_reason: str = "completed",
+) -> tuple[CommandContext, _FakeStore]:
+    """Build a /dream ctx whose run is driven by a canned stop reason + diff."""
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
+    store = _FakeStore(
+        _FakeGit(initialized=initialized),
+        last_dream_cursor=5,
+        dream_prompt_result=("dream prompt", 42),
+        content_diff=content_diff,
+    )
+
+    async def process_direct(*args, **kwargs):
+        return OutboundMessage(
+            channel="cli",
+            chat_id="direct",
+            content="done",
+            metadata={"_stop_reason": stop_reason},
+        )
+
+    bus = _FakeBus()
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    loop = SimpleNamespace(
+        bus=bus,
+        context=SimpleNamespace(memory=store, timezone="UTC"),
+        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        process_direct=process_direct,
+    )
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
+    return ctx, store
+
+
+@pytest.mark.asyncio
+async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
+    """A real file delta => productive run => cursor advances (Tier 3)."""
+    ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="SOUL.md: +1 -0")
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 42
+
+
+@pytest.mark.asyncio
+async def test_dream_keeps_cursor_on_completed_noop(tmp_path) -> None:
+    """Completed run with no file changes must NOT advance the cursor, so the
+    history batch is reconsidered next run instead of silently swallowed."""
+    ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 5  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
+    """Without git there is no diff signal; productivity falls back to the
+    completion check so non-git workspaces keep working."""
+    ctx, store = _build_runnable_dream(
+        tmp_path, initialized=False, content_diff="", stop_reason="completed",
+    )
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 42  # advanced via completion fallback
 
 
 @pytest.mark.asyncio
@@ -185,6 +278,79 @@ async def test_dream_log_before_first_run_is_clear() -> None:
 
     assert "Dream has not run yet." in out.content
     assert "Run `/dream`" in out.content
+    assert "/dream-prompt" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_log_without_saved_versions_mentions_prompt_command() -> None:
+    git = _FakeGit(initialized=True, commits=[])
+
+    out = await cmd_dream_log(_make_ctx("/dream-log", git))
+
+    assert "Dream memory has no saved versions yet." in out.content
+    assert "/dream-prompt" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_reports_default_prompt(tmp_path) -> None:
+    out = await cmd_dream_prompt(_make_dream_prompt_ctx(tmp_path))
+
+    assert "Dream memory instructions: nanobot default" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert "/dream-prompt init" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_copies_default_prompt(tmp_path) -> None:
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    assert "Created Dream memory instructions" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert "fully replaces nanobot's default Dream guide" in out.content
+    assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_does_not_overwrite_existing_prompt(tmp_path) -> None:
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    prompt_file.parent.mkdir()
+    prompt_file.write_text("custom", encoding="utf-8")
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    assert "already exist" in out.content
+    assert "prompts/dream.md" in out.content
+    assert str(tmp_path) not in out.content
+    assert prompt_file.read_text(encoding="utf-8") == "custom"
+
+
+@pytest.mark.asyncio
+async def test_dream_prompt_init_recreates_empty_prompt(tmp_path) -> None:
+    prompt_file = tmp_path / "prompts" / "dream.md"
+    prompt_file.parent.mkdir()
+    prompt_file.write_text("  \n", encoding="utf-8")
+    ctx = _make_dream_prompt_ctx(tmp_path, "/dream-prompt init", "init")
+
+    out = await cmd_dream_prompt(ctx)
+
+    assert "Created Dream memory instructions" in out.content
+    assert prompt_file.read_text(encoding="utf-8") == MemoryStore.default_dream_prompt() + "\n"
+
+
+def test_dream_prompt_command_in_help_and_palette() -> None:
+    palette = builtin_command_palette()
+    dream_prompt = next(item for item in palette if item["command"] == "/dream-prompt")
+
+    assert dream_prompt["arg_hint"] == "[init]"
+    assert dream_prompt["lifecycle"] == "side_channel"
+    assert dream_prompt["accepts_args"] is True
+    assert "/dream-prompt [init]" in build_help_text()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
+    _model_catalog_kind,
     _oauth_provider_status,
     create_model_configuration,
     login_oauth_provider,
@@ -879,6 +881,42 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     assert captured == {"get_proxy": proxy, "login_proxy": proxy}
 
 
+def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "oauth_cli_kit":
+            raise ImportError("missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(WebUISettingsError) as exc:
+        login_oauth_provider({"provider": ["openai-codex"]})
+
+    assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
+
+
+def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "nanobot.providers.github_copilot_provider":
+            raise ImportError("missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(WebUISettingsError) as exc:
+        login_oauth_provider({"provider": ["github-copilot"]})
+
+    assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
+
+
 def test_provider_models_payload_fetches_openai_compatible_models(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -998,7 +1036,14 @@ def test_provider_models_payload_requires_gateway_key(
     payload = provider_models_payload({"provider": ["openrouter"]})
 
     assert payload["status"] == "not_configured"
+    assert payload["catalog_kind"] == "catalog"
     assert payload["models"] == []
+
+
+def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
+    assert _model_catalog_kind(find_by_name("skywork")) == "official"
+    assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
+    assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(

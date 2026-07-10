@@ -1,4 +1,8 @@
-# Memory in nanobot
+# AI Agent Memory in nanobot
+
+This page explains how nanobot implements long-term AI agent memory: session
+history, compressed archives, durable knowledge files, Dream consolidation, and
+Git-backed memory changes.
 
 nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
 
@@ -64,6 +68,9 @@ This is why nanobot's memory is not just archival. It is interpretive.
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
+├── prompts/
+│   ├── README.md        # Notes for memory guidance files
+│   └── dream.md         # Optional instructions for how Dream organizes memory
 └── memory/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
@@ -120,6 +127,8 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 | `/dream-log <sha>` | Show a specific Dream change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/dream-prompt` | Show how Dream is being guided for memory |
+| `/dream-prompt init` | Create an editable Dream memory guide at `prompts/dream.md` |
 
 These commands exist for a reason: automatic memory is powerful, but users should always retain the right to inspect, understand, and restore it.
 
@@ -134,6 +143,28 @@ This gives memory a history of its own:
 - you can restore a previous state
 
 That turns memory from a silent mutation into an auditable process.
+
+## Guiding Dream
+
+Dream decides what to keep, update, or forget using nanobot's built-in memory instructions. Most users can leave this alone.
+
+If one workspace needs a different memory style, create an editable guide:
+
+```text
+/dream-prompt init
+```
+
+This creates:
+
+```text
+workspace/prompts/dream.md
+```
+
+Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds the current `## Conversation History` block automatically.
+
+To return to nanobot's default behavior, delete `prompts/dream.md` or leave it empty.
+
+Each workspace has its own guide. Changing this file does not affect other nanobot workspaces.
 
 ## Configuration
 

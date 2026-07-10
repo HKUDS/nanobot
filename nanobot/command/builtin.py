@@ -9,12 +9,27 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Literal
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+
+# WebUI protocol contract for how a slash command participates in turn state:
+# - side_channel: returns control text without starting or ending an agent turn.
+# - finalize_active_turn: side-channel command that also closes the active UI turn.
+# - stop_active_turn: cancels the active turn; WebUI may intercept exact submits.
+# - agent_turn: always enters the normal agent path.
+# - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
+CommandLifecycle = Literal[
+    "side_channel",
+    "finalize_active_turn",
+    "stop_active_turn",
+    "agent_turn",
+    "agent_turn_with_args",
+]
 
 
 @dataclass(frozen=True)
@@ -24,14 +39,18 @@ class BuiltinCommandSpec:
     description: str
     icon: str
     arg_hint: str = ""
+    lifecycle: CommandLifecycle = "side_channel"
+    accepts_args: bool = False
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, str | bool]:
         return {
             "command": self.command,
             "title": self.title,
             "description": self.description,
             "icon": self.icon,
             "arg_hint": self.arg_hint,
+            "lifecycle": self.lifecycle,
+            "accepts_args": self.accepts_args,
         }
 
 
@@ -39,14 +58,16 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/new",
         "New chat",
-        "Stop the current task and start a fresh conversation.",
+        "Reset this chat and start a fresh conversation.",
         "square-pen",
+        lifecycle="finalize_active_turn",
     ),
     BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",
         "square",
+        lifecycle="stop_active_turn",
     ),
     BuiltinCommandSpec(
         "/restart",
@@ -66,6 +87,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Show or switch the active model preset.",
         "brain",
         "[preset]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/history",
@@ -73,6 +95,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Print the last N persisted conversation messages.",
         "history",
         "[n]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/goal",
@@ -80,6 +103,16 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Tell the agent to treat the request as a long-running goal.",
         "activity",
         "<goal>",
+        lifecycle="agent_turn_with_args",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/trigger",
+        "Create named local trigger",
+        "Create a named CLI trigger bound to this chat session.",
+        "zap",
+        "<name>",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream",
@@ -92,12 +125,22 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Show Dream log",
         "Show what the last Dream consolidation changed.",
         "book-open",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/dream-restore",
         "Restore memory",
         "Revert memory to a previous Dream snapshot.",
         "undo-2",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/dream-prompt",
+        "Dream memory",
+        "Tell Dream how to organize this workspace's memory.",
+        "file-text",
+        "[init]",
+        accepts_args=True,
     ),
     BuiltinCommandSpec(
         "/skill",
@@ -117,11 +160,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "List, approve, deny or revoke pairing requests.",
         "shield",
         "[list|approve <code>|deny <code>|revoke <user_id>]",
+        accepts_args=True,
     ),
 )
 
 
-def builtin_command_palette() -> list[dict[str, str]]:
+def builtin_command_palette() -> list[dict[str, str | bool]]:
     """Return structured command metadata for UI command palettes."""
     return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
 
@@ -183,9 +227,13 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    runtime = ctx.runtime or loop.llm_runtime()
     ctx_est = 0
     with suppress(Exception):
-        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(session)
+        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
+            session,
+            runtime=runtime,
+        )
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
 
@@ -209,16 +257,14 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=build_status_content(
-            version=__version__, model=loop.model,
+            version=__version__, model=runtime.model,
             start_time=loop._start_time, last_usage=loop._last_usage,
-            context_window_tokens=loop.context_window_tokens,
+            context_window_tokens=runtime.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
             search_usage_text=search_usage_text,
             active_task_count=task_count,
-            max_completion_tokens=getattr(
-                getattr(loop.provider, "generation", None), "max_tokens", 8192
-            ),
+            max_completion_tokens=runtime.generation.max_tokens,
         ),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
@@ -234,7 +280,14 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
+        runtime = ctx.runtime or loop.llm_runtime()
+        loop._schedule_background(
+            loop.consolidator.archive(
+                snapshot,
+                runtime=runtime,
+                session_key=ctx.key,
+            )
+        )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -296,7 +349,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
     name = parts[0]
     try:
-        loop.set_model_preset(name)
+        runtime = loop.set_model_preset(name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -309,11 +362,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
-    max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
+    max_tokens = runtime.generation.max_tokens
     lines = [
-        f"Switched model preset to `{loop.model_preset}`.",
-        f"- Model: `{loop.model}`",
-        f"- Context window: {loop.context_window_tokens}",
+        f"Switched model preset to `{runtime.model_preset}`.",
+        f"- Model: `{runtime.model}`",
+        f"- Context window: {runtime.context_window_tokens}",
     ]
     if max_tokens is not None:
         lines.append(f"- Max output tokens: {max_tokens}")
@@ -345,6 +398,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         store = loop.context.memory
         content = ""
         resp = None
+        diff_body = ""
         t0 = time.monotonic()
         try:
             result = store.build_dream_prompt()
@@ -365,9 +419,17 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 on_progress=_silent,
             )
             elapsed = time.monotonic() - t0
-            if MemoryStore.dream_run_completed(resp):
+            # Ground truth: the real file delta, not the LLM's self-report.
+            diff_body = store.dream_content_diff()
+            productive = bool(diff_body) or (
+                not store.git.is_initialized()
+                and MemoryStore.dream_run_completed(resp)
+            )
+            if productive:
                 store.set_last_dream_cursor(last_cursor)
                 content = f"Dream completed in {elapsed:.1f}s."
+            elif MemoryStore.dream_run_completed(resp):
+                content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
                 content = (
                     f"Dream did not complete after {elapsed:.1f}s; "
@@ -385,7 +447,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 timezone_name=getattr(loop.context, "timezone", None),
             )
             if store.git.is_initialized():
-                commit_msg = build_dream_commit_message("dream: manual run", resp)
+                commit_msg = build_dream_commit_message("dream: manual run", diff_body)
                 sha = store.git.auto_commit(commit_msg)
                 if sha:
                     content += f" (commit {sha})"
@@ -398,6 +460,57 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     asyncio.create_task(_run_dream())
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
+    )
+
+
+async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
+    """Show or set up the workspace Dream memory instructions."""
+    store = ctx.loop.context.memory
+    path = store.dream_prompt_file
+    display_path = path.relative_to(store.workspace).as_posix()
+    args = ctx.args.strip().lower()
+
+    if args == "init":
+        try:
+            prompt_exists_with_content = path.exists() and (
+                not path.is_file() or bool(path.read_text(encoding="utf-8").strip())
+            )
+        except OSError:
+            prompt_exists_with_content = True
+        if prompt_exists_with_content:
+            content = (
+                f"Dream memory instructions already exist at `{display_path}`.\n\n"
+                "Edit that file, or delete/empty it to return to nanobot's default."
+            )
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(store.default_dream_prompt() + "\n", encoding="utf-8")
+            content = (
+                f"Created Dream memory instructions at `{display_path}`.\n\n"
+                "Edit that file to teach Dream how to organize memory. "
+                "This fully replaces nanobot's default Dream guide for this workspace. "
+                "Delete or empty it to return to nanobot's default."
+            )
+    elif args:
+        content = "Usage: /dream-prompt [init]"
+    elif store.has_dream_prompt_override():
+        content = (
+            "Dream memory instructions: custom for this workspace\n\n"
+            f"- Path: `{display_path}`\n"
+            "- Delete or empty this file to return to nanobot's default."
+        )
+    else:
+        content = (
+            "Dream memory instructions: nanobot default\n\n"
+            f"- Editable file: `{display_path}`\n"
+            "- Run `/dream-prompt init` to create an editable copy."
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
@@ -415,6 +528,7 @@ def _format_dream_no_input_message() -> str:
         "- Enable `agents.defaults.idleCompactAfterMinutes` so completed chats become Dream input automatically.",
         "- Compact the current chat into memory once that manual action is available.",
         "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
+        "- Use `/dream-prompt` to see or change how Dream organizes memory.",
     ])
 
 
@@ -501,7 +615,10 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
 
     if not git.is_initialized():
         if store.get_last_dream_cursor() == 0:
-            msg = "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle."
+            msg = (
+                "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle.\n\n"
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
+            )
         else:
             msg = "Dream history is not available because memory versioning is not initialized."
         return OutboundMessage(
@@ -532,7 +649,10 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff)
         else:
-            content = "Dream memory has no saved versions yet."
+            content = (
+                "Dream memory has no saved versions yet.\n\n"
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
+            )
 
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
@@ -718,6 +838,61 @@ async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
         metadata=dict(ctx.msg.metadata or {}),
     )
 
+
+async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
+    """Create a local trigger bound to the current session."""
+    name = ctx.args.strip()
+    if not name:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=(
+                "Usage: /trigger <name>\n\n"
+                "Create a named local trigger bound to this chat session."
+            ),
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    from nanobot.triggers.local_store import LocalTriggerStore
+
+    loop = ctx.loop
+    workspace = getattr(loop, "workspace", None)
+    if workspace is None:
+        workspace = getattr(getattr(loop, "context", None), "workspace", None)
+    if workspace is None:
+        raise RuntimeError("workspace unavailable for trigger creation")
+
+    store = getattr(loop, "local_trigger_store", None)
+    if store is None:
+        store = LocalTriggerStore(workspace)
+
+    from nanobot.session.keys import UNIFIED_SESSION_KEY
+
+    session_key = (
+        ctx.msg.session_key
+        if ctx.key == UNIFIED_SESSION_KEY
+        else ctx.key
+    )
+    trigger = store.create(
+        name=name,
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        session_key=session_key,
+        sender_id="trigger",
+        origin_metadata=dict(ctx.msg.metadata or {}),
+    )
+    command = f'nanobot trigger {trigger.id} "message"'
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=(
+            f"Trigger created: {trigger.name}\n"
+            f"ID: {trigger.id}\n\n"
+            f"Command:\n{command}"
+        ),
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -752,11 +927,15 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/history ", cmd_history)
     router.exact("/goal", cmd_goal)
     router.prefix("/goal ", cmd_goal)
+    router.exact("/trigger", cmd_trigger)
+    router.prefix("/trigger ", cmd_trigger)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/dream-prompt", cmd_dream_prompt)
+    router.prefix("/dream-prompt ", cmd_dream_prompt)
     router.exact("/skill", cmd_skill)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)

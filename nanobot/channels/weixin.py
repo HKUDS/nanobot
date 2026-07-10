@@ -29,6 +29,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
@@ -1101,11 +1102,13 @@ class WeixinChannel(BaseChannel):
             raise RuntimeError("WeChat client not initialized or not authenticated")
         self._assert_session_active()
 
-        is_progress = bool((msg.metadata or {}).get("_progress", False))
+        event = getattr(msg, "event", None)
+        progress_event = event if isinstance(event, ProgressEvent) else None
+        is_progress = progress_event is not None
 
         # Buffer tool hints to coalesce consecutive ones and avoid burning
         # WeChat iLink rate-limit quota (~7 msgs / 5 min).
-        if is_progress and (msg.metadata or {}).get("_tool_hint"):
+        if progress_event and progress_event.tool_hint:
             if not self.send_tool_hints:
                 return
             self._pending_tool_hints.setdefault(msg.chat_id, []).append(msg.content)
@@ -1118,7 +1121,7 @@ class WeixinChannel(BaseChannel):
 
         # Reasoning deltas are invisible in WeChat (there is no reasoning
         # UI).  Skip them entirely — do not send and do not flush buffer.
-        if is_progress and (msg.metadata or {}).get("_reasoning_delta"):
+        if progress_event and (progress_event.reasoning_delta or progress_event.reasoning):
             self.logger.debug(
                 "Dropped invisible reasoning delta for {}", msg.chat_id
             )
@@ -1232,40 +1235,46 @@ class WeixinChannel(BaseChannel):
                     await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_CANCEL)
 
     async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
     ) -> None:
         """Deliver a streamed reply to WeChat.
 
         WeChat iLink has no native incremental delivery, and the manager
         bypasses :meth:`send` for the ``_streamed`` final answer. So we
-        accumulate the content deltas here and flush the full reply as a
-        single message at ``_stream_end`` — otherwise a streamed reply would
-        never reach the user. Reasoning deltas are invisible in WeChat and are
-        dropped.
+        accumulate content deltas and flush the full reply as a single message
+        at stream end. Reasoning deltas are invisible in WeChat and are dropped.
         """
         meta = metadata or {}
         if meta.get("_reasoning_delta") or meta.get("_reasoning"):
             return
-        is_end = meta.get("_stream_end")
-        # Accumulate intermediate deltas. The _stream_end message's own content
+        is_end = stream_end or bool(meta.get("_stream_end"))
+        buffer_key = stream_id or chat_id
+        # Accumulate intermediate deltas. The stream_end message's own content
         # (present when the manager coalesces deltas into the end message) is
         # folded into `full` below instead of appended here, so a send retry
         # recomputes the same `full` from an unchanged buffer rather than
         # double-counting that delta.
         if delta and not is_end:
-            self._stream_buffers.setdefault(chat_id, []).append(delta)
+            self._stream_buffers.setdefault(buffer_key, []).append(delta)
         if not is_end:
             return
-        full = ("".join(self._stream_buffers.get(chat_id, [])) + (delta or "")).strip()
+        full = ("".join(self._stream_buffers.get(buffer_key, [])) + (delta or "")).strip()
         await self._flush_tool_hints(chat_id)
         if full:
             # Send before clearing the buffer: if the send raises, the buffer is
             # left intact so ChannelManager._send_with_retry can re-deliver the
-            # same _stream_end message instead of silently losing the reply.
+            # same stream_end message instead of silently losing the reply.
             await self.send(
                 OutboundMessage(channel=self.name, chat_id=chat_id, content=full)
             )
-        self._stream_buffers.pop(chat_id, None)
+        self._stream_buffers.pop(buffer_key, None)
 
     async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
         """Start typing indicator immediately when a message is received."""

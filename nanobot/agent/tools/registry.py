@@ -3,7 +3,12 @@
 import json
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import ContextAware, current_request_context
+
+
+def is_tool_error_result(name: str, result: Any) -> bool:
+    return isinstance(result, ToolResult) and result.is_error
 
 
 class ToolRegistry:
@@ -100,22 +105,32 @@ class ToolRegistry:
             suggestion = self._suggest_name(str(name))
             hint = f" Did you mean '{suggestion}'? Tool names must match exactly." if suggestion else ""
             return None, params, (
-                f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
+                ToolResult.error(
+                    f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
+                )
             )
+
+        # Compatibility for external tools that still implement the legacy
+        # setter protocol. Built-ins read the authoritative ContextVar
+        # directly and never copy routing state.
+        if isinstance(tool, ContextAware) and (ctx := current_request_context()) is not None:
+            tool.set_context(ctx)
 
         params = self._coerce_params(tool, params)
         if not isinstance(params, dict):
             return tool, params, (
-                f"Error: Tool '{name}' parameters must be a JSON object, got "
-                f"{type(params).__name__}. Use named parameters like "
-                'tool_name(param1="value1", param2="value2") matching the tool schema.'
+                ToolResult.error(
+                    f"Error: Tool '{name}' parameters must be a JSON object, got "
+                    f"{type(params).__name__}. Use named parameters like "
+                    'tool_name(param1="value1", param2="value2") matching the tool schema.'
+                )
             )
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
         if errors:
             return tool, cast_params, (
-                f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+                ToolResult.error(f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors))
             )
         return tool, cast_params, None
 
@@ -159,16 +174,16 @@ class ToolRegistry:
         hint = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
-            return error + hint
+            return ToolResult.error(str(error) + hint)
 
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
-            if isinstance(result, str) and result.startswith("Error"):
-                return result + hint
+            if is_tool_error_result(name, result):
+                return ToolResult.error(str(result) + hint)
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + hint
+            return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)
 
     @property
     def tool_names(self) -> list[str]:

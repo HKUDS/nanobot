@@ -121,6 +121,7 @@
       "presetModel": "Modelo del preajuste",
       "density": "Densidad",
       "activityMode": "Detalle de actividad",
+      "fileEditDisplay": "Vista de edición de archivos",
       "codeWrap": "Ajuste de código",
       "maxResults": "Resultados máximos",
       "timeout": "Tiempo de espera",
@@ -165,6 +166,7 @@
       "presetModel": "Cambia a Default para editar modelo y proveedor desde WebUI.",
       "density": "Solo se guarda en este navegador.",
       "activityMode": "Elige cuánto detalle de actividad del agente se muestra por defecto.",
+      "fileEditDisplay": "Elige si la actividad de edición muestra recuentos de líneas o el diff.",
       "codeWrap": "Mantiene legibles las líneas largas de código en pantallas pequeñas.",
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
@@ -214,6 +216,9 @@
       "compact": "Compacto",
       "auto": "Automático",
       "expanded": "Expandido",
+      "summary": "Resumen",
+      "diff": "Diff",
+      "collapsedDiff": "Diff contraído",
       "on": "Activado",
       "off": "Desactivado",
       "defaultPermission": "Permiso predeterminado",
@@ -458,18 +463,36 @@
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
     },
     "apps": {
-      "description": "Agrega CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
+      "description": "Activa complementos, adaptadores locales de apps y servidores de herramientas conectados.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Canal",
+      "featureLabel": "Función",
       "filterAll": "Todo",
+      "filterPlugins": "Complementos",
       "filterCli": "Apps CLI",
       "filterMcp": "Servicios MCP",
       "enabledSummary": "{{count}} activados",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} complementos · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Buscar apps",
-      "featured": "Destacadas",
+      "featured": "Catálogo",
       "loading": "Cargando apps...",
-      "empty": "Ninguna app coincide con este filtro."
+      "empty": "Ninguna app coincide con este filtro.",
+      "restartRequired": "Reinicia nanobot para aplicar apps y funciones actualizadas."
+    },
+    "nanobotFeatures": {
+      "enabled": "Activado",
+      "enable": "Activar",
+      "disable": "Desactivar",
+      "ready": "Listo",
+      "missingDependency": "Falta soporte",
+      "installSupport": "Instalar soporte",
+      "installConfirmTitle": "¿Instalar soporte para {{name}}?",
+      "installConfirmDescription": "nanobot añadirá lo que {{name}} necesita y luego lo activará. ¿Continuar?",
+      "installConfirmAction": "Instalar y activar",
+      "websocketRequired": "Requerido para WebUI",
+      "channelDisabled": "El canal está desactivado",
+      "notEnabled": "No activado"
     },
     "automations": {
       "filters": {
@@ -493,6 +516,7 @@
       "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
       "oneShot": "Una vez",
       "systemTask": "Automatización administrada por el sistema",
+      "localTrigger": "Activador local",
       "labels": {
         "schedule": "Programación",
         "next": "Siguiente",
@@ -551,11 +575,13 @@
         "weekdaysAt": "Días laborables a las {{time}}",
         "hourlyAt": "Cada hora en :{{minute}}",
         "hourlyWindow": "Cada hora {{start}}-{{end}} en :{{minute}}",
+        "local": "Activador local",
         "custom": "Programación personalizada"
       },
       "next": {
         "paused": "Pausada",
         "pending": "Ejecutándose ahora",
+        "local": "Esperando activador",
         "none": "Sin próxima ejecución"
       },
       "message": {
@@ -692,11 +718,13 @@
       "every": "Cada {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Activador local",
       "unknown": "Programación personalizada"
     },
     "next": {
       "label": "Siguiente: {{time}}",
       "disabled": "Pausada",
+      "local": "Esperando activador",
       "none": "Sin próxima ejecución"
     }
   },
@@ -791,12 +819,14 @@
         "every": "Cada {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Activador local",
         "unknown": "Programación personalizada"
       },
       "next": {
         "label": "Siguiente {{time}}",
         "pending": "Se ejecutará pronto",
         "disabled": "En pausa",
+        "local": "Esperando activador",
         "none": "Sin próxima ejecución"
       }
     },
@@ -870,7 +900,7 @@
         "commands": {
           "new": {
             "title": "Nuevo chat",
-            "description": "Detiene la tarea actual e inicia una conversación nueva."
+            "description": "Restablece este chat e inicia una conversación nueva."
           },
           "stop": {
             "title": "Detener tarea actual",
@@ -904,9 +934,17 @@
             "title": "Restaurar memoria",
             "description": "Revierte la memoria a una instantánea Dream anterior."
           },
+          "dream_prompt": {
+            "title": "Memoria de Dream",
+            "description": "Indica a Dream cómo organizar la memoria de este espacio de trabajo."
+          },
           "goal": {
             "title": "Objetivo a largo plazo",
             "description": "Indica al agente que trate esto como un objetivo sostenido en varios pasos."
+          },
+          "trigger": {
+            "title": "Crear trigger local",
+            "description": "Crea un trigger de CLI vinculado a esta sesion de chat."
           },
           "help": {
             "title": "Mostrar ayuda",
@@ -950,11 +988,11 @@
         "mcpDescription": "Usar @{{name}} como servidor MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Modo de acceso al espacio de trabajo",
         "projectAria": "Elegir proyecto",
         "projectPlaceholder": "Seleccionar proyecto",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Permiso predeterminado",
+        "full": "Acceso completo"
       }
     },
     "scrollToBottom": "Desplazarse al final",
@@ -989,6 +1027,14 @@
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
+    "fileEditViewDiff": "Ver diff",
+    "fileEditViewLargeDiff": "Ver diff grande",
+    "fileEditDiffLineCount": "{{count}} líneas",
+    "fileEditUnchangedLinesHidden": "{{count}} líneas sin cambios ocultas",
+    "fileEditShowMoreLines": "Mostrar {{count}} líneas más",
+    "fileEditShowFewerLines": "Mostrar menos líneas",
+    "fileEditOpenFile": "Abrir archivo",
+    "fileEditDiffTruncated": "Diff truncado. Abre el archivo para ver el cambio completo.",
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",
@@ -1038,17 +1084,17 @@
       "body": "El servidor rechazó tu último mensaje por superar el tamaño permitido. Quita algunas imágenes o usa archivos más pequeños y vuelve a enviarlo."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "El espacio de trabajo no cambió",
+      "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Espacio de trabajo predeterminado",
       "manual": "Pegar ruta",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Usar ruta",
+      "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
     }
   }
 }

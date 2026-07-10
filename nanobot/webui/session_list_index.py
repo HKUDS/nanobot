@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
-from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     _SESSION_LIST_PREVIEW_MAX_CHARS,
     _SESSION_LIST_PREVIEW_MAX_RECORDS,
@@ -154,7 +154,7 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
             or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
         ):
             break
-        if item.get(CRON_HISTORY_META) is True:
+        if is_hidden_history_message(item):
             continue
         text = _message_preview_text(item)
         if not text:
@@ -216,7 +216,7 @@ def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
 
 
 def _visible_message_timestamp(item: dict[str, Any]) -> str | None:
-    if item.get(CRON_HISTORY_META) is True:
+    if is_hidden_history_message(item):
         return None
     if item.get("role") not in _VISIBLE_TRANSCRIPT_ROLES:
         return None
@@ -296,7 +296,9 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                     ):
                         preview_done = True
                         continue
-                    if item.get(CRON_HISTORY_META) is True:
+                    if item.get("_type") == "metadata":
+                        continue
+                    if is_hidden_history_message(item):
                         continue
                     text = _message_preview_text(item)
                     if not text:

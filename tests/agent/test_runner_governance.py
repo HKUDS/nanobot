@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.runner_helpers import make_run_spec
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
     MICROCOMPACT_KEEP_RECENT,
@@ -29,14 +30,14 @@ def _governance_config(
 ) -> ContextGovernanceConfig:
     return ContextGovernanceConfig(
         provider=provider,
-        model=spec.model,
+        model=spec.runtime.model,
         tools=tools,
         workspace=spec.workspace,
         session_key=spec.session_key,
         max_tool_result_chars=spec.max_tool_result_chars,
-        context_window_tokens=spec.context_window_tokens,
+        context_window_tokens=spec.runtime.context_window_tokens,
         context_block_limit=spec.context_block_limit,
-        max_tokens=spec.max_tokens,
+        max_tokens=spec.runtime.generation.max_tokens,
         inflight_start_index=inflight_start_index,
     )
 
@@ -75,11 +76,11 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
         {"role": "user", "content": "hello"},
     ]
 
-    runner = AgentRunner(provider)
+    runner = AgentRunner()
     runner.context_governor.prepare_for_model = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("boom")
     )
-    result = await runner.run(AgentRunSpec(
+    result = await runner.run(make_run_spec(provider,
         initial_messages=initial_messages,
         tools=tools,
         model="test-model",
@@ -106,7 +107,7 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
         {"role": "tool", "tool_call_id": "call_1", "content": "tool output"},
         {"role": "assistant", "content": "after tool"},
     ]
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -153,7 +154,7 @@ def test_snip_history_reserves_budget_for_tool_definitions(monkeypatch):
         {"role": "assistant", "content": "recent answer"},
         {"role": "user", "content": "recent two"},
     ]
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -281,8 +282,8 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "old user"},
@@ -423,8 +424,8 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
         {"role": "user", "content": "new prompt"},
     ]
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=initial_messages,
         tools=tools,
         model="test-model",
@@ -503,7 +504,7 @@ def test_microcompact_skips_when_prompt_under_hard_budget(monkeypatch):
     total = MICROCOMPACT_KEEP_RECENT + 5
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -537,7 +538,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     total = MICROCOMPACT_KEEP_RECENT + 8
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -550,7 +551,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
     def estimate(_provider, _model, msgs, _tools):
         return sum(
             100 if (content := msg.get("content")) == long_content
-            else 1 if isinstance(content, str) and "omitted from context" in content
+            else 1 if isinstance(content, str) and "compacted to fit context" in content
             else 0
             for msg in msgs
             if msg.get("role") == "tool"
@@ -564,7 +565,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
         set(),
     )
     tool_msgs = [m for m in result if m.get("role") == "tool"]
-    compacted = [m for m in tool_msgs if "omitted from context" in str(m.get("content", ""))]
+    compacted = [m for m in tool_msgs if "compacted to fit context" in str(m.get("content", ""))]
     preserved = [m for m in tool_msgs if m.get("content") == long_content]
 
     assert len(compacted) == 8
@@ -581,7 +582,7 @@ def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
 
     long_content = "x" * 600
     messages = _microcompact_messages(total=1, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -609,7 +610,7 @@ def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
     )
 
     tool_msg = next(m for m in result if m.get("role") == "tool")
-    assert "omitted from context" in tool_msg["content"]
+    assert "compacted to fit context" in tool_msg["content"]
     assert compacted_tool_call_ids == {"c0"}
 
 
@@ -622,7 +623,7 @@ def test_context_governor_keeps_compaction_boundary_stable(monkeypatch):
     total = MICROCOMPACT_KEEP_RECENT + 8
     long_content = "x" * 600
     messages = _microcompact_messages(total=total, tool_name="read_file", content=long_content)
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -662,7 +663,7 @@ def test_microcompact_preserves_short_results(monkeypatch):
 
     total = MICROCOMPACT_KEEP_RECENT + 5
     messages = _microcompact_messages(total=total, tool_name="exec", content="short")
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -695,7 +696,7 @@ def test_microcompact_skips_non_compactable_tools(monkeypatch):
     total = MICROCOMPACT_KEEP_RECENT + 5
     long_content = "y" * 1000
     messages = _microcompact_messages(total=total, tool_name="message", content=long_content)
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -789,7 +790,7 @@ def test_snip_history_preserves_user_message_after_truncation(monkeypatch):
         {"role": "tool", "tool_call_id": "tc_2", "content": "tool output 2"},
     ]
 
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",
@@ -843,7 +844,7 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
         {"role": "tool", "tool_call_id": "tc_2", "content": "result 2"},
     ]
 
-    spec = AgentRunSpec(
+    spec = make_run_spec(provider,
         initial_messages=messages,
         tools=tools,
         model="test-model",

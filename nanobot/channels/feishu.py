@@ -22,8 +22,10 @@ from rich.panel import Panel
 from rich.text import Text
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename
@@ -554,6 +556,10 @@ def _qr_register_inner(
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
+_NEW_SESSION_DIVIDER_CONTENT = json.dumps({
+    "type": "divider",
+    "params": {"divider_text": {"text": "New session started."}},
+})
 
 
 @dataclass
@@ -671,7 +677,7 @@ class FeishuChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
         if not FEISHU_AVAILABLE:
-            self.logger.error("SDK not installed. Run: pip install lark-oapi")
+            self.logger.error("SDK not installed. Run: nanobot plugins enable feishu")
             return
 
         if not self.config.app_id or not self.config.app_secret:
@@ -1797,14 +1803,19 @@ class FeishuChannel(BaseChannel):
         return self._stream_update_text_sync(card_id, content, sequence), sequence
 
     async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
         Supported metadata keys:
-            _stream_end: Finalize the streaming card.
-            _tool_hint:  Delta is a formatted tool hint (for display only).
-            message_id:  Original message id (used with _stream_end for reaction cleanup).
+            message_id:  Original message id (used with stream end for reaction cleanup).
             chat_type:   "group" or "p2p" — controls reply-in-thread for streaming cards.
         """
         if not self._client:
@@ -1815,14 +1826,14 @@ class FeishuChannel(BaseChannel):
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
         # --- stream end: final update or fallback ---
-        if meta.get("_stream_end"):
+        if stream_end:
             message_id = meta.get("message_id")
             # Only finalize the OnIt -> DONE reaction transition on the truly
-            # final stream end. _resuming=True means the agent will keep
+            # final stream end. resuming=True means the agent will keep
             # working (more tool-call rounds), so leave the reaction state
             # in place — otherwise the OnIt indicator disappears prematurely
             # and the DONE reaction fires after every tool call.
-            if message_id and not meta.get("_resuming"):
+            if message_id and not resuming:
                 reaction_id = self._reaction_ids.pop(message_id, None)
                 if reaction_id:
                     await self._remove_reaction(message_id, reaction_id)
@@ -1965,7 +1976,9 @@ class FeishuChannel(BaseChannel):
             # Handle tool hint messages.  When a streaming card is active for
             # this chat, inline the hint into the card instead of sending a
             # separate message so the user experience stays cohesive.
-            if msg.metadata.get("_tool_hint"):
+            progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
+
+            if progress_event and progress_event.tool_hint:
                 hint = (msg.content or "").strip()
                 if not hint:
                     return
@@ -1976,6 +1989,7 @@ class FeishuChannel(BaseChannel):
                     await self.send_delta(
                         msg.chat_id,
                         "\n\n" + self._format_tool_hint_delta(hint) + "\n\n",
+                        metadata=msg.metadata,
                     )
                     return
                 # No active streaming card — send as a regular interactive card
@@ -2001,6 +2015,14 @@ class FeishuChannel(BaseChannel):
                     )
                 return
 
+            if (
+                msg.content.strip() == "New session started."
+                and msg.metadata.get("chat_type") == "p2p"
+                and not msg.media
+                and not msg.buttons
+            ):
+                return
+
             # Determine whether the first message should quote the user's message.
             # Only the very first send (media or text) in this call uses reply; subsequent
             # chunks/media fall back to plain create to avoid redundant quote bubbles.
@@ -2009,7 +2031,7 @@ class FeishuChannel(BaseChannel):
             reply_message_id: str | None = None
             _msg_id = msg.metadata.get("message_id")
             has_thread_id = msg.metadata.get("thread_id")
-            if self.config.reply_to_message and not msg.metadata.get("_progress", False):
+            if self.config.reply_to_message and progress_event is None:
                 reply_message_id = _msg_id
             # For topic group messages, always reply to keep context in thread
             elif has_thread_id:
@@ -2250,6 +2272,17 @@ class FeishuChannel(BaseChannel):
 
             if not content and not media_paths:
                 return
+
+            if chat_type == "p2p" and normalize_command_text(content).lower() == "/new":
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    self._send_message_sync,
+                    "open_id",
+                    sender_id,
+                    "system",
+                    _NEW_SESSION_DIVIDER_CONTENT,
+                )
 
             # Build session key for conversation isolation.
             # If topic_isolation is True: each topic gets its own session via root_id/message_id.

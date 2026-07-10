@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
@@ -321,11 +321,10 @@ def test_remove_protected_dream_job_returns_clear_feedback(tmp_path) -> None:
 
 def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
-    tool.set_context(
+    with request_context(
         RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
-    )
-
-    result = tool._add_job(None, "Morning standup", None, "0 8 * * *", None, None)
+    ):
+        result = tool._add_job(None, "Morning standup", None, "0 8 * * *", None, None)
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
@@ -334,11 +333,12 @@ def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
 
 def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
-    tool.set_context(
+    with request_context(
         RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
-    )
-
-    result = tool._add_job(None, "Morning reminder", None, None, None, "2026-03-25T08:00:00")
+    ):
+        result = tool._add_job(
+            None, "Morning reminder", None, None, None, "2026-03-25T08:00:00"
+        )
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
@@ -348,11 +348,10 @@ def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
 
 def test_add_job_binds_current_session_key(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    tool.set_context(
+    with request_context(
         RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
-    )
-
-    result = tool._add_job(None, "Morning standup", 60, None, None, None)
+    ):
+        result = tool._add_job(None, "Morning standup", 60, None, None, None)
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
@@ -366,9 +365,8 @@ def test_add_job_binds_current_session_key(tmp_path) -> None:
 
 def test_add_job_requires_session_key(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
-
-    result = tool._add_job(None, "Background refresh", 60, None, None, None)
+    with request_context(RequestContext(channel="telegram", chat_id="chat-1")):
+        result = tool._add_job(None, "Background refresh", 60, None, None, None)
 
     assert result == "Error: scheduled cron jobs must be created from a chat session"
     assert tool._cron.list_jobs() == []
@@ -403,11 +401,10 @@ def test_validate_params_requires_message_only_for_add(tmp_path) -> None:
 
 def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    tool.set_context(
+    with request_context(
         RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
-    )
-
-    result = tool._add_job(None, "", 60, None, None, None)
+    ):
+        result = tool._add_job(None, "", 60, None, None, None)
 
     assert "action='add' requires a non-empty 'message'" in result
     assert "Retry including message=" in result
@@ -417,11 +414,15 @@ def test_add_job_captures_owner_and_origin_without_legacy_delivery_fields(tmp_pa
     """CronTool stores owner/session identity separately from origin delivery context."""
     tool = _make_tool(tmp_path)
     meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
-    tool.set_context(RequestContext(
-        channel="slack", chat_id="C99", metadata=meta, session_key="slack:C99:111.222"
-    ))
-
-    result = tool._add_job("test", "say hi", 60, None, None, None)
+    with request_context(
+        RequestContext(
+            channel="slack",
+            chat_id="C99",
+            metadata=meta,
+            session_key="slack:C99:111.222",
+        )
+    ):
+        result = tool._add_job("test", "say hi", 60, None, None, None)
     assert "Created job" in result
 
     jobs = tool._cron.list_jobs()
