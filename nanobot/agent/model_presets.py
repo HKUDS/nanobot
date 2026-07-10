@@ -34,12 +34,12 @@ def build_static_preset_snapshot(
     name: str,
     preset: ModelPresetConfig,
 ) -> ProviderSnapshot:
-    provider.generation = preset.to_generation_settings()
     return ProviderSnapshot(
         provider=provider,
         model=preset.model,
         context_window_tokens=preset.context_window_tokens,
         signature=("model_preset", name, preset.model_dump_json()),
+        generation=preset.to_generation_settings(),
     )
 
 

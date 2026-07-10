@@ -39,13 +39,18 @@ class LLMRuntime:
     ) -> LLMRuntime:
         """Capture provider defaults without retaining mutable generation state."""
         generation = provider.generation
+        defaults = GenerationSettings()
         return cls(
             provider=provider,
             model=model,
             generation=GenerationSettings(
-                temperature=generation.temperature,
-                max_tokens=generation.max_tokens,
-                reasoning_effort=generation.reasoning_effort,
+                temperature=getattr(generation, "temperature", defaults.temperature),
+                max_tokens=getattr(generation, "max_tokens", defaults.max_tokens),
+                reasoning_effort=getattr(
+                    generation,
+                    "reasoning_effort",
+                    defaults.reasoning_effort,
+                ),
             ),
             context_window_tokens=context_window_tokens,
             model_preset=model_preset,
@@ -83,6 +88,15 @@ def runtime_from_provider_snapshot(
     model_preset: str | None = None,
 ) -> LLMRuntime:
     """Convert a provider factory snapshot into the canonical runtime value."""
+    if snapshot.generation is not None:
+        return LLMRuntime(
+            provider=snapshot.provider,
+            model=snapshot.model,
+            generation=snapshot.generation,
+            context_window_tokens=snapshot.context_window_tokens,
+            model_preset=model_preset,
+            snapshot_signature=snapshot.signature,
+        )
     return LLMRuntime.capture(
         snapshot.provider,
         snapshot.model,

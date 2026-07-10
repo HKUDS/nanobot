@@ -173,9 +173,15 @@ class AgentLoop:
         return self.tools.tool_names
 
     def llm_runtime(self) -> LLMRuntime:
-        """Return the current provider/model pair owned by this loop."""
+        """Capture the current provider/model settings owned by this loop."""
         self._refresh_provider_snapshot()
-        return LLMRuntime(self.provider, self.model)
+        return LLMRuntime.capture(
+            self.provider,
+            self.model,
+            context_window_tokens=self.context_window_tokens,
+            model_preset=self.model_preset,
+            snapshot_signature=self._provider_signature,
+        )
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -444,6 +450,8 @@ class AgentLoop:
         provider = snapshot.provider
         model = snapshot.model
         context_window_tokens = snapshot.context_window_tokens
+        if snapshot.generation is not None:
+            provider.generation = snapshot.generation
         old_model = self.model
         self.provider = provider
         self.model = model

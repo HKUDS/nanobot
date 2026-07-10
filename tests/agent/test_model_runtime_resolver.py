@@ -90,6 +90,8 @@ def test_resolver_resolves_preset_without_mutating_selected_runtime() -> None:
     assert resolved.model_preset == "fast"
     assert resolver.runtime is initial
     assert resolver.model_preset is None
+    assert initial.provider.generation == GenerationSettings(0.1, 1024, None)
+    assert resolved.generation == GenerationSettings(0.5, 512, None)
 
 
 def test_resolver_model_override_is_derived_without_default_mutation() -> None:
