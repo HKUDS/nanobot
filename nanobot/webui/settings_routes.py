@@ -100,6 +100,7 @@ _CHANNEL_CONFIG_FIELDS: dict[str, dict[str, Any]] = {
         "userId": "string",
         "password": "secret",
         "accessToken": "secret",
+        "deviceId": "string",
         "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
     },
     "dingtalk": {

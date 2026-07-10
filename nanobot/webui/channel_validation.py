@@ -266,6 +266,43 @@ def _validate_feishu(name: str, values: dict[str, Any]) -> dict[str, Any]:
     return _payload(name, status, checks, identity=identity, missing_fields=missing)
 
 
+def _validate_matrix(name: str, values: dict[str, Any]) -> dict[str, Any]:
+    checks, missing = _required_checks(name, values)
+    password = _str(values.get("password"))
+    access_token = _str(values.get("accessToken"))
+    device_id = _str(values.get("deviceId"))
+
+    if password:
+        checks.append(_check("login", "Login credentials", "pass", "Password login is configured."))
+    elif access_token and device_id:
+        checks.append(
+            _check(
+                "login",
+                "Login credentials",
+                "pass",
+                "Access token login is configured with its device ID.",
+            )
+        )
+    else:
+        if not password and not access_token:
+            missing.append("password_or_accessToken")
+            message = "Add a password, or an access token with its device ID."
+        else:
+            missing.append("deviceId")
+            message = "A device ID is required with an access token."
+        checks.append(_check("login", "Login credentials", "fail", message))
+
+    checks.append(
+        _check(
+            "manual_review",
+            "Matrix account",
+            "skipped",
+            "Room access is verified when the channel starts.",
+        )
+    )
+    return _status_from_checks(name, checks, list(dict.fromkeys(missing)))
+
+
 def _validate_cli_handoff(name: str, values: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     if _enabled(values) or _str(values.get("token")) or _str(values.get("databasePath")):
@@ -300,6 +337,7 @@ _VALIDATORS = {
     "slack": _validate_slack,
     "email": _validate_email,
     "feishu": _validate_feishu,
+    "matrix": _validate_matrix,
     "whatsapp": _validate_cli_handoff,
     "weixin": _validate_cli_handoff,
 }

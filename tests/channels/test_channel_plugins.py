@@ -1141,6 +1141,85 @@ def test_optional_features_payload_marks_enabled_channel_missing_credentials(mon
     assert "configured_fields" not in discord
 
 
+def test_optional_features_payload_detects_saved_weixin_login_state(tmp_path, monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    state_dir = tmp_path / "weixin-state"
+    state_dir.mkdir()
+    (state_dir / "account.json").write_text(
+        json.dumps({"token": "saved-weixin-token"}),
+        encoding="utf-8",
+    )
+    config = Config.model_validate({
+        "channels": {
+            "weixin": {
+                "enabled": True,
+                "stateDir": str(state_dir),
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    weixin = payload["features"][0]
+    assert weixin["enabled"] is True
+    assert weixin["configured"] is True
+
+
+def test_optional_features_payload_detects_legacy_default_weixin_state(tmp_path, monkeypatch):
+    from nanobot.config import loader
+    from nanobot.optional_features import optional_features_payload
+
+    config_path = tmp_path / "config.json"
+    loader.save_config(Config(), config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    state_dir = tmp_path / "weixin"
+    state_dir.mkdir()
+    (state_dir / "account.json").write_text(
+        json.dumps({"token": "legacy-weixin-token"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=Config())
+
+    weixin = payload["features"][0]
+    assert weixin["enabled"] is False
+    assert weixin["configured"] is True
+
+
+@pytest.mark.parametrize("device_id", ["", "DEVICE-ID"])
+def test_optional_features_payload_requires_matrix_device_id_for_token_login(
+    monkeypatch,
+    device_id,
+):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({
+        "channels": {
+            "matrix": {
+                "enabled": False,
+                "homeserver": "https://matrix.example",
+                "userId": "@nanobot:matrix.example",
+                "accessToken": "saved-token",
+                "deviceId": device_id,
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    assert payload["features"][0]["configured"] is bool(device_id)
+
+
 def test_optional_features_payload_marks_disabled_feishu_as_configured(monkeypatch):
     from nanobot.optional_features import optional_features_payload
 

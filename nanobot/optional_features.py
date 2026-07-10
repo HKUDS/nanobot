@@ -404,7 +404,15 @@ _CHANNEL_SETUP_STATES: dict[str, _ChannelSetupState] = {
             "userId",
             ("password", "accessToken"),
         ),
-        ("homeserver", "userId", "password", "accessToken", "groupPolicy", "allowFrom"),
+        (
+            "homeserver",
+            "userId",
+            "password",
+            "accessToken",
+            "deviceId",
+            "groupPolicy",
+            "allowFrom",
+        ),
         ("password", "accessToken"),
     ),
     "mattermost": _channel_setup_state(
@@ -539,12 +547,54 @@ def _channel_requirement_present(section: Any, requirement: str | tuple[str, ...
 
 
 def _channel_has_required_setup(section: Any, name: str) -> bool:
+    if name == "matrix":
+        homeserver = _channel_requirement_present(section, "homeserver")
+        user_id = _channel_requirement_present(section, "userId")
+        password = _channel_requirement_present(section, "password")
+        token_login = _channel_requirement_present(
+            section,
+            "accessToken",
+        ) and _channel_requirement_present(section, "deviceId")
+        return homeserver and user_id and (password or token_login)
+
     spec = _CHANNEL_SETUP_STATES.get(name)
     return bool(
         spec
         and spec.required
         and all(_channel_requirement_present(section, requirement) for requirement in spec.required)
     )
+
+
+def _local_login_state_present(section: Any, name: str) -> bool:
+    """Return whether a QR-login channel has reusable local account state."""
+    from nanobot.config.loader import get_config_path
+
+    if name == "weixin":
+        configured_dir = _channel_field_value(section, "stateDir")
+        state_dir = (
+            Path(str(configured_dir)).expanduser()
+            if configured_dir
+            else get_config_path().parent / "weixin"
+        )
+        try:
+            payload = json.loads((state_dir / "account.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return False
+        return bool(str(payload.get("token") or "").strip())
+
+    if name == "whatsapp":
+        configured_path = _channel_field_value(section, "databasePath")
+        database_path = (
+            Path(str(configured_path)).expanduser()
+            if configured_path
+            else get_config_path().parent / "whatsapp-auth" / "neonize.db"
+        )
+        try:
+            return database_path.is_file() and database_path.stat().st_size > 0
+        except OSError:
+            return False
+
+    return False
 
 
 def _feishu_instance_display_name(config: dict[str, Any]) -> str:
@@ -566,6 +616,8 @@ def _feishu_instance_identity_source(config: dict[str, Any]) -> str:
 def channel_configured(config: Config, name: str) -> bool:
     """Return whether a channel has enough saved setup to be enabled directly."""
     section = getattr(config.channels, name, None)
+    if name in {"weixin", "whatsapp"} and _local_login_state_present(section, name):
+        return True
     if section is None:
         return False
 

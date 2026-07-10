@@ -75,3 +75,40 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
     assert disabled_result["requires_restart"] is False
     assert "hot" not in manager.channels
     assert channel.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_fails(monkeypatch):
+    enabled = Config.model_validate({
+        "channels": {
+            "websocket": {"enabled": False},
+            "hot": {"enabled": True},
+        }
+    })
+
+    import nanobot.channels.registry as registry
+
+    monkeypatch.setattr(registry, "discover_channel_names", lambda: ["hot"])
+    monkeypatch.setattr(registry, "discover_plugins", lambda enabled_names=None: {})
+    monkeypatch.setattr(
+        registry,
+        "discover_enabled",
+        lambda enabled_names, **_kwargs: {"hot": _HotChannel},
+    )
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: enabled)
+
+    manager = ChannelManager(enabled, MessageBus())
+    old_channel = manager.channels["hot"]
+    old_channel._running = True
+
+    def fail_build(*_args, **_kwargs):
+        raise RuntimeError("invalid replacement config")
+
+    monkeypatch.setattr(manager, "_build_channel", fail_build)
+
+    result = await manager.apply_channel_feature_action("enable", "hot")
+
+    assert result["requires_restart"] is True
+    assert manager.channels["hot"] is old_channel
+    assert old_channel.is_running is True
+    assert not old_channel.stopped.is_set()

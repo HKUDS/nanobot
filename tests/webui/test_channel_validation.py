@@ -100,3 +100,47 @@ def test_validate_manual_channel_returns_configured(tmp_path, monkeypatch: pytes
     assert payload["status"] == "configured"
     assert payload["can_enable"] is True
     assert any(check["status"] == "skipped" for check in payload["checks"])
+
+
+@pytest.mark.parametrize(
+    ("credentials", "expected_status", "expected_missing"),
+    [
+        ({}, "needs_setup", "password_or_accessToken"),
+        ({"channels.matrix.accessToken": "token"}, "needs_setup", "deviceId"),
+        ({"channels.matrix.password": "secret"}, "configured", None),
+        (
+            {
+                "channels.matrix.accessToken": "token",
+                "channels.matrix.deviceId": "DEVICE",
+            },
+            "configured",
+            None,
+        ),
+    ],
+)
+def test_validate_matrix_requires_a_complete_login_method(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    credentials: dict[str, str],
+    expected_status: str,
+    expected_missing: str | None,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = validate_channel_config(
+        "matrix",
+        {
+            "channels.matrix.homeserver": "https://matrix.example",
+            "channels.matrix.userId": "@nanobot:matrix.example",
+            **credentials,
+        },
+    )
+
+    assert payload["status"] == expected_status
+    assert payload["can_enable"] is (expected_status == "configured")
+    if expected_missing is None:
+        assert payload["missing_fields"] == []
+    else:
+        assert expected_missing in payload["missing_fields"]

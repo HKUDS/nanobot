@@ -234,11 +234,11 @@ class WeixinConnectStore:
 
         channel = self._build_channel()
         if force:
+            # Start a fresh login flow without touching the currently working
+            # account.  A confirmed scan replaces it via _save_state;
+            # cancellation or expiry must leave the old account usable.
             channel._token = ""
             channel._get_updates_buf = ""
-            state_file = channel._get_state_dir() / "account.json"
-            if state_file.exists():
-                state_file.unlink()
         elif channel._load_state():
             return {
                 "session_id": "",

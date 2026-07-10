@@ -423,11 +423,8 @@ class ChannelManager:
             }
 
         try:
-            built: list[tuple[str, BaseChannel]] = []
-            for spec in specs:
-                if spec.runtime_name in self.channels:
-                    await self._stop_channel(spec.runtime_name)
-                built.append((
+            built = [
+                (
                     spec.runtime_name,
                     self._build_channel(
                         name,
@@ -435,7 +432,9 @@ class ChannelManager:
                         spec.config,
                         runtime_name=spec.runtime_name,
                     ),
-                ))
+                )
+                for spec in specs
+            ]
         except Exception as exc:
             logger.exception("Failed to build {} channel after settings change", name)
             return {
@@ -444,6 +443,10 @@ class ChannelManager:
                 "requires_restart": True,
                 "message": f"{name} channel could not be started: {exc}",
             }
+
+        for runtime_name, _channel in built:
+            if runtime_name in self.channels:
+                await self._stop_channel(runtime_name)
 
         for runtime_name, channel in built:
             self.channels[runtime_name] = channel

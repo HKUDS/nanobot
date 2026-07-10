@@ -3,6 +3,7 @@ import {
   useEffect,
   forwardRef,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -5909,6 +5910,13 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
           help: "Preferred when your Matrix client exposes an access token.",
         },
         {
+          key: "channels.matrix.deviceId",
+          label: "Device ID",
+          placeholder: "Required with an access token",
+          optional: true,
+          help: "Copy the device ID associated with the access token. Password login does not need it.",
+        },
+        {
           key: "channels.matrix.groupPolicy",
           label: "Group behavior",
           defaultValue: "open",
@@ -7308,6 +7316,7 @@ function ChannelQrConnectFlow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [handledRequestId, setHandledRequestId] = useState(0);
+  const pollInFlight = useRef(false);
   const startDomain = startOptions.domain;
   const startInstanceId = startOptions.instanceId;
   const startMode = startOptions.mode;
@@ -7343,6 +7352,8 @@ function ChannelQrConnectFlow({
     if (!connect?.session_id || connect.status !== "pending") return;
     let cancelled = false;
     const poll = async () => {
+      if (pollInFlight.current) return;
+      pollInFlight.current = true;
       try {
         const payload = await pollChannelConnect(token, channelName, connect.session_id);
         if (cancelled) return;
@@ -7359,6 +7370,8 @@ function ChannelQrConnectFlow({
         }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
+      } finally {
+        pollInFlight.current = false;
       }
     };
     const initial = window.setTimeout(() => void poll(), 900);

@@ -1215,6 +1215,57 @@ async def test_channel_configure_route_preserves_existing_channel_values(
 
 
 @pytest.mark.asyncio
+async def test_channel_configure_route_saves_matrix_device_id_without_replacing_token(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.config import loader
+    from nanobot.config.schema import Config
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    setattr(
+        config.channels,
+        "matrix",
+        {
+            "enabled": False,
+            "homeserver": "https://matrix.example",
+            "userId": "@nanobot:matrix.example",
+            "accessToken": "saved-token",
+        },
+    )
+    loader.save_config(config, config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    token = channel.gateway.tokens.issue_api_token(300)
+    response = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(
+            {
+                "Authorization": f"Bearer {token}",
+                "Host": "127.0.0.1:8765",
+                "X-Nanobot-Channel-Values": json.dumps(
+                    {
+                        "channels.matrix.accessToken": "",
+                        "channels.matrix.deviceId": "DEVICE-ID",
+                    }
+                ),
+            },
+            path="/api/settings/channels/configure?name=matrix",
+        ),
+        "/api/settings/channels/configure",
+    )
+
+    assert response is not None
+    assert response.status_code == 200
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["accessToken"] == "saved-token"
+    assert data["channels"]["matrix"]["deviceId"] == "DEVICE-ID"
+
+
+@pytest.mark.asyncio
 async def test_nanobot_feature_loopback_reverse_proxy_install_requires_opt_in(
     bus: MagicMock,
     tmp_path: Path,

@@ -391,6 +391,7 @@ describe("SettingsView Apps catalog", () => {
 
     expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
+    expect(screen.getByLabelText("Device ID")).toBeInTheDocument();
     expect(screen.queryByText("channels.matrix.homeserver")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));

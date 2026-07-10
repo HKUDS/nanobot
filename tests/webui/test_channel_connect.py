@@ -62,3 +62,38 @@ async def test_weixin_connect_store_saves_confirmed_qr_login(
     saved = json.loads((state_dir / "account.json").read_text())
     assert saved["token"] == "wx-token"
     assert saved["base_url"] == "https://weixin.example"
+
+
+@pytest.mark.asyncio
+async def test_weixin_reconnect_keeps_existing_account_until_scan_succeeds(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "weixin-state"
+    state_dir.mkdir()
+    existing = {
+        "token": "working-token",
+        "base_url": "https://working.weixin.example",
+        "context_tokens": {"user-1": "context-1"},
+    }
+    state_file = state_dir / "account.json"
+    state_file.write_text(json.dumps(existing), encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"channels": {"weixin": {"stateDir": str(state_dir)}}}),
+        config_path,
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+        return "qr-reconnect", "https://qr.example/reconnect"
+
+    monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+
+    store = WeixinConnectStore()
+    started = await store.start(force=True)
+
+    assert json.loads(state_file.read_text(encoding="utf-8")) == existing
+    cancelled = await store.cancel(started["session_id"])
+    assert cancelled["status"] == "cancelled"
+    assert json.loads(state_file.read_text(encoding="utf-8")) == existing
