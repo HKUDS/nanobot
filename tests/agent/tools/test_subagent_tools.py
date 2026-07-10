@@ -114,7 +114,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
     seen = {}
 
     async def fake_run(spec):
-        seen["temperature"] = spec.temperature
+        seen["temperature"] = spec.runtime.generation.temperature
         return SimpleNamespace(
             stop_reason="done", final_content="done", error=None, tool_events=[],
         )
