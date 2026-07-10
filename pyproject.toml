@@ -114,6 +114,11 @@ nanobot = "nanobot.cli.commands:app"
 # [project.entry-points."nanobot.tools"]
 # my_plugin = "my_package.plugins:MyTool"
 
+# Third-party hook plugins register here.  Built-in hooks are discovered
+# automatically via pkgutil scanning in nanobot/agent/hooks/discovery.py.
+# [project.entry-points."nanobot.hooks"]
+# my_hook = "my_package:module"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -11,7 +11,6 @@ import typer
 from rich.console import Console
 
 from nanobot import __logo__
-from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
@@ -98,7 +97,6 @@ def agent(
             provider=provider,
             cron_service=cron,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
-            hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )
     except ValueError as exc:

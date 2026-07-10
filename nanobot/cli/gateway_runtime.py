@@ -12,7 +12,6 @@ from loguru import logger
 from rich.console import Console
 
 from nanobot import __logo__, __version__
-from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
@@ -435,7 +434,6 @@ def _run_gateway(
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
-        hook_factories=[create_file_edit_activity_hook],
         tool_registry=tools,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:

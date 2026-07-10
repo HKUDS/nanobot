@@ -214,7 +214,9 @@ async def test_run_with_hooks(tmp_path):
     result = await bot.run("hi", hooks=[TestHook()])
 
     assert result.content == "done"
-    assert bot._loop._extra_hooks == []
+    # Hook auto-discovery may register built-in hooks at loop construction,
+    # but per-run hooks must not leak into loop state.
+    assert all(not isinstance(h, TestHook) for h in bot._loop._extra_hooks)
     hooks = bot._loop.process_direct.await_args.kwargs["hooks"]
     assert len(hooks) == 2
     assert isinstance(hooks[0], SDKCaptureHook)

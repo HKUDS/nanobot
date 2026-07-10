@@ -47,7 +47,6 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
-from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.agent.tools.mcp import MCPProvider  # noqa: E402
 from nanobot.agent.tools.registry import ToolRegistry  # noqa: E402
@@ -360,7 +359,6 @@ def serve(
             runtime_config, bus,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
-            hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )
     except ValueError as exc:
