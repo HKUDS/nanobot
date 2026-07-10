@@ -26,6 +26,7 @@ class LLMRuntime:
     context_window_tokens: int
     model_preset: str | None = None
     snapshot_signature: tuple[object, ...] | None = None
+    runtime_probe: str | None = None
 
     @classmethod
     def capture(
