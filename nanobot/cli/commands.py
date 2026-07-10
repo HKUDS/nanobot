@@ -1551,7 +1551,7 @@ def _run_gateway(
                     sha = store.git.auto_commit(msg)
                     if sha:
                         logger.info("Dream commit: {}", sha)
-                store.compact_history()
+                store.compact_history(protect_after_cursor=store.get_last_dream_cursor())
                 prune_dream_sessions(agent.sessions.sessions_dir)
             return None
 

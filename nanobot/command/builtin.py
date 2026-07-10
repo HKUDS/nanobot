@@ -451,7 +451,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 sha = store.git.auto_commit(commit_msg)
                 if sha:
                     content += f" (commit {sha})"
-            store.compact_history()
+            store.compact_history(protect_after_cursor=store.get_last_dream_cursor())
             prune_dream_sessions(loop.sessions.sessions_dir)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,

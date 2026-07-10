@@ -32,6 +32,7 @@ class _FakeStore:
         self._dream_prompt_result = dream_prompt_result
         self._content_diff = content_diff
         self.compact_history_called = False
+        self.compact_history_protect_after_cursor = None
 
     def get_last_dream_cursor(self) -> int:
         return self._last_dream_cursor
@@ -50,6 +51,7 @@ class _FakeStore:
 
     def compact_history(self) -> None:
         self.compact_history_called = True
+        self.compact_history_protect_after_cursor = protect_after_cursor
 
 
 class _FakeGit:
