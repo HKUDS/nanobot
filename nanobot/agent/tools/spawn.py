@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
 from nanobot.security.workspace_access import current_workspace_scope
@@ -70,20 +70,19 @@ class SpawnTool(Tool):
                 f"to complete before spawning a new one."
             )
         request_ctx = current_request_context()
-        origin_channel = request_ctx.channel if request_ctx is not None else "cli"
-        origin_chat_id = request_ctx.chat_id if request_ctx is not None else "direct"
-        session_key = (
-            request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
-            if request_ctx is not None
-            else "cli:direct"
-        )
+        if request_ctx is None or request_ctx.runtime is None:
+            return ToolResult.error("Error: spawn requires an active model runtime")
+        origin_channel = request_ctx.channel
+        origin_chat_id = request_ctx.chat_id
+        session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
         return await self._manager.spawn(
             task=task,
+            runtime=request_ctx.runtime,
             label=label,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             session_key=session_key,
-            origin_message_id=request_ctx.message_id if request_ctx is not None else None,
+            origin_message_id=request_ctx.message_id,
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
         )

@@ -12,14 +12,18 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.context import (
+    RequestContext,
+    ToolContext,
+    bind_request_context,
+    reset_request_context,
+)
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
@@ -77,12 +81,9 @@ class SubagentManager:
 
     def __init__(
         self,
-        provider: LLMProvider,
         workspace: Path,
         bus: MessageBus,
         max_tool_result_chars: int,
-        model: str | None = None,
-        context_window_tokens: int | None = None,
         tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
@@ -92,11 +93,8 @@ class SubagentManager:
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         defaults = AgentDefaults()
-        self.provider = provider
         self.workspace = workspace
         self.bus = bus
-        self.model = model or provider.get_default_model()
-        self.context_window_tokens = context_window_tokens or defaults.context_window_tokens
         self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
@@ -152,17 +150,6 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
-    def set_provider(
-        self,
-        provider: LLMProvider,
-        model: str,
-        context_window_tokens: int | None = None,
-    ) -> None:
-        self.provider = provider
-        self.model = model
-        if context_window_tokens is not None:
-            self.context_window_tokens = context_window_tokens
-
     async def spawn(
         self,
         task: str,
@@ -173,8 +160,12 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        *,
+        runtime: LLMRuntime,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
+        if temperature is not None:
+            runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
@@ -194,8 +185,8 @@ class SubagentManager:
                 display_label,
                 origin,
                 status,
+                runtime,
                 origin_message_id,
-                temperature,
                 workspace_scope,
             )
         )
@@ -223,8 +214,8 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         status: SubagentStatus,
+        runtime: LLMRuntime,
         origin_message_id: str | None = None,
-        temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
@@ -253,13 +244,15 @@ class SubagentManager:
                 if self._llm_wall_timeout_for_session
                 else None
             )
+            request_token = bind_request_context(RequestContext(
+                channel=origin["channel"],
+                chat_id=origin["chat_id"],
+                message_id=origin_message_id,
+                session_key=sess_key,
+                runtime=runtime,
+            ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
-                runtime = LLMRuntime.capture(
-                    self.provider,
-                    self.model,
-                    context_window_tokens=self.context_window_tokens,
-                ).with_generation_overrides(temperature=temperature)
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
@@ -279,6 +272,7 @@ class SubagentManager:
             finally:
                 if token is not None:
                     reset_workspace_scope(token)
+                reset_request_context(request_token)
             status.phase = "done"
             status.stop_reason = result.stop_reason
 

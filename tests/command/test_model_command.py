@@ -85,7 +85,7 @@ async def test_model_command_switches_preset(tmp_path) -> None:
     assert "Model: `openai/gpt-4.1`" in out.content
     assert loop.model_preset == "fast"
     assert loop.model == "openai/gpt-4.1"
-    assert loop.subagents.model == "openai/gpt-4.1"
+    assert not hasattr(loop.subagents, "model")
     assert loop.consolidator.model == "openai/gpt-4.1"
 
 

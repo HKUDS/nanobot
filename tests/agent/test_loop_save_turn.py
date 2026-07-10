@@ -1098,11 +1098,13 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
     spawn_tool = loop.tools.get("spawn")
     assert spawn_tool is not None
     spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
 
     with request_context(RequestContext(
         channel="discord",
         chat_id="thread-777",
         session_key="discord:parent-456:thread:thread-777",
+        runtime=runtime,
     )):
         await spawn_tool.execute(task="inspect context")
 
@@ -1110,6 +1112,7 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
     assert call["origin_channel"] == "discord"
     assert call["origin_chat_id"] == "thread-777"
     assert call["session_key"] == "discord:parent-456:thread:thread-777"
+    assert call["runtime"] is runtime
 
 
 @pytest.mark.asyncio
@@ -1443,6 +1446,7 @@ async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path
     spawn_tool = loop.tools.get("spawn")
     assert spawn_tool is not None
     spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
 
     with request_context(RequestContext(
         channel="slack",
@@ -1450,12 +1454,14 @@ async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path
         message_id="msg-123",
         metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
         session_key="slack:C123:1700.42",
+        runtime=runtime,
     )):
         await spawn_tool.execute(task="inspect thread")
 
     call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
     assert call["session_key"] == "slack:C123:1700.42"
     assert call["origin_message_id"] == "msg-123"
+    assert call["runtime"] is runtime
 
 
 @pytest.mark.asyncio

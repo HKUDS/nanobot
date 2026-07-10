@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,7 +10,15 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.cron.service import CronService
+from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.utils.llm_runtime import LLMRuntime
+
+
+def _runtime(model: str = "test-model") -> LLMRuntime:
+    provider = MagicMock(spec=LLMProvider)
+    provider.generation = GenerationSettings()
+    return LLMRuntime.capture(provider, model, context_window_tokens=128_000)
 
 
 @pytest.mark.asyncio
@@ -60,6 +69,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             self,
             *,
             task: str,
+            runtime: LLMRuntime,
             label: str | None,
             origin_channel: str,
             origin_chat_id: str,
@@ -74,14 +84,22 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
     tool = SpawnTool(_Manager())
 
     async def task_one() -> str:
-        with request_context(RequestContext(channel="whatsapp", chat_id="chat-a")):
+        with request_context(RequestContext(
+            channel="whatsapp",
+            chat_id="chat-a",
+            runtime=_runtime("model-a"),
+        )):
             entered.set()
             await release.wait()
             return await tool.execute(task="one")
 
     async def task_two() -> str:
         await entered.wait()
-        with request_context(RequestContext(channel="telegram", chat_id="chat-b")):
+        with request_context(RequestContext(
+            channel="telegram",
+            chat_id="chat-b",
+            runtime=_runtime("model-b"),
+        )):
             release.set()
             return await tool.execute(task="two")
 
@@ -182,6 +200,7 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
             self,
             *,
             task,
+            runtime,
             label,
             origin_channel,
             origin_chat_id,
@@ -194,15 +213,19 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
             return f"ok: {task}"
 
     tool = SpawnTool(_Manager())
-    with request_context(RequestContext(channel="feishu", chat_id="chat-abc")):
+    with request_context(RequestContext(
+        channel="feishu",
+        chat_id="chat-abc",
+        runtime=_runtime(),
+    )):
         result = await tool.execute(task="do something")
     assert result == "ok: do something"
     assert seen == [("feishu", "chat-abc", "feishu:chat-abc")]
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_default_values_without_request_context() -> None:
-    """Without a request context, default cli:direct should be used."""
+async def test_spawn_tool_rejects_missing_request_runtime() -> None:
+    """Spawning cannot reconstruct a model runtime outside turn admission."""
     seen: list[tuple[str, str, str]] = []
 
     class _Manager:
@@ -215,6 +238,7 @@ async def test_spawn_tool_default_values_without_request_context() -> None:
             self,
             *,
             task,
+            runtime,
             label,
             origin_channel,
             origin_chat_id,
@@ -228,8 +252,10 @@ async def test_spawn_tool_default_values_without_request_context() -> None:
 
     tool = SpawnTool(_Manager())
 
-    await tool.execute(task="test")
-    assert seen == [("cli", "direct", "cli:direct")]
+    result = await tool.execute(task="test")
+    assert result == "Error: spawn requires an active model runtime"
+    assert result.is_error
+    assert seen == []
 
 
 @pytest.mark.asyncio

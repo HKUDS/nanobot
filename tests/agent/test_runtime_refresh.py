@@ -41,8 +41,8 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     assert loop.model == "new-model"
     assert loop.context_window_tokens == 2000
     assert not hasattr(loop.runner, "provider")
-    assert loop.subagents.provider is new_provider
-    assert loop.subagents.model == "new-model"
+    assert not hasattr(loop.subagents, "provider")
+    assert not hasattr(loop.subagents, "model")
     assert not hasattr(loop.subagents.runner, "provider")
     assert loop.consolidator.provider is new_provider
     assert loop.consolidator.model == "new-model"

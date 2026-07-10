@@ -57,7 +57,7 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert loop.provider.generation.temperature == 0.5
     assert loop.provider.generation.max_tokens == 4096
     assert loop.provider.generation.reasoning_effort == "low"
-    assert loop.subagents.model == "openai/gpt-4.1"
+    assert not hasattr(loop.subagents, "model")
     assert loop.consolidator.model == "openai/gpt-4.1"
     assert loop.consolidator.context_window_tokens == 32_768
     assert loop.consolidator.max_completion_tokens == 4096
@@ -108,7 +108,7 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
 
     assert loop.provider is new_provider
     assert not hasattr(loop.runner, "provider")
-    assert loop.subagents.provider is new_provider
+    assert not hasattr(loop.subagents, "provider")
     assert not hasattr(loop.subagents.runner, "provider")
     assert loop.consolidator.provider is new_provider
     assert loop.model == "anthropic/claude-opus-4-5"
@@ -135,7 +135,7 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
 
     assert loop.model_preset is None
     assert loop.model == "base-model"
-    assert loop.subagents.model == "base-model"
+    assert not hasattr(loop.subagents, "model")
     assert loop.consolidator.model == "base-model"
     assert loop.context_window_tokens == 1000
     assert loop.consolidator.max_completion_tokens == 123

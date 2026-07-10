@@ -8,8 +8,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.config.schema import AgentDefaults
+from nanobot.providers.base import GenerationSettings
+from nanobot.utils.llm_runtime import LLMRuntime
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+def _runtime(provider: MagicMock, model: str = "test-model") -> LLMRuntime:
+    provider.generation = GenerationSettings(temperature=0.1, max_tokens=4096)
+    return LLMRuntime.capture(provider, model, context_window_tokens=128_000)
 
 
 @pytest.mark.asyncio
@@ -24,7 +31,6 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -49,7 +55,12 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
     )
     await mgr._run_subagent(
-        "sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"}, status
+        "sub-1",
+        "do task",
+        "label",
+        {"channel": "test", "chat_id": "c1"},
+        status,
+        _runtime(provider),
     )
 
     mgr.runner.run.assert_awaited_once()
@@ -65,7 +76,6 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -88,7 +98,12 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
         task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
     )
     await mgr._run_subagent(
-        "sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"}, status
+        "sub-1",
+        "do task",
+        "label",
+        {"channel": "test", "chat_id": "c1"},
+        status,
+        _runtime(provider),
     )
 
     mgr.runner.run.assert_awaited_once()
@@ -104,27 +119,30 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
     mgr._announce_result = AsyncMock()
 
+    parent_runtime = _runtime(provider)
     seen = {}
 
     async def fake_run(spec):
         seen["temperature"] = spec.runtime.generation.temperature
+        seen["runtime"] = spec.runtime
         return SimpleNamespace(
             stop_reason="done", final_content="done", error=None, tool_events=[],
         )
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-    await mgr.spawn(task="do task", temperature=0.9)
+    await mgr.spawn(task="do task", runtime=parent_runtime, temperature=0.9)
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     assert seen["temperature"] == 0.9
+    assert seen["runtime"] is not parent_runtime
+    assert parent_runtime.generation.temperature == 0.1
 
 
 @pytest.mark.asyncio
@@ -138,7 +156,6 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -162,7 +179,12 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     from nanobot.agent.tools.context import RequestContext, request_context
 
     tool = SpawnTool(mgr)
-    with request_context(RequestContext(channel="test", chat_id="c1", session_key="test:c1")):
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=_runtime(provider),
+    )):
         # First spawn succeeds
         result = await tool.execute(task="first task")
         assert "started" in result
@@ -184,11 +206,7 @@ def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -203,11 +221,7 @@ def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,

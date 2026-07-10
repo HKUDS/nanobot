@@ -340,11 +340,8 @@ class AgentLoop:
         self._file_state_store = FileStateStore()
         self.runner = AgentRunner()
         self.subagents = SubagentManager(
-            provider=provider,
             workspace=workspace,
             bus=bus,
-            model=self.model,
-            context_window_tokens=self.context_window_tokens,
             tools_config=_tc,
             max_tool_result_chars=self.max_tool_result_chars,
             restrict_to_workspace=restrict_to_workspace,
@@ -495,7 +492,6 @@ class AgentLoop:
         self.provider = provider
         self.model = model
         self.context_window_tokens = context_window_tokens
-        self.subagents.set_provider(provider, model, context_window_tokens)
         self.consolidator.set_provider(provider, model, context_window_tokens)
         self._sync_replay_max_messages()
         self._provider_signature = snapshot.signature
