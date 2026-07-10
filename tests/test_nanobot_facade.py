@@ -576,7 +576,7 @@ async def test_run_model_override_is_per_run_and_restores_default(tmp_path):
 
     async def fake_process_direct(message, *, session_key, hooks):
         assert bot._loop.provider is override_provider
-        assert bot._loop.runner.provider is override_provider
+        assert not hasattr(bot._loop.runner, "provider")
         assert bot._loop.model == "openai/gpt-4.1-mini"
         assert bot._loop.context_window_tokens == 4096
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
@@ -591,7 +591,7 @@ async def test_run_model_override_is_per_run_and_restores_default(tmp_path):
         model_preset=None,
     )
     assert bot._loop.provider is original_provider
-    assert bot._loop.runner.provider is original_provider
+    assert not hasattr(bot._loop.runner, "provider")
     assert bot._loop.model == original_model
     assert bot._loop._provider_signature == original_signature
 

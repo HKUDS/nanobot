@@ -39,10 +39,10 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     assert loop.provider is new_provider
     assert loop.model == "new-model"
     assert loop.context_window_tokens == 2000
-    assert loop.runner.provider is new_provider
+    assert not hasattr(loop.runner, "provider")
     assert loop.subagents.provider is new_provider
     assert loop.subagents.model == "new-model"
-    assert loop.subagents.runner.provider is new_provider
+    assert not hasattr(loop.subagents.runner, "provider")
     assert loop.consolidator.provider is new_provider
     assert loop.consolidator.model == "new-model"
     assert loop.consolidator.context_window_tokens == 2000
@@ -71,7 +71,7 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert runtime.provider is new_provider
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
-    assert loop.runner.provider is new_provider
+    assert not hasattr(loop.runner, "provider")
 
 
 def test_settings_context_window_refreshes_runtime_state(

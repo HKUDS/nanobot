@@ -26,6 +26,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -81,6 +82,7 @@ class SubagentManager:
         bus: MessageBus,
         max_tool_result_chars: int,
         model: str | None = None,
+        context_window_tokens: int | None = None,
         tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
@@ -94,6 +96,7 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+        self.context_window_tokens = context_window_tokens or defaults.context_window_tokens
         self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
@@ -113,7 +116,7 @@ class SubagentManager:
             if fail_on_tool_error is not None
             else defaults.fail_on_tool_error
         )
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
@@ -149,10 +152,16 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
-    def set_provider(self, provider: LLMProvider, model: str) -> None:
+    def set_provider(
+        self,
+        provider: LLMProvider,
+        model: str,
+        context_window_tokens: int | None = None,
+    ) -> None:
         self.provider = provider
         self.model = model
-        self.runner.provider = provider
+        if context_window_tokens is not None:
+            self.context_window_tokens = context_window_tokens
 
     async def spawn(
         self,
@@ -246,11 +255,15 @@ class SubagentManager:
             )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
+                runtime = LLMRuntime.capture(
+                    self.provider,
+                    self.model,
+                    context_window_tokens=self.context_window_tokens,
+                ).with_generation_overrides(temperature=temperature)
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
-                    model=self.model,
-                    temperature=temperature,
+                    runtime=runtime,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
                     hook=_SubagentHook(task_id, status),

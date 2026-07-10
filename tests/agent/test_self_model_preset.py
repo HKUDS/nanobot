@@ -107,9 +107,9 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
     loop.set_model_preset("deep")
 
     assert loop.provider is new_provider
-    assert loop.runner.provider is new_provider
+    assert not hasattr(loop.runner, "provider")
     assert loop.subagents.provider is new_provider
-    assert loop.subagents.runner.provider is new_provider
+    assert not hasattr(loop.subagents.runner, "provider")
     assert loop.consolidator.provider is new_provider
     assert loop.model == "anthropic/claude-opus-4-5"
     assert loop.context_window_tokens == 200_000

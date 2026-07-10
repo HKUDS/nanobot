@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.runner_helpers import make_run_spec
 from nanobot.agent.hooks import FileEditActivityHook
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -27,8 +28,8 @@ async def test_runner_can_disable_provider_progress_delta_streaming():
     tools.get_definitions.return_value = []
     progress_cb = AsyncMock()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "hi"},
@@ -64,8 +65,8 @@ async def test_runner_streams_provider_progress_deltas_by_default():
     tools.get_definitions.return_value = []
     progress_cb = AsyncMock()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "hi"},
@@ -124,8 +125,8 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "write a large file"}],
         tools=tools,
         model="test-model",
@@ -198,8 +199,8 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "edit a file"}],
         tools=tools,
         model="test-model",
@@ -264,8 +265,8 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "write a file"}],
         tools=tools,
         model="test-model",
@@ -328,8 +329,8 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
     provider.chat_with_retry = AsyncMock()
     tools = Tools()
 
-    runner = AgentRunner(provider)
-    task = asyncio.create_task(runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    task = asyncio.create_task(runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "write a file"}],
         tools=tools,
         model="test-model",

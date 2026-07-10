@@ -38,8 +38,8 @@ class LLMRuntime:
         snapshot_signature: tuple[object, ...] | None = None,
     ) -> LLMRuntime:
         """Capture provider defaults without retaining mutable generation state."""
-        generation = provider.generation
         defaults = GenerationSettings()
+        generation = getattr(provider, "generation", defaults)
         return cls(
             provider=provider,
             model=model,

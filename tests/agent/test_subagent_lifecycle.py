@@ -88,7 +88,7 @@ class TestSetProvider:
         sm.set_provider(new_provider, "new-model")
         assert sm.provider is new_provider
         assert sm.model == "new-model"
-        assert sm.runner.provider is new_provider
+        assert not hasattr(sm.runner, "provider")
 
 
 # ---------------------------------------------------------------------------
