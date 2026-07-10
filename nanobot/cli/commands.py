@@ -50,6 +50,8 @@ from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
 from prompt_toolkit.application import run_in_terminal  # noqa: E402
 from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
 from prompt_toolkit.history import FileHistory  # noqa: E402
+from prompt_toolkit.key_binding import KeyBindings  # noqa: E402
+from prompt_toolkit.keys import Keys  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
@@ -59,6 +61,7 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
+from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.bus.outbound_events import (  # noqa: E402
     ProgressEvent,
@@ -300,6 +303,46 @@ def _restore_terminal() -> None:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
 
 
+def _build_cli_key_bindings() -> KeyBindings:
+    """Key bindings for the interactive prompt.
+
+    Behaviour:
+      * Enter       -> submit the current input (keeps the familiar
+                       single-line Enter-to-send feel even though the buffer
+                       is multiline-capable).
+      * Alt+Enter   -> insert a newline for multi-line input.
+      * Shift+Enter -> insert a newline on terminals that emit the CSI-u
+                       (kitty / fixterms) keyboard-protocol encoding for it.
+    """
+    # prompt_toolkit does not recognize CSI-u, so register its Shift+Enter
+    # sequence as a best-effort addition without overriding existing mappings.
+    with suppress(Exception):
+        from prompt_toolkit.input import ansi_escape_sequences as _aes
+
+        _aes.ANSI_SEQUENCES.setdefault("\x1b[13;2u", Keys.ControlF3)
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _(event):
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("escape", "enter")  # Alt+Enter / Meta+Enter (ESC + CR, "\x1b\r")
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    # LF-as-Enter terminals send Alt+Enter as ESC + LF rather than ESC + CR.
+    @kb.add("escape", Keys.ControlJ)  # Alt+Enter on LF-as-Enter terminals
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    @kb.add(Keys.ControlF3)  # Shift+Enter on CSI-u capable terminals
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    return kb
+
+
 def _init_prompt_session() -> None:
     """Create the prompt_toolkit session with persistent file history."""
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
@@ -318,7 +361,10 @@ def _init_prompt_session() -> None:
     _PROMPT_SESSION = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
-        multiline=False,  # Enter submits (single line mode)
+        # Multiline-capable buffer; Enter still submits via the custom key
+        # bindings, while Alt+Enter adds a newline.
+        multiline=True,
+        key_bindings=_build_cli_key_bindings(),
     )
 
 
@@ -565,6 +611,7 @@ def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
+    non_interactive_refresh: bool = typer.Option(False, "--refresh", help="Refresh config, preserving existing settings without prompting"),
 ):
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
@@ -587,18 +634,23 @@ def onboard(
         if wizard:
             config = _apply_workspace_override(load_config(config_path))
         else:
-            console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-            console.print(
-                "  [bold]y[/bold] = overwrite with defaults (existing values will be lost)"
-            )
-            console.print(
-                "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
-            )
-            if typer.confirm("Overwrite?"):
-                config = _apply_workspace_override(Config())
-                save_config(config, config_path)
-                console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
-            else:
+            should_refresh = non_interactive_refresh
+            if not non_interactive_refresh:
+                console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
+                console.print(
+                    "  [bold]y[/bold] = overwrite with defaults (existing values will be lost)"
+                )
+                console.print(
+                    "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
+                )
+                if typer.confirm("Overwrite?"):
+                    config = _apply_workspace_override(Config())
+                    save_config(config, config_path)
+                    console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
+                else:
+                    should_refresh = True
+
+            if should_refresh:
                 config = _apply_workspace_override(load_config(config_path))
                 save_config(config, config_path)
                 console.print(
@@ -788,6 +840,267 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
         )
 
 
+def _load_inspection_config(
+    config: str | None = None,
+    workspace: str | None = None,
+) -> tuple[Path, Config]:
+    """Load config for diagnostic commands without resolving secret env refs."""
+    from nanobot.config.loader import get_config_path, load_config, set_config_path
+
+    config_path = None
+    if config:
+        config_path = Path(config).expanduser().resolve(strict=False)
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
+
+    display_path = config_path or get_config_path()
+    try:
+        loaded = load_config(config_path)
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    _warn_deprecated_config_keys(display_path)
+    if workspace:
+        loaded.agents.defaults.workspace = workspace
+    return display_path, loaded
+
+
+def _confirm_webui_action(message: str, *, yes: bool) -> None:
+    """Confirm a WebUI first-run mutation or fail clearly in non-interactive shells."""
+    if yes:
+        return
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        console.print(
+            "[red]Error: WebUI setup needs confirmation. Re-run with --yes or use "
+            "`nanobot onboard --wizard`.[/red]"
+        )
+        raise typer.Exit(1)
+    if not typer.confirm(message, default=True):
+        console.print("[yellow]WebUI setup cancelled.[/yellow]")
+        raise typer.Exit(1)
+
+
+def _resolve_webui_config_path(config: str | None) -> Path:
+    """Resolve the config path used by ``nanobot webui`` and bind loader state."""
+    from nanobot.config.loader import get_config_path, set_config_path
+
+    if not config:
+        return get_config_path()
+    config_path = Path(config).expanduser().resolve(strict=False)
+    set_config_path(config_path)
+    console.print(f"[dim]Using config: {config_path}[/dim]")
+    return config_path
+
+
+def _load_webui_setup_config(config_path: Path) -> Config:
+    """Load config for first-run mutation without resolving env-var placeholders."""
+    from nanobot.config.loader import load_config
+
+    try:
+        return load_config(config_path)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1) from e
+
+
+def _provider_setup_error(config: Config) -> str | None:
+    """Return the provider setup error, or None when the current model can start."""
+    from nanobot.config.loader import resolve_config_env_vars
+    from nanobot.providers.factory import build_provider_snapshot
+
+    try:
+        build_provider_snapshot(resolve_config_env_vars(config.model_copy(deep=True)))
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _webui_config_dict(config: Config) -> dict[str, Any]:
+    """Return the current WebSocket config as a mutable alias-key dictionary."""
+    from nanobot.channels.websocket import WebSocketConfig
+
+    current = getattr(config.channels, "websocket", None) or {}
+    model = WebSocketConfig.model_validate(current)
+    return model.model_dump(by_alias=True, exclude_none=True)
+
+
+def _host_for_local_browser(host: str) -> str:
+    """Map bind hosts to a browser-openable local host."""
+    if host in {"0.0.0.0", ""}:
+        return "127.0.0.1"
+    if host == "::":
+        return "[::1]"
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def _webui_bootstrap_secret(config: Config) -> str:
+    ws_cfg = _webui_config_dict(config)
+    return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
+
+
+def _webui_browser_url(config: Config) -> str:
+    from urllib.parse import quote
+
+    ws_cfg = _webui_config_dict(config)
+    host = _host_for_local_browser(str(ws_cfg.get("host") or "127.0.0.1"))
+    port = int(ws_cfg.get("port") or 8765)
+    base_url = f"http://{host}:{port}"
+    secret = _webui_bootstrap_secret(config)
+    if not secret:
+        return base_url
+    return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"
+
+
+def _webui_display_url(url: str) -> str:
+    marker = "bootstrapSecret="
+    if marker not in url:
+        return url
+    prefix, _ = url.split(marker, 1)
+    return f"{prefix}{marker}<redacted>"
+
+
+def _ensure_local_webui_channel(config: Config, *, port: int | None, yes: bool) -> tuple[bool, bool]:
+    """Enable the local WebUI channel with safe localhost defaults."""
+    from nanobot.channels.websocket import WebSocketConfig
+
+    current = getattr(config.channels, "websocket", None) or {}
+    model = WebSocketConfig.model_validate(current)
+    changed = False
+    generated_secret = False
+
+    needs_enable = not model.enabled
+    needs_port = port is not None and model.port != port
+    needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
+    if not needs_enable and not needs_port and not needs_secret:
+        return False, False
+
+    target_port = port if port is not None else model.port
+    console.print()
+    console.print("[bold]Local WebUI setup[/bold]")
+    console.print(f"  URL: [cyan]http://127.0.0.1:{target_port}[/cyan]")
+    console.print("  Bind: [cyan]127.0.0.1 only[/cyan] (not exposed to your LAN)")
+    console.print("  Auth: generated WebUI bootstrap secret stored in config")
+    console.print(
+        "  LAN access requires an explicit host change plus a WebUI password in config."
+    )
+    _confirm_webui_action("Update the local WebUI channel in this config?", yes=yes)
+
+    if not model.enabled:
+        model.enabled = True
+        changed = True
+    if model.host != "127.0.0.1":
+        model.host = "127.0.0.1"
+        changed = True
+    if port is not None and model.port != port:
+        model.port = port
+        changed = True
+    if not model.websocket_requires_token:
+        model.websocket_requires_token = True
+        changed = True
+    if needs_secret:
+        import secrets
+
+        model.token_issue_secret = secrets.token_urlsafe(32)
+        changed = True
+        generated_secret = True
+
+    setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
+    return changed, generated_secret
+
+
+def _warn_webui_bind_scope(config: Config) -> None:
+    ws_cfg = _webui_config_dict(config)
+    host = str(ws_cfg.get("host") or "127.0.0.1")
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return
+    console.print(
+        "[yellow]Warning: WebUI is configured to bind outside localhost. "
+        "Keep tokenIssueSecret set and use this only on trusted networks.[/yellow]"
+    )
+
+
+def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
+    """Best-effort wait for the WebUI listener before opening a browser."""
+    import socket
+    import time
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.1)
+
+
+def _open_webui_browser(url: str, *, wait: bool = True) -> None:
+    """Open the WebUI in the user's default browser, with a copyable fallback."""
+    import webbrowser
+
+    if wait:
+        _wait_for_webui(url)
+    try:
+        webbrowser.open(url)
+        console.print(f"[green]✓[/green] Opened WebUI: [cyan]{url}[/cyan]")
+    except Exception as exc:
+        console.print(f"[yellow]Could not open browser ({exc}); visit {url}[/yellow]")
+
+
+def _gateway_instance_command(
+    subcommand: str,
+    *,
+    config_path: Path,
+    workspace: str | None,
+) -> str:
+    """Return a copyable gateway command for the same config/workspace instance."""
+    import shlex
+
+    parts = ["nanobot", "gateway", subcommand, "--config", str(config_path)]
+    if workspace:
+        workspace_path = str(Path(workspace).expanduser().resolve(strict=False))
+        parts.extend(["--workspace", workspace_path])
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _run_quick_start_for_webui(config: Config, *, yes: bool) -> Config:
+    """Offer the existing Quick Start flow when provider setup is missing."""
+    if yes:
+        console.print(
+            "[red]Error: provider/model setup is incomplete, and --yes cannot answer "
+            "provider credentials. Run `nanobot webui` interactively or "
+            "`nanobot onboard --wizard`.[/red]"
+        )
+        raise typer.Exit(1)
+
+    console.print()
+    console.print("[yellow]Model provider setup is not ready.[/yellow]")
+    console.print("Quick Start will ask for provider, API key/base URL, model, and WebUI password.")
+    _confirm_webui_action("Run Quick Start now?", yes=False)
+
+    from nanobot.cli.onboard import run_quick_start_onboard
+
+    try:
+        result = run_quick_start_onboard(config)
+    except RuntimeError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        console.print("[yellow]Run `nanobot onboard --wizard` after installing wizard dependencies.[/yellow]")
+        raise typer.Exit(1) from exc
+    if not result.should_save:
+        console.print("[yellow]Quick Start cancelled. No changes were saved.[/yellow]")
+        raise typer.Exit(1)
+    return result.config
+
+
 def _migrate_cron_store(config: "Config") -> None:
     """One-time migration: move legacy global cron store into the workspace."""
     from nanobot.config.paths import get_cron_dir
@@ -863,6 +1176,13 @@ def serve(
     host = host if host is not None else api_cfg.host
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
+    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
+    if host in {"0.0.0.0", "::"} and not api_key:
+        console.print(
+            "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+            "Set api.api_key in config to prevent unauthenticated access.[/red]"
+        )
+        raise typer.Exit(1)
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
@@ -871,6 +1191,7 @@ def serve(
             runtime_config, bus,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
+            hook_factories=[create_file_edit_activity_hook],
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -882,14 +1203,7 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
-    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
     if host in {"0.0.0.0", "::"}:
-        if not api_key:
-            console.print(
-                "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
-                "Set api.api_key in config to prevent unauthenticated access.[/red]"
-            )
-            raise typer.Exit(1)
         console.print(
             "[yellow]API is bound to all interfaces "
             "(authentication required).[/yellow]"
@@ -911,6 +1225,141 @@ def serve(
     api_app.on_cleanup.append(on_cleanup)
 
     web.run_app(api_app, host=host, port=port, print=lambda msg: logger.info(msg))
+
+
+# ============================================================================
+# WebUI Launcher
+# ============================================================================
+
+
+@app.command()
+def webui(
+    port: int | None = typer.Option(None, "--port", "-p", help="WebUI port"),
+    gateway_port: int | None = typer.Option(
+        None,
+        "--gateway-port",
+        help="Gateway health port",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    background: bool = typer.Option(False, "--background", help="Start gateway in the background"),
+    no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser"),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Apply safe local WebUI defaults without prompting",
+    ),
+) -> None:
+    """Prepare the local WebUI, start the gateway, and open the browser workbench."""
+    from nanobot.config.loader import save_config
+    from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+
+    config_path = _resolve_webui_config_path(config)
+    created_config = not config_path.exists()
+    if created_config:
+        console.print(f"[yellow]No config found at {config_path}.[/yellow]")
+        _confirm_webui_action("Create a nanobot config and workspace now?", yes=yes)
+
+    setup_config = _load_webui_setup_config(config_path)
+    if workspace:
+        setup_config.agents.defaults.workspace = workspace
+
+    provider_error = _provider_setup_error(setup_config)
+    if provider_error:
+        console.print(f"[dim]Provider check: {provider_error}[/dim]")
+        setup_config = _run_quick_start_for_webui(setup_config, yes=yes)
+        if workspace:
+            setup_config.agents.defaults.workspace = workspace
+
+    try:
+        changed_webui, generated_bootstrap_secret = _ensure_local_webui_channel(
+            setup_config,
+            port=port,
+            yes=yes,
+        )
+        _warn_webui_bind_scope(setup_config)
+        webui_url = _webui_browser_url(setup_config)
+    except ValueError as exc:
+        console.print(f"[red]Error: invalid WebUI channel config: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if created_config or provider_error or changed_webui or workspace:
+        save_config(setup_config, config_path)
+        console.print(f"[green]✓[/green] Saved config: {config_path}")
+
+    workspace_path = get_workspace_path(setup_config.workspace_path)
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    sync_workspace_templates(workspace_path)
+
+    runtime_config = _load_runtime_config(str(config_path), workspace)
+    effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
+
+    console.print()
+    console.print(f"WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
+    console.print(f"Gateway health: [cyan]http://{runtime_config.gateway.host}:{effective_gateway_port}/health[/cyan]")
+    if no_open:
+        console.print("[dim]Browser opening disabled by --no-open.[/dim]")
+        if generated_bootstrap_secret:
+            console.print(
+                "[yellow]A WebUI bootstrap secret was generated and saved in this config.[/yellow]"
+            )
+            console.print(
+                "[dim]Open the WebUI and enter channels.websocket.tokenIssueSecret from "
+                f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
+            )
+
+    if background:
+        config_arg = str(config_path)
+        workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
+        runtime = GatewayRuntime(
+            paths=GatewayRuntimePaths.for_instance(
+                data_dir=config_path.parent,
+                workspace=workspace_arg,
+                config_path=config_arg,
+            )
+        )
+        start_options = GatewayStartOptions(
+            port=effective_gateway_port,
+            workspace=workspace_arg,
+            config_path=config_arg,
+        )
+        result = runtime.start_background(start_options)
+        restarted = False
+        restart_attempted = False
+        if not result.ok and result.message == "gateway_already_running" and changed_webui:
+            restart_attempted = True
+            console.print("[yellow]WebUI config changed; restarting the background gateway.[/yellow]")
+            result = runtime.restart(start_options, timeout_s=20)
+            restarted = result.ok
+        if not result.ok and (restart_attempted or result.message != "gateway_already_running"):
+            action = "restarted" if restart_attempted else "started"
+            console.print(f"[yellow]Gateway was not {action}: {result.message}[/yellow]")
+            console.print(f"Logs: {result.status.log_path}")
+            raise typer.Exit(1)
+        if restarted:
+            console.print("[green]Gateway restarted in the background.[/green]")
+        elif result.ok:
+            console.print("[green]Gateway started in the background.[/green]")
+        else:
+            console.print("[yellow]Gateway is already running in the background.[/yellow]")
+        console.print(
+            "Manage this instance: "
+            f"[cyan]{_gateway_instance_command('status', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
+        console.print(
+            "View logs: "
+            f"[cyan]{_gateway_instance_command('logs', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
+        if not no_open:
+            _open_webui_browser(webui_url)
+        return
+
+    _run_gateway(
+        runtime_config,
+        port=effective_gateway_port,
+        open_browser_url=None if no_open else webui_url,
+    )
 
 
 # ============================================================================
@@ -958,6 +1407,20 @@ def _run_gateway(
         raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
 
+    # Self-heal the gateway state file with the current PID after any restart.
+    from nanobot.config.loader import get_config_path
+    from nanobot.gateway.runtime import GatewayRuntime, GatewayRuntimePaths
+
+    config_path = str(get_config_path().resolve(strict=False))
+    GatewayRuntime.refresh_state_pid(
+        paths=GatewayRuntimePaths.for_instance(
+            workspace=str(config.workspace_path)
+            if not is_default_workspace(config.workspace_path)
+            else None,
+            config_path=config_path,
+        )
+    )
+
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
         _migrate_cron_store(config)
@@ -981,6 +1444,7 @@ def _run_gateway(
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
+        hook_factories=[create_file_edit_activity_hook],
     )
     WebuiTurnCoordinator(
         bus=bus,
@@ -1049,6 +1513,7 @@ def _run_gateway(
 
             store = agent.context.memory
             resp = None
+            diff_body = ""
             try:
                 result = store.build_dream_prompt()
                 if result is None:
@@ -1063,9 +1528,20 @@ def _run_gateway(
                     tools=store.build_dream_tools(),
                     on_progress=_silent,
                 )
-                if MemoryStore.dream_run_completed(resp):
+                # Ground truth: the real file delta, not the LLM's self-report.
+                diff_body = store.dream_content_diff()
+                productive = bool(diff_body) or (
+                    not store.git.is_initialized()
+                    and MemoryStore.dream_run_completed(resp)
+                )
+                if productive:
                     store.set_last_dream_cursor(last_cursor)
                     logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
+                elif MemoryStore.dream_run_completed(resp):
+                    logger.info(
+                        "Dream cron job completed with no memory changes; "
+                        "cursor not advanced",
+                    )
                 else:
                     logger.warning(
                         "Dream cron job did not complete; cursor remains at {}",
@@ -1083,7 +1559,7 @@ def _run_gateway(
                 )
                 if store.git.is_initialized():
                     msg = build_dream_commit_message(
-                        "dream: periodic memory consolidation", resp,
+                        "dream: periodic memory consolidation", diff_body,
                     )
                     sha = store.git.auto_commit(msg)
                     if sha:
@@ -1294,11 +1770,17 @@ def _run_gateway(
         if not open_browser_url:
             return
         import webbrowser
+        from urllib.parse import urlparse
+
+        parsed = urlparse(open_browser_url)
+        target_host = parsed.hostname or config.gateway.host or "127.0.0.1"
+        target_port = parsed.port or port
         # Channels start asynchronously; a short poll lets us avoid racing the bind.
         for _ in range(40):  # ~4s max
             try:
                 reader, writer = await asyncio.open_connection(
-                    config.gateway.host or "127.0.0.1", port
+                    target_host,
+                    target_port,
                 )
                 writer.close()
                 with suppress(Exception):
@@ -1448,6 +1930,7 @@ def agent(
             config, bus,
             cron_service=cron,
             image_generation_provider_configs=image_gen_provider_configs(config),
+            hook_factories=[create_file_edit_activity_hook],
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -1572,6 +2055,17 @@ def agent(
                                 )
                             continue
                         if isinstance(event, StreamedResponseEvent):
+                            if msg.content and renderer and not renderer.streamed:
+                                await renderer.close()
+                                print_kwargs: dict[str, Any] = {}
+                                if renderer.header_printed:
+                                    print_kwargs["show_header"] = False
+                                _print_agent_response(
+                                    msg.content,
+                                    render_markdown=markdown,
+                                    metadata=msg.metadata,
+                                    **print_kwargs,
+                                )
                             turn_done.set()
                             continue
 
@@ -1684,24 +2178,19 @@ app.add_typer(channels_app, name="channels")
 
 @channels_app.command("status")
 def channels_status(
-    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Show channel status."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config, set_config_path
 
-    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
-        set_config_path(resolved_config_path)
-
-    config = load_config(resolved_config_path)
+    _, loaded = _load_inspection_config(config=config)
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled")
 
     for name, cls in sorted(discover_all().items()):
-        section = getattr(config.channels, name, None)
+        section = getattr(loaded.channels, name, None)
         if section is None:
             enabled = False
         elif isinstance(section, dict):
@@ -1720,18 +2209,13 @@ def channels_status(
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
-    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config, set_config_path
 
-    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
-        set_config_path(resolved_config_path)
-
-    config = load_config(resolved_config_path)
-    channel_cfg = getattr(config.channels, channel_name, None) or {}
+    _, loaded = _load_inspection_config(config=config)
+    channel_cfg = getattr(loaded.channels, channel_name, None) or {}
 
     # Validate channel exists
     all_channels = discover_all()
@@ -1837,28 +2321,31 @@ def plugins_disable(
 
 
 @app.command()
-def status():
+def status(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+):
     """Show nanobot status."""
-    from nanobot.config.loader import get_config_path, load_config
-
-    config_path = get_config_path()
-    config = load_config()
-    workspace = config.workspace_path
+    config_path, loaded = _load_inspection_config(config=config, workspace=workspace)
+    workspace_path = loaded.workspace_path
 
     console.print(f"{__logo__} nanobot Status\n")
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(
+        f"Workspace: {workspace_path} "
+        f"{'[green]✓[/green]' if workspace_path.exists() else '[red]✗[/red]'}"
+    )
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        _model, _preset_tag = _model_display(config)
+        _model, _preset_tag = _model_display(loaded)
         console.print(f"Model: {_model}{_preset_tag}")
 
         # Check API keys from registry
         for spec in PROVIDERS:
-            p = getattr(config.providers, spec.name, None)
+            p = getattr(loaded.providers, spec.name, None)
             if p is None:
                 continue
             if spec.is_oauth:
@@ -2054,7 +2541,7 @@ def _logout_github_copilot() -> None:
     try:
         from nanobot.providers.github_copilot_provider import get_storage
     except ImportError:
-        console.print("[red]GitHub Copilot provider unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
 
     storage = get_storage()

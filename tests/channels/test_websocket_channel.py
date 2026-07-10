@@ -44,9 +44,6 @@ from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
 )
 from nanobot.webui.http_utils import (
-    normalize_http_path as _normalize_http_path,
-)
-from nanobot.webui.http_utils import (
     parse_query as _parse_query,
 )
 from nanobot.webui.http_utils import (
@@ -90,6 +87,7 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
         "enabled": True, "allowFrom": ["*"],
         "host": "127.0.0.1", "port": _PORT,
         "path": "/ws", "websocketRequiresToken": False,
+        "tokenIssueSecret": kw.get("token_issue_secret", ""),
     })
     return build_gateway_services(
         config=cfg,
@@ -227,15 +225,15 @@ def _sent_ws_payloads(mock_ws: AsyncMock) -> list[dict[str, Any]]:
     return [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
 
 
-def test_normalize_http_path_strips_trailing_slash_except_root() -> None:
-    assert _normalize_http_path("/chat/") == "/chat"
-    assert _normalize_http_path("/chat?x=1") == "/chat"
-    assert _normalize_http_path("/") == "/"
+def test_parse_request_path_strips_trailing_slash_except_root() -> None:
+    assert _parse_request_path("/chat/")[0] == "/chat"
+    assert _parse_request_path("/chat?x=1")[0] == "/chat"
+    assert _parse_request_path("/")[0] == "/"
 
 
-def test_parse_request_path_matches_normalize_and_query() -> None:
+def test_parse_request_path_matches_query() -> None:
     path, query = _parse_request_path("/ws/?token=secret&client_id=u1")
-    assert path == _normalize_http_path("/ws/?token=secret&client_id=u1")
+    assert path == "/ws"
     assert query == _parse_query("/ws/?token=secret&client_id=u1")
 
 
@@ -2075,7 +2073,13 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> No
         body = response.json()
         commands = {row["command"]: row for row in body["commands"]}
         assert commands["/stop"]["title"] == "Stop current task"
+        assert commands["/new"]["lifecycle"] == "finalize_active_turn"
+        assert commands["/stop"]["lifecycle"] == "stop_active_turn"
+        assert commands["/history"]["lifecycle"] == "side_channel"
         assert commands["/history"]["arg_hint"] == "[n]"
+        assert commands["/history"]["accepts_args"] is True
+        assert commands["/goal"]["lifecycle"] == "agent_turn_with_args"
+        assert commands["/goal"]["accepts_args"] is True
         assert all("description" in row for row in body["commands"])
     finally:
         await channel.stop()
@@ -2096,7 +2100,12 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
             "websocketRequiresToken": True,
         },
         bus,
-        gateway=_basic_handler(bus, runtime_surface="native", runtime_capabilities_overrides={"can_pick_folder": True}),
+        gateway=_basic_handler(
+            bus,
+            token_issue_secret="native-secret",
+            runtime_surface="native",
+            runtime_capabilities_overrides={"can_pick_folder": True},
+        ),
     )
 
     server_task = asyncio.create_task(channel.start())
@@ -2113,6 +2122,8 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
         assert body["runtime_capabilities"]["can_pick_folder"] is True
         assert body["runtime_capabilities"]["can_restart_engine"] is True
         assert body["token"].startswith("nbwt_")
+        assert body["api_token"].startswith("nbwt_")
+        assert body["api_token"] != body["token"]
     finally:
         await channel.stop()
         await server_task
@@ -2903,7 +2914,11 @@ def test_handle_file_preview_rejects_paths_outside_workspace(tmp_path) -> None:
     outside = tmp_path / "secret.py"
     outside.write_text("secret = True\n", encoding="utf-8")
 
-    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway = _basic_handler(
+        MagicMock(),
+        workspace_path=workspace,
+        default_restrict_to_workspace=True,
+    )
     gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
     key = "websocket:file-preview"
     enc = quote(key, safe="")
@@ -2915,6 +2930,39 @@ def test_handle_file_preview_rejects_paths_outside_workspace(tmp_path) -> None:
     resp = gateway.http._handle_file_preview(req, enc)
 
     assert resp.status_code == 403
+
+
+def test_handle_file_preview_allows_paths_outside_workspace_in_full_access(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "notes.py"
+    outside.write_text("value = 42\n", encoding="utf-8")
+
+    gateway = _basic_handler(
+        MagicMock(),
+        workspace_path=workspace,
+        default_restrict_to_workspace=False,
+    )
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path={quote(str(outside), safe='')}",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["path"] == str(outside.resolve())
+    assert body["display_path"] == outside.resolve().as_posix()
+    assert body["content"].splitlines() == ["value = 42"]
 
 
 def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(

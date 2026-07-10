@@ -339,7 +339,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
           <Globe2 className="h-3 w-3" />
         )}
       </span>
-      <span className="min-w-0 truncate leading-normal">
+      <span className="min-w-0 [overflow-wrap:anywhere] leading-normal sm:truncate">
         {label}
       </span>
     </a>
@@ -417,7 +417,7 @@ export default function MarkdownTextRenderer({
           return (
             <code
               className={cn(
-                "block min-w-0 whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
+                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
                 "leading-snug text-inherit",
                 cls,
               )}
@@ -495,6 +495,19 @@ export default function MarkdownTextRenderer({
           >
             {markdownChildren}
           </a>
+        );
+      },
+      table({ children, ...props }) {
+        // Wrap wide markdown tables in a horizontal-scroll container (the
+        // pattern used by DeepSeek/others) so a 6+ column table scrolls inside
+        // the conversation column instead of forcing the page wider than 100vw.
+        // min-w-max keeps natural column widths; w-full stretches narrow tables.
+        return (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-max" {...props}>
+              {children}
+            </table>
+          </div>
         );
       },
       li({ children: markdownChildren, className: itemClassName }) {

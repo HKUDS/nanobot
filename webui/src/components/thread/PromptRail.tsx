@@ -126,7 +126,7 @@ export function PromptRail({
       ref={railRef}
       aria-label="User prompt navigation"
       className={cn(
-        "group pointer-events-auto absolute left-7 top-3 z-20 hidden w-9 opacity-100 md:block",
+        "thread-prompt-rail group pointer-events-auto absolute top-3 z-20 w-9 opacity-100",
         "transition-opacity duration-200",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
       )}

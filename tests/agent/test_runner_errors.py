@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -15,7 +16,7 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 @pytest.mark.asyncio
 async def test_runner_returns_structured_tool_error():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -26,9 +27,9 @@ async def test_runner_returns_structured_tool_error():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
-    runner = AgentRunner(provider)
+    runner = AgentRunner()
 
-    result = await runner.run(AgentRunSpec(
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -49,9 +50,8 @@ async def test_llm_error_not_appended_to_session_messages():
     """When LLM returns finish_reason='error', the error content must NOT be
     appended to the messages list (prevents polluting session history)."""
     from nanobot.agent.runner import (
-        AgentRunSpec,
-        AgentRunner,
         _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+        AgentRunner,
     )
 
     provider = MagicMock(spec=LLMProvider)
@@ -61,8 +61,8 @@ async def test_llm_error_not_appended_to_session_messages():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hello"}],
         tools=tools,
         model="test-model",
@@ -81,7 +81,7 @@ async def test_llm_error_not_appended_to_session_messages():
 @pytest.mark.asyncio
 async def test_llm_arrearage_error_surfaces_clear_message():
     """Arrearage errors yield a clear user-facing message, not a raw dump (#3006)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _ARREARAGE_ERROR_MESSAGE
+    from nanobot.agent.runner import _ARREARAGE_ERROR_MESSAGE, AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -90,8 +90,8 @@ async def test_llm_arrearage_error_surfaces_clear_message():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hello"}],
         tools=tools,
         model="test-model",
@@ -117,7 +117,7 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
     expected_stop_reason: str,
 ):
     """Provider/gateway-injected tool calls under terminal block reasons must not run."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -130,7 +130,7 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="should not run")
 
-    result = await AgentRunner(provider).run(AgentRunSpec(
+    result = await AgentRunner().run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "run a command"}],
         tools=tools,
         model="test-model",
@@ -147,7 +147,7 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
 
 @pytest.mark.asyncio
 async def test_runner_tool_error_sets_final_content():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -163,8 +163,8 @@ async def test_runner_tool_error_sets_final_content():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
@@ -179,7 +179,7 @@ async def test_runner_tool_error_sets_final_content():
 
 @pytest.mark.asyncio
 async def test_runner_preserves_successful_exec_output_that_starts_with_error():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -200,8 +200,8 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value=output)
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "run report"}],
         tools=tools,
         model="test-model",
@@ -221,7 +221,7 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
 async def test_runner_tool_error_preserves_tool_results_in_messages():
     """When a tool raises a fatal error, its results must still be appended
     to messages so the session never contains orphan tool_calls (#2943)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -251,8 +251,8 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(side_effect=fake_execute)
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do stuff"}],
         tools=tools,
         model="test-model",

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.self import MyTool
 
 # ---------------------------------------------------------------------------
@@ -34,6 +35,12 @@ def _make_mock_loop(**overrides):
     loop._concurrency_gate = None
     loop._unified_session = False
     loop._extra_hooks = []
+    loop.set_runtime_model.side_effect = lambda value: setattr(loop, "model", value)
+    loop.set_runtime_context_window.side_effect = lambda value: setattr(
+        loop,
+        "context_window_tokens",
+        value,
+    )
 
     # web_config mock — needed for check tests
     loop.web_config = MagicMock()
@@ -236,12 +243,12 @@ class TestModifyRestricted:
 
     @pytest.mark.asyncio
     async def test_modify_context_window_valid(self):
-        loop = _make_mock_loop(_sync_replay_max_messages=MagicMock())
+        loop = _make_mock_loop()
         tool = _make_tool(runtime_state=loop)
         result = await tool.execute(action="set", key="context_window_tokens", value=131072)
         assert "Set context_window_tokens" in result
         assert loop.context_window_tokens == 131072
-        loop._sync_replay_max_messages.assert_called_once_with()
+        loop.set_runtime_context_window.assert_called_once_with(131072)
 
     @pytest.mark.asyncio
     async def test_modify_none_value_for_restricted_int(self):
@@ -1121,14 +1128,26 @@ class TestLastUsageInSummary:
 
 
 # ---------------------------------------------------------------------------
-# set_context (audit session tracking)
+# request context (audit session tracking)
 # ---------------------------------------------------------------------------
 
-class TestSetContext:
+class TestRequestContext:
 
-    def test_set_context_stores_channel_and_chat_id(self):
-        from nanobot.agent.tools.context import RequestContext
+    def test_audit_reads_bound_session(self):
         tool = _make_tool()
-        tool.set_context(RequestContext(channel="feishu", chat_id="oc_abc123"))
-        assert tool._channel == "feishu"
-        assert tool._chat_id == "oc_abc123"
+        ctx = RequestContext(
+            channel="feishu",
+            chat_id="oc_abc123",
+            session_key="feishu:oc_abc123",
+        )
+
+        with patch("nanobot.agent.tools.self.logger.info") as info:
+            with request_context(ctx):
+                tool._audit("modify", "temperature = 0.2")
+
+        info.assert_called_once_with(
+            "self.{} | {} | session:{}",
+            "modify",
+            "temperature = 0.2",
+            "feishu:oc_abc123",
+        )

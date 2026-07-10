@@ -31,8 +31,8 @@ from nanobot.utils.helpers import (
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import SessionManager
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
@@ -42,6 +42,14 @@ class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
+    # Durable files whose real working-tree delta grounds Dream commit messages
+    # and the cursor-advance gate. Deliberately excludes memory/.dream_cursor so
+    # that advancing the cursor itself is never mistaken for a productive edit.
+    _DREAM_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
+    # Per-file cap when embedding current contents into the Dream prompt. The
+    # durable files are tiny in practice (~5 KB total), but a runaway file must
+    # not unbounded the prompt.
+    _DREAM_FILE_EMBED_CAP = 8000
     _INTERNAL_HISTORY_SESSION_PREFIXES = ("cron:", "dream:")
     _INTERNAL_HISTORY_SESSION_KEYS = {"heartbeat"}
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
@@ -525,6 +533,11 @@ class MemoryStore:
         """Build the Dream prompt with unprocessed history context.
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
+
+        The current contents of the durable memory files (SOUL.md, USER.md,
+        memory/MEMORY.md) are embedded so the model edits the real files rather
+        than a stale mental model — eliminating a class of failed/out-of-bounds
+        edits that previously produced hallucinated audit records.
         """
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
@@ -537,8 +550,45 @@ class MemoryStore:
             for e in batch
         )
         template = self._dream_template()
-        prompt = f"{template}\n\n## Conversation History\n{history_text}"
+        files_section = self._render_current_memory_files()
+        prompt = (
+            f"{template}\n\n{files_section}\n\n"
+            f"## Conversation History\n{history_text}"
+        )
         return (prompt, batch[-1]["cursor"])
+
+    def _render_current_memory_files(self) -> str:
+        """Render the durable memory files' current contents for the Dream prompt.
+
+        Missing files render as ``(empty)``; oversized files are capped. The
+        section is the ground truth the model must edit against.
+        """
+        files = [
+            ("SOUL.md", self.soul_file),
+            ("USER.md", self.user_file),
+            ("memory/MEMORY.md", self.memory_file),
+        ]
+        blocks = []
+        for label, path in files:
+            try:
+                content = path.read_text(encoding="utf-8") if path.exists() else ""
+            except OSError:
+                content = ""
+            if len(content) > self._DREAM_FILE_EMBED_CAP:
+                content = truncate_text(content, self._DREAM_FILE_EMBED_CAP) + "\n...[truncated]"
+            blocks.append(f"### {label}\n{content}" if content.strip() else f"### {label}\n(empty)")
+        return "## Current Memory Files\n" + "\n\n".join(blocks)
+
+    def dream_content_diff(self) -> str:
+        """Structured summary of uncommitted changes to the durable memory files.
+
+        Returns "" when git is unavailable or no content file changed. This is
+        the ground-truth input for diff-grounded Dream commit messages and for
+        gating cursor advance on real edits (never on LLM self-report).
+        """
+        if not self._git.is_initialized():
+            return ""
+        return self._git.summarize_working_tree(list(self._DREAM_CONTENT_PATHS))
 
     def build_dream_tools(self):
         """Build the restricted tool registry used by Dream runs."""
@@ -631,12 +681,22 @@ class MemoryStore:
         return f"dream:{datetime.now():%Y%m%d-%H%M%S}"
 
     @staticmethod
-    def build_dream_commit_message(prefix: str, resp: object | None) -> str:
-        """Build a Dream auto-commit message, appending the LLM summary if present."""
-        msg = prefix
-        if resp is not None and getattr(resp, "content", None):
-            msg = f"{msg}\n\n{resp.content.strip()}"
-        return msg
+    def build_dream_commit_message(prefix: str, diff_body: str) -> str:
+        """Build a Dream commit message grounded in the real working-tree diff.
+
+        *diff_body* is a structured, machine-derived summary of the actual file
+        changes (see :meth:`dream_content_diff` /
+        :meth:`GitStore.summarize_working_tree`). The LLM narrative is
+        deliberately excluded so the audit record (``/dream-log``) reflects the
+        filesystem's truth, not the model's self-report.
+
+        An empty *diff_body* yields the bare *prefix*, which ``auto_commit``
+        turns into a no-op when there is nothing to stage.
+        """
+        diff_body = (diff_body or "").strip()
+        if not diff_body:
+            return prefix
+        return f"{prefix}\n\n{diff_body}"
 
     @staticmethod
     def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:
@@ -684,22 +744,14 @@ class Consolidator:
     def __init__(
         self,
         store: MemoryStore,
-        provider: LLMProvider,
-        model: str,
         sessions: SessionManager,
-        context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
-        max_completion_tokens: int = 4096,
         consolidation_ratio: float = 0.5,
         unified_session: bool = False,
     ):
         self.store = store
-        self.provider = provider
-        self.model = model
         self.sessions = sessions
-        self.context_window_tokens = context_window_tokens
-        self.max_completion_tokens = max_completion_tokens
         self.consolidation_ratio = consolidation_ratio
         self.unified_session = unified_session
         self._build_messages = build_messages
@@ -707,17 +759,6 @@ class Consolidator:
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
-
-    def set_provider(
-        self,
-        provider: LLMProvider,
-        model: str,
-        context_window_tokens: int,
-    ) -> None:
-        self.provider = provider
-        self.model = model
-        self.context_window_tokens = context_window_tokens
-        self.max_completion_tokens = provider.generation.max_tokens
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -796,6 +837,8 @@ class Consolidator:
         self,
         session: Session,
         replay_max_messages: int | None,
+        *,
+        runtime: LLMRuntime,
     ) -> str | None:
         """Archive messages that would be hidden by the replay message window."""
         end_idx = self._replay_overflow_boundary(session, replay_max_messages)
@@ -810,7 +853,11 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
-        summary = await self.archive(chunk, session_key=session.key)
+        summary = await self.archive(
+            chunk,
+            runtime=runtime,
+            session_key=session.key,
+        )
         session.last_consolidated = end_idx
         self.sessions.save(session)
         return summary
@@ -826,6 +873,8 @@ class Consolidator:
     def estimate_session_prompt_tokens(
         self,
         session: Session,
+        *,
+        runtime: LLMRuntime,
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
         history = self._full_unconsolidated_history(session)
@@ -845,20 +894,23 @@ class Consolidator:
             unified_session=self.unified_session,
         )
         return estimate_prompt_tokens_chain(
-            self.provider,
-            self.model,
+            runtime.provider,
+            runtime.model,
             probe_messages,
             self._get_tool_definitions(),
         )
 
-    @property
-    def _input_token_budget(self) -> int:
+    def _input_token_budget(self, runtime: LLMRuntime) -> int:
         """Available input token budget for consolidation LLM."""
-        return self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+        return (
+            runtime.context_window_tokens
+            - runtime.generation.max_tokens
+            - self._SAFETY_BUFFER
+        )
 
-    def _truncate_to_token_budget(self, text: str) -> str:
+    def _truncate_to_token_budget(self, text: str, *, runtime: LLMRuntime) -> str:
         """Truncate text so it fits within the consolidation LLM's token budget."""
-        budget = self._input_token_budget
+        budget = self._input_token_budget(runtime)
         if budget <= 0:
             return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
         return truncate_text_to_tokens(text, budget)
@@ -891,6 +943,7 @@ class Consolidator:
         self,
         messages: list[dict],
         *,
+        runtime: LLMRuntime,
         session_key: str | None = None,
         summary_messages: list[dict] | None = None,
     ) -> str | None:
@@ -910,9 +963,9 @@ class Consolidator:
             formatted = self._format_archive_input(
                 MemoryStore._format_messages(messages_to_summarize)
             )
-            formatted = self._truncate_to_token_budget(formatted)
-            response = await self.provider.chat_with_retry(
-                model=self.model,
+            formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
+            response = await runtime.provider.chat_with_retry(
+                model=runtime.model,
                 messages=[
                     {
                         "role": "system",
@@ -925,6 +978,9 @@ class Consolidator:
                 ],
                 tools=None,
                 tool_choice=None,
+                temperature=runtime.generation.temperature,
+                max_tokens=runtime.generation.max_tokens,
+                reasoning_effort=runtime.generation.reasoning_effort,
             )
             if response.finish_reason == "error":
                 raise RuntimeError(f"LLM returned error: {response.content}")
@@ -944,6 +1000,7 @@ class Consolidator:
         self,
         session: Session,
         *,
+        runtime: LLMRuntime,
         replay_max_messages: int | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
@@ -951,7 +1008,7 @@ class Consolidator:
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
         """
-        if self.context_window_tokens <= 0:
+        if runtime.context_window_tokens <= 0:
             return
 
         lock = self.get_lock(session.key)
@@ -963,15 +1020,17 @@ class Consolidator:
             if not session.messages:
                 return
 
-            budget = self._input_token_budget
+            budget = self._input_token_budget(runtime)
             target = int(budget * self.consolidation_ratio)
             last_summary = await self._consolidate_replay_overflow(
                 session,
                 replay_max_messages,
+                runtime=runtime,
             )
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
+                    runtime=runtime,
                 )
             except Exception:
                 logger.exception("Token estimation failed for {}", session.key)
@@ -985,7 +1044,7 @@ class Consolidator:
                     "Token consolidation idle {}: {}/{} via {}, msgs={}",
                     session.key,
                     estimated,
-                    self.context_window_tokens,
+                    runtime.context_window_tokens,
                     source,
                     unconsolidated_count,
                 )
@@ -1016,11 +1075,15 @@ class Consolidator:
                     round_num,
                     session.key,
                     estimated,
-                    self.context_window_tokens,
+                    runtime.context_window_tokens,
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(chunk, session_key=session.key)
+                summary = await self.archive(
+                    chunk,
+                    runtime=runtime,
+                    session_key=session.key,
+                )
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call
@@ -1037,6 +1100,7 @@ class Consolidator:
                 try:
                     estimated, source = self.estimate_session_prompt_tokens(
                         session,
+                        runtime=runtime,
                     )
                 except Exception:
                     logger.exception("Token estimation failed for {}", session.key)
@@ -1052,6 +1116,8 @@ class Consolidator:
     async def compact_idle_session(
         self,
         session_key: str,
+        *,
+        runtime: LLMRuntime,
         max_suffix: int = 8,
     ) -> str | None:
         """Hard-truncate an idle session under the consolidation lock.
@@ -1094,6 +1160,7 @@ class Consolidator:
                 # the messages that are no longer kept in the live session.
                 summary = await self.archive(
                     messages_to_remove,
+                    runtime=runtime,
                     session_key=session_key,
                     summary_messages=messages_to_summarize,
                 )

@@ -46,6 +46,9 @@ from nanobot.webui.http_utils import (
     http_response as _http_response,
 )
 from nanobot.webui.http_utils import (
+    is_local_browser_request as _is_local_browser_request,
+)
+from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
 )
 from nanobot.webui.http_utils import (
@@ -306,33 +309,41 @@ class GatewayHTTPHandler:
 
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
+        is_local_browser = _is_local_browser_request(connection, request.headers)
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not _is_localhost(connection):
+        elif not is_local_browser:
             return _http_error(403, "bootstrap is localhost-only")
 
-        if not self.tokens.can_issue(include_api_token=True):
+        api_token_allowed = bool(secret) or is_local_browser
+        if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
                 status=429,
                 content_type="application/json; charset=utf-8",
             )
-        token = self.tokens.issue_token(self.config.token_ttl_s, api_token=True)
+        token = self.tokens.issue_token(self.config.token_ttl_s)
+        api_token = (
+            self.tokens.issue_api_token(self.config.token_ttl_s)
+            if api_token_allowed
+            else None
+        )
 
         ws_url = self._bootstrap_ws_url(request)
         expected_path = _normalize_config_path(self.config.path)
-        return _http_json_response(
-            {
-                "token": token,
-                "ws_path": expected_path,
-                "ws_url": ws_url,
-                "expires_in": self.config.token_ttl_s,
-                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
-                "runtime_surface": self._runtime_surface,
-                "runtime_capabilities": self._capabilities,
-            }
-        )
+        payload = {
+            "token": token,
+            "ws_path": expected_path,
+            "ws_url": ws_url,
+            "expires_in": self.config.token_ttl_s,
+            "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+            "runtime_surface": self._runtime_surface,
+            "runtime_capabilities": self._capabilities,
+        }
+        if api_token is not None:
+            payload["api_token"] = api_token
+        return _http_json_response(payload)
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}

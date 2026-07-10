@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools import ToolResult
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -40,9 +41,9 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
         )
     )
 
-    runner = AgentRunner(provider)
+    runner = AgentRunner()
 
-    result = await runner.run(AgentRunSpec(
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -107,8 +108,8 @@ async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
         "Error: Command blocked by safety guard (internal/private URL detected)"
     ))
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -162,8 +163,8 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
         )
     )
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -214,8 +215,8 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
         )
     )
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",

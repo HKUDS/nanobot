@@ -975,15 +975,20 @@ class TestMainMenuUpdate:
 
         choices = onboard_wizard._get_quick_start_provider_choices()
         selected_provider_names = set(choices.values())
-        expected_provider_names = {
-            spec.name
-            for spec in PROVIDERS
-            if spec.name != "custom" and not spec.is_oauth and not spec.is_transcription_only
-        }
+        expected_provider_names = set()
+        seen_display_names: set[str] = set()
+        for spec in PROVIDERS:
+            if spec.name == "custom" or spec.is_oauth or spec.is_transcription_only:
+                continue
+            if spec.display_name in seen_display_names:
+                continue
+            seen_display_names.add(spec.display_name)
+            expected_provider_names.add(spec.name)
         expected_provider_names.add("custom")
 
         assert selected_provider_names == expected_provider_names
         assert "assemblyai" not in selected_provider_names
+        assert choices["OpenCode Zen"] == "opencode"
         assert choices[onboard_wizard._QUICK_START_CUSTOM_PROVIDER_CHOICE] == "custom"
 
     def test_quick_start_provider_choice_skips_advanced_prompts(self, monkeypatch):

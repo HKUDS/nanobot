@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.loader import ToolLoader
@@ -117,7 +118,7 @@ async def _run_optional_tool_response(response: LLMResponse):
         shared_events=shared_events,
     ))
 
-    result = await AgentRunner(provider).run(AgentRunSpec(
+    result = await AgentRunner().run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "try optional"}],
         tools=tools,
         model="test-model",
@@ -159,9 +160,10 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
     tools.register(read_b)
     tools.register(write_a)
 
-    runner = AgentRunner(MagicMock())
+    provider = MagicMock()
+    runner = AgentRunner()
     await runner._execute_tools(
-        AgentRunSpec(
+        make_run_spec(provider,
             initial_messages=[],
             tools=tools,
             model="test-model",
@@ -202,9 +204,10 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
     tools.register(ddg_like)
     tools.register(read_b)
 
-    runner = AgentRunner(MagicMock())
+    provider = MagicMock()
+    runner = AgentRunner()
     await runner._execute_tools(
-        AgentRunSpec(
+        make_run_spec(provider,
             initial_messages=[],
             tools=tools,
             model="test-model",
@@ -260,8 +263,8 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
         shared_events=shared_events,
     ))
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "read notes"}],
         tools=tools,
         model="test-model",
@@ -379,7 +382,7 @@ async def test_runner_treats_legacy_entry_point_error_prefix_as_tool_error(tmp_p
         usage={},
     ))
 
-    result = await AgentRunner(provider).run(AgentRunSpec(
+    result = await AgentRunner().run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "run plugin"}],
         tools=_load_entry_point_plugin(_LegacyErrorPluginTool, tmp_path),
         model="test-model",
@@ -408,7 +411,7 @@ async def test_runner_preserves_structured_plugin_success_that_starts_with_error
         LLMResponse(content="done", tool_calls=[], usage={}),
     ])
 
-    result = await AgentRunner(provider).run(AgentRunSpec(
+    result = await AgentRunner().run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "run plugin"}],
         tools=_load_entry_point_plugin(_StructuredSuccessPluginTool, tmp_path),
         model="test-model",
@@ -449,8 +452,8 @@ async def test_runner_blocks_repeated_external_fetches():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="page content")
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "research task"}],
         tools=tools,
         model="test-model",

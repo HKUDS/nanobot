@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import os
 import time
+from collections.abc import Mapping
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -21,9 +22,9 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
-from nanobot.agent.hook import AgentHook, CompositeHook
+from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
-from nanobot.agent.progress_hook import AgentProgressHook
+from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -31,6 +32,7 @@ from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, res
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
+from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
     RetryWaitEvent,
@@ -63,7 +65,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import (
     Session,
     SessionManager,
@@ -113,6 +115,8 @@ class TurnContext:
     session_key: str
     state: TurnState
     turn_id: str
+    runtime: LLMRuntime
+    original_user_text: str | None = None
     session: Session | None = None
 
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -141,6 +145,7 @@ class TurnContext:
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
     hooks: list[AgentHook] = field(default_factory=list)
+    hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     tools: ToolRegistry | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
@@ -170,10 +175,49 @@ class AgentLoop:
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
 
+    @property
+    def provider(self) -> LLMProvider:
+        """Provider selected for future turn admissions."""
+        return self.runtime_resolver.runtime.provider
+
+    @property
+    def model(self) -> str:
+        """Model selected for future turn admissions."""
+        return self.runtime_resolver.runtime.model
+
+    @property
+    def context_window_tokens(self) -> int:
+        """Context limit selected for future turn admissions."""
+        return self.runtime_resolver.runtime.context_window_tokens
+
+    @property
+    def model_presets(self) -> Mapping[str, ModelPresetConfig]:
+        """Configured model presets exposed for selection and display."""
+        return self.runtime_resolver.model_presets
+
+    @property
+    def model_preset(self) -> str | None:
+        return self.runtime_resolver.model_preset
+
+    @model_preset.setter
+    def model_preset(self, name: str | None) -> None:
+        self.set_model_preset(name)
+
     def llm_runtime(self) -> LLMRuntime:
-        """Return the current provider/model pair owned by this loop."""
-        self._refresh_provider_snapshot()
-        return LLMRuntime(self.provider, self.model)
+        """Resolve the immutable default used to admit the next turn."""
+        previous = self.runtime_resolver.runtime
+        try:
+            runtime = self.runtime_resolver.current(refresh=True)
+        except Exception:
+            logger.exception("Failed to refresh model runtime")
+            return previous
+        if (
+            runtime.model != previous.model
+            or runtime.model_preset != previous.model_preset
+            or runtime.snapshot_signature != previous.snapshot_signature
+        ):
+            self._publish_runtime_selection(runtime)
+        return runtime
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -214,6 +258,7 @@ class AgentLoop:
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
         hooks: list[AgentHook] | None = None,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
@@ -238,21 +283,28 @@ class AgentLoop:
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
         self.restart_mode = restart_mode
-        self.provider = provider
-        self._provider_snapshot_loader = provider_snapshot_loader
-        self._preset_snapshot_loader = preset_snapshot_loader
         self._runtime_model_publisher = runtime_model_publisher
-        self._provider_signature = provider_signature
-        self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
-        self.model = model or provider.get_default_model()
+        initial_model = model or provider.get_default_model()
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
-        self.context_window_tokens = (
+        initial_context_window = (
             context_window_tokens
             if context_window_tokens is not None
             else defaults.context_window_tokens
+        )
+        configured_presets = model_presets or {}
+        self.runtime_resolver = ModelRuntimeResolver(
+            LLMRuntime.capture(
+                provider,
+                initial_model,
+                context_window_tokens=initial_context_window,
+                snapshot_signature=provider_signature,
+            ),
+            model_presets=configured_presets,
+            provider_snapshot_loader=provider_snapshot_loader,
+            preset_snapshot_loader=preset_snapshot_loader,
         )
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
@@ -284,6 +336,7 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
@@ -291,12 +344,10 @@ class AgentLoop:
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner()
         self.subagents = SubagentManager(
-            provider=provider,
             workspace=workspace,
             bus=bus,
-            model=self.model,
             tools_config=_tc,
             max_tool_result_chars=self.max_tool_result_chars,
             restrict_to_workspace=restrict_to_workspace,
@@ -307,11 +358,9 @@ class AgentLoop:
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
-        self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
-        self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
@@ -344,13 +393,9 @@ class AgentLoop:
         )
         self.consolidator = Consolidator(
             store=self.context.memory,
-            provider=provider,
-            model=self.model,
             sessions=self.sessions,
-            context_window_tokens=self.context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
         )
@@ -359,11 +404,9 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
-        self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
-        self._active_preset: str | None = None
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
-        self._register_default_tools()
+        self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
@@ -430,89 +473,51 @@ class AgentLoop:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
 
-    def _apply_provider_snapshot(
+    def _publish_runtime_selection(
         self,
-        snapshot: ProviderSnapshot,
+        runtime: LLMRuntime,
         *,
         publish_update: bool = True,
-        model_preset: str | None = None,
     ) -> None:
-        """Swap model/provider for future turns without disturbing an active one."""
-        provider = snapshot.provider
-        model = snapshot.model
-        context_window_tokens = snapshot.context_window_tokens
-        old_model = self.model
-        self.provider = provider
-        self.model = model
-        self.context_window_tokens = context_window_tokens
-        self.runner.provider = provider
-        self.subagents.set_provider(provider, model)
-        self.consolidator.set_provider(provider, model, context_window_tokens)
-        self._sync_replay_max_messages()
-        self._provider_signature = snapshot.signature
-        if publish_update and self._runtime_model_publisher is not None:
-            self._runtime_model_publisher(
-                self.model,
-                model_preset if model_preset is not None else self.model_preset,
-            )
-        if publish_update:
-            self._runtime_events().runtime_model_changed(
-                self.model,
-                model_preset if model_preset is not None else self.model_preset,
-            )
-        logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
-
-    def _sync_replay_max_messages(self) -> None:
-        self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
-
-    def _refresh_provider_snapshot(self) -> None:
-        if self._provider_snapshot_loader is None:
+        if not publish_update:
             return
-        try:
-            snapshot = self._provider_snapshot_loader()
-        except Exception:
-            logger.exception("Failed to refresh provider config")
-            return
-        default_selection = preset_helpers.default_selection_signature(snapshot.signature)
-        if self._active_preset and self._default_selection_signature in (None, default_selection):
-            self._default_selection_signature = default_selection
-            try:
-                snapshot = self._build_model_preset_snapshot(self._active_preset)
-            except Exception:
-                logger.exception("Failed to refresh active model preset")
-                return
-        else:
-            self._active_preset = None
-            self._default_selection_signature = default_selection
-        if snapshot.signature == self._provider_signature:
-            return
-        self._default_selection_signature = preset_helpers.default_selection_signature(snapshot.signature)
-        self._apply_provider_snapshot(snapshot)
-
-    @property
-    def model_preset(self) -> str | None:
-        return self._active_preset
-
-    @model_preset.setter
-    def model_preset(self, name: str | None) -> None:
-        self.set_model_preset(name)
-
-    def _build_model_preset_snapshot(self, name: str) -> ProviderSnapshot:
-        return preset_helpers.build_runtime_preset_snapshot(
-            name=name,
-            presets=self.model_presets,
-            provider=self.provider,
-            loader=self._preset_snapshot_loader,
+        if self._runtime_model_publisher is not None:
+            self._runtime_model_publisher(runtime.model, runtime.model_preset)
+        self._runtime_events().runtime_model_changed(
+            runtime.model,
+            runtime.model_preset,
         )
 
-    def set_model_preset(self, name: str | None, *, publish_update: bool = True) -> None:
-        """Resolve a preset by name and apply all runtime model dependents."""
-        name = preset_helpers.normalize_preset_name(name, self.model_presets)
-        snapshot = self._build_model_preset_snapshot(name)
-        self._apply_provider_snapshot(snapshot, publish_update=publish_update, model_preset=name)
-        self._active_preset = name
+    def set_model_preset(
+        self,
+        name: str | None,
+        *,
+        publish_update: bool = True,
+    ) -> LLMRuntime:
+        """Select a named default runtime for future turns."""
+        old_model = self.model
+        runtime = self.runtime_resolver.select_preset(name)
+        self._publish_runtime_selection(runtime, publish_update=publish_update)
+        logger.info(
+            "Runtime model switched for next turn: {} -> {}",
+            old_model,
+            runtime.model,
+        )
+        return runtime
 
-    def _register_default_tools(self) -> None:
+    def set_runtime_model(self, model: str) -> LLMRuntime:
+        """Select a model on the current provider for future turns."""
+        return self.runtime_resolver.select_model(model)
+
+    def set_runtime_context_window(self, context_window_tokens: int) -> LLMRuntime:
+        """Select a context limit for future turns."""
+        return self.runtime_resolver.select_context_window(context_window_tokens)
+
+    def _register_default_tools(
+        self,
+        *,
+        provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
+    ) -> None:
         """Register the default set of tools via plugin loader."""
         from nanobot.agent.tools.context import ToolContext
         from nanobot.agent.tools.loader import ToolLoader
@@ -524,7 +529,7 @@ class AgentLoop:
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
             sessions=self.sessions,
-            provider_snapshot_loader=self._provider_snapshot_loader,
+            provider_snapshot_loader=provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
@@ -545,32 +550,6 @@ class AgentLoop:
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
-
-    def _set_tool_context(
-        self, channel: str, chat_id: str,
-        message_id: str | None = None, metadata: dict | None = None,
-        session_key: str | None = None,
-    ) -> None:
-        """Update context for all tools that need routing info."""
-        from nanobot.agent.tools.context import ContextAware
-
-        effective_key = session_key or session_key_for_channel(
-            channel,
-            chat_id,
-            unified_session=self._unified_session,
-        )
-        request_ctx = RequestContext(
-            channel=channel,
-            chat_id=chat_id,
-            message_id=message_id,
-            session_key=effective_key,
-            metadata=dict(metadata or {}),
-        )
-
-        for name in self.tools.tool_names:
-            tool = self.tools.get(name)
-            if tool and isinstance(tool, ContextAware):
-                tool.set_context(request_ctx)
 
     @staticmethod
     def _runtime_chat_id(msg: InboundMessage) -> str:
@@ -711,17 +690,18 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
-    def _replay_token_budget(self) -> int:
+    @staticmethod
+    def _replay_token_budget(runtime: LLMRuntime) -> int:
         """Derive a token budget for session history replay from the context window."""
-        if self.context_window_tokens <= 0:
+        if runtime.context_window_tokens <= 0:
             return 0
-        max_output = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        max_output = runtime.generation.max_tokens
         try:
             reserved_output = int(max_output)
         except (TypeError, ValueError):
             reserved_output = 4096
-        budget = self.context_window_tokens - max(1, reserved_output) - 1024
-        return budget if budget > 0 else max(128, self.context_window_tokens // 2)
+        budget = runtime.context_window_tokens - max(1, reserved_output) - 1024
+        return budget if budget > 0 else max(128, runtime.context_window_tokens // 2)
 
     async def _run_agent_loop(
         self,
@@ -731,16 +711,19 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
         *,
+        runtime: LLMRuntime,
         session: Session | None = None,
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        original_user_text: str | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
@@ -753,24 +736,6 @@ class AgentLoop:
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
         self._sync_subagent_runtime_limits()
-
-        loop_hook = AgentProgressHook(
-            on_progress=on_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            channel=channel,
-            chat_id=chat_id,
-            message_id=message_id,
-            metadata=metadata,
-            session_key=session_key,
-            tool_hint_max_length=self.tool_hint_max_length,
-            set_tool_context=self._set_tool_context,
-            on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
-        )
-        run_hooks = [*self._extra_hooks, *(hooks or [])]
-        hook: AgentHook = loop_hook
-        if run_hooks and (not ephemeral or run_extra_hooks_for_ephemeral):
-            hook = CompositeHook([loop_hook, *run_hooks])
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -847,11 +812,14 @@ class AgentLoop:
             message_metadata=metadata,
             session_metadata=session.metadata if session is not None else None,
         )
+        effective_tools = tools or self.tools
         request_ctx = RequestContext(
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
             session_key=active_session_key,
+            original_user_text=original_user_text,
+            runtime=runtime,
             metadata=dict(metadata or {}),
         )
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
@@ -871,10 +839,29 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         try:
+            hook = build_agent_turn_hook(AgentTurnHookSpec(
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                channel=channel,
+                chat_id=chat_id,
+                message_id=message_id,
+                metadata=metadata,
+                session_key=active_session_key,
+                workspace=effective_scope.project_path,
+                tool_hint_max_length=self.tool_hint_max_length,
+                on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
+                registered_hook_factories=self._hook_factories,
+                turn_hook_factories=list(hook_factories or []),
+                registered_hooks=self._extra_hooks,
+                turn_hooks=list(hooks or []),
+                ephemeral=ephemeral,
+                run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            ))
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
-                tools=tools or self.tools,
-                model=self.model,
+                tools=effective_tools,
+                runtime=runtime,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,
@@ -882,7 +869,6 @@ class AgentLoop:
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
-                context_window_tokens=self.context_window_tokens,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 progress_callback=on_progress,
@@ -941,6 +927,7 @@ class AgentLoop:
                 except asyncio.TimeoutError:
                     self.auto_compact.check_expired(
                         self._schedule_background,
+                        self.llm_runtime,
                         active_session_keys=self._pending_queues.keys(),
                     )
                     continue
@@ -1211,11 +1198,14 @@ class AgentLoop:
     async def _process_system_message(
         self,
         msg: InboundMessage,
+        *,
+        runtime: LLMRuntime,
         session_key: str | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
     ) -> OutboundMessage | None:
         """Process a system inbound message (e.g. subagent announce)."""
         channel, chat_id = (
@@ -1224,6 +1214,7 @@ class AgentLoop:
         logger.info("Processing system message from {}", msg.sender_id)
         key = msg.session_key_override or f"{channel}:{chat_id}"
         session = self.sessions.get_or_create(key)
+        self._runtime_events().record_turn_runtime(key, runtime)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
         if self._restore_pending_user_turn(session):
@@ -1235,20 +1226,19 @@ class AgentLoop:
 
         await self.consolidator.maybe_consolidate_by_tokens(
             session,
-            replay_max_messages=self._max_messages,
+            runtime=runtime,
+            replay_max_messages=replay_max_messages_for_context(
+                runtime.context_window_tokens
+            ),
         )
         is_subagent = msg.sender_id == "subagent"
         if is_subagent and self._persist_subagent_followup(session, msg):
             logger.debug("Subagent result persisted for session {}", key)
             self.sessions.save(session)
-        self._set_tool_context(
-            channel, chat_id, msg.metadata.get("message_id"),
-            msg.metadata, session_key=key,
-        )
         current_role = "assistant" if is_subagent else "user"
         _hist_kwargs: dict[str, Any] = {
-            "max_messages": self._max_messages,
-            "max_tokens": self._replay_token_budget(),
+            "max_messages": replay_max_messages_for_context(runtime.context_window_tokens),
+            "max_tokens": self._replay_token_budget(runtime),
             "extend_to_user": is_subagent,
         }
         history = session.get_history(**_hist_kwargs)
@@ -1273,10 +1263,13 @@ class AgentLoop:
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
+            runtime=runtime,
             message_id=msg.metadata.get("message_id"),
             metadata=msg.metadata,
             session_key=key,
+            original_user_text=None,
             pending_queue=pending_queue,
+            hook_factories=hook_factories,
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
@@ -1290,7 +1283,10 @@ class AgentLoop:
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
-                replay_max_messages=self._max_messages,
+                runtime=runtime,
+                replay_max_messages=replay_max_messages_for_context(
+                    runtime.context_window_tokens
+                ),
             )
         )
         content = final_content or "Background task completed."
@@ -1317,19 +1313,24 @@ class AgentLoop:
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
+        runtime: LLMRuntime | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        self._refresh_provider_snapshot()
+        if runtime is None:
+            runtime = self.llm_runtime()
 
         if msg.channel == "system":
             return await self._process_system_message(
                 msg,
+                runtime=runtime,
                 session_key=session_key,
                 on_progress=on_progress,
                 on_stream=on_stream,
                 on_stream_end=on_stream_end,
                 pending_queue=pending_queue,
+                hook_factories=hook_factories,
             )
 
         key = session_key or msg.session_key
@@ -1340,6 +1341,12 @@ class AgentLoop:
             session_key=key,
             state=TurnState.RESTORE,
             turn_id=f"{key}:{time.time_ns()}",
+            runtime=runtime,
+            original_user_text=(
+                None
+                if turn_continuation.internal_continuation_inbound(msg.metadata)
+                else msg.content
+            ),
             turn_wall_started_at=t0,
             visible_run_started_at=turn_continuation.internal_continuation_run_started_at(
                 msg.metadata,
@@ -1351,6 +1358,7 @@ class AgentLoop:
             ephemeral=ephemeral,
             run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
             hooks=list(hooks or []),
+            hook_factories=list(hook_factories or []),
             tools=tools,
         )
 
@@ -1487,7 +1495,12 @@ class AgentLoop:
     async def _state_command(self, ctx: TurnContext) -> str:
         raw = ctx.msg.content.strip()
         cmd_ctx = CommandContext(
-            msg=ctx.msg, session=ctx.session, key=ctx.session_key, raw=raw, loop=self
+            msg=ctx.msg,
+            session=ctx.session,
+            key=ctx.session_key,
+            raw=raw,
+            loop=self,
+            runtime=ctx.runtime,
         )
         result = await self.commands.dispatch(cmd_ctx)
         if result is not None:
@@ -1510,31 +1523,28 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
+        replay_max_messages = replay_max_messages_for_context(
+            ctx.runtime.context_window_tokens
+        )
         if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
-                replay_max_messages=self._max_messages,
+                runtime=ctx.runtime,
+                replay_max_messages=replay_max_messages,
             )
-        self._set_tool_context(
-            ctx.msg.channel,
-            ctx.msg.chat_id,
-            ctx.msg.metadata.get("message_id"),
-            ctx.msg.metadata,
-            session_key=ctx.session_key,
-        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
         _hist_kwargs: dict[str, Any] = {
-            "max_messages": self._max_messages,
-            "max_tokens": self._replay_token_budget(),
+            "max_messages": replay_max_messages,
+            "max_tokens": self._replay_token_budget(ctx.runtime),
             "extend_to_user": False,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
-            self.llm_runtime(),
+            ctx.runtime,
         )
 
         ctx.initial_messages = self._build_initial_messages(
@@ -1566,6 +1576,7 @@ class AgentLoop:
         )
         result = await self._run_agent_loop(
             ctx.initial_messages,
+            runtime=ctx.runtime,
             on_progress=ctx.on_progress,
             on_stream=ctx.on_stream,
             on_stream_end=ctx.on_stream_end,
@@ -1576,10 +1587,12 @@ class AgentLoop:
             message_id=ctx.msg.metadata.get("message_id"),
             metadata=ctx.msg.metadata,
             session_key=ctx.session_key,
+            original_user_text=ctx.original_user_text,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
             hooks=ctx.hooks,
+            hook_factories=ctx.hook_factories,
             tools=ctx.tools,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
@@ -1622,7 +1635,10 @@ class AgentLoop:
             self._schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
                     ctx.session,
-                    replay_max_messages=self._max_messages,
+                    runtime=ctx.runtime,
+                    replay_max_messages=replay_max_messages_for_context(
+                        ctx.runtime.context_window_tokens
+                    ),
                 )
             )
         self._clear_pending_user_turn(ctx.session)
@@ -1897,8 +1913,10 @@ class AgentLoop:
         ephemeral: bool = False,
         _run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
+        hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
+        runtime: LLMRuntime | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -1924,8 +1942,12 @@ class AgentLoop:
                     kwargs["run_extra_hooks_for_ephemeral"] = True
                 if hooks is not None:
                     kwargs["hooks"] = hooks
+                if hook_factories is not None:
+                    kwargs["hook_factories"] = hook_factories
                 if tools is not None:
                     kwargs["tools"] = tools
+                if runtime is not None:
+                    kwargs["runtime"] = runtime
                 return await self._process_message(
                     msg,
                     **kwargs,
