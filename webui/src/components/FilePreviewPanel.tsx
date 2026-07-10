@@ -238,6 +238,7 @@ export function FilePreviewPanel({
                   language={state.payload.language}
                   code={state.payload.content}
                   chrome="none"
+                  highlight
                   showLineNumbers
                   wrapLongLines={false}
                   className="min-h-full"

@@ -6,7 +6,23 @@ import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { fetchFilePreview } from "@/lib/api";
 
 vi.mock("@/components/CodeBlock", () => ({
-  CodeBlock: ({ code }: { code: string }) => <pre data-testid="mock-code-block">{code}</pre>,
+  CodeBlock: ({
+    code,
+    language,
+    highlight,
+  }: {
+    code: string;
+    language?: string;
+    highlight?: boolean;
+  }) => (
+    <pre
+      data-testid="mock-code-block"
+      data-language={language}
+      data-highlight={String(highlight)}
+    >
+      {code}
+    </pre>
+  ),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -42,7 +58,10 @@ describe("FilePreviewPanel", () => {
       />,
     );
 
-    expect(await screen.findByTestId("mock-code-block")).toHaveTextContent("print('ok')");
+    const codeBlock = await screen.findByTestId("mock-code-block");
+    expect(codeBlock).toHaveTextContent("print('ok')");
+    expect(codeBlock).toHaveAttribute("data-language", "python");
+    expect(codeBlock).toHaveAttribute("data-highlight", "true");
     expect(screen.getByTestId("file-preview-breadcrumb")).toHaveTextContent("...");
     expect(screen.getByTestId("file-preview-breadcrumb")).toHaveTextContent("workspace");
     expect(screen.getByTestId("file-preview-title")).toHaveTextContent("quicksort.py");
