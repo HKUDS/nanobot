@@ -818,7 +818,10 @@ class OpenAICompatProvider(LLMProvider):
                     continue
                 extra = _thinking_extra_body(thinking_style, thinking_enabled)
                 if extra:
-                    kwargs.setdefault("extra_body", {}).update(extra)
+                    extra_body = kwargs.get("extra_body")
+                    if extra_body is None:
+                        kwargs["extra_body"] = extra_body = {}
+                    extra_body.update(extra)
             gateway_style = getattr(spec, "gateway_reasoning_style", "") if spec else ""
             if (
                 gateway_style
@@ -827,7 +830,10 @@ class OpenAICompatProvider(LLMProvider):
             ):
                 extra = _gateway_reasoning_extra_body(gateway_style, semantic_effort)
                 if extra:
-                    kwargs.setdefault("extra_body", {}).update(extra)
+                    extra_body = kwargs.get("extra_body")
+                    if extra_body is None:
+                        kwargs["extra_body"] = extra_body = {}
+                    extra_body.update(extra)
 
             # Moonshot rejects requests that carry both 'reasoning_effort'
             # and the native 'thinking' param.  We already expressed the
@@ -1631,7 +1637,9 @@ class OpenAICompatProvider(LLMProvider):
                 # explicit provider flag.  Pass it through the OpenAI SDK's
                 # extra_body escape hatch so the usual delta.tool_calls path
                 # can surface live file-edit progress.
-                kwargs.setdefault("extra_body", {})["tool_stream"] = True
+                if "extra_body" not in kwargs:
+                    kwargs["extra_body"] = {}
+                kwargs["extra_body"]["tool_stream"] = True
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
             stream = await self._client.chat.completions.create(**kwargs)
