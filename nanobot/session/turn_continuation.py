@@ -99,9 +99,32 @@ def should_finalize_on_max_iterations(
     )
 
 
+def _goal_feature_enabled(ctx: Any) -> bool:
+    """Mirror of long_task._goal_feature_enabled; disabled by default."""
+    config = getattr(ctx, "config", None)
+    if config is None:
+        return False
+    lt = getattr(config, "long_task", None)
+    if lt is not None:
+        flag = getattr(lt, "enable", None)
+        if flag is not None:
+            return bool(flag)
+    tools = getattr(config, "tools", None)
+    if isinstance(tools, dict):
+        lt = tools.get("long_task")
+        if isinstance(lt, dict) and "enable" in lt:
+            return bool(lt["enable"])
+    flag = getattr(config, "long_task_enable", None)
+    if flag is not None:
+        return bool(flag)
+    return False
+
+
 async def maybe_continue_turn(ctx: Any) -> bool:
     """Queue an internal continuation for *ctx* when policy allows it."""
     if ctx.session is None or ctx.pending_queue is None:
+        return False
+    if not _goal_feature_enabled(ctx):
         return False
     if not _continuation_available(
         stop_reason=ctx.stop_reason,

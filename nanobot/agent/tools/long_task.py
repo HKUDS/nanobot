@@ -38,6 +38,30 @@ def _iso_now() -> str:
     return datetime.now().isoformat()
 
 
+def _goal_feature_enabled(ctx: Any) -> bool:
+    """Whether the sustained-goal feature (long_task/complete_goal + auto
+    continuation) is active. Disabled by default; enable via config flag
+    ``tools.long_task.enable = true`` or ``long_task_enable = true``.
+    """
+    config = getattr(ctx, "config", None)
+    if config is None:
+        return False
+    lt = getattr(config, "long_task", None)
+    if lt is not None:
+        flag = getattr(lt, "enable", None)
+        if flag is not None:
+            return bool(flag)
+    tools = getattr(config, "tools", None)
+    if isinstance(tools, dict):
+        lt = tools.get("long_task")
+        if isinstance(lt, dict) and "enable" in lt:
+            return bool(lt["enable"])
+    flag = getattr(config, "long_task_enable", None)
+    if flag is not None:
+        return bool(flag)
+    return False
+
+
 class _GoalToolsMixin:
     """Shared routing context + Session lookup."""
 
@@ -118,6 +142,8 @@ class LongTaskTool(Tool, _GoalToolsMixin):
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
+        if not _goal_feature_enabled(ctx):
+            return False
         return getattr(ctx, "sessions", None) is not None
 
     @property
@@ -200,6 +226,8 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
+        if not _goal_feature_enabled(ctx):
+            return False
         return getattr(ctx, "sessions", None) is not None
 
     @property
