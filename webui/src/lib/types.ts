@@ -885,6 +885,16 @@ export type InboundEvent =
       model_preset?: string | null;
     }
   | ({
+      event: "turn_model_routed";
+      chat_id: string;
+      model_name: string;
+      model_preset?: string | null;
+      task_kind?: string;
+      task_type?: string | null;
+      complexity?: string | null;
+      ephemeral?: boolean;
+    } & InboundTurnMetadata)
+  | ({
       event: "turn_end";
       chat_id: string;
       latency_ms?: number;

@@ -362,6 +362,7 @@ export function ThreadShell({
     isStreaming,
     runStartedAt,
     goalState,
+    turnRoutedModel,
     send,
     transcribeAudio,
     stop,
@@ -400,8 +401,8 @@ export function ThreadShell({
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(modelName, settings),
-    [modelName, settings],
+    () => toModelBadgeInfo(turnRoutedModel ?? modelName, settings),
+    [turnRoutedModel, modelName, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })

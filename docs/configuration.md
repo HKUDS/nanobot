@@ -1381,6 +1381,75 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 
 Set `agents.defaults.modelPreset` to choose the startup preset. When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from direct `agents.defaults.*` fields. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
 
+### Model Routing
+
+`agents.defaults.modelRouting` enables per-turn model selection based on task kind, task type, and complexity. Routing is **ephemeral**: it affects only the current turn (or subagent run) and does not change the global `/model` default.
+
+When enabled, nanobot:
+
+1. Uses deterministic rules for known contexts (`subagent`, `cron`, `dream`, `sustained_goal`).
+2. Runs a fast classifier model for normal chat turns to estimate `task_type` and `complexity`.
+3. Picks the first matching rule and runs that turn with the mapped `modelPresets` entry.
+
+```json
+{
+  "modelPresets": {
+    "fast": {
+      "model": "gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000
+    },
+    "deep": {
+      "model": "claude-opus-4-5",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "reasoningEffort": "high"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "modelRouting": {
+        "enabled": true,
+        "classifierPreset": "fast",
+        "rules": [
+          { "match": { "taskKind": "subagent" }, "preset": "deep" },
+          { "match": { "taskKind": "sustained_goal" }, "preset": "deep" },
+          { "match": { "taskKind": "cron" }, "preset": "fast" },
+          { "match": { "taskKind": "dream" }, "preset": "fast" },
+          { "match": { "taskType": "coding", "complexity": "high" }, "preset": "deep" },
+          { "match": { "complexity": "low" }, "preset": "fast" }
+        ]
+      },
+      "dream": {
+        "modelOverride": "gpt-4.1-mini"
+      }
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Turn routing on or off. Default `false`. |
+| `classifierPreset` | Preset used for the lightweight chat-turn classifier. Must exist in `modelPresets` when routing is enabled. |
+| `rules` | Ordered list of match rules. First match wins; put more specific rules first. |
+| `defaultPreset` | Optional fallback preset when the classifier fails or no rule matches. |
+
+Rule `match` fields (all optional except that at least one should be set per rule):
+
+| Match field | Values |
+|-------------|--------|
+| `taskKind` | `subagent`, `cron`, `dream`, `sustained_goal`, `chat` |
+| `taskType` | `coding`, `research`, `admin`, `chat`, `other` (from classifier on chat turns) |
+| `complexity` | `low`, `medium`, `high` (from classifier on chat turns) |
+
+`agents.defaults.dream.modelOverride` still applies for Dream runs when set; it takes precedence over routing rules for `taskKind: dream`.
+
+The WebUI shows ephemeral routed models in the composer badge for the active turn via the `turn_model_routed` websocket event.
+
 ### Model Fallbacks
 
 `agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` or, in older configs, by the implicit `default` preset from direct `agents.defaults.*` fields.

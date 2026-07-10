@@ -63,7 +63,7 @@ class DreamConfig(Base):
     model_override: str | None = Field(
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
-    )  # Override model for Dream sessions (pending implementation)
+    )  # Override model for Dream sessions when model routing is enabled
     max_batch_size: int = Field(default=20, ge=1)  # Deprecated: no longer used
     max_iterations: int = Field(default=15, ge=1)  # Deprecated: no longer used
     annotate_line_ages: bool = True  # Deprecated: no longer used
@@ -116,6 +116,51 @@ class ModelPresetConfig(Base):
         )
 
 
+TaskKind = Literal["subagent", "cron", "dream", "sustained_goal", "chat"]
+TaskType = Literal["coding", "research", "admin", "chat", "other"]
+TaskComplexity = Literal["low", "medium", "high"]
+
+
+class ModelRouteMatch(Base):
+    """Criteria for a model routing rule."""
+
+    task_kind: TaskKind | None = Field(
+        default=None,
+        validation_alias=AliasChoices("taskKind", "task_kind"),
+        serialization_alias="taskKind",
+    )
+    task_type: TaskType | None = Field(
+        default=None,
+        validation_alias=AliasChoices("taskType", "task_type"),
+        serialization_alias="taskType",
+    )
+    complexity: TaskComplexity | None = None
+
+
+class ModelRouteRule(Base):
+    """Map a routing context to a named model preset."""
+
+    match: ModelRouteMatch
+    preset: str
+
+
+class ModelRoutingConfig(Base):
+    """Per-turn model routing based on task kind, type, and complexity."""
+
+    enabled: bool = False
+    classifier_preset: str = Field(
+        default="fast",
+        validation_alias=AliasChoices("classifierPreset", "classifier_preset"),
+        serialization_alias="classifierPreset",
+    )
+    rules: list[ModelRouteRule] = Field(default_factory=list)
+    default_preset: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("defaultPreset", "default_preset"),
+        serialization_alias="defaultPreset",
+    )
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -162,6 +207,11 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    model_routing: ModelRoutingConfig = Field(
+        default_factory=ModelRoutingConfig,
+        validation_alias=AliasChoices("modelRouting", "model_routing"),
+        serialization_alias="modelRouting",
+    )
 
 
 class AgentsConfig(Base):
@@ -420,7 +470,23 @@ class Config(BaseSettings):
         for fallback in self.agents.defaults.fallback_models:
             if isinstance(fallback, str) and fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")
+        routing = self.agents.defaults.model_routing
+        if routing.enabled:
+            self._validate_routing_preset(routing.classifier_preset, "classifier_preset")
+            if routing.default_preset is not None:
+                self._validate_routing_preset(routing.default_preset, "default_preset")
+            for idx, rule in enumerate(routing.rules):
+                try:
+                    self._validate_routing_preset(rule.preset, f"rules[{idx}].preset")
+                except ValueError as exc:
+                    raise ValueError(str(exc)) from exc
         return self
+
+    def _validate_routing_preset(self, name: str, field_name: str) -> None:
+        if name == "default":
+            return
+        if name not in self.model_presets:
+            raise ValueError(f"model_routing {field_name} {name!r} not found in model_presets")
 
     def resolve_default_preset(self) -> ModelPresetConfig:
         """Return the implicit `default` preset from agents.defaults fields."""

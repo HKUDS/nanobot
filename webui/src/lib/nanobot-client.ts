@@ -66,6 +66,11 @@ type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
 type RuntimeModelHandler = (modelName: string | null, modelPreset?: string | null) => void;
+type TurnModelRoutedHandler = (
+  chatId: string,
+  modelName: string,
+  modelPreset?: string | null,
+) => void;
 type SessionUpdateScope = "metadata" | "thread" | string;
 type SessionUpdateHandler = (
   chatId: string,
@@ -123,6 +128,7 @@ export class NanobotClient {
   private socket: WebSocket | null = null;
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
+  private turnModelRoutedHandlers = new Set<TurnModelRoutedHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -188,6 +194,13 @@ export class NanobotClient {
     this.runtimeModelHandlers.add(handler);
     return () => {
       this.runtimeModelHandlers.delete(handler);
+    };
+  }
+
+  onTurnModelRouted(handler: TurnModelRoutedHandler): Unsubscribe {
+    this.turnModelRoutedHandlers.add(handler);
+    return () => {
+      this.turnModelRoutedHandlers.delete(handler);
     };
   }
 
@@ -485,6 +498,15 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "turn_model_routed") {
+      this.emitTurnModelRouted(
+        parsed.chat_id,
+        parsed.model_name,
+        parsed.model_preset ?? null,
+      );
+      return;
+    }
+
     if (parsed.event === "transcription_result") {
       this.resolveTranscription(parsed.request_id, parsed.text);
       return;
@@ -532,6 +554,16 @@ export class NanobotClient {
   private emitRuntimeModelUpdate(modelName: string | null, modelPreset?: string | null): void {
     for (const handler of this.runtimeModelHandlers) {
       handler(modelName, modelPreset);
+    }
+  }
+
+  private emitTurnModelRouted(
+    chatId: string,
+    modelName: string,
+    modelPreset?: string | null,
+  ): void {
+    for (const handler of this.turnModelRoutedHandlers) {
+      handler(chatId, modelName, modelPreset);
     }
   }
 

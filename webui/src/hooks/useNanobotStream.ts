@@ -522,6 +522,8 @@ export function useNanobotStream(
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
+  /** Latest ephemeral per-turn routed model for this chat, if any. */
+  turnRoutedModel: string | null;
   send: (content: string, images?: SendImage[], options?: SendOptions) => void;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
@@ -541,6 +543,7 @@ export function useNanobotStream(
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
+  const [turnRoutedModel, setTurnRoutedModel] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
@@ -801,6 +804,7 @@ export function useNanobotStream(
     setStreamError(null);
     setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
+    setTurnRoutedModel(null);
     buffer.current = null;
     activeAssistantRef.current = null;
     closedAssistantStreamIdsRef.current.clear();
@@ -815,6 +819,15 @@ export function useNanobotStream(
   useEffect(() => {
     if (hasPendingToolCalls) setIsStreaming(true);
   }, [hasPendingToolCalls]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    return client.onTurnModelRouted((routedChatId, modelName) => {
+      if (routedChatId === chatId) {
+        setTurnRoutedModel(modelName);
+      }
+    });
+  }, [chatId, client]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -923,6 +936,7 @@ export function useNanobotStream(
           return finalized;
         });
         suppressStreamUntilTurnEndRef.current = false;
+        setTurnRoutedModel(null);
         onTurnEnd?.();
         return;
       }
@@ -1215,6 +1229,7 @@ export function useNanobotStream(
     isStreaming,
     runStartedAt,
     goalState,
+    turnRoutedModel,
     send,
     transcribeAudio,
     stop,

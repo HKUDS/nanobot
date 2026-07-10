@@ -26,6 +26,7 @@ from nanobot.bus.outbound_events import (
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
+    TurnModelRoutedEvent,
     outbound_event_from_message,
     outbound_message_for_event,
 )
@@ -871,6 +872,16 @@ class WebSocketChannel(BaseChannel):
                 model_preset=event.model_preset,
             )
             return
+        if isinstance(event, TurnModelRoutedEvent):
+            await self.send_turn_model_routed(
+                chat_id=msg.chat_id,
+                model_name=event.model,
+                model_preset=event.model_preset,
+                task_kind=event.task_kind,
+                task_type=event.task_type,
+                complexity=event.complexity,
+            )
+            return
 
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
         conns = list(self._subs.get(msg.chat_id, ()))
@@ -1192,3 +1203,34 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" runtime_model_updated ")
+
+    async def send_turn_model_routed(
+        self,
+        *,
+        chat_id: str,
+        model_name: str,
+        model_preset: str | None = None,
+        task_kind: str = "chat",
+        task_type: str | None = None,
+        complexity: str | None = None,
+    ) -> None:
+        """Notify websocket clients about an ephemeral per-turn model route."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns or not model_name.strip():
+            return
+        body: dict[str, Any] = {
+            "event": "turn_model_routed",
+            "chat_id": chat_id,
+            "model_name": model_name.strip(),
+            "task_kind": task_kind,
+            "ephemeral": True,
+        }
+        if isinstance(model_preset, str) and model_preset.strip():
+            body["model_preset"] = model_preset.strip()
+        if isinstance(task_type, str) and task_type.strip():
+            body["task_type"] = task_type.strip()
+        if isinstance(complexity, str) and complexity.strip():
+            body["complexity"] = complexity.strip()
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" turn_model_routed ")

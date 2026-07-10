@@ -11,6 +11,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.model_routing import ModelRouter, RoutingContext, infer_task_kind
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
@@ -88,6 +89,7 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        model_router: ModelRouter | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -115,6 +117,8 @@ class SubagentManager:
         )
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
+        self._model_router = model_router
+        self._model_preset: str | None = None
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -149,9 +153,15 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
-    def set_provider(self, provider: LLMProvider, model: str) -> None:
+    def set_provider(
+        self,
+        provider: LLMProvider,
+        model: str,
+        model_preset: str | None = None,
+    ) -> None:
         self.provider = provider
         self.model = model
+        self._model_preset = model_preset
         self.runner.provider = provider
 
     async def spawn(
@@ -245,12 +255,43 @@ class SubagentManager:
                 else None
             )
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
+            route_spec_kwargs: dict[str, Any] = {}
+            if self._model_router is not None and self._model_router.enabled:
+                route = await self._model_router.resolve_turn_route(
+                    RoutingContext(
+                        user_text=task,
+                        task_kind=infer_task_kind(
+                            session_key=sess_key,
+                            session_metadata=None,
+                            message_metadata=None,
+                            explicit_task_kind="subagent",
+                        ),
+                        session_key=sess_key,
+                    ),
+                    baseline_model=self.model,
+                    baseline_preset=self._model_preset,
+                )
+                if route is not None:
+                    route_spec_kwargs = route.to_run_spec_kwargs()
+                    logger.info(
+                        "Subagent [{}] model route: preset={} model={}",
+                        task_id,
+                        route.preset_name,
+                        route.snapshot.model,
+                    )
             try:
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
-                    model=self.model,
-                    temperature=temperature,
+                    model=route_spec_kwargs.get("model", self.model),
+                    temperature=(
+                        temperature
+                        if temperature is not None
+                        else route_spec_kwargs.get("temperature")
+                    ),
+                    max_tokens=route_spec_kwargs.get("max_tokens"),
+                    reasoning_effort=route_spec_kwargs.get("reasoning_effort"),
+                    context_window_tokens=route_spec_kwargs.get("context_window_tokens"),
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
                     hook=_SubagentHook(task_id, status),
@@ -262,6 +303,8 @@ class SubagentManager:
                     session_key=sess_key,
                     workspace=root,
                     llm_timeout_s=llm_timeout,
+                    route_provider=route_spec_kwargs.get("route_provider"),
+                    routed_preset=route_spec_kwargs.get("routed_preset"),
                 ))
             finally:
                 if token is not None:

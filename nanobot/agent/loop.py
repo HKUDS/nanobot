@@ -23,6 +23,12 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
+from nanobot.agent.model_routing import (
+    ModelRouter,
+    RoutingContext,
+    extract_user_text,
+    infer_task_kind,
+)
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -226,6 +232,7 @@ class AgentLoop:
         model_presets: dict[str, ModelPresetConfig] | None = None,
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
+        model_router: ModelRouter | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
@@ -243,6 +250,7 @@ class AgentLoop:
         self.provider = provider
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
+        self._model_router = model_router
         self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
@@ -308,6 +316,7 @@ class AgentLoop:
             max_concurrent_subagents=max_concurrent_subagents,
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            model_router=model_router,
         )
         self._unified_session = unified_session
         self._max_messages = replay_max_messages_for_context(self.context_window_tokens)
@@ -384,7 +393,8 @@ class AgentLoop:
         allowing callers to override or extend the standard config-derived
         parameters (e.g. ``cron_service``, ``session_manager``).
         """
-        from nanobot.providers.factory import make_provider
+        from nanobot.agent.model_routing import ModelRouter
+        from nanobot.providers.factory import build_provider_snapshot, make_provider
 
         if bus is None:
             bus = MessageBus()
@@ -398,6 +408,15 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        model_router = extra.pop("model_router", None)
+        if model_router is None:
+            model_router = ModelRouter(
+                routing=defaults.model_routing,
+                dream=defaults.dream,
+                load_preset=preset_snapshot_loader,
+                build_inline_snapshot=lambda preset: build_provider_snapshot(config, preset=preset),
+                resolve_preset=lambda name: config.resolve_preset(name),
+            )
         return cls(
             bus=bus,
             provider=provider,
@@ -425,6 +444,7 @@ class AgentLoop:
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            model_router=model_router,
             **extra,
         )
 
@@ -448,7 +468,11 @@ class AgentLoop:
         self.model = model
         self.context_window_tokens = context_window_tokens
         self.runner.provider = provider
-        self.subagents.set_provider(provider, model)
+        self.subagents.set_provider(
+            provider,
+            model,
+            model_preset if model_preset is not None else self._active_preset,
+        )
         self.consolidator.set_provider(provider, model, context_window_tokens)
         self._sync_replay_max_messages()
         self._provider_signature = snapshot.signature
@@ -876,11 +900,51 @@ class AgentLoop:
             )
 
         session_metadata = session.metadata if session is not None else None
+        route_spec_kwargs: dict[str, Any] = {}
+        if self._model_router is not None and self._model_router.enabled:
+            active_session_key = session.key if session is not None else session_key
+            routing_ctx = RoutingContext(
+                user_text=extract_user_text(initial_messages),
+                task_kind=infer_task_kind(
+                    session_key=active_session_key,
+                    session_metadata=session_metadata,
+                    message_metadata=metadata,
+                ),
+                session_metadata=session_metadata,
+                message_metadata=metadata,
+                session_key=active_session_key,
+            )
+            route = await self._model_router.resolve_turn_route(
+                routing_ctx,
+                baseline_model=self.model,
+                baseline_preset=self._active_preset,
+            )
+            if route is not None:
+                route_spec_kwargs = route.to_run_spec_kwargs()
+                logger.info(
+                    "Per-turn model route: preset={} model={} task_kind={} task_type={} complexity={}",
+                    route.preset_name,
+                    route.snapshot.model,
+                    route.task_kind,
+                    route.task_type,
+                    route.complexity,
+                )
+                self._runtime_events().turn_model_routed(
+                    model=route.snapshot.model,
+                    model_preset=route.preset_name,
+                    task_kind=route.task_kind,
+                    task_type=route.task_type,
+                    complexity=route.complexity,
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_key=active_session_key,
+                    metadata=metadata,
+                )
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
                 tools=effective_tools,
-                model=self.model,
+                model=route_spec_kwargs.get("model", self.model),
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,
@@ -888,7 +952,10 @@ class AgentLoop:
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
-                context_window_tokens=self.context_window_tokens,
+                context_window_tokens=route_spec_kwargs.get(
+                    "context_window_tokens",
+                    self.context_window_tokens,
+                ),
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 progress_callback=on_progress,
@@ -911,6 +978,11 @@ class AgentLoop:
                     session_metadata=session_metadata,
                     message_metadata=metadata,
                 ),
+                temperature=route_spec_kwargs.get("temperature"),
+                max_tokens=route_spec_kwargs.get("max_tokens"),
+                reasoning_effort=route_spec_kwargs.get("reasoning_effort"),
+                route_provider=route_spec_kwargs.get("route_provider"),
+                routed_preset=route_spec_kwargs.get("routed_preset"),
             ))
         finally:
             reset_workspace_scope(workspace_token)

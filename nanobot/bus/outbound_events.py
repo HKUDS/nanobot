@@ -81,6 +81,16 @@ class RuntimeModelUpdatedEvent(OutboundEvent):
     model_preset: str | None = None
 
 
+@dataclass(frozen=True)
+class TurnModelRoutedEvent(OutboundEvent):
+    model: str
+    model_preset: str | None = None
+    task_kind: str = "chat"
+    task_type: str | None = None
+    complexity: str | None = None
+    ephemeral: bool = True
+
+
 def outbound_message_for_event(
     *,
     channel: str,

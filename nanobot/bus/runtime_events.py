@@ -70,12 +70,26 @@ class RuntimeModelChanged:
     model_preset: str | None
 
 
+@dataclass(frozen=True)
+class TurnModelRouted:
+    """A per-turn ephemeral model route was selected."""
+
+    context: RuntimeEventContext
+    model: str
+    model_preset: str | None
+    task_kind: str
+    task_type: str | None = None
+    complexity: str | None = None
+    ephemeral: bool = True
+
+
 RuntimeEvent = (
     SessionTurnStarted
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
     | RuntimeModelChanged
+    | TurnModelRouted
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
@@ -83,6 +97,7 @@ RuntimeEventType = (
     | type[TurnCompleted]
     | type[GoalStateChanged]
     | type[RuntimeModelChanged]
+    | type[TurnModelRouted]
 )
 RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
 _HandlerEntry = tuple[RuntimeEventType | None, RuntimeEventHandler]
@@ -232,6 +247,35 @@ class RuntimeEventPublisher:
     def runtime_model_changed(self, model: str, model_preset: str | None) -> None:
         self.bus.publish_nowait(
             RuntimeModelChanged(model=model, model_preset=model_preset)
+        )
+
+    def turn_model_routed(
+        self,
+        *,
+        model: str,
+        model_preset: str | None,
+        task_kind: str,
+        task_type: str | None,
+        complexity: str | None,
+        channel: str,
+        chat_id: str,
+        session_key: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.bus.publish_nowait(
+            TurnModelRouted(
+                context=self._context(
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_key=session_key,
+                    metadata=metadata,
+                ),
+                model=model,
+                model_preset=model_preset,
+                task_kind=task_kind,
+                task_type=task_type,
+                complexity=complexity,
+            )
         )
 
 
