@@ -18,6 +18,7 @@ class RequestContext:
     chat_id: str
     message_id: str | None = None
     session_key: str | None = None
+    original_user_text: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

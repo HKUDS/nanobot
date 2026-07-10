@@ -11,8 +11,10 @@ from nanobot.agent.tools.context import (
     current_request_context,
     reset_request_context,
 )
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
 
 class _ContextRecordingTool:
@@ -165,6 +167,7 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
         assert current.channel == "slack"
         assert current.chat_id == "C123"
         assert current.session_key == "slack:C123:111.222"
+        assert current.original_user_text == "  unchanged user text  "
         raise RuntimeError("runner failed")
 
     loop.runner.run = AsyncMock(side_effect=fail_run)
@@ -176,9 +179,53 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
                 channel="slack",
                 chat_id="C123",
                 session_key="slack:C123:111.222",
+                original_user_text="  unchanged user text  ",
             )
         assert current_request_context() is outer
     finally:
         reset_request_context(outer_token)
 
     assert current_request_context() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({}, "  original user text  "),
+        ({INTERNAL_CONTINUATION_META: True}, None),
+    ],
+)
+async def test_process_message_captures_original_text_before_restore(
+    tmp_path: Path,
+    metadata: dict,
+    expected: str | None,
+) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    seen: list[str | None] = []
+
+    async def stop_after_capture(ctx) -> str:
+        seen.append(ctx.original_user_text)
+        raise RuntimeError("captured before restore")
+
+    loop._state_restore = stop_after_capture  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="captured before restore"):
+        await loop._process_message(
+            InboundMessage(
+                channel="slack",
+                sender_id="user",
+                chat_id="C123",
+                content="  original user text  ",
+                metadata=metadata,
+            )
+        )
+
+    assert seen == [expected]

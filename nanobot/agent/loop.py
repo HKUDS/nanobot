@@ -113,6 +113,7 @@ class TurnContext:
     session_key: str
     state: TurnState
     turn_id: str
+    original_user_text: str | None = None
     session: Session | None = None
 
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -739,6 +740,7 @@ class AgentLoop:
         message_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        original_user_text: str | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         run_extra_hooks_for_ephemeral: bool = False,
@@ -858,6 +860,7 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
             session_key=active_session_key,
+            original_user_text=original_user_text,
             metadata=dict(metadata or {}),
         )
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
@@ -1283,6 +1286,7 @@ class AgentLoop:
             message_id=msg.metadata.get("message_id"),
             metadata=msg.metadata,
             session_key=key,
+            original_user_text=None,
             pending_queue=pending_queue,
             hook_factories=hook_factories,
         )
@@ -1350,6 +1354,11 @@ class AgentLoop:
             session_key=key,
             state=TurnState.RESTORE,
             turn_id=f"{key}:{time.time_ns()}",
+            original_user_text=(
+                None
+                if turn_continuation.internal_continuation_inbound(msg.metadata)
+                else msg.content
+            ),
             turn_wall_started_at=t0,
             visible_run_started_at=turn_continuation.internal_continuation_run_started_at(
                 msg.metadata,
@@ -1587,6 +1596,7 @@ class AgentLoop:
             message_id=ctx.msg.metadata.get("message_id"),
             metadata=ctx.msg.metadata,
             session_key=ctx.session_key,
+            original_user_text=ctx.original_user_text,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
