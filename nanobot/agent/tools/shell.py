@@ -17,6 +17,7 @@ from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.command_output_compaction import compact_command_output
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
@@ -304,21 +305,14 @@ class ExecTool(Tool):
                 await self._kill_process(process)
                 raise
 
-            output_parts = []
-
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-
-            output_parts.append(f"\nExit code: {process.returncode}")
-
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-
             max_len = clamp_session_int(max_output_chars, self._MAX_OUTPUT, 1000, MAX_OUTPUT_CHARS)
+            result = compact_command_output(
+                command=prepared.command,
+                stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
+                stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+                exit_code=process.returncode,
+                max_chars=max_len,
+            )
             if len(result) > max_len:
                 half = max_len // 2
                 result = (

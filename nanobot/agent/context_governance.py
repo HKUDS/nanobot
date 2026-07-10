@@ -7,6 +7,7 @@ mutate an existing session history list in place.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
 SNIP_SAFETY_BUFFER = 1024
 MICROCOMPACT_KEEP_RECENT = 10
 MICROCOMPACT_MIN_CHARS = 500
+TOOL_REPLAY_KEEP_FULL = 10
+TOOL_REPLAY_KEEP_SUMMARY = 50
+TOOL_REPLAY_SUMMARY_CHARS = 180
 INFLIGHT_COMPACT_TARGET_RATIO = 0.85
 COMPACTABLE_TOOLS = frozenset({
     "read_file", "exec", "grep", "find_files",
@@ -82,6 +86,7 @@ class ContextGovernor:
         updated = self.strip_malformed_tool_calls(updated)
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
+        updated = self.apply_tool_replay_window(updated)
         updated = self.apply_tool_result_budget(config, updated)
         updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
         updated = self.snip_history(config, updated)
@@ -316,6 +321,74 @@ class ContextGovernor:
                 updated[idx]["content"] = normalized
         return updated
 
+    def apply_tool_replay_window(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Keep recent tool calls useful while removing stale tool chatter.
+
+        The model-facing transcript keeps the newest 10 tool results verbatim,
+        rewrites the previous 50 tool results to one-line summaries, and drops
+        older assistant tool_call declarations plus their tool result messages.
+        Persisted session history is not modified.
+        """
+        tool_call_details = self._tool_call_details(messages)
+        ordered_tool_ids = [
+            str(msg.get("tool_call_id"))
+            for msg in messages
+            if msg.get("role") == "tool" and msg.get("tool_call_id") in tool_call_details
+        ]
+        if len(ordered_tool_ids) <= TOOL_REPLAY_KEEP_FULL:
+            return messages
+
+        summarize_start = max(0, len(ordered_tool_ids) - TOOL_REPLAY_KEEP_FULL - TOOL_REPLAY_KEEP_SUMMARY)
+        summarize_ids = set(ordered_tool_ids[summarize_start:-TOOL_REPLAY_KEEP_FULL])
+        remove_ids = set(ordered_tool_ids[:summarize_start])
+        if not summarize_ids and not remove_ids:
+            return messages
+
+        updated: list[dict[str, Any]] = []
+        changed = False
+        for msg in messages:
+            role = msg.get("role")
+            if role == "assistant" and msg.get("tool_calls"):
+                kept_calls = []
+                for tool_call in msg.get("tool_calls") or []:
+                    tool_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+                    if tool_id and str(tool_id) in remove_ids:
+                        changed = True
+                        continue
+                    kept_calls.append(tool_call)
+                if len(kept_calls) == len(msg.get("tool_calls") or []):
+                    updated.append(msg)
+                    continue
+                repaired = dict(msg)
+                if kept_calls:
+                    repaired["tool_calls"] = kept_calls
+                    updated.append(repaired)
+                elif repaired.get("content"):
+                    repaired.pop("tool_calls", None)
+                    updated.append(repaired)
+                continue
+
+            if role == "tool":
+                tool_id = msg.get("tool_call_id")
+                tool_id = str(tool_id) if tool_id else ""
+                if tool_id in remove_ids:
+                    changed = True
+                    continue
+                if tool_id in summarize_ids:
+                    summary = self._tool_replay_summary(msg, tool_call_details.get(tool_id, {}))
+                    if msg.get("content") != summary:
+                        repaired = dict(msg)
+                        repaired["content"] = summary
+                        updated.append(repaired)
+                        changed = True
+                        continue
+            updated.append(msg)
+
+        return updated if changed else messages
+
     def compact_inflight_overflow(
         self,
         config: ContextGovernanceConfig,
@@ -423,6 +496,58 @@ class ContextGovernor:
         kept.reverse()
 
         return system_messages + self._legal_history_tail(kept, non_system)
+
+    @staticmethod
+    def _tool_call_details(messages: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+        details: dict[str, dict[str, str]] = {}
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            for tool_call in msg.get("tool_calls") or []:
+                if not isinstance(tool_call, dict) or not tool_call.get("id"):
+                    continue
+                fn = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+                name = fn.get("name") or tool_call.get("name") or "tool"
+                details[str(tool_call["id"])] = {
+                    "name": str(name),
+                    "arguments": ContextGovernor._short_tool_arguments(str(name), fn.get("arguments")),
+                }
+        return details
+
+    @staticmethod
+    def _short_tool_arguments(tool_name: str, arguments: Any) -> str:
+        if isinstance(arguments, str):
+            raw = arguments
+        else:
+            raw = json.dumps(arguments or {}, ensure_ascii=False, sort_keys=True)
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            parsed = raw
+        if isinstance(parsed, dict):
+            if tool_name == "exec":
+                command = parsed.get("command") or parsed.get("cmd")
+                if command:
+                    return f"command={truncate_text(str(command), 90)}"
+            keys = ",".join(str(key) for key in list(parsed)[:4])
+            if len(parsed) > 4:
+                keys += ",..."
+            return f"args={{{keys}}}" if keys else "args={}"
+        return f"args={truncate_text(str(parsed), 90)}"
+
+    @staticmethod
+    def _tool_replay_summary(message: dict[str, Any], details: dict[str, str]) -> str:
+        name = str(message.get("name") or details.get("name") or "tool")
+        arguments = details.get("arguments") or "args={}"
+        content = message.get("content")
+        output = content if isinstance(content, str) else repr(content)
+        output = " ".join(output.split())
+        if not output:
+            output = "(no output)"
+        return truncate_text(
+            f"[{name} result summarized for context: {arguments}; output={output}]",
+            TOOL_REPLAY_SUMMARY_CHARS,
+        )
 
     @staticmethod
     def _summary_for(message: dict[str, Any]) -> str:
