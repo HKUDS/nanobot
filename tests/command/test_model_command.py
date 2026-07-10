@@ -86,7 +86,8 @@ async def test_model_command_switches_preset(tmp_path) -> None:
     assert loop.model_preset == "fast"
     assert loop.model == "openai/gpt-4.1"
     assert not hasattr(loop.subagents, "model")
-    assert loop.consolidator.model == "openai/gpt-4.1"
+    assert not hasattr(loop.consolidator, "model")
+    assert loop.llm_runtime().model == "openai/gpt-4.1"
 
 
 @pytest.mark.asyncio

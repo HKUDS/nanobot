@@ -44,10 +44,10 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     assert not hasattr(loop.subagents, "provider")
     assert not hasattr(loop.subagents, "model")
     assert not hasattr(loop.subagents.runner, "provider")
-    assert loop.consolidator.provider is new_provider
-    assert loop.consolidator.model == "new-model"
-    assert loop.consolidator.context_window_tokens == 2000
-    assert loop.consolidator.max_completion_tokens == 456
+    assert not hasattr(loop.consolidator, "provider")
+    assert not hasattr(loop.consolidator, "model")
+    assert not hasattr(loop.consolidator, "context_window_tokens")
+    assert not hasattr(loop.consolidator, "max_completion_tokens")
 
 
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
@@ -122,4 +122,4 @@ def test_settings_context_window_refreshes_runtime_state(
 
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
-    assert loop.consolidator.context_window_tokens == 262_144
+    assert loop.llm_runtime().context_window_tokens == 262_144

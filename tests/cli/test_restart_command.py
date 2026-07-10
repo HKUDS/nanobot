@@ -244,8 +244,16 @@ class TestRestartCommand:
         loop.subagents.get_running_count_by_session.return_value = 0
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
+        runtime = loop.llm_runtime()
+        loop.model = "replacement-model"
+        loop.context_window_tokens = 10
+        loop.provider.generation = SimpleNamespace(
+            temperature=1.0,
+            max_tokens=1,
+            reasoning_effort=None,
+        )
 
-        response = await loop._process_message(msg)
+        response = await loop._process_message(msg, runtime=runtime)
 
         assert response is not None
         assert "Model: test-model" in response.content
@@ -255,6 +263,10 @@ class TestRestartCommand:
         assert "Uptime: 2m 5s" in response.content
         assert "Tasks: 0 active" in response.content
         assert response.metadata == {"render_as": "text"}
+        loop.consolidator.estimate_session_prompt_tokens.assert_called_once_with(
+            session,
+            runtime=runtime,
+        )
 
     @pytest.mark.asyncio
     async def test_status_counts_running_dispatch_and_subagent_tasks(self):

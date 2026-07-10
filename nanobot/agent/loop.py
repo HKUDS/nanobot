@@ -388,13 +388,9 @@ class AgentLoop:
         )
         self.consolidator = Consolidator(
             store=self.context.memory,
-            provider=provider,
-            model=self.model,
             sessions=self.sessions,
-            context_window_tokens=self.context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
         )
@@ -492,7 +488,6 @@ class AgentLoop:
         self.provider = provider
         self.model = model
         self.context_window_tokens = context_window_tokens
-        self.consolidator.set_provider(provider, model, context_window_tokens)
         self._sync_replay_max_messages()
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
@@ -974,6 +969,7 @@ class AgentLoop:
                 except asyncio.TimeoutError:
                     self.auto_compact.check_expired(
                         self._schedule_background,
+                        self.llm_runtime,
                         active_session_keys=self._pending_queues.keys(),
                     )
                     continue
@@ -1272,6 +1268,7 @@ class AgentLoop:
 
         await self.consolidator.maybe_consolidate_by_tokens(
             session,
+            runtime=runtime,
             replay_max_messages=replay_max_messages_for_context(
                 runtime.context_window_tokens
             ),
@@ -1328,6 +1325,7 @@ class AgentLoop:
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
+                runtime=runtime,
                 replay_max_messages=replay_max_messages_for_context(
                     runtime.context_window_tokens
                 ),
@@ -1539,7 +1537,12 @@ class AgentLoop:
     async def _state_command(self, ctx: TurnContext) -> str:
         raw = ctx.msg.content.strip()
         cmd_ctx = CommandContext(
-            msg=ctx.msg, session=ctx.session, key=ctx.session_key, raw=raw, loop=self
+            msg=ctx.msg,
+            session=ctx.session,
+            key=ctx.session_key,
+            raw=raw,
+            loop=self,
+            runtime=ctx.runtime,
         )
         result = await self.commands.dispatch(cmd_ctx)
         if result is not None:
@@ -1568,6 +1571,7 @@ class AgentLoop:
         if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
+                runtime=ctx.runtime,
                 replay_max_messages=replay_max_messages,
             )
         if message_tool := self.tools.get("message"):
@@ -1673,6 +1677,7 @@ class AgentLoop:
             self._schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
                     ctx.session,
+                    runtime=ctx.runtime,
                     replay_max_messages=replay_max_messages_for_context(
                         ctx.runtime.context_window_tokens
                     ),

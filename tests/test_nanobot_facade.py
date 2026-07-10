@@ -1213,11 +1213,16 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     await bot.sessions.ingest("sdk:history", [{"role": "user", "content": "hello"}])
+    runtime = bot._loop.llm_runtime()
+    bot._loop.llm_runtime = MagicMock(return_value=runtime)  # type: ignore[method-assign]
 
     bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once()
+    assert (
+        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"]
+        is runtime
+    )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path
 
@@ -1226,6 +1231,7 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     assert summary == "Summary."
     bot._loop.consolidator.compact_idle_session.assert_awaited_once_with(
         "sdk:history",
+        runtime=runtime,
         max_suffix=4,
     )
 

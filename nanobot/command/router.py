@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 if TYPE_CHECKING:
     from nanobot.bus.events import InboundMessage, OutboundMessage
     from nanobot.session.manager import Session
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 Handler = Callable[["CommandContext"], Awaitable["OutboundMessage | None"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -43,6 +44,7 @@ class CommandContext:
     raw: str
     args: str = ""
     loop: Any = None
+    runtime: LLMRuntime | None = None
 
 
 class CommandRouter:
