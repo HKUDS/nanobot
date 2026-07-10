@@ -48,12 +48,21 @@ def _mk_loop() -> AgentLoop:
     return loop
 
 
-def _make_full_loop(tmp_path: Path) -> AgentLoop:
+def _make_full_loop(tmp_path: Path, *, sustained_goal: bool = False) -> AgentLoop:
+    from nanobot.config.schema import ToolsConfig
+
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    tools_config = ToolsConfig(long_task={"enable": True}) if sustained_goal else None
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        tools_config=tools_config,
+    )
     WebuiTurnCoordinator(
         bus=loop.bus,
         sessions=loop.sessions,
@@ -732,7 +741,7 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
 async def test_internal_continuation_queues_turn_without_fake_user_history(
     tmp_path: Path,
 ) -> None:
-    loop = _make_full_loop(tmp_path)
+    loop = _make_full_loop(tmp_path, sustained_goal=True)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     session = loop.sessions.get_or_create("feishu:c-auto")
     session.metadata[GOAL_STATE_KEY] = {
@@ -804,7 +813,7 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
 async def test_internal_continuation_preserves_streaming_route_metadata(
     tmp_path: Path,
 ) -> None:
-    loop = _make_full_loop(tmp_path)
+    loop = _make_full_loop(tmp_path, sustained_goal=True)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     session = loop.sessions.get_or_create("feishu:c-stream")
     session.metadata[GOAL_STATE_KEY] = {
@@ -882,7 +891,7 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
 async def test_websocket_internal_continuation_keeps_single_visible_run(
     tmp_path: Path,
 ) -> None:
-    loop = _make_full_loop(tmp_path)
+    loop = _make_full_loop(tmp_path, sustained_goal=True)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
     session = loop.sessions.get_or_create("websocket:c-auto")
     session.metadata[GOAL_STATE_KEY] = {

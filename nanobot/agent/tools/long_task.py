@@ -30,6 +30,11 @@ from nanobot.session.goal_state import (
     parse_goal_state,
 )
 
+# Re-export so ``from nanobot.agent.tools.long_task import LongTaskToolConfig``
+# keeps working; the class itself lives in a dependency-light module to avoid
+# import cycles during pydantic model_rebuild of ToolsConfig.
+from nanobot.agent.tools.long_task_config import LongTaskToolConfig
+
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
 

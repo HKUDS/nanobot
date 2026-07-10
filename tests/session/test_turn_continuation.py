@@ -8,7 +8,13 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
+from nanobot.config.schema import ToolsConfig
 from nanobot.session.goal_state import GOAL_STATE_KEY
+
+
+def _goal_enabled_config():
+    """Config with the sustained-goal feature opted in (flag off by default)."""
+    return ToolsConfig(long_task={"enable": True})
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_KIND_META,
     INTERNAL_CONTINUATION_META,
@@ -59,6 +65,7 @@ async def test_maybe_continue_turn_queues_internal_message():
         all_messages=messages,
         suppress_response=False,
         visible_run_started_at=1234.5,
+        config=_goal_enabled_config(),
     )
 
     assert await maybe_continue_turn(ctx) is True

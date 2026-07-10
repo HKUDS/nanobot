@@ -100,7 +100,15 @@ def should_finalize_on_max_iterations(
 
 
 def _goal_feature_enabled(ctx: Any) -> bool:
-    """Mirror of long_task._goal_feature_enabled; disabled by default."""
+    """Mirror of long_task._goal_feature_enabled; disabled by default.
+
+    Prefers a resolved ``ctx.long_task_enabled`` flag (set on the loop's
+    TurnContext from ``tools.long_task.enable``); otherwise falls back to reading
+    ``ctx.config`` for callers that pass a raw config-bearing context.
+    """
+    resolved = getattr(ctx, "long_task_enabled", None)
+    if resolved is not None:
+        return bool(resolved)
     config = getattr(ctx, "config", None)
     if config is None:
         return False

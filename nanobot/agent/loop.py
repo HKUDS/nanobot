@@ -148,6 +148,9 @@ class TurnContext:
     hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     tools: ToolRegistry | None = None
 
+    # Whether the sustained-goal feature is opted in (tools.long_task.enable).
+    long_task_enabled: bool = False
+
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
@@ -1360,6 +1363,9 @@ class AgentLoop:
             hooks=list(hooks or []),
             hook_factories=list(hook_factories or []),
             tools=tools,
+            long_task_enabled=bool(
+                getattr(getattr(self.tools_config, "long_task", None), "enable", False)
+            ),
         )
 
         while ctx.state is not TurnState.DONE:

@@ -211,11 +211,31 @@ async def test_long_task_skips_ws_publish_without_bus(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_long_task_and_complete_goal_registered(tmp_path):
+async def test_long_task_and_complete_goal_not_registered_by_default(tmp_path):
+    """The sustained-goal tools are gated off by default (opt-in flag)."""
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+
+    assert loop.tools.get("long_task") is None
+    assert loop.tools.get("complete_goal") is None
+
+
+@pytest.mark.asyncio
+async def test_long_task_and_complete_goal_registered(tmp_path):
+    from nanobot.config.schema import ToolsConfig
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        tools_config=ToolsConfig(long_task={"enable": True}),
+    )
 
     lt = loop.tools.get("long_task")
     cg = loop.tools.get("complete_goal")
