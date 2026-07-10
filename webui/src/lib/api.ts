@@ -540,7 +540,6 @@ export async function configureChannel(
     `${base}/api/settings/channels/configure?${query}`,
     token,
     {
-      method: "POST",
       headers: {
         [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
       },
@@ -562,7 +561,6 @@ export async function validateChannel(
     `${base}/api/settings/channels/validate?${query}`,
     token,
     {
-      method: "POST",
       headers: {
         [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
       },

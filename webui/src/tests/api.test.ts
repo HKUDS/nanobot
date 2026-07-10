@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  configureChannel,
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -131,7 +132,6 @@ describe("webui API helpers", () => {
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/channels/validate?name=slack&instance_id=default",
       expect.objectContaining({
-        method: "POST",
         headers: expect.objectContaining({
           Authorization: "Bearer tok",
           "X-Nanobot-Channel-Values": JSON.stringify({
@@ -139,6 +139,35 @@ describe("webui API helpers", () => {
           }),
         }),
       }),
+    );
+    expect(fetch).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("configures channels through the WebSocket HTTP shim", async () => {
+    await configureChannel(
+      "tok",
+      "discord",
+      { "channels.discord.token": "saved-secret" },
+      { enable: true },
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/channels/configure?name=discord&enable=true",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer tok",
+          "X-Nanobot-Channel-Values": JSON.stringify({
+            "channels.discord.token": "saved-secret",
+          }),
+        }),
+      }),
+    );
+    expect(fetch).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ method: "POST" }),
     );
   });
 

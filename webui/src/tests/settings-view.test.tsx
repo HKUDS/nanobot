@@ -961,7 +961,7 @@ describe("SettingsView Apps catalog", () => {
     const configureCall = fetchMock.mock.calls.find(
       ([input]) => String(input) === "/api/settings/channels/configure?name=discord&enable=true",
     );
-    expect((configureCall?.[1] as RequestInit | undefined)?.method).toBe("POST");
+    expect((configureCall?.[1] as RequestInit | undefined)?.method).toBeUndefined();
     const headers = (configureCall?.[1] as RequestInit | undefined)?.headers as Record<string, string>;
     expect(JSON.parse(headers["X-Nanobot-Channel-Values"])).toEqual({
       "channels.discord.token": "discord-token",
