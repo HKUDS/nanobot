@@ -137,3 +137,52 @@ def test_resolver_refresh_preserves_unchanged_active_preset() -> None:
     assert refreshed is None
     assert resolver.runtime.provider is preset_provider
     assert resolver.model_preset == "fast"
+
+
+def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:
+    provider = _provider(temperature=0.2, max_tokens=2048)
+    resolver = ModelRuntimeResolver(_runtime(provider))
+    admitted = resolver.current()
+
+    provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
+    refreshed = resolver.current(refresh=True)
+
+    assert admitted.generation == GenerationSettings(0.2, 2048, None)
+    assert refreshed.generation == GenerationSettings(0.8, 512, None)
+
+
+def test_selected_preset_generation_does_not_fall_back_to_provider_defaults() -> None:
+    provider = _provider(temperature=0.1, max_tokens=1024)
+    resolver = ModelRuntimeResolver(
+        _runtime(provider),
+        model_presets={
+            "creative": ModelPresetConfig(
+                model="creative-model",
+                temperature=0.7,
+                max_tokens=4096,
+            )
+        },
+    )
+    selected = resolver.select_preset("creative")
+
+    provider.generation = GenerationSettings(temperature=0.9, max_tokens=64)
+    refreshed = resolver.current(refresh=True)
+
+    assert refreshed is selected
+    assert refreshed.generation == GenerationSettings(0.7, 4096, None)
+
+
+def test_resolver_mutates_only_its_default_selection() -> None:
+    initial = _runtime()
+    resolver = ModelRuntimeResolver(initial)
+
+    selected_model = resolver.select_model("next-model")
+    selected_window = resolver.select_context_window(65_536)
+
+    assert selected_model.model == "next-model"
+    assert selected_window.model == "next-model"
+    assert selected_window.context_window_tokens == 65_536
+    assert resolver.runtime is selected_window
+    assert resolver.model_preset is None
+    assert initial.model == "base-model"
+    assert initial.context_window_tokens == 10_000

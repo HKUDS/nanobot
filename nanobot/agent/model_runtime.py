@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -31,6 +32,7 @@ class ModelRuntimeResolver:
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
         self._active_preset = initial_runtime.model_preset
+        self._tracks_provider_generation = initial_runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             initial_runtime.snapshot_signature
         )
@@ -56,6 +58,7 @@ class ModelRuntimeResolver:
         """Return the selected runtime, optionally refreshing the default source."""
         if refresh:
             self.refresh()
+            self._refresh_provider_generation()
         return self._runtime
 
     def resolve_snapshot(
@@ -77,6 +80,7 @@ class ModelRuntimeResolver:
         runtime = self.resolve_snapshot(snapshot, model_preset=model_preset)
         self._runtime = runtime
         self._active_preset = model_preset
+        self._tracks_provider_generation = model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             runtime.snapshot_signature
         )
@@ -98,7 +102,50 @@ class ModelRuntimeResolver:
         runtime = self.resolve_preset(name)
         self._runtime = runtime
         self._active_preset = runtime.model_preset
+        self._tracks_provider_generation = False
         return runtime
+
+    def select_model(self, model: str) -> LLMRuntime:
+        """Change the default model without reconstructing downstream consumers."""
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model must be a non-empty string")
+        self._runtime = replace(
+            self._runtime,
+            model=model.strip(),
+            model_preset=None,
+        )
+        self._active_preset = None
+        return self._runtime
+
+    def select_context_window(self, context_window_tokens: int) -> LLMRuntime:
+        """Change the default context limit for future admissions."""
+        if not isinstance(context_window_tokens, int) or isinstance(
+            context_window_tokens,
+            bool,
+        ):
+            raise TypeError("context_window_tokens must be an integer")
+        self._runtime = replace(
+            self._runtime,
+            context_window_tokens=context_window_tokens,
+        )
+        return self._runtime
+
+    def _refresh_provider_generation(self) -> LLMRuntime | None:
+        """Adopt direct provider-default changes only for provider-backed defaults."""
+        if not self._tracks_provider_generation:
+            return None
+        runtime = self._runtime
+        captured = LLMRuntime.capture(
+            runtime.provider,
+            runtime.model,
+            context_window_tokens=runtime.context_window_tokens,
+            model_preset=runtime.model_preset,
+            snapshot_signature=runtime.snapshot_signature,
+        )
+        if captured.generation == runtime.generation:
+            return None
+        self._runtime = replace(runtime, generation=captured.generation)
+        return self._runtime
 
     def refresh(self) -> LLMRuntime | None:
         """Refresh configured defaults and return the replacement when changed."""
@@ -121,6 +168,7 @@ class ModelRuntimeResolver:
             return None
         self._runtime = runtime
         self._active_preset = active_preset
+        self._tracks_provider_generation = active_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             runtime.snapshot_signature
         )
