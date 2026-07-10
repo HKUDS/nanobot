@@ -82,6 +82,30 @@ function stubVisualViewport({
   };
 }
 
+function stubResizeObserver() {
+  const original = globalThis.ResizeObserver;
+  const observers: ResizeObserverInstance[] = [];
+  class MockResizeObserver {
+    element?: Element;
+    callback: ResizeObserverCallback;
+    disconnect = vi.fn();
+
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+      observers.push(this);
+    }
+
+    observe(element: Element) {
+      this.element = element;
+    }
+  }
+  vi.stubGlobal("ResizeObserver", MockResizeObserver);
+  return {
+    observers,
+    restore: () => vi.stubGlobal("ResizeObserver", original),
+  };
+}
+
 function makeLongMessages(count: number): UIMessage[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `m${index}`,
@@ -89,6 +113,63 @@ function makeLongMessages(count: number): UIMessage[] {
     content: `message ${index}`,
     createdAt: index,
   }));
+}
+
+function makePromptExchangeMessages(count: number): UIMessage[] {
+  return Array.from({ length: count }, (_, index) => ([
+    {
+      id: `m${index}`,
+      role: "user" as const,
+      content: `message ${index}`,
+      createdAt: index * 2,
+    },
+    {
+      id: `a${index}`,
+      role: "assistant" as const,
+      content: `answer ${index}`,
+      createdAt: index * 2 + 1,
+    },
+  ])).flat();
+}
+
+async function renderPromptRailViewport({
+  scrollTo,
+}: {
+  scrollTo?: (options?: ScrollToOptions) => void;
+} = {}) {
+  const promptMessages = makePromptExchangeMessages(5);
+  const { container } = render(
+    <ThreadViewport
+      messages={promptMessages}
+      isStreaming={false}
+      composer={<div />}
+    />,
+  );
+
+  const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: 1800 },
+    clientHeight: { configurable: true, value: 600 },
+    scrollTop: { configurable: true, value: 0 },
+    ...(scrollTo ? { scrollTo: { configurable: true, value: scrollTo } } : {}),
+  });
+
+  const promptEls = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+  );
+  promptEls.forEach((el, index) => {
+    Object.defineProperty(el, "offsetTop", {
+      configurable: true,
+      value: index * 360,
+    });
+  });
+
+  await act(async () => {
+    window.dispatchEvent(new Event("resize"));
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  });
+
+  return { promptEls };
 }
 
 function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
@@ -345,23 +426,7 @@ describe("ThreadViewport", () => {
   });
 
   it("keeps the scroll-to-bottom button above a growing composer", () => {
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const resizeObservers: ResizeObserverInstance[] = [];
-    class MockResizeObserver {
-      element?: Element;
-      callback: ResizeObserverCallback;
-      disconnect = vi.fn();
-
-      constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-        resizeObservers.push(this);
-      }
-
-      observe(element: Element) {
-        this.element = element;
-      }
-    }
-    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+    const resizeObserver = stubResizeObserver();
 
     try {
       const { container } = render(
@@ -401,7 +466,7 @@ describe("ThreadViewport", () => {
           toJSON: () => ({}),
         }) as DOMRect;
 
-      const composerObserver = resizeObservers.find(
+      const composerObserver = resizeObserver.observers.find(
         (observer) => observer.element === composerDock,
       );
       expect(composerObserver).toBeDefined();
@@ -412,7 +477,85 @@ describe("ThreadViewport", () => {
 
       expect(buttonPositioner).toHaveStyle({ bottom: "256px" });
     } finally {
-      vi.stubGlobal("ResizeObserver", originalResizeObserver);
+      resizeObserver.restore();
+    }
+  });
+
+  it("keeps the active prompt visible when the composer grows", async () => {
+    const resizeObserver = stubResizeObserver();
+
+    try {
+      const threaded: UIMessage[] = [
+        { id: "u1", role: "user", content: "old question", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "old answer", createdAt: 2 },
+        { id: "u2", role: "user", content: "new question", createdAt: 3 },
+      ];
+      const scrollTo = vi.fn();
+      const { container, rerender } = render(
+        <ThreadViewport
+          messages={threaded}
+          isStreaming
+          composer={<div>composer</div>}
+          scrollToLatestUserPromptSignal={0}
+        />,
+      );
+
+      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1200 },
+        clientHeight: { configurable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 700 },
+        scrollTo: { configurable: true, value: scrollTo },
+      });
+      const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="u2"]');
+      expect(prompt).not.toBeNull();
+      Object.defineProperty(prompt, "offsetTop", {
+        configurable: true,
+        value: 420,
+      });
+
+      await act(async () => {
+        rerender(
+          <ThreadViewport
+            messages={threaded}
+            isStreaming
+            composer={<div>composer</div>}
+            scrollToLatestUserPromptSignal={1}
+          />,
+        );
+      });
+
+      scrollTo.mockClear();
+      const composerDock = screen.getByTestId("thread-composer-dock");
+      composerDock.getBoundingClientRect = () =>
+        ({
+          height: 240,
+          width: 800,
+          top: 0,
+          right: 800,
+          bottom: 240,
+          left: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      const composerObserver = resizeObserver.observers.find(
+        (observer) => observer.element === composerDock,
+      );
+      expect(composerObserver).toBeDefined();
+
+      act(() => {
+        composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
+      });
+
+      await waitFor(() =>
+        expect(scrollTo).toHaveBeenCalledWith({
+          top: 404,
+          behavior: "auto",
+        }),
+      );
+    } finally {
+      resizeObserver.restore();
     }
   });
 
@@ -604,7 +747,7 @@ describe("ThreadViewport", () => {
       screen.queryByText(`message ${firstVisible - 1}`),
     ).not.toBeInTheDocument();
     expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
-    expect(screen.getByText("message 299")).toBeInTheDocument();
+    expect(screen.getAllByText("message 299").length).toBeGreaterThan(0);
   });
 
   it("automatically requests older transcript pages near the top", () => {
@@ -635,44 +778,37 @@ describe("ThreadViewport", () => {
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {
-    const promptMessages = makeLongMessages(5);
-    const { container } = render(
-      <ThreadViewport
-        messages={promptMessages}
-        isStreaming={false}
-        composer={<div />}
-      />,
-    );
-
-    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
     const scrollTo = vi.fn();
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, value: 0 },
-      scrollTo: { configurable: true, value: scrollTo },
-    });
+    const { promptEls } = await renderPromptRailViewport({ scrollTo });
 
-    const promptEls = Array.from(
-      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
-    );
     expect(promptEls).toHaveLength(5);
-    promptEls.forEach((el, index) => {
-      Object.defineProperty(el, "offsetTop", {
-        configurable: true,
-        value: index * 360,
-      });
-    });
-
-    await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-    });
 
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
+    const promptMarkers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    const markerTops = promptMarkers.map((marker) => Number.parseFloat(marker.style.top));
+    expect(markerTops[2]).toBeCloseTo(50);
+    expect(markerTops[1] - markerTops[0]).toBeCloseTo(16 / 3);
+    expect(markerTops[4] - markerTops[0]).toBeCloseTo(64 / 3);
+
+    const railMarkers = screen.getAllByTestId("prompt-rail-marker");
+    expect(railMarkers).toHaveLength(promptMarkers.length);
+    expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
+
+    fireEvent.pointerEnter(promptMarkers[2]);
+    expect(railMarkers.map((marker) => marker.style.width)).toEqual([
+      "16px",
+      "22px",
+      "28px",
+      "22px",
+      "16px",
+    ]);
+
+    fireEvent.pointerLeave(promptMarkers[2]);
+    expect(railMarkers.every((marker) => marker.style.width === "9px")).toBe(true);
 
     const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
     expect(within(targetPrompt).getByText("message 3")).toBeInTheDocument();
+    expect(within(targetPrompt).getByText("answer 3")).toBeInTheDocument();
 
     fireEvent.click(targetPrompt);
 

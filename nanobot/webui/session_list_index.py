@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
-from nanobot.cron.session_turns import CRON_HISTORY_META
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     _SESSION_LIST_PREVIEW_MAX_CHARS,
     _SESSION_LIST_PREVIEW_MAX_RECORDS,
@@ -26,10 +26,11 @@ from nanobot.session.manager import (
     _metadata_title,
 )
 
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
 _INDEX_FILENAME = ".webui_session_index.json"
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
+_VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
 
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
@@ -153,7 +154,7 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
             or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
         ):
             break
-        if item.get(CRON_HISTORY_META) is True:
+        if is_hidden_history_message(item):
             continue
         text = _message_preview_text(item)
         if not text:
@@ -214,14 +215,45 @@ def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
     return stored
 
 
+def _visible_message_timestamp(item: dict[str, Any]) -> str | None:
+    if is_hidden_history_message(item):
+        return None
+    if item.get("role") not in _VISIBLE_TRANSCRIPT_ROLES:
+        return None
+    timestamp = item.get("timestamp")
+    return timestamp if isinstance(timestamp, str) else None
+
+
+def _last_visible_message_at(messages: list[dict[str, Any]]) -> str | None:
+    latest: str | None = None
+    for item in messages:
+        timestamp = _visible_message_timestamp(item)
+        if timestamp is not None:
+            latest = _latest_updated_at(latest, timestamp)
+    return latest
+
+
+def _visible_activity_updated_at(
+    stored: str | None,
+    visible_message_at: str | None,
+    webui_activity: str | None,
+) -> str | None:
+    return _latest_updated_at(visible_message_at, webui_activity) or stored
+
+
 def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
     signature = _file_signature(path)
     activity_signature = _webui_activity_signature(session.key)
     activity_updated_at = _webui_activity_updated_at(activity_signature)
+    visible_message_at = _last_visible_message_at(session.messages)
     return {
         "key": session.key,
         "created_at": session.created_at.isoformat(),
-        "updated_at": _latest_updated_at(session.updated_at.isoformat(), activity_updated_at),
+        "updated_at": _visible_activity_updated_at(
+            session.updated_at.isoformat(),
+            visible_message_at,
+            activity_updated_at,
+        ),
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         "file": path.name,
@@ -232,7 +264,8 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
 
 
 def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
-    fallback_key = path.stem.replace("_", ":", 1)
+    storage_key = SessionManager._decode_storage_key(path.stem)
+    fallback_key = storage_key or path.stem.replace("_", ":", 1)
     try:
         with open(path, encoding="utf-8") as f:
             first_line = f.readline().strip()
@@ -243,31 +276,39 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 return None
             preview = ""
             fallback_preview = ""
+            visible_message_at = None
+            preview_done = False
             scanned_records = 0
             scanned_chars = 0
             for line in f:
                 if not line.strip():
                     continue
-                scanned_records += 1
-                scanned_chars += len(line)
-                if (
-                    scanned_records > _SESSION_LIST_PREVIEW_MAX_RECORDS
-                    or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
-                ):
-                    break
                 item = json.loads(line)
-                if item.get("_type") == "metadata":
-                    continue
-                if item.get(CRON_HISTORY_META) is True:
-                    continue
-                text = _message_preview_text(item)
-                if not text:
-                    continue
-                if item.get("role") == "user":
-                    preview = text
-                    break
-                if not fallback_preview and item.get("role") == "assistant":
-                    fallback_preview = text
+                timestamp = _visible_message_timestamp(item)
+                if timestamp is not None:
+                    visible_message_at = _latest_updated_at(visible_message_at, timestamp)
+                if not preview_done:
+                    scanned_records += 1
+                    scanned_chars += len(line)
+                    if (
+                        scanned_records > _SESSION_LIST_PREVIEW_MAX_RECORDS
+                        or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
+                    ):
+                        preview_done = True
+                        continue
+                    if item.get("_type") == "metadata":
+                        continue
+                    if is_hidden_history_message(item):
+                        continue
+                    text = _message_preview_text(item)
+                    if not text:
+                        continue
+                    if item.get("role") == "user":
+                        preview = text
+                        preview_done = True
+                        continue
+                    if not fallback_preview and item.get("role") == "assistant":
+                        fallback_preview = text
             signature = _file_signature(path)
             created_at_s = data.get("created_at")
             updated_at_s = data.get("updated_at")
@@ -281,7 +322,11 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
             return {
                 "key": key,
                 "created_at": created_at_s,
-                "updated_at": _latest_updated_at(updated_at_s, activity_updated_at),
+                "updated_at": _visible_activity_updated_at(
+                    updated_at_s,
+                    visible_message_at,
+                    activity_updated_at,
+                ),
                 "title": _metadata_title(data.get("metadata", {})),
                 "preview": preview or fallback_preview,
                 "file": path.name,

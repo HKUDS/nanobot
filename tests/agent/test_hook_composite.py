@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext, CompositeHook
+from nanobot.agent.hook import (
+    AgentHook,
+    AgentHookContext,
+    AgentRunHookContext,
+    AgentTurnHookContext,
+    CompositeHook,
+)
 
 
 def _ctx() -> AgentHookContext:
@@ -67,6 +73,9 @@ async def test_composite_fans_out_all_async_methods():
         async def emit_reasoning(self, reasoning_content: str | None) -> None:
             events.append(f"emit_reasoning:{reasoning_content}")
 
+        async def emit_reasoning_end(self) -> None:
+            events.append("emit_reasoning_end")
+
         async def on_stream(self, context: AgentHookContext, delta: str) -> None:
             events.append(f"on_stream:{delta}")
 
@@ -75,6 +84,15 @@ async def test_composite_fans_out_all_async_methods():
 
         async def before_execute_tools(self, context: AgentHookContext) -> None:
             events.append("before_execute_tools")
+
+        async def before_execute_tool(self, context, tool_call, tool, params) -> None:
+            events.append("before_execute_tool")
+
+        async def after_execute_tool(self, context, tool_call, tool, params, result) -> None:
+            events.append("after_execute_tool")
+
+        async def on_execute_tool_error(self, context, tool_call, tool, params, error) -> None:
+            events.append("on_execute_tool_error")
 
         async def after_iteration(self, context: AgentHookContext) -> None:
             events.append("after_iteration")
@@ -95,9 +113,13 @@ async def test_composite_fans_out_all_async_methods():
     await hook.before_run(run_ctx)
     await hook.before_iteration(ctx)
     await hook.emit_reasoning("thinking...")
+    await hook.emit_reasoning_end()
     await hook.on_stream(ctx, "hi")
     await hook.on_stream_end(ctx, resuming=True)
     await hook.before_execute_tools(ctx)
+    await hook.before_execute_tool(ctx, object(), object(), {})
+    await hook.after_execute_tool(ctx, object(), object(), {}, "ok")
+    await hook.on_execute_tool_error(ctx, object(), object(), {}, "err")
     await hook.after_iteration(ctx)
     await hook.after_run(run_ctx)
     await hook.on_error(run_ctx)
@@ -107,9 +129,13 @@ async def test_composite_fans_out_all_async_methods():
         "before_run", "before_run",
         "before_iteration", "before_iteration",
         "emit_reasoning:thinking...", "emit_reasoning:thinking...",
+        "emit_reasoning_end", "emit_reasoning_end",
         "on_stream:hi", "on_stream:hi",
         "on_stream_end:True", "on_stream_end:True",
         "before_execute_tools", "before_execute_tools",
+        "before_execute_tool", "before_execute_tool",
+        "after_execute_tool", "after_execute_tool",
+        "on_execute_tool_error", "on_execute_tool_error",
         "after_iteration", "after_iteration",
         "after_run", "after_run",
         "on_error", "on_error",
@@ -166,9 +192,19 @@ async def test_composite_error_isolation_all_async():
             raise RuntimeError("err")
         async def emit_reasoning(self, reasoning_content):
             raise RuntimeError("err")
+        async def emit_reasoning_end(self):
+            raise RuntimeError("err")
+        async def on_stream(self, context, delta):
+            raise RuntimeError("err")
         async def on_stream_end(self, context, *, resuming):
             raise RuntimeError("err")
         async def before_execute_tools(self, context):
+            raise RuntimeError("err")
+        async def before_execute_tool(self, context, tool_call, tool, params):
+            raise RuntimeError("err")
+        async def after_execute_tool(self, context, tool_call, tool, params, result):
+            raise RuntimeError("err")
+        async def on_execute_tool_error(self, context, tool_call, tool, params, error):
             raise RuntimeError("err")
         async def after_iteration(self, context):
             raise RuntimeError("err")
@@ -184,10 +220,20 @@ async def test_composite_error_isolation_all_async():
             calls.append("before_run")
         async def emit_reasoning(self, reasoning_content):
             calls.append("emit_reasoning")
+        async def emit_reasoning_end(self):
+            calls.append("emit_reasoning_end")
+        async def on_stream(self, context, delta):
+            calls.append("on_stream")
         async def on_stream_end(self, context, *, resuming):
             calls.append("on_stream_end")
         async def before_execute_tools(self, context):
             calls.append("before_execute_tools")
+        async def before_execute_tool(self, context, tool_call, tool, params):
+            calls.append("before_execute_tool")
+        async def after_execute_tool(self, context, tool_call, tool, params, result):
+            calls.append("after_execute_tool")
+        async def on_execute_tool_error(self, context, tool_call, tool, params, error):
+            calls.append("on_execute_tool_error")
         async def after_iteration(self, context):
             calls.append("after_iteration")
         async def after_run(self, context):
@@ -202,8 +248,13 @@ async def test_composite_error_isolation_all_async():
     run_ctx = _run_ctx()
     await hook.before_run(run_ctx)
     await hook.emit_reasoning("test")
+    await hook.emit_reasoning_end()
+    await hook.on_stream(ctx, "delta")
     await hook.on_stream_end(ctx, resuming=False)
     await hook.before_execute_tools(ctx)
+    await hook.before_execute_tool(ctx, object(), object(), {})
+    await hook.after_execute_tool(ctx, object(), object(), {}, "ok")
+    await hook.on_execute_tool_error(ctx, object(), object(), {}, "err")
     await hook.after_iteration(ctx)
     await hook.after_run(run_ctx)
     await hook.on_error(run_ctx)
@@ -211,8 +262,13 @@ async def test_composite_error_isolation_all_async():
     assert calls == [
         "before_run",
         "emit_reasoning",
+        "emit_reasoning_end",
+        "on_stream",
         "on_stream_end",
         "before_execute_tools",
+        "before_execute_tool",
+        "after_execute_tool",
+        "on_execute_tool_error",
         "after_iteration",
         "after_run",
         "on_error",
@@ -307,6 +363,9 @@ async def test_composite_empty_hooks_no_ops():
     await hook.on_stream(ctx, "delta")
     await hook.on_stream_end(ctx, resuming=False)
     await hook.before_execute_tools(ctx)
+    await hook.before_execute_tool(ctx, object(), object(), {})
+    await hook.after_execute_tool(ctx, object(), object(), {}, None)
+    await hook.on_execute_tool_error(ctx, object(), object(), {}, "err")
     await hook.after_iteration(ctx)
     await hook.after_run(run_ctx)
     await hook.on_error(run_ctx)
@@ -348,7 +407,7 @@ async def test_composite_can_wrap_another_composite():
 # ---------------------------------------------------------------------------
 
 
-def _make_loop(tmp_path, hooks=None):
+def _make_loop(tmp_path, hooks=None, hook_factories=None):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -363,7 +422,11 @@ def _make_loop(tmp_path, hooks=None):
          patch("nanobot.agent.loop.Consolidator"):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
-            bus=bus, provider=provider, workspace=tmp_path, hooks=hooks,
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            hooks=hooks,
+            hook_factories=hook_factories,
         )
     return loop
 
@@ -395,7 +458,8 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     content, tools_used, messages, _, _ = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}]
+        [{"role": "user", "content": "hi"}],
+        runtime=loop.llm_runtime(),
     )
 
     assert content == "done"
@@ -403,6 +467,67 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     assert "before_iter:0" in events
     assert "after_iter:0" in events
     assert "after_run:completed" in events
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
+    """Turn-scoped hooks can be supplied externally and see turn-local context."""
+    from nanobot.providers.base import LLMResponse
+
+    captured: list[tuple[str, AgentTurnHookContext]] = []
+    events: list[str] = []
+
+    class TrackingHook(AgentHook):
+        def __init__(self, label: str) -> None:
+            super().__init__()
+            self._label = label
+
+        async def before_iteration(self, context):
+            events.append(f"{self._label}:{context.iteration}")
+
+    def factory(label: str):
+        def _create(context: AgentTurnHookContext) -> AgentHook:
+            captured.append((label, context))
+            return TrackingHook(label)
+
+        return _create
+
+    loop = _make_loop(tmp_path, hook_factories=[factory("registered")])
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    async def on_progress(*args, **kwargs):
+        pass
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hi"}],
+        runtime=loop.llm_runtime(),
+        on_progress=on_progress,
+        channel="websocket",
+        chat_id="chat-1",
+        message_id="msg-1",
+        metadata={"source": "test"},
+        session_key="websocket:chat-1",
+        hook_factories=[factory("turn")],
+    )
+
+    assert events == ["registered:0", "turn:0"]
+    assert [label for label, _ in captured] == ["registered", "turn"]
+    assert [context.on_progress for _, context in captured] == [on_progress, on_progress]
+    assert [context.workspace for _, context in captured] == [tmp_path, tmp_path]
+    assert [context.channel for _, context in captured] == ["websocket", "websocket"]
+    assert [context.chat_id for _, context in captured] == ["chat-1", "chat-1"]
+    assert [context.message_id for _, context in captured] == ["msg-1", "msg-1"]
+    assert [context.session_key for _, context in captured] == [
+        "websocket:chat-1",
+        "websocket:chat-1",
+    ]
+    assert [context.metadata for _, context in captured] == [
+        {"source": "test"},
+        {"source": "test"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -421,7 +546,8 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     content, _, _, _, _ = await loop._run_agent_loop(
-        [{"role": "user", "content": "hi"}]
+        [{"role": "user", "content": "hi"}],
+        runtime=loop.llm_runtime(),
     )
 
     assert content == "still works"
@@ -445,7 +571,9 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
         raise RuntimeError("progress failed")
 
     with pytest.raises(RuntimeError, match="progress failed"):
-        await loop._run_agent_loop([], on_progress=bad_progress)
+        await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=bad_progress
+        )
 
 
 @pytest.mark.asyncio
@@ -462,7 +590,9 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    content, tools_used, _, _, _ = await loop._run_agent_loop([])
+    content, tools_used, _, _, _ = await loop._run_agent_loop(
+        [], runtime=loop.llm_runtime()
+    )
     assert content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."

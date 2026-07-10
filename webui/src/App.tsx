@@ -23,7 +23,9 @@ import { useSkills } from "@/hooks/useSkills";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import {
+  BootstrapAuthRequiredError,
   clearSavedSecret,
+  consumeUrlBootstrapSecret,
   deriveWsUrl,
   fetchBootstrap,
   loadSavedSecret,
@@ -295,6 +297,12 @@ function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePa
   };
 }
 
+function isBootstrapAuthRequired(error: unknown): boolean {
+  if (error instanceof BootstrapAuthRequiredError) return true;
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("HTTP 401") || msg.includes("HTTP 403");
+}
+
 function HostChrome({
   onToggleSidebar,
   onSidebarPreviewEnter,
@@ -361,14 +369,14 @@ export default function App() {
         current.status === "ready" && current.client === client
           ? {
               ...current,
-              token: boot.token,
+              token: boot.api_token,
               tokenExpiresAt,
               modelName: boot.model_name ?? current.modelName,
               runtimeSurface,
             }
           : current,
       );
-      return { token: boot.token, url };
+      return { token: boot.api_token, url };
     },
     [],
   );
@@ -402,18 +410,20 @@ export default function App() {
           setState({
             status: "ready",
             client,
-            token: boot.token,
+            token: boot.api_token,
             tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
             modelName: boot.model_name ?? null,
             runtimeSurface,
           });
         } catch (e) {
           if (cancelled) return;
-          const msg = (e as Error).message;
-          if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
+          if (isBootstrapAuthRequired(e)) {
             setState({ status: "auth", failed: !!secret });
           } else {
-            setState({ status: "error", message: msg });
+            setState({
+              status: "error",
+              message: e instanceof Error ? e.message : String(e),
+            });
           }
         }
       })();
@@ -431,8 +441,7 @@ export default function App() {
       try {
         await refreshReadyClient(client, state.runtimeSurface);
       } catch (e) {
-        const msg = (e as Error).message;
-        if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
+        if (isBootstrapAuthRequired(e)) {
           setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
       }
@@ -441,7 +450,7 @@ export default function App() {
   }, [refreshReadyClient, state]);
 
   useEffect(() => {
-    const saved = loadSavedSecret();
+    const saved = consumeUrlBootstrapSecret() || loadSavedSecret();
     return bootstrapWithSecret(saved);
   }, [bootstrapWithSecret]);
 
@@ -1586,6 +1595,7 @@ function Shell({
                 onWorkspaceScopeChange={applyWorkspaceScope}
                 settingsSnapshot={settingsSnapshot}
                 onOpenModelSettings={onOpenModelSettings}
+                skills={skills}
               />
             </div>
             {view !== "chat" && (

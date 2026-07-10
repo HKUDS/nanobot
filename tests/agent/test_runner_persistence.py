@@ -6,15 +6,14 @@ import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
+from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -36,8 +35,8 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="x" * 20_000)
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
@@ -127,7 +126,7 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
 
 async def test_read_file_result_is_not_offloaded(tmp_path):
     """read_file must not trigger generic offloading (prevents persist->read->persist loops)."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -149,8 +148,8 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="x" * 20_000)
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "read big file"}],
         tools=tools,
         model="test-model",
@@ -172,7 +171,7 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
 
 
 async def test_runner_keeps_going_when_tool_result_persistence_fails():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -194,9 +193,12 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
 
-    runner = AgentRunner(provider)
-    with patch("nanobot.agent.runner.maybe_persist_tool_result", side_effect=RuntimeError("disk full")):
-        result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    with patch(
+        "nanobot.agent.context_governance.maybe_persist_tool_result",
+        side_effect=RuntimeError("disk full"),
+    ):
+        result = await runner.run(make_run_spec(provider,
             initial_messages=[{"role": "user", "content": "do task"}],
             tools=tools,
             model="test-model",

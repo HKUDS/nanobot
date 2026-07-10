@@ -29,6 +29,9 @@ import {
   isReasoningOnlyAssistant,
   type ActivityEvidence,
 } from "@/lib/activity-timeline";
+import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { hasRenderableFileDiff } from "@/lib/file-diff";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
 import { formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
@@ -190,6 +193,7 @@ export function AgentActivityCluster({
   onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
+  const fileEditDisplayMode = useFileEditDisplayMode();
   const fileEdits = useMemo(
     () => summarizeFileEdits(collectFileEdits(messages), isTurnStreaming),
     [messages, isTurnStreaming],
@@ -282,7 +286,7 @@ export function AgentActivityCluster({
         })
       : t(fileActivityManySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
           count: fileCount,
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{count}} files`,
+          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{count}} changes`,
         })
     : "";
 
@@ -438,6 +442,7 @@ export function AgentActivityCluster({
         added={added}
         deleted={deleted}
         hasDiffStats={hasDiffStats}
+        fileEditDisplayMode={fileEditDisplayMode}
         onOpenFilePreview={onOpenFilePreview}
       />
     );
@@ -532,6 +537,7 @@ export function AgentActivityCluster({
               {fileEdits.length ? (
                 <FileEditGroup
                   edits={fileEdits}
+                  displayMode={fileEditDisplayMode}
                   onOpenFilePreview={onOpenFilePreview}
                 />
               ) : null}
@@ -561,6 +567,7 @@ function FileEditFlatActivity({
   added,
   deleted,
   hasDiffStats,
+  fileEditDisplayMode,
   onOpenFilePreview,
 }: {
   edits: FileEditSummary[];
@@ -575,9 +582,23 @@ function FileEditFlatActivity({
   added: number;
   deleted: number;
   hasDiffStats: boolean;
+  fileEditDisplayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
 }) {
-  const showRows = edits.length > 1 || edits.some((edit) => edit.status === "error" || edit.pending);
+  const diffOnlyRows = edits.length === 1
+    && !!singleFilePath
+    && fileEditDisplayMode !== "summary"
+    && edits.some((edit) => (
+      edit.status !== "editing"
+      && edit.status !== "error"
+      && hasRenderableFileDiff(edit.diff)
+    ));
+  const showRows = edits.length > 1
+    || edits.some((edit) => edit.status === "error" || edit.pending)
+    || (
+      fileEditDisplayMode !== "summary"
+      && edits.some((edit) => hasRenderableFileDiff(edit.diff))
+    );
   return (
     <div className={cn("w-full", hasBodyBelow && "mb-2")} aria-label={summary}>
       <div
@@ -611,7 +632,12 @@ function FileEditFlatActivity({
       </div>
       {showRows ? (
         <div className="mt-0.5 pl-4">
-          <FileEditGroup edits={edits} onOpenFilePreview={onOpenFilePreview} />
+          <FileEditGroup
+            edits={edits}
+            displayMode={fileEditDisplayMode}
+            density={diffOnlyRows ? "diff-only" : "default"}
+            onOpenFilePreview={onOpenFilePreview}
+          />
         </div>
       ) : null}
     </div>
@@ -986,7 +1012,7 @@ function describeTraceLine(line: string): TraceDescription {
     };
   }
   if (name) {
-    return { kind: "tool", label: "Using", detail: name };
+    return { kind: "tool", label: "Using", detail: genericToolTraceDetail(name, args) };
   }
   if (/done|complete|success/i.test(trimmed)) {
     return { kind: "done", label: "Done", detail: trimmed };
@@ -1146,6 +1172,35 @@ function formatTraceUrl(url: URL): string {
   const host = displayHost(url.hostname);
   const path = url.pathname && url.pathname !== "/" ? url.pathname : "";
   return `${host}${path}`;
+}
+
+function genericToolTraceDetail(name: string, args: string): string {
+  const preview = previewGenericToolArgs(args);
+  return preview ? `${name} ${preview}` : name;
+}
+
+function previewGenericToolArgs(args: string): string {
+  const compactArgs = args.trim();
+  if (!compactArgs) return "";
+  try {
+    return previewGenericArgsObject(JSON.parse(compactArgs) as unknown);
+  } catch {
+    return compactArgs.replace(/^["']|["']$/g, "");
+  }
+}
+
+function previewGenericArgsObject(argsObject: unknown): string {
+  if (!argsObject || typeof argsObject !== "object" || Array.isArray(argsObject)) {
+    return previewScalar(argsObject) ?? "";
+  }
+  const record = argsObject as Record<string, unknown>;
+  const entries: string[] = [];
+  for (const key of ["query", "glob", "pattern", "path", "file_path", "url", "name", "id", "title"]) {
+    const preview = previewScalar(record[key]);
+    if (preview) entries.push(`${key}: ${preview}`);
+    if (entries.length >= 2) return entries.join(" · ");
+  }
+  return entries.join(" · ");
 }
 
 function previewTraceDetail(args: string, fallback: string): string {
@@ -1550,122 +1605,32 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
 }
 
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {
-  interface MutableSummary {
-    key: string;
-    path: string;
-    absolute_path?: string;
-    added: number;
-    deleted: number;
-    approximate: boolean;
-    binary: boolean;
-    pending: boolean;
-    hasSuccessfulChange: boolean;
-    hasActiveEditing: boolean;
-    hasFailed: boolean;
-    operation?: UIFileEdit["operation"];
-    error?: string;
-  }
+  return latestFileEditEvents(edits).flatMap((edit) => {
+    const editing = active && edit.status === "editing";
+    const failed = edit.status === "error";
+    if (!edit.path && edit.pending && !editing) return [];
+    if (!edit.path && !editing && !failed) return [];
 
-  const order: string[] = [];
-  const byPath = new Map<string, MutableSummary>();
-  for (const edit of latestFileEditEvents(edits)) {
-    const key = edit.path || edit.call_id || edit.tool;
-    let summary = byPath.get(key);
-    if (!summary) {
-      summary = {
-        key,
-        path: edit.path || "",
-        absolute_path: edit.absolute_path,
-        added: 0,
-        deleted: 0,
-        approximate: false,
-        binary: false,
-        pending: false,
-        hasSuccessfulChange: false,
-        hasActiveEditing: false,
-        hasFailed: false,
-        operation: undefined,
-      };
-      byPath.set(key, summary);
-      order.push(key);
-    }
-
-    if (edit.path && !summary.path) {
-      summary.path = edit.path;
-    }
-    if (edit.absolute_path) {
-      summary.absolute_path = edit.absolute_path;
-    }
-    if (edit.operation === "delete") {
-      summary.operation = "delete";
-    }
-    summary.pending = summary.pending || !!edit.pending || !edit.path;
-    if (!edit.path && edit.pending) {
-      if (active && edit.status === "editing") {
-        summary.hasActiveEditing = true;
-        summary.approximate = summary.approximate || !!edit.approximate;
-        if (!edit.binary) {
-          summary.added += edit.added;
-          summary.deleted += edit.deleted;
-        }
-      }
-      continue;
-    }
-    if (active && edit.status === "editing") {
-      summary.hasActiveEditing = true;
-      summary.binary = summary.binary || !!edit.binary;
-      summary.approximate = summary.approximate || !!edit.approximate;
-      if (!edit.binary) {
-        summary.added += edit.added;
-        summary.deleted += edit.deleted;
-      }
-      continue;
-    }
-
-    if (edit.status === "error") {
-      summary.hasFailed = true;
-      summary.error = edit.error ?? summary.error;
-      continue;
-    }
-
-    summary.hasSuccessfulChange = true;
-    summary.binary = summary.binary || !!edit.binary;
-    summary.approximate = active && (summary.approximate || !!edit.approximate);
-    if (!edit.binary) {
-      summary.added += edit.added;
-      summary.deleted += edit.deleted;
-    }
-  }
-
-  return order.flatMap((key) => {
-    const summary = byPath.get(key)!;
-    if (
-      !summary.path
-      && !summary.hasActiveEditing
-      && !summary.hasSuccessfulChange
-      && !summary.hasFailed
-    ) {
-      return [];
-    }
-    const status: UIFileEdit["status"] = summary.hasActiveEditing
+    const status: UIFileEdit["status"] = editing
       ? "editing"
-      : summary.hasSuccessfulChange
-        ? "done"
-        : summary.hasFailed
-          ? "error"
-          : "done";
+      : failed
+        ? "error"
+        : "done";
+    const binary = !!edit.binary;
+    const diff = hasRenderableFileDiff(edit.diff) ? edit.diff : undefined;
     return [{
-      key: summary.key,
-      path: summary.path,
-      absolute_path: summary.absolute_path,
-      added: summary.added,
-      deleted: summary.deleted,
-      approximate: summary.approximate,
-      binary: summary.binary,
+      key: fileEditCallKey(edit),
+      path: edit.path || "",
+      absolute_path: edit.absolute_path,
+      added: binary ? 0 : edit.added,
+      deleted: binary ? 0 : edit.deleted,
+      approximate: active && !!edit.approximate,
+      binary,
       status,
-      operation: summary.operation,
-      pending: summary.pending && !summary.path,
-      error: summary.error,
+      operation: edit.operation,
+      pending: !!edit.pending && !edit.path,
+      error: edit.error,
+      diff,
     }];
   });
 }

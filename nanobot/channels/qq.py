@@ -195,7 +195,7 @@ class QQChannel(BaseChannel):
         """Start the QQ bot with auto-reconnect loop."""
         redirect_lib_logging("botpy", level="WARNING")
         if not QQ_AVAILABLE:
-            self.logger.error("SDK not installed. Run: pip install qq-botpy")
+            self.logger.error("SDK not installed. Run: nanobot plugins enable qq")
             return
 
         if not self.config.app_id or not self.config.secret:

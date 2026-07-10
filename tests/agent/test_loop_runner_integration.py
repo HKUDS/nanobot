@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.utils.llm_runtime import LLMRuntime
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -20,11 +22,12 @@ def _make_loop(tmp_path):
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
 
@@ -39,7 +42,9 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    final_content, _, _, _, _ = await loop._run_agent_loop([])
+    final_content, _, _, _, _ = await loop._run_agent_loop(
+        [], runtime=loop.llm_runtime()
+    )
 
     assert final_content == (
         "I reached the maximum number of tool call iterations (2) "
@@ -60,6 +65,7 @@ async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
 
     final_content, _, _, stop_reason, _ = await loop._run_agent_loop(
         [],
+        runtime=loop.llm_runtime(),
         metadata={"original_command": "/goal"},
     )
 
@@ -93,6 +99,7 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
 
     final_content, _, _, _, _ = await loop._run_agent_loop(
         [],
+        runtime=loop.llm_runtime(),
         on_stream=on_stream,
         on_stream_end=on_stream_end,
     )
@@ -117,7 +124,9 @@ async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+    final_content, _, _, _, _ = await loop._run_agent_loop(
+        [], runtime=loop.llm_runtime(), on_stream=on_stream
+    )
 
     assert final_content == "Hello World"
     assert deltas == ["Hello", " World"]
@@ -138,7 +147,9 @@ async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+    final_content, _, _, _, _ = await loop._run_agent_loop(
+        [], runtime=loop.llm_runtime(), on_stream=on_stream
+    )
 
     assert final_content == "Hello World"
     assert deltas == ["Hello", " World"]
@@ -157,7 +168,9 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
     loop.provider.chat_with_retry = chat_with_retry
 
-    final_content, _, _, _, _ = await loop._run_agent_loop([])
+    final_content, _, _, _, _ = await loop._run_agent_loop(
+        [], runtime=loop.llm_runtime()
+    )
 
     assert final_content == "Recovered answer"
     assert call_count["n"] == 2
@@ -193,8 +206,9 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
     assert result is not None
     assert "503" in result.content
-    assert not result.metadata.get("_streamed"), \
-        "_streamed must not be set when stop_reason is error"
+    assert not isinstance(result.event, StreamedResponseEvent), (
+        "streamed response event must not be set when stop_reason is error"
+    )
 
 
 @pytest.mark.asyncio
@@ -239,7 +253,7 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
 
     assert result is not None
     assert result.content == "I cannot access private URLs. Please share the local file."
-    assert result.metadata.get("_streamed") is True
+    assert isinstance(result.event, StreamedResponseEvent)
 
 
 @pytest.mark.asyncio
@@ -304,7 +318,6 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
         tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
     ))
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -317,7 +330,14 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
     status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
-    await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"}, status)
+    await mgr._run_subagent(
+        "sub-1",
+        "do task",
+        "label",
+        {"channel": "test", "chat_id": "c1"},
+        status,
+        LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    )
 
     mgr._announce_result.assert_awaited_once()
     args = mgr._announce_result.await_args.args

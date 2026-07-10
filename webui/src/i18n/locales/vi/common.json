@@ -121,6 +121,7 @@
       "presetModel": "Mô hình preset",
       "density": "Mật độ",
       "activityMode": "Chi tiết hoạt động",
+      "fileEditDisplay": "Hiển thị sửa tệp",
       "codeWrap": "Xuống dòng mã",
       "maxResults": "Kết quả tối đa",
       "timeout": "Thời gian chờ",
@@ -165,6 +166,7 @@
       "presetModel": "Chuyển sang Default để chỉnh sửa mô hình và nhà cung cấp từ WebUI.",
       "density": "Chỉ lưu trong trình duyệt này.",
       "activityMode": "Chọn mức chi tiết hoạt động agent hiển thị mặc định.",
+      "fileEditDisplay": "Chọn hoạt động sửa tệp hiển thị số dòng hay diff.",
       "codeWrap": "Giữ các dòng mã dài dễ đọc trên màn hình nhỏ.",
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
@@ -214,6 +216,9 @@
       "compact": "Gọn",
       "auto": "Tự động",
       "expanded": "Mở rộng",
+      "summary": "Tóm tắt",
+      "diff": "Diff",
+      "collapsedDiff": "Diff thu gọn",
       "on": "Bật",
       "off": "Tắt",
       "defaultPermission": "Quyền mặc định",
@@ -458,18 +463,36 @@
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
     },
     "apps": {
-      "description": "Thêm CLI ứng dụng và dịch vụ MCP mà nanobot có thể dùng trong chat.",
+      "description": "Bật plugin, bộ chuyển đổi ứng dụng cục bộ và máy chủ công cụ đã kết nối.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "Kênh",
+      "featureLabel": "Tính năng",
       "filterAll": "Tất cả",
+      "filterPlugins": "Plugin",
       "filterCli": "Ứng dụng CLI",
       "filterMcp": "Dịch vụ MCP",
       "enabledSummary": "{{count}} đã bật",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "caption": "{{plugins}} plugin · {{cli}} CLI · {{mcp}} MCP",
       "searchPlaceholder": "Tìm ứng dụng",
-      "featured": "Nổi bật",
+      "featured": "Danh mục",
       "loading": "Đang tải ứng dụng...",
-      "empty": "Không có ứng dụng phù hợp."
+      "empty": "Không có ứng dụng phù hợp.",
+      "restartRequired": "Khởi động lại nanobot để áp dụng ứng dụng và tính năng đã cập nhật."
+    },
+    "nanobotFeatures": {
+      "enabled": "Đã bật",
+      "enable": "Bật",
+      "disable": "Tắt",
+      "ready": "Sẵn sàng",
+      "missingDependency": "Thiếu gói hỗ trợ",
+      "installSupport": "Cài gói hỗ trợ",
+      "installConfirmTitle": "Cài hỗ trợ cho {{name}}?",
+      "installConfirmDescription": "nanobot sẽ thêm những gì {{name}} cần, rồi bật tính năng này. Tiếp tục?",
+      "installConfirmAction": "Cài và bật",
+      "websocketRequired": "Bắt buộc cho WebUI",
+      "channelDisabled": "Kênh đang tắt",
+      "notEnabled": "Chưa bật"
     },
     "automations": {
       "filters": {
@@ -493,6 +516,7 @@
       "emptyHint": "Tạo từ nơi tác vụ sẽ chạy để nanobot giữ đúng ngữ cảnh.",
       "oneShot": "Một lần",
       "systemTask": "Tự động hóa do hệ thống quản lý",
+      "localTrigger": "Trình kích hoạt cục bộ",
       "labels": {
         "schedule": "Lịch",
         "next": "Tiếp theo",
@@ -551,11 +575,13 @@
         "weekdaysAt": "Ngày làm việc lúc {{time}}",
         "hourlyAt": "Mỗi giờ tại :{{minute}}",
         "hourlyWindow": "Mỗi giờ {{start}}-{{end}} tại :{{minute}}",
+        "local": "Trình kích hoạt cục bộ",
         "custom": "Lịch tùy chỉnh"
       },
       "next": {
         "paused": "Đã tạm dừng",
         "pending": "Đang chạy",
+        "local": "Đang chờ kích hoạt",
         "none": "Không có lần chạy tiếp theo"
       },
       "message": {
@@ -692,11 +718,13 @@
       "every": "Mỗi {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Trình kích hoạt cục bộ",
       "unknown": "Lịch tùy chỉnh"
     },
     "next": {
       "label": "Tiếp theo: {{time}}",
       "disabled": "Đã tạm dừng",
+      "local": "Đang chờ kích hoạt",
       "none": "Không có lần chạy tiếp theo"
     }
   },
@@ -791,12 +819,14 @@
         "every": "Mỗi {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Trình kích hoạt cục bộ",
         "unknown": "Lịch tùy chỉnh"
       },
       "next": {
         "label": "Tiếp theo {{time}}",
         "pending": "Sắp chạy",
         "disabled": "Đã tạm dừng",
+        "local": "Đang chờ kích hoạt",
         "none": "Không có lần chạy tiếp theo"
       }
     },
@@ -870,7 +900,7 @@
         "commands": {
           "new": {
             "title": "Cuộc trò chuyện mới",
-            "description": "Dừng tác vụ hiện tại và bắt đầu một cuộc trò chuyện mới."
+            "description": "Đặt lại cuộc trò chuyện này và bắt đầu một cuộc trò chuyện mới."
           },
           "stop": {
             "title": "Dừng tác vụ hiện tại",
@@ -904,9 +934,17 @@
             "title": "Khôi phục bộ nhớ",
             "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
           },
+          "dream_prompt": {
+            "title": "Bộ nhớ Dream",
+            "description": "Cho Dream biết cách sắp xếp bộ nhớ của workspace này."
+          },
           "goal": {
             "title": "Mục tiêu dài hạn",
             "description": "Yêu cầu agent xử lý đây là mục tiêu nhiều bước kéo dài."
+          },
+          "trigger": {
+            "title": "Tạo trigger cục bộ",
+            "description": "Tạo trigger CLI gắn với phiên chat này."
           },
           "help": {
             "title": "Hiển thị trợ giúp",
@@ -950,11 +988,11 @@
         "mcpDescription": "Dùng @{{name}} như máy chủ MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Chế độ truy cập workspace",
         "projectAria": "Chọn dự án",
         "projectPlaceholder": "Chọn dự án",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Quyền mặc định",
+        "full": "Toàn quyền truy cập"
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
@@ -989,6 +1027,14 @@
     "copyReply": "Sao chép",
     "copiedReply": "Đã sao chép",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
+    "fileEditViewDiff": "Xem diff",
+    "fileEditViewLargeDiff": "Xem diff lớn",
+    "fileEditDiffLineCount": "{{count}} dòng",
+    "fileEditUnchangedLinesHidden": "Đã ẩn {{count}} dòng không đổi",
+    "fileEditShowMoreLines": "Hiển thị thêm {{count}} dòng",
+    "fileEditShowFewerLines": "Hiển thị ít dòng hơn",
+    "fileEditOpenFile": "Mở tệp",
+    "fileEditDiffTruncated": "Diff đã bị cắt bớt. Mở tệp để xem toàn bộ thay đổi.",
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",
     "activityThoughtFor": "Đã suy nghĩ trong {{duration}}",
@@ -1038,17 +1084,17 @@
       "body": "Máy chủ đã từ chối tin nhắn trước vì vượt quá giới hạn kích thước. Hãy bớt ảnh hoặc chọn tệp nhỏ hơn rồi thử lại."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace không thay đổi",
+      "body": "Gateway đã từ chối dự án hoặc chế độ truy cập được yêu cầu, nên Nanobot giữ workspace trước đó."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace mặc định",
       "manual": "Dán đường dẫn",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Dùng đường dẫn",
+      "absolutePathRequired": "Nhập đường dẫn thư mục tuyệt đối trên máy này."
     }
   }
 }

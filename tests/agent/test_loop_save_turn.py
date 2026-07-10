@@ -7,10 +7,20 @@ import pytest
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import (
+    GoalStatusEvent,
+    StreamDeltaEvent,
+    StreamedResponseEvent,
+    StreamEndEvent,
+    TurnEndEvent,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMResponse
+from nanobot.providers.factory import ProviderSnapshot
+from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.turn_continuation import (
@@ -26,6 +36,7 @@ from nanobot.session.webui_turns import (
     clean_generated_title,
     maybe_generate_webui_title,
 )
+from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -59,8 +70,17 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
     assert runtime.model == "test-model"
 
     next_provider = MagicMock()
-    loop.provider = next_provider
-    loop.model = "next-model"
+    next_provider.generation = SimpleNamespace(
+        temperature=0.1,
+        max_tokens=4096,
+        reasoning_effort=None,
+    )
+    loop.runtime_resolver.adopt_snapshot(ProviderSnapshot(
+        provider=next_provider,
+        model="next-model",
+        context_window_tokens=runtime.context_window_tokens,
+        signature=("next-model",),
+    ))
     runtime = loop.llm_runtime()
 
     assert runtime.provider is next_provider
@@ -94,12 +114,76 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert persisted is True
     message = session.messages[-1]
     assert message["content"] == "Scheduled cron job triggered: Daily check"
+    assert message[AUTOMATION_HISTORY_META] == {
+        "kind": "cron",
+        "cron_job_id": "job-1",
+        "cron_job_name": "Daily check",
+        "cron_run_id": "job-1:1",
+        "cron_prompt_ref": prompt_ref,
+    }
     assert message[CRON_HISTORY_META] is True
     assert CRON_TRIGGER_META not in message
     assert message["cron_job_id"] == "job-1"
     assert message["cron_job_name"] == "Daily check"
     assert message["cron_run_id"] == "job-1:1"
     assert message["cron_prompt_ref"] == prompt_ref
+
+
+def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:auto")
+
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="websocket",
+            sender_id="trigger",
+            chat_id="auto",
+            content="Review PR #4502",
+            metadata={
+                LOCAL_TRIGGER_META: {
+                    "trigger_id": "trg_123",
+                    "trigger_name": "PR review",
+                    "delivery_id": "tdel_456",
+                    "created_at_ms": 1_700_000_000_000,
+                    "persist_content": "Local trigger received: PR review\n\nReview PR #4502",
+                }
+            },
+        ),
+        session,
+    )
+
+    assert persisted is True
+    message = session.messages[-1]
+    assert message["content"] == "Local trigger received: PR review\n\nReview PR #4502"
+    assert message[AUTOMATION_HISTORY_META] == {
+        "kind": "local_trigger",
+        "trigger_id": "trg_123",
+        "trigger_name": "PR review",
+        "trigger_delivery_id": "tdel_456",
+    }
+    assert LOCAL_TRIGGER_META not in message
+    assert message["trigger_id"] == "trg_123"
+    assert message["trigger_name"] == "PR review"
+    assert message["trigger_delivery_id"] == "tdel_456"
+
+
+@pytest.mark.asyncio
+async def test_new_with_bot_suffix_does_not_persist_command(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="chat-1",
+            content="/new@nanobot_bot",
+        )
+    )
+
+    assert response is not None
+    assert response.content == "New session started."
+    session = loop.sessions.get_or_create("websocket:chat-1")
+    assert session.messages == []
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:
@@ -242,7 +326,7 @@ def test_webui_title_update_uses_captured_llm_runtime(
     coordinator.capture_title_context(
         "websocket:chat1",
         msg,
-        LLMRuntime(provider, "turn-model"),
+        LLMRuntime.capture(provider, "turn-model", context_window_tokens=32_768),
     )
     asyncio.run(coordinator.handle_turn_end(
         msg,
@@ -765,7 +849,6 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
             "_wants_stream": True,
             "message_id": "om_001",
             "origin_message_id": "root_001",
-            "_stream_id": "old-stream",
         },
     ))
 
@@ -775,23 +858,23 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
     assert queued.metadata["_wants_stream"] is True
     assert queued.metadata["message_id"] == "om_001"
     assert queued.metadata["origin_message_id"] == "root_001"
-    assert "_stream_id" not in queued.metadata
 
     await loop._dispatch(queued)
 
     outbound = []
     while loop.bus.outbound_size:
         outbound.append(await loop.bus.consume_outbound())
-    deltas = [m for m in outbound if m.metadata.get("_stream_delta")]
-    ends = [m for m in outbound if m.metadata.get("_stream_end")]
-    streamed_markers = [m for m in outbound if m.metadata.get("_streamed")]
+    deltas = [m for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+    ends = [m for m in outbound if isinstance(m.event, StreamEndEvent)]
+    streamed_markers = [m for m in outbound if isinstance(m.event, StreamedResponseEvent)]
 
     assert [m.content for m in deltas] == ["done"]
     assert len(ends) == 1
-    assert ends[0].metadata["_resuming"] is False
+    assert isinstance(ends[0].event, StreamEndEvent)
+    assert ends[0].event.resuming is False
     assert ends[0].metadata["message_id"] == "om_001"
     assert ends[0].metadata["origin_message_id"] == "root_001"
-    assert isinstance(ends[0].metadata.get("_stream_id"), str)
+    assert isinstance(ends[0].event.stream_id, str)
     assert streamed_markers and streamed_markers[-1].content == "done"
 
 
@@ -842,10 +925,10 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
     first_outbound = []
     while loop.bus.outbound_size:
         first_outbound.append(await loop.bus.consume_outbound())
-    first_statuses = [m.metadata for m in first_outbound if m.metadata.get("_goal_status")]
-    assert [m["goal_status"] for m in first_statuses] == ["running"]
-    assert not [m for m in first_outbound if m.metadata.get("_turn_end")]
-    started_at = first_statuses[0]["started_at"]
+    first_statuses = [m.event for m in first_outbound if isinstance(m.event, GoalStatusEvent)]
+    assert [m.status for m in first_statuses] == ["running"]
+    assert not [m for m in first_outbound if isinstance(m.event, TurnEndEvent)]
+    started_at = first_statuses[0].started_at
 
     queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
     assert queued.metadata[INTERNAL_CONTINUATION_META] is True
@@ -856,12 +939,13 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
     second_outbound = []
     while loop.bus.outbound_size:
         second_outbound.append(await loop.bus.consume_outbound())
-    second_statuses = [m.metadata for m in second_outbound if m.metadata.get("_goal_status")]
-    assert [m["goal_status"] for m in second_statuses] == ["running", "idle"]
-    assert second_statuses[0]["started_at"] == started_at
-    turn_end = [m for m in second_outbound if m.metadata.get("_turn_end")]
+    second_statuses = [m.event for m in second_outbound if isinstance(m.event, GoalStatusEvent)]
+    assert [m.status for m in second_statuses] == ["running", "idle"]
+    assert second_statuses[0].started_at == started_at
+    turn_end = [m for m in second_outbound if isinstance(m.event, TurnEndEvent)]
     assert len(turn_end) == 1
-    assert isinstance(turn_end[0].metadata.get("latency_ms"), int)
+    assert isinstance(turn_end[0].event, TurnEndEvent)
+    assert isinstance(turn_end[0].event.latency_ms, int)
 
 
 @pytest.mark.asyncio
@@ -981,6 +1065,7 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
 
     await loop._run_agent_loop(
         [],
+        runtime=loop.llm_runtime(),
         session=session,
         channel="websocket",
         chat_id="late-goal",
@@ -1017,20 +1102,27 @@ async def test_process_direct_skip_user_persist_does_not_save_retry_user(
     ]
 
 
-def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     spawn_tool = loop.tools.get("spawn")
     assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
 
-    loop._set_tool_context(
-        "discord",
-        "thread-777",
+    with request_context(RequestContext(
+        channel="discord",
+        chat_id="thread-777",
         session_key="discord:parent-456:thread:thread-777",
-    )
+        runtime=runtime,
+    )):
+        await spawn_tool.execute(task="inspect context")
 
-    assert spawn_tool._origin_channel.get() == "discord"  # type: ignore[attr-defined]
-    assert spawn_tool._origin_chat_id.get() == "thread-777"  # type: ignore[attr-defined]
-    assert spawn_tool._session_key.get() == "discord:parent-456:thread:thread-777"  # type: ignore[attr-defined]
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["origin_channel"] == "discord"
+    assert call["origin_chat_id"] == "thread-777"
+    assert call["session_key"] == "discord:parent-456:thread:thread-777"
+    assert call["runtime"] is runtime
 
 
 @pytest.mark.asyncio
@@ -1195,10 +1287,14 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     session.add_message("assistant", "working")
     loop.sessions.save(session)
 
-    seen: dict[str, list[dict]] = {}
+    runtime = loop.llm_runtime()
+    seen: dict[str, object] = {}
+    record_runtime = MagicMock(wraps=loop._runtime_events().record_turn_runtime)
+    loop.runtime_event_publisher.record_turn_runtime = record_runtime
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(initial_messages, **kwargs):
         seen["initial_messages"] = initial_messages
+        seen["runtime"] = kwargs["runtime"]
         return (
             "done",
             [],
@@ -1216,17 +1312,25 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
             chat_id="cli:test",
             content="subagent result",
             metadata={"subagent_task_id": "sub-1"},
-        )
+        ),
+        runtime=runtime,
     )
 
-    non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
+    assert seen["runtime"] is runtime
+    record_runtime.assert_called_once_with("cli:test", runtime)
+    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
+    assert all(
+        call.kwargs["runtime"] is runtime
+        for call in loop.consolidator.maybe_consolidate_by_tokens.call_args_list
+    )
+    initial_messages = seen["initial_messages"]
+    assert isinstance(initial_messages, list)
+    non_system = [m for m in initial_messages if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
-    # User turns carry the timestamp prefix so the model can reason about
-    # relative time. Assistant turns do NOT, otherwise the model treats those
-    # past replies as in-context examples and starts its own outputs with
-    # ``[Message Time: ...]`` (which then leaks back to the user).
-    assert "[Message Time:" in non_system[0]["content"]
+    # Persisted timestamps stay in session records, but replay content is not
+    # rewritten with volatile ``[Message Time: ...]`` prefixes.
+    assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["content"].count("subagent result") == 1
     assert "Current Time:" in non_system[2]["content"]
@@ -1351,21 +1455,28 @@ def test_subagent_followup_skips_empty_content() -> None:
     assert session.messages == []
 
 
-def test_set_tool_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    runtime = loop.llm_runtime()
 
-    loop._set_tool_context(
-        "slack",
-        "C123",
+    with request_context(RequestContext(
+        channel="slack",
+        chat_id="C123",
         message_id="msg-123",
         metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
         session_key="slack:C123:1700.42",
-    )
+        runtime=runtime,
+    )):
+        await spawn_tool.execute(task="inspect thread")
 
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    assert spawn_tool._session_key.get() == "slack:C123:1700.42"
-    assert spawn_tool._origin_message_id.get() == "msg-123"
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["session_key"] == "slack:C123:1700.42"
+    assert call["origin_message_id"] == "msg-123"
+    assert call["runtime"] is runtime
 
 
 @pytest.mark.asyncio

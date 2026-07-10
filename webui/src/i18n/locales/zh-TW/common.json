@@ -121,6 +121,7 @@
       "presetModel": "預設模型",
       "density": "密度",
       "activityMode": "活動細節",
+      "fileEditDisplay": "檔案編輯顯示",
       "codeWrap": "程式碼換行",
       "maxResults": "最大結果數",
       "timeout": "逾時",
@@ -165,6 +166,7 @@
       "presetModel": "切回 Default 後可在 WebUI 中編輯模型與供應商。",
       "density": "只儲存在此瀏覽器中。",
       "activityMode": "選擇預設顯示多少 agent 活動細節。",
+      "fileEditDisplay": "選擇檔案編輯活動預設顯示行數或差異。",
       "codeWrap": "讓長程式碼行在小螢幕上也易讀。",
       "maxResults": "每次 web_search 呼叫返回的結果數。",
       "timeout": "搜尋供應商請求逾時前的秒數。",
@@ -214,6 +216,9 @@
       "compact": "緊湊",
       "auto": "自動",
       "expanded": "展開",
+      "summary": "摘要",
+      "diff": "差異",
+      "collapsedDiff": "摺疊差異",
       "on": "開啟",
       "off": "關閉",
       "defaultPermission": "預設權限",
@@ -458,18 +463,36 @@
       "thirdPartyBrands": "產品名稱、標誌與品牌均屬於其各自擁有者。使用僅為識別用途，並不代表背書。"
     },
     "apps": {
-      "description": "新增 nanobot 可在聊天中使用的 App CLI 和 MCP 服務。",
+      "description": "啟用插件、本機應用適配器和已連接的工具服務。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "channelLabel": "通道",
+      "featureLabel": "能力",
       "filterAll": "全部",
+      "filterPlugins": "插件",
       "filterCli": "CLI 應用",
       "filterMcp": "MCP 服務",
       "enabledSummary": "已啟用 {{count}} 個",
-      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP",
+      "caption": "{{plugins}} 個插件 · {{cli}} 個 CLI · {{mcp}} 個 MCP",
       "searchPlaceholder": "搜尋應用",
-      "featured": "精選",
+      "featured": "應用目錄",
       "loading": "正在載入應用...",
-      "empty": "沒有符合的應用。"
+      "empty": "沒有符合的應用。",
+      "restartRequired": "重新啟動 nanobot 以套用更新後的應用和能力。"
+    },
+    "nanobotFeatures": {
+      "enabled": "已啟用",
+      "enable": "啟用",
+      "disable": "停用",
+      "ready": "就緒",
+      "missingDependency": "缺少支援套件",
+      "installSupport": "安裝支援套件",
+      "installConfirmTitle": "安裝 {{name}} 支援？",
+      "installConfirmDescription": "將安裝並啟用 {{name}} 支援。是否繼續？",
+      "installConfirmAction": "安裝並啟用",
+      "websocketRequired": "WebUI 必需",
+      "channelDisabled": "通道已停用",
+      "notEnabled": "未啟用"
     },
     "automations": {
       "filters": {
@@ -493,6 +516,7 @@
       "emptyHint": "請從它應該執行的來源處建立，這樣 nanobot 才能保留正確上下文。",
       "oneShot": "一次性",
       "systemTask": "系統管理的自動任務",
+      "localTrigger": "本機觸發器",
       "labels": {
         "schedule": "排程",
         "next": "下次",
@@ -551,11 +575,13 @@
         "weekdaysAt": "工作日 {{time}}",
         "hourlyAt": "每小時第 {{minute}} 分鐘",
         "hourlyWindow": "{{start}}-{{end}} 點每小時第 {{minute}} 分鐘",
+        "local": "本機觸發器",
         "custom": "自訂排程"
       },
       "next": {
         "paused": "已暫停",
         "pending": "正在執行",
+        "local": "等待觸發",
         "none": "沒有下次執行"
       },
       "message": {
@@ -692,11 +718,13 @@
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "本機觸發器",
       "unknown": "自訂計畫"
     },
     "next": {
       "label": "下次：{{time}}",
       "disabled": "已暫停",
+      "local": "等待觸發",
       "none": "沒有下次執行"
     }
   },
@@ -791,12 +819,14 @@
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "本機觸發器",
         "unknown": "自訂計畫"
       },
       "next": {
         "label": "下次 {{time}}",
         "pending": "即將執行",
         "disabled": "已暫停",
+        "local": "等待觸發",
         "none": "沒有下次執行"
       }
     },
@@ -870,7 +900,7 @@
         "commands": {
           "new": {
             "title": "新增對話",
-            "description": "停止目前任務，並開始新的對話。"
+            "description": "重置目前對話，並開始新的對話。"
           },
           "stop": {
             "title": "停止目前任務",
@@ -904,9 +934,17 @@
             "title": "恢復記憶",
             "description": "將記憶恢復到之前的 Dream 快照。"
           },
+          "dream_prompt": {
+            "title": "Dream 記憶",
+            "description": "設定 Dream 如何整理目前工作區的記憶。"
+          },
           "goal": {
             "title": "長期目標",
             "description": "請助理把這則請求當成需要多步驟持續推進的目標。"
+          },
+          "trigger": {
+            "title": "建立本機觸發器",
+            "description": "建立綁定到目前聊天工作階段的 CLI 觸發器。"
           },
           "help": {
             "title": "查看說明",
@@ -989,6 +1027,14 @@
     "copyReply": "複製",
     "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",
+    "fileEditViewDiff": "查看差異",
+    "fileEditViewLargeDiff": "查看大型差異",
+    "fileEditDiffLineCount": "{{count}} 行",
+    "fileEditUnchangedLinesHidden": "已隱藏 {{count}} 行未修改內容",
+    "fileEditShowMoreLines": "顯示其餘 {{count}} 行",
+    "fileEditShowFewerLines": "收起部分行",
+    "fileEditOpenFile": "開啟檔案",
+    "fileEditDiffTruncated": "差異內容已截斷。開啟檔案可查看完整更改。",
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",

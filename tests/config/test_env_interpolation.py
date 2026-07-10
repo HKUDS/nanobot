@@ -8,6 +8,7 @@ from nanobot.config.loader import (
     resolve_config_env_vars,
     save_config,
 )
+from nanobot.config.schema import Config
 
 
 class TestResolveEnvVars:
@@ -126,6 +127,31 @@ class TestResolveConfig:
         assert "openaiCodex" not in saved["providers"]
         assert "githubCopilot" not in saved["providers"]
         assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
+
+    def test_save_preserves_openai_codex_proxy_config(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        proxy = "http://127.0.0.1:23458"
+        config = Config.model_validate(
+            {
+                "providers": {
+                    "openaiCodex": {
+                        "apiKey": "codex-secret",
+                        "proxy": proxy,
+                    },
+                    "groq": {"apiKey": "groq-secret"},
+                }
+            }
+        )
+
+        save_config(config, config_path)
+
+        saved = json.loads(config_path.read_text(encoding="utf-8"))
+        assert saved["providers"]["openaiCodex"] == {"proxy": proxy}
+        assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
+
+        reloaded = load_config(config_path)
+        assert reloaded.providers.openai_codex.proxy == proxy
+        assert reloaded.providers.openai_codex.api_key is None
 
     def test_preserves_excluded_fields_when_no_env_refs(self, tmp_path):
         """Regression: fields with ``exclude=True`` (e.g. ProviderConfig.openai_codex)

@@ -26,6 +26,7 @@ import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 export interface ThreadViewportHandle {
   jumpToUserPrompt: (promptId: string) => void;
+  cancelAutoScroll: () => void;
 }
 
 interface ThreadViewportProps {
@@ -290,7 +291,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     setVisibleMessageCount((count) => Math.max(count, messages.length - index));
   }, [messages]);
 
-  useImperativeHandle(ref, () => ({ jumpToUserPrompt }), [jumpToUserPrompt]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      jumpToUserPrompt,
+      cancelAutoScroll: cancelScheduledBottomScroll,
+    }),
+    [cancelScheduledBottomScroll, jumpToUserPrompt],
+  );
 
   const measureComposerDock = useCallback(() => {
     const el = composerDockRef.current;
@@ -447,6 +455,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     measureComposerDock();
   }, [composer, hasMessages, measureComposerDock]);
 
+  useLayoutEffect(() => {
+    if (!hasMessages || userReadingHistoryRef.current) return;
+    const promptId = activeTurnPromptRef.current;
+    if (promptId && scrollToPromptTopNow(promptId)) return;
+    scrollToBottom(false, 2);
+  }, [composerDockHeight, hasMessages, scrollToBottom, scrollToPromptTopNow]);
+
   useEffect(() => cancelScheduledBottomScroll, [cancelScheduledBottomScroll]);
 
   useEffect(() => {
@@ -486,7 +501,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   }, [maybeLoadEarlierFromScroll]);
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="thread-viewport relative flex min-h-0 flex-1 overflow-hidden">
       <div
         ref={scrollRef}
         className={cn(

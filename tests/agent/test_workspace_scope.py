@@ -2,10 +2,12 @@ import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
@@ -362,7 +364,12 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
     tool = SpawnTool(manager)  # type: ignore[arg-type]
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(task="inspect")
+        with request_context(RequestContext(
+            channel="test",
+            chat_id="chat",
+            runtime=MagicMock(),
+        )):
+            result = await tool.execute(task="inspect")
     finally:
         reset_workspace_scope(token)
 

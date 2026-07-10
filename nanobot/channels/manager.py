@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -12,8 +13,19 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import (
+    ProgressEvent,
+    RetryWaitEvent,
+    RuntimeModelUpdatedEvent,
+    StreamDeltaEvent,
+    StreamedResponseEvent,
+    StreamEndEvent,
+    outbound_event_from_message,
+    replace_outbound_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
@@ -40,6 +52,21 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "show_reasoning": "showReasoning",
 }
 
+def _default_channel_config(name: str) -> dict[str, Any] | None:
+    if name != "websocket":
+        return None
+    from nanobot.channels.websocket import WebSocketChannel
+
+    return WebSocketChannel.default_config()
+
+
+def _channel_config_enabled(name: str, section: Any) -> bool:
+    default_enabled = name in DEFAULT_ENABLED_CHANNELS
+    if isinstance(section, dict):
+        return bool(section.get("enabled", default_enabled))
+    return bool(getattr(section, "enabled", default_enabled))
+
+
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
@@ -57,8 +84,10 @@ class ChannelManager:
         *,
         session_manager: "SessionManager | None" = None,
         cron_service: Any | None = None,
+        local_trigger_store: Any | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+        webui_local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
@@ -67,8 +96,10 @@ class ChannelManager:
         self.bus = bus
         self._session_manager = session_manager
         self._cron_service = cron_service
+        self._local_trigger_store = local_trigger_store
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
+        self._webui_local_trigger_pending_ids = webui_local_trigger_pending_ids
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
@@ -90,21 +121,32 @@ class ChannelManager:
         candidate_names = set(names)
         extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
         candidate_names.update(extra.keys())
+        default_sections: dict[str, Any] = {}
+
+        def section_for(name: str) -> Any:
+            section = getattr(self.config.channels, name, None)
+            if section is not None or name not in DEFAULT_ENABLED_CHANNELS:
+                return section
+            if name not in default_sections:
+                default = _default_channel_config(name)
+                if default is not None:
+                    default_sections[name] = default
+            return default_sections.get(name)
 
         enabled_names: set[str] = set()
         for name in candidate_names:
-            section = getattr(self.config.channels, name, None)
+            section = section_for(name)
             if section is None:
                 continue
-            if (
-                section.get("enabled", False)
-                if isinstance(section, dict)
-                else getattr(section, "enabled", False)
-            ):
+            if _channel_config_enabled(name, section):
                 enabled_names.add(name)
 
-        for name, cls in discover_enabled(enabled_names, _names=names).items():
-            section = getattr(self.config.channels, name, None)
+        for name, cls in discover_enabled(
+            enabled_names,
+            _names=names,
+            warn_import_errors=True,
+        ).items():
+            section = section_for(name)
             if section is None:
                 continue
             try:
@@ -128,7 +170,9 @@ class ChannelManager:
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
                         cron_service=self._cron_service,
+                        local_trigger_store=self._local_trigger_store,
                         cron_pending_job_ids=self._webui_cron_pending_job_ids,
+                        local_trigger_pending_ids=self._webui_local_trigger_pending_ids,
                         logger=logger,
                     )
                     kwargs["gateway"] = gateway
@@ -266,7 +310,7 @@ class ChannelManager:
 
     def _should_suppress_outbound(self, msg: OutboundMessage) -> bool:
         metadata = msg.metadata or {}
-        if metadata.get("_progress"):
+        if isinstance(outbound_event_from_message(msg), ProgressEvent):
             return False
         fingerprint = self._fingerprint_content(msg.content)
         if not fingerprint:
@@ -305,57 +349,59 @@ class ChannelManager:
                         timeout=1.0
                     )
 
-                if (
-                    msg.metadata.get("_reasoning_delta")
-                    or msg.metadata.get("_reasoning_end")
-                    or msg.metadata.get("_reasoning")
+                event = outbound_event_from_message(msg)
+                progress_event = event if isinstance(event, ProgressEvent) else None
+                if progress_event and (
+                    progress_event.reasoning_delta
+                    or progress_event.reasoning_end
+                    or progress_event.reasoning
                 ):
                     # Reasoning rides its own plugin channel: only delivered
                     # when the destination channel opts in via ``show_reasoning``
                     # and overrides the streaming primitives. Channels without
                     # a low-emphasis UI affordance keep the base no-op and the
-                    # content silently drops here. ``_reasoning`` (one-shot)
-                    # is accepted for backward compatibility with hooks that
-                    # haven't migrated to delta/end yet.
+                    # content silently drops here.
                     channel = self.channels.get(msg.channel)
                     if channel is not None and channel.show_reasoning:
                         await self._send_with_retry(channel, msg)
                     continue
 
-                if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                if progress_event:
+                    if progress_event.tool_hint and not self._should_send_progress(
                         msg.channel, tool_hint=True,
                     ):
                         continue
-                    if not msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                    if not progress_event.tool_hint and not self._should_send_progress(
                         msg.channel, tool_hint=False,
                     ):
                         continue
 
-                if msg.metadata.get("_retry_wait"):
+                if isinstance(event, RetryWaitEvent):
                     continue
 
                 if (
-                    msg.metadata.get("_runtime_model_updated")
+                    isinstance(event, RuntimeModelUpdatedEvent)
                     and msg.channel == "websocket"
                     and "websocket" not in self.channels
                 ):
                     continue
 
-                # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
+                # Coalesce consecutive stream delta messages for the same (channel, chat_id)
                 # to reduce API calls and improve streaming latency
-                if msg.metadata.get("_stream_delta") and not msg.metadata.get("_stream_end"):
+                if isinstance(event, StreamDeltaEvent):
                     msg, extra_pending = self._coalesce_stream_deltas(msg)
                     pending.extend(extra_pending)
+                    event = outbound_event_from_message(msg)
 
                 channel = self.channels.get(msg.channel)
                 if channel:
                     # Duplicate suppression is scoped to a known source message
                     # so repeated content from separate turns is still delivered.
                     if (
-                        not msg.metadata.get("_stream_delta")
-                        and not msg.metadata.get("_stream_end")
-                        and not msg.metadata.get("_streamed")
+                        not isinstance(
+                            event,
+                            StreamDeltaEvent | StreamEndEvent | StreamedResponseEvent,
+                        )
                     ):
                         if self._should_suppress_outbound(msg):
                             logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
@@ -370,33 +416,115 @@ class ChannelManager:
                 break
 
     @staticmethod
+    def _accepts_keyword(callable_obj: Callable[..., Any], name: str) -> bool:
+        try:
+            signature = inspect.signature(callable_obj)
+        except (TypeError, ValueError):
+            return True
+        return any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == name
+            for parameter in signature.parameters.values()
+        )
+
+    @classmethod
+    async def _send_reasoning_delta(cls, channel: BaseChannel, msg: OutboundMessage, event: ProgressEvent) -> None:
+        metadata = msg.metadata
+        kwargs: dict[str, Any] = {}
+        if cls._accepts_keyword(channel.send_reasoning_delta, "stream_id"):
+            kwargs["stream_id"] = event.stream_id
+        else:
+            metadata = dict(metadata or {})
+            metadata["_reasoning_delta"] = True
+            if event.stream_id is not None:
+                metadata["_stream_id"] = event.stream_id
+        await channel.send_reasoning_delta(
+            msg.chat_id,
+            msg.content,
+            metadata,
+            **kwargs,
+        )
+
+    @classmethod
+    async def _send_reasoning_end(cls, channel: BaseChannel, msg: OutboundMessage, event: ProgressEvent) -> None:
+        metadata = msg.metadata
+        kwargs: dict[str, Any] = {}
+        if cls._accepts_keyword(channel.send_reasoning_end, "stream_id"):
+            kwargs["stream_id"] = event.stream_id
+        else:
+            metadata = dict(metadata or {})
+            metadata["_reasoning_end"] = True
+            if event.stream_id is not None:
+                metadata["_stream_id"] = event.stream_id
+        await channel.send_reasoning_end(
+            msg.chat_id,
+            metadata,
+            **kwargs,
+        )
+
+    @classmethod
+    async def _send_stream_event(
+        cls,
+        channel: BaseChannel,
+        msg: OutboundMessage,
+        event: StreamDeltaEvent | StreamEndEvent,
+    ) -> None:
+        metadata = msg.metadata
+        kwargs: dict[str, Any] = {}
+        if cls._accepts_keyword(channel.send_delta, "stream_id"):
+            kwargs["stream_id"] = event.stream_id
+        else:
+            metadata = dict(metadata or {})
+            if event.stream_id is not None:
+                metadata["_stream_id"] = event.stream_id
+
+        if isinstance(event, StreamEndEvent):
+            if cls._accepts_keyword(channel.send_delta, "stream_end"):
+                kwargs["stream_end"] = True
+            else:
+                metadata = dict(metadata or {})
+                metadata["_stream_end"] = True
+            if cls._accepts_keyword(channel.send_delta, "resuming"):
+                kwargs["resuming"] = event.resuming
+        elif not kwargs:
+            metadata = dict(metadata or {})
+            metadata["_stream_delta"] = True
+
+        await channel.send_delta(
+            msg.chat_id,
+            msg.content,
+            metadata,
+            **kwargs,
+        )
+
+    @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
-        if msg.metadata.get("_reasoning_end"):
-            await channel.send_reasoning_end(msg.chat_id, msg.metadata)
-        elif msg.metadata.get("_reasoning_delta"):
-            await channel.send_reasoning_delta(msg.chat_id, msg.content, msg.metadata)
-        elif msg.metadata.get("_reasoning"):
-            # Back-compat: one-shot reasoning. BaseChannel translates this
-            # to a single delta + end pair so plugins only implement the
-            # streaming primitives.
+        event = outbound_event_from_message(msg)
+        if isinstance(event, ProgressEvent) and event.reasoning_end:
+            await ChannelManager._send_reasoning_end(channel, msg, event)
+        elif isinstance(event, ProgressEvent) and event.reasoning_delta:
+            await ChannelManager._send_reasoning_delta(channel, msg, event)
+        elif isinstance(event, ProgressEvent) and event.reasoning:
+            # BaseChannel translates one-shot reasoning to a single delta +
+            # end pair so plugins only implement the streaming primitives.
             await channel.send_reasoning(msg)
-        elif msg.metadata.get("_file_edit_events"):
-            edits = msg.metadata.get("_file_edit_events")
+        elif isinstance(event, ProgressEvent) and event.file_edit_events:
             await channel.send_file_edit_events(
                 msg.chat_id,
-                edits if isinstance(edits, list) else [],
+                event.file_edit_events,
                 msg.metadata,
             )
-        elif msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
-            await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
-        elif not msg.metadata.get("_streamed"):
+        elif isinstance(event, StreamDeltaEvent):
+            await ChannelManager._send_stream_event(channel, msg, event)
+        elif isinstance(event, StreamEndEvent):
+            await ChannelManager._send_stream_event(channel, msg, event)
+        elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 
     def _coalesce_stream_deltas(
         self, first_msg: OutboundMessage
     ) -> tuple[OutboundMessage, list[OutboundMessage]]:
-        """Merge consecutive _stream_delta messages for the same (channel, chat_id).
+        """Merge consecutive stream deltas for the same (channel, chat_id, stream_id).
 
         This reduces the number of API calls when the queue has accumulated multiple
         deltas, which happens when LLM generates faster than the channel can process.
@@ -404,9 +532,15 @@ class ChannelManager:
         Returns:
             tuple of (merged_message, list_of_non_matching_messages)
         """
-        target_key = (first_msg.channel, first_msg.chat_id)
+        first_event = outbound_event_from_message(first_msg)
+        first_stream_id = first_event.stream_id if isinstance(first_event, StreamDeltaEvent) else None
+        target_key = (first_msg.channel, first_msg.chat_id, first_stream_id)
         combined_content = first_msg.content
-        final_metadata = dict(first_msg.metadata or {})
+        final_event: StreamDeltaEvent | StreamEndEvent = (
+            first_event
+            if isinstance(first_event, StreamDeltaEvent)
+            else StreamDeltaEvent(stream_id=first_stream_id)
+        )
         non_matching: list[OutboundMessage] = []
 
         # Only merge consecutive deltas. As soon as we hit any other message,
@@ -418,16 +552,29 @@ class ChannelManager:
                 break
 
             # Check if this message belongs to the same stream
-            same_target = (next_msg.channel, next_msg.chat_id) == target_key
-            is_delta = next_msg.metadata and next_msg.metadata.get("_stream_delta")
-            is_end = next_msg.metadata and next_msg.metadata.get("_stream_end")
+            next_event = outbound_event_from_message(next_msg)
+            next_stream_id = (
+                next_event.stream_id
+                if isinstance(next_event, StreamDeltaEvent | StreamEndEvent)
+                else None
+            )
+            same_target = (
+                next_msg.channel,
+                next_msg.chat_id,
+                next_stream_id,
+            ) == target_key
+            is_delta = isinstance(next_event, StreamDeltaEvent)
+            is_end = isinstance(next_event, StreamEndEvent)
 
-            if same_target and is_delta and not final_metadata.get("_stream_end"):
+            if same_target and (is_delta or (is_end and next_msg.content)):
                 # Accumulate content
                 combined_content += next_msg.content
-                # If we see _stream_end, remember it and stop coalescing this stream
-                if is_end:
-                    final_metadata["_stream_end"] = True
+                # If we see stream_end, remember it and stop coalescing this stream
+                if isinstance(next_event, StreamEndEvent):
+                    final_event = StreamEndEvent(
+                        stream_id=next_stream_id,
+                        resuming=next_event.resuming,
+                    )
                     # Stream ended - stop coalescing this stream
                     break
             else:
@@ -435,12 +582,7 @@ class ChannelManager:
                 non_matching.append(next_msg)
                 break
 
-        merged = OutboundMessage(
-            channel=first_msg.channel,
-            chat_id=first_msg.chat_id,
-            content=combined_content,
-            metadata=final_metadata,
-        )
+        merged = replace_outbound_event(first_msg, final_event, content=combined_content)
         return merged, non_matching
 
     async def _send_with_retry(self, channel: BaseChannel, msg: OutboundMessage) -> None:

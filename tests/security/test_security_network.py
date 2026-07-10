@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 from unittest.mock import patch
 
@@ -10,8 +11,20 @@ import pytest
 from nanobot.security.network import (
     configure_ssrf_whitelist,
     contains_internal_url,
+    env_proxy_applies_to_url,
+    httpx_env_proxy_mounts,
+    pin_resolved_url_dns,
+    resolve_url_target,
     validate_url_target,
 )
+
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -107,6 +120,38 @@ def test_blocks_ipv6_mapped_rfc1918():
         assert not ok
 
 
+def test_blocks_sampled_addresses_from_internal_networks():
+    """Property-style guard: sampled blocked CIDRs must all fail closed."""
+    configure_ssrf_whitelist([])
+    blocked_networks = [
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    ]
+    samples: list[str] = []
+    for cidr in blocked_networks:
+        network = ipaddress.ip_network(cidr)
+        samples.append(str(network.network_address))
+        if network.num_addresses > 2:
+            samples.append(str(network.network_address + 1))
+            samples.append(str(network[-2]))
+
+    for idx, ip in enumerate(samples):
+        host = f"internal-{idx}.example"
+        resolver = _fake_resolve_v6 if ":" in ip else _fake_resolve
+        with patch("nanobot.security.network.socket.getaddrinfo", resolver(host, [ip])):
+            ok, err = validate_url_target(f"http://{host}/")
+        assert not ok, f"expected {ip} to be blocked"
+        assert "blocked" in err.lower() or "private" in err.lower()
+
+
 def test_allows_public_ipv6():
     """Public IPv6 addresses must still be allowed."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("example.com", ["2606:4700::6810:84e5"])):
@@ -124,10 +169,41 @@ def test_allows_public_ip():
         assert ok, f"Should allow public IP, got: {err}"
 
 
+def test_resolve_url_target_returns_validated_public_ips():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("example.com", ["93.184.216.34"])):
+        ok, err, resolved_ips = resolve_url_target("http://example.com/page")
+
+    assert ok, err
+    assert resolved_ips == ("93.184.216.34",)
+
+
+def test_pin_resolved_url_dns_prevents_second_resolution_rebind():
+    def _rebinding_resolver(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.169.254", 0))]
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver):
+        with pin_resolved_url_dns("http://example.com/page", ("93.184.216.34",)):
+            infos = socket.getaddrinfo("example.com", 80, socket.AF_UNSPEC, socket.SOCK_STREAM)
+
+    assert infos[0][4][0] == "93.184.216.34"
+
+
 def test_allows_normal_https():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("github.com", ["140.82.121.3"])):
         ok, err = validate_url_target("https://github.com/HKUDS/nanobot")
         assert ok
+
+
+def test_env_proxy_helpers_respect_no_proxy(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+
+    assert env_proxy_applies_to_url("https://example.com/page")
+    assert not env_proxy_applies_to_url("http://localhost:8765/mcp")
+
+    mounts = httpx_env_proxy_mounts()
+    assert any(transport is None for transport in mounts.values())
+    assert any(transport is not None for transport in mounts.values())
 
 
 # ---------------------------------------------------------------------------

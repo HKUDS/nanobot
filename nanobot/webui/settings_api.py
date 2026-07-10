@@ -22,7 +22,7 @@ from nanobot.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
-from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
 from nanobot.config.schema import ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
@@ -98,47 +98,6 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-
-_MODEL_LIST_UNSUPPORTED_BACKENDS = {
-    "anthropic",
-    "azure_openai",
-    "bedrock",
-    "github_copilot",
-    "openai_codex",
-}
-
-_MODEL_LIST_CATALOG_PROVIDERS = {
-    "aihubmix",
-    "byteplus",
-    "byteplus_coding_plan",
-    "huggingface",
-    "novita",
-    "openrouter",
-    "siliconflow",
-    "volcengine",
-    "volcengine_coding_plan",
-}
-
-_MODEL_LIST_OFFICIAL_PROVIDERS = {
-    "ant_ling",
-    "dashscope",
-    "deepseek",
-    "gemini",
-    "groq",
-    "longcat",
-    "minimax",
-    "minimax_anthropic",
-    "mistral",
-    "moonshot",
-    "nvidia",
-    "openai",
-    "qianfan",
-    "skywork",
-    "stepfun",
-    "xiaomi_mimo",
-    "zhipu",
-}
-
 
 class WebUISettingsError(ValueError):
     """User-facing settings validation failure."""
@@ -394,10 +353,13 @@ def _provider_settings_row(
 
 
 def _model_catalog_kind(spec: Any) -> str:
-    if spec.name in _MODEL_LIST_CATALOG_PROVIDERS:
-        return "catalog"
-    if spec.name in _MODEL_LIST_OFFICIAL_PROVIDERS:
-        return "official"
+    catalog = getattr(spec, "model_catalog", "auto")
+    if catalog != "auto":
+        return catalog
+    if spec.is_transcription_only or spec.is_oauth:
+        return "unsupported"
+    if spec.backend != "openai_compat" and spec.name != "minimax_anthropic":
+        return "unsupported"
     if spec.is_local:
         return "local"
     if spec.is_direct:
@@ -490,27 +452,20 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
 
+    catalog_kind = _model_catalog_kind(spec)
     base_payload: dict[str, Any] = {
         "provider": provider_key,
         "label": spec.label,
-        "catalog_kind": _model_catalog_kind(spec),
+        "catalog_kind": catalog_kind,
         "models": [],
         "model_count": 0,
         "message": None,
         "fetched_at": time.time(),
     }
-    if (
-        spec.is_transcription_only
-        or (
-            spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
-            and spec.name != "minimax_anthropic"
-        )
-        or spec.is_oauth
-    ):
+    if catalog_kind == "unsupported":
         return {
             **base_payload,
             "status": "unsupported",
-            "catalog_kind": "unsupported",
             "message": "Model list is not available for this provider. Type a model ID manually.",
         }
 
@@ -1164,16 +1119,23 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         try:
             from oauth_cli_kit import get_token, login_oauth_interactive
         except ImportError:
-            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
 
+        try:
+            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+        except ValueError as e:
+            raise WebUISettingsError(str(e), status=400) from e
         token = None
         with suppress(Exception):
-            token = get_token()
+            token = get_token(proxy=proxy)
         if not (token and token.access):
             messages: list[str] = []
             token = login_oauth_interactive(
                 print_fn=lambda message: messages.append(str(message)),
                 prompt_fn=lambda _prompt: "",
+                proxy=proxy,
             )
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
@@ -1186,7 +1148,9 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 login_github_copilot,
             )
         except ImportError:
-            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
 
         token = get_github_copilot_login_status()
         if not token:
@@ -1211,13 +1175,17 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
             from oauth_cli_kit.storage import FileTokenStorage
         except ImportError:
-            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
-            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
         token_path = get_storage().get_token_path()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
