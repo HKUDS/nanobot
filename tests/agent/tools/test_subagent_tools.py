@@ -272,7 +272,7 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     loop.runner.run = AsyncMock(side_effect=fake_run)
     loop.max_iterations = 55
 
-    await loop._run_agent_loop([])
+    await loop._run_agent_loop([], runtime=loop.llm_runtime())
 
     loop.runner.run.assert_awaited_once()
 
@@ -327,6 +327,7 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     # Run _run_agent_loop — this defines the _drain_pending closure
     await loop._run_agent_loop(
         [{"role": "user", "content": "test"}],
+        runtime=loop.llm_runtime(),
         session=session,
         channel="test",
         chat_id="c1",
@@ -402,6 +403,7 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     await loop._run_agent_loop(
         [{"role": "user", "content": "test"}],
+        runtime=loop.llm_runtime(),
         session=None,
         channel="test",
         chat_id="c1",
@@ -458,6 +460,7 @@ async def test_drain_pending_timeout(tmp_path):
 
     await loop._run_agent_loop(
         [{"role": "user", "content": "test"}],
+        runtime=loop.llm_runtime(),
         session=session,
         channel="test",
         chat_id="c1",

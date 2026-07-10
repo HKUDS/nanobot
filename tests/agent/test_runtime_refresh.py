@@ -6,6 +6,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
+from nanobot.providers.base import GenerationSettings
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
 from nanobot.webui.settings_api import update_agent_settings
 
@@ -72,6 +73,29 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
     assert not hasattr(loop.runner, "provider")
+
+
+def test_next_turn_captures_generation_changed_after_previous_admission(
+    tmp_path: Path,
+) -> None:
+    provider = _provider("test-model")
+    provider.generation = GenerationSettings(temperature=0.2, max_tokens=1024)
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        context_window_tokens=16_384,
+    )
+
+    first = loop.llm_runtime()
+    provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
+    second = loop.llm_runtime()
+
+    assert first.generation.temperature == 0.2
+    assert first.generation.max_tokens == 1024
+    assert second.generation.temperature == 0.8
+    assert second.generation.max_tokens == 512
 
 
 def test_settings_context_window_refreshes_runtime_state(

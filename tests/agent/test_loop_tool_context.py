@@ -23,10 +23,12 @@ class _ContextRecordingTool:
 
     def __init__(self) -> None:
         self.contexts: list[dict] = []
+        self.runtimes: list[object] = []
 
     async def execute(self, **_kwargs) -> str:
         ctx = current_request_context()
         assert ctx is not None
+        self.runtimes.append(ctx.runtime)
         self.contexts.append({
             "channel": ctx.channel,
             "chat_id": ctx.chat_id,
@@ -81,8 +83,10 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     loop.tools = _Tools(cron)
 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
         [],
+        runtime=runtime,
         channel="slack",
         chat_id="C123",
         metadata=metadata,
@@ -95,6 +99,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
         "metadata": metadata,
         "session_key": "slack:C123:111.222",
     }
+    assert cron.runtimes[-1] is runtime
 
 
 def test_request_context_nested_bind_restores_outer_context() -> None:
@@ -160,10 +165,13 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
         model="test-model",
     )
     outer = RequestContext(channel="test", chat_id="outer", session_key="test:outer")
+    runtime = loop.llm_runtime()
 
-    async def fail_run(_spec):
+    async def fail_run(spec):
         current = current_request_context()
         assert current is not None
+        assert spec.runtime is runtime
+        assert current.runtime is runtime
         assert current.channel == "slack"
         assert current.chat_id == "C123"
         assert current.session_key == "slack:C123:111.222"
@@ -176,6 +184,7 @@ async def test_agent_loop_restores_outer_request_context_after_runner_exception(
         with pytest.raises(RuntimeError, match="runner failed"):
             await loop._run_agent_loop(
                 [],
+                runtime=runtime,
                 channel="slack",
                 chat_id="C123",
                 session_key="slack:C123:111.222",
@@ -209,10 +218,11 @@ async def test_process_message_captures_original_text_before_restore(
         workspace=tmp_path,
         model="test-model",
     )
-    seen: list[str | None] = []
+    runtime = loop.llm_runtime()
+    seen: list[tuple[str | None, object]] = []
 
     async def stop_after_capture(ctx) -> str:
-        seen.append(ctx.original_user_text)
+        seen.append((ctx.original_user_text, ctx.runtime))
         raise RuntimeError("captured before restore")
 
     loop._state_restore = stop_after_capture  # type: ignore[method-assign]
@@ -225,7 +235,8 @@ async def test_process_message_captures_original_text_before_restore(
                 chat_id="C123",
                 content="  original user text  ",
                 metadata=metadata,
-            )
+            ),
+            runtime=runtime,
         )
 
-    assert seen == [expected]
+    assert seen == [(expected, runtime)]

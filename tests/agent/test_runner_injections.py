@@ -446,6 +446,7 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
     final_content, _, _, _, had_injections = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
+        runtime=loop.llm_runtime(),
         channel="cli",
         chat_id="c",
         pending_queue=pending_queue,
@@ -511,6 +512,7 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
 
     final_content, _, all_msgs, _, had_injections = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
+        runtime=loop.llm_runtime(),
         channel="cli",
         chat_id="c",
         pending_queue=pending_queue,
@@ -993,6 +995,7 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
 
     final_content, _, _, _, had_injections = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
+        runtime=loop.llm_runtime(),
         channel="cli",
         chat_id="c",
         pending_queue=pending_queue,

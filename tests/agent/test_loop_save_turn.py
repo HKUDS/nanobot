@@ -316,7 +316,7 @@ def test_webui_title_update_uses_captured_llm_runtime(
     coordinator.capture_title_context(
         "websocket:chat1",
         msg,
-        LLMRuntime(provider, "turn-model"),
+        LLMRuntime.capture(provider, "turn-model", context_window_tokens=32_768),
     )
     asyncio.run(coordinator.handle_turn_end(
         msg,
@@ -1055,6 +1055,7 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
 
     await loop._run_agent_loop(
         [],
+        runtime=loop.llm_runtime(),
         session=session,
         channel="websocket",
         chat_id="late-goal",
@@ -1273,10 +1274,14 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     session.add_message("assistant", "working")
     loop.sessions.save(session)
 
-    seen: dict[str, list[dict]] = {}
+    runtime = loop.llm_runtime()
+    seen: dict[str, object] = {}
+    record_runtime = MagicMock(wraps=loop._runtime_events().record_turn_runtime)
+    loop.runtime_event_publisher.record_turn_runtime = record_runtime
 
-    async def fake_run_agent_loop(initial_messages, **_kwargs):
+    async def fake_run_agent_loop(initial_messages, **kwargs):
         seen["initial_messages"] = initial_messages
+        seen["runtime"] = kwargs["runtime"]
         return (
             "done",
             [],
@@ -1294,10 +1299,15 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
             chat_id="cli:test",
             content="subagent result",
             metadata={"subagent_task_id": "sub-1"},
-        )
+        ),
+        runtime=runtime,
     )
 
-    non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
+    assert seen["runtime"] is runtime
+    record_runtime.assert_called_once_with("cli:test", runtime)
+    initial_messages = seen["initial_messages"]
+    assert isinstance(initial_messages, list)
+    non_system = [m for m in initial_messages if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
     # Persisted timestamps stay in session records, but replay content is not

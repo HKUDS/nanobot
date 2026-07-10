@@ -144,7 +144,9 @@ class TestMessageToolSuppressLogic:
         async def on_progress(content: str, *, tool_hint: bool = False) -> None:
             progress.append((content, tool_hint))
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert progress == [

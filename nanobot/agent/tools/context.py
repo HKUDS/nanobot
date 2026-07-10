@@ -4,7 +4,10 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
@@ -20,6 +23,7 @@ class RequestContext:
     message_id: str | None = None
     session_key: str | None = None
     original_user_text: str | None = None
+    runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

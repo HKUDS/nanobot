@@ -76,7 +76,9 @@ class TestToolEventProgress:
         ) -> None:
             progress.append((content, tool_hint, tool_events))
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert progress == [
@@ -145,7 +147,9 @@ class TestToolEventProgress:
             if file_edit_events:
                 file_events.extend(file_edit_events)
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert [event["phase"] for event in file_events] == ["start", "end"]
@@ -213,7 +217,9 @@ class TestToolEventProgress:
             prepare_file_edit_trackers,
         )
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert target.read_text(encoding="utf-8") == "new\n"
@@ -249,7 +255,9 @@ class TestToolEventProgress:
             if file_edit_events:
                 file_events.extend(file_edit_events)
 
-        await loop._run_agent_loop([], on_progress=on_progress)
+        await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert file_events == []
 
@@ -623,6 +631,7 @@ class TestToolEventProgress:
 
         final_content, _, _, _, _ = await loop._run_agent_loop(
             [],
+            runtime=loop.llm_runtime(),
             on_progress=on_progress,
             on_stream=on_stream,
         )

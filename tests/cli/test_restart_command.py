@@ -296,11 +296,11 @@ class TestRestartCommand:
             LLMResponse(content="second", usage={}),
         ])
 
-        await loop._run_agent_loop([])
+        await loop._run_agent_loop([], runtime=loop.llm_runtime())
         assert loop._last_usage["prompt_tokens"] == 9
         assert loop._last_usage["completion_tokens"] == 4
 
-        await loop._run_agent_loop([])
+        await loop._run_agent_loop([], runtime=loop.llm_runtime())
         assert loop._last_usage["prompt_tokens"] == 123
         assert loop._last_usage["completion_tokens"] == 7
         assert loop._last_usage["estimated_tokens"] == 130
