@@ -654,53 +654,6 @@ class TestDreamCommitMessage:
             == "dream: x\n\nSOUL.md: +1 -0"
         )
 
-    def test_productive_gate_skips_commit_when_no_content_change(self, tmp_path):
-        """When no content files changed, there should be no auto_commit. 
-        In the old code, auto_commit ran unconditionally
-        in the finally block; now it only runs when productive is True."""
-        from unittest.mock import MagicMock
-
-        store = MemoryStore(tmp_path)
-        store.write_soul("# Soul")
-        store.write_memory("# Memory")
-        store.git.init()
-        store.git.auto_commit("initial")
-
-        assert store.dream_content_diff() == ""
-
-        original = store.git.auto_commit
-        store.git.auto_commit = MagicMock(wraps=original)
-
-        # Exact productive gate pattern from the cron handler (commands.py):
-        diff_body = store.dream_content_diff()
-        productive = bool(diff_body)  # git is initialized
-        if productive and store.git.is_initialized():
-            store.git.auto_commit("dream: periodic memory consolidation")
-
-        store.git.auto_commit.assert_not_called()
-
-    def test_productive_gate_allows_commit_on_content_change(self, tmp_path):
-        """The productive gate must perform auto_commit when content files changed."""
-        from unittest.mock import MagicMock
-
-        store = MemoryStore(tmp_path)
-        store.write_soul("# Soul")
-        store.write_memory("# Memory")
-        store.git.init()
-        store.git.auto_commit("initial")
-
-        store.write_memory("# Memory\n- Research notes")
-
-        original = store.git.auto_commit
-        store.git.auto_commit = MagicMock(wraps=original)
-
-        diff_body = store.dream_content_diff()
-        productive = bool(diff_body)
-        if productive and store.git.is_initialized():
-            store.git.auto_commit("dream: periodic memory consolidation")
-
-        store.git.auto_commit.assert_called_once()
-
 
 class TestDreamContentDiff:
     """The ground-truth signal that gates cursor advance and commit messages."""

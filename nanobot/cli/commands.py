@@ -181,6 +181,20 @@ def _advance_dream_cursor_if_behind(memory: Any) -> None:
         memory.set_last_dream_cursor(latest)
 
 
+def _commit_dream_changes(memory: Any) -> str | None:
+    """Commit durable Dream edits, without entering the commit path for a no-op run."""
+    if not memory.git.is_initialized():
+        return None
+    diff_body = memory.dream_content_diff()
+    if not diff_body:
+        return None
+    message = memory.build_dream_commit_message(
+        "dream: periodic memory consolidation",
+        diff_body,
+    )
+    return memory.git.auto_commit(message)
+
+
 class SafeFileHistory(FileHistory):
     """FileHistory subclass that sanitizes surrogate characters on write.
 
@@ -1508,7 +1522,6 @@ def _run_gateway(
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
-            build_dream_commit_message = MemoryStore.build_dream_commit_message
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
@@ -1537,13 +1550,6 @@ def _run_gateway(
                 if productive:
                     store.set_last_dream_cursor(last_cursor)
                     logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
-                    if store.git.is_initialized():
-                        msg = build_dream_commit_message(
-                            "dream: periodic memory consolidation", diff_body,
-                        )
-                        sha = store.git.auto_commit(msg)
-                        if sha:
-                            logger.info("Dream commit: {}", sha)
                 elif MemoryStore.dream_run_completed(resp):
                     logger.info(
                         "Dream cron job completed with no memory changes; "
@@ -1564,6 +1570,9 @@ def _run_gateway(
                     source="dream",
                     timezone_name=config.agents.defaults.timezone,
                 )
+                sha = _commit_dream_changes(store)
+                if sha:
+                    logger.info("Dream commit: {}", sha)
                 store.compact_history()
                 prune_dream_sessions(agent.sessions.sessions_dir)
             return None
