@@ -54,6 +54,52 @@ _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 
 
+class MCPToolProvider:
+    """Own the MCP dynamic tool provider lifecycle and runtime state."""
+
+    def __init__(self, servers: Mapping[str, Any] | None = None) -> None:
+        self._mcp_servers = dict(servers or {})
+        self._mcp_stacks: dict[str, AsyncExitStack] = {}
+        self._mcp_connecting = False
+
+    @property
+    def configured_server_names(self) -> set[str]:
+        return set(self._mcp_servers)
+
+    @property
+    def connected_server_names(self) -> set[str]:
+        return set(self._mcp_stacks)
+
+    async def connect(self, registry: ToolRegistry) -> None:
+        await connect_missing_servers(self, registry)
+
+    async def close(self) -> None:
+        for name, stack in self._mcp_stacks.items():
+            try:
+                await stack.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+        self._mcp_stacks.clear()
+
+    async def reload(self, registry: ToolRegistry) -> dict[str, Any]:
+        return await reload_servers(self, registry)
+
+    async def handle_runtime_control(
+        self,
+        msg: InboundMessage,
+        registry: ToolRegistry,
+    ) -> bool:
+        return await handle_runtime_control(self, msg, registry)
+
+    def runtime_lines(self, message: Any, *, skip: bool = False) -> list[str]:
+        return runtime_lines(
+            message,
+            configured_server_names=self.configured_server_names,
+            connected_server_names=self.connected_server_names,
+            skip=skip,
+        )
+
+
 def _is_malformed_mcp_progress_notification(message: Any) -> bool:
     payload = _mcp_jsonrpc_payload(message)
     if _payload_value(payload, "method") != "notifications/progress":
