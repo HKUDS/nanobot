@@ -1,0 +1,137 @@
+from dataclasses import FrozenInstanceError
+from unittest.mock import MagicMock
+
+import pytest
+
+from nanobot.agent.model_runtime import ModelRuntimeResolver
+from nanobot.config.schema import ModelPresetConfig
+from nanobot.providers.base import GenerationSettings
+from nanobot.providers.factory import ProviderSnapshot
+from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
+
+
+def _provider(
+    *,
+    temperature: float = 0.1,
+    max_tokens: int = 1024,
+    reasoning_effort: str | None = None,
+) -> MagicMock:
+    provider = MagicMock()
+    provider.generation = GenerationSettings(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
+    )
+    return provider
+
+
+def _runtime(provider: MagicMock | None = None) -> LLMRuntime:
+    return LLMRuntime.capture(
+        provider or _provider(),
+        "base-model",
+        context_window_tokens=10_000,
+        snapshot_signature=("base-model", "auto"),
+    )
+
+
+def test_runtime_captures_generation_and_is_immutable() -> None:
+    provider = _provider(temperature=0.2, max_tokens=2048, reasoning_effort="low")
+    runtime = _runtime(provider)
+
+    provider.generation = GenerationSettings(temperature=0.9, max_tokens=99)
+
+    assert runtime.generation == GenerationSettings(0.2, 2048, "low")
+    with pytest.raises(FrozenInstanceError):
+        runtime.model = "changed"  # type: ignore[misc]
+
+
+def test_provider_snapshot_has_one_canonical_runtime_conversion() -> None:
+    provider = _provider(temperature=0.3, max_tokens=4096)
+    snapshot = ProviderSnapshot(
+        provider=provider,
+        model="snapshot-model",
+        context_window_tokens=32_768,
+        signature=("snapshot-model", "openai"),
+    )
+
+    runtime = runtime_from_provider_snapshot(snapshot, model_preset="fast")
+
+    assert runtime.provider is provider
+    assert runtime.model == "snapshot-model"
+    assert runtime.generation == GenerationSettings(0.3, 4096, None)
+    assert runtime.context_window_tokens == 32_768
+    assert runtime.model_preset == "fast"
+    assert runtime.snapshot_signature == snapshot.signature
+
+
+def test_resolver_resolves_preset_without_mutating_selected_runtime() -> None:
+    initial = _runtime()
+    preset_provider = _provider(temperature=0.5, max_tokens=512)
+    preset = ModelPresetConfig(
+        model="fast-model",
+        temperature=0.5,
+        max_tokens=512,
+        context_window_tokens=8192,
+    )
+    resolver = ModelRuntimeResolver(
+        initial,
+        model_presets={"fast": preset},
+        preset_snapshot_loader=lambda name: ProviderSnapshot(
+            provider=preset_provider,
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=(name, preset.model),
+        ),
+    )
+
+    resolved = resolver.resolve_preset("fast")
+
+    assert resolved.model == "fast-model"
+    assert resolved.model_preset == "fast"
+    assert resolver.runtime is initial
+    assert resolver.model_preset is None
+
+
+def test_resolver_model_override_is_derived_without_default_mutation() -> None:
+    initial = _runtime()
+    resolver = ModelRuntimeResolver(initial)
+
+    override = resolver.resolve_override(
+        model="override-model",
+        model_preset=None,
+    )
+
+    assert override is not None
+    assert override.model == "override-model"
+    assert override.provider is initial.provider
+    assert override.generation is initial.generation
+    assert resolver.runtime is initial
+
+
+def test_resolver_refresh_preserves_unchanged_active_preset() -> None:
+    initial = _runtime()
+    preset = ModelPresetConfig(model="fast-model")
+    preset_provider = _provider()
+    resolver = ModelRuntimeResolver(
+        initial,
+        model_presets={"fast": preset},
+        provider_snapshot_loader=lambda: ProviderSnapshot(
+            provider=_provider(),
+            model="base-model",
+            context_window_tokens=10_000,
+            signature=("base-model", "auto", "refreshed"),
+        ),
+        preset_snapshot_loader=lambda _name: ProviderSnapshot(
+            provider=preset_provider,
+            model="fast-model",
+            context_window_tokens=20_000,
+            signature=("fast-model", "auto", "refreshed"),
+        ),
+    )
+    resolver.select_preset("fast")
+
+    refreshed = resolver.refresh()
+
+    assert refreshed is None
+    assert resolver.runtime.provider is preset_provider
+    assert resolver.model_preset == "fast"
