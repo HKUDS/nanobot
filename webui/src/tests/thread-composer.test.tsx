@@ -1554,6 +1554,125 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
   });
 
+  it("guides queued guidance when Enter is pressed again", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "send this guidance now" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("");
+    expect(screen.getByText("send this guidance now")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("send this guidance now")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("send this guidance now");
+    expect(screen.queryByText("send this guidance now")).not.toBeInTheDocument();
+  });
+
+  it("disarms the second Enter shortcut after stopping the active response", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+  });
+
+  it("disarms the second Enter shortcut when the composer loses focus", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "leave this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("leave this queued")).toBeInTheDocument();
+  });
+
+  it("guides the newly queued prompt when older guidance is still waiting", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "older guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "guide this one now" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("guide this one now");
+    expect(screen.getByText("older guidance")).toBeInTheDocument();
+    expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
+  });
+
   it("keeps queued guidance attached to the composer and sends it one item at a time", async () => {
     const onSend = vi.fn();
     const { rerender } = render(
@@ -1914,6 +2033,8 @@ describe("ThreadComposer", () => {
     );
 
     expect(await screen.findByText("remember this edited follow-up")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
     expect(onSend).toHaveBeenCalledWith("remember this edited follow-up");
 
