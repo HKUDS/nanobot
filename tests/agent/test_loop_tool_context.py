@@ -24,15 +24,15 @@ class _ContextRecordingTool:
     def __init__(self) -> None:
         self.contexts: list[dict] = []
 
-    def set_context(self, ctx: RequestContext) -> None:
+    async def execute(self, **_kwargs) -> str:
+        ctx = current_request_context()
+        assert ctx is not None
         self.contexts.append({
             "channel": ctx.channel,
             "chat_id": ctx.chat_id,
             "metadata": ctx.metadata,
             "session_key": ctx.session_key,
         })
-
-    async def execute(self, **_kwargs) -> str:
         return "created"
 
 
@@ -55,7 +55,7 @@ class _Tools:
 
 
 @pytest.mark.asyncio
-async def test_loop_hook_preserves_metadata_when_resetting_tool_context(tmp_path: Path) -> None:
+async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()
     calls = {"n": 0}
 

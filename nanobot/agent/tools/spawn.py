@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
 from nanobot.security.workspace_access import current_workspace_scope
 
@@ -30,29 +29,15 @@ if TYPE_CHECKING:
         required=["task"],
     )
 )
-class SpawnTool(Tool, ContextAware):
+class SpawnTool(Tool):
     """Tool to spawn a subagent for background task execution."""
 
     def __init__(self, manager: "SubagentManager"):
         self._manager = manager
-        self._origin_channel: ContextVar[str] = ContextVar("spawn_origin_channel", default="cli")
-        self._origin_chat_id: ContextVar[str] = ContextVar("spawn_origin_chat_id", default="direct")
-        self._session_key: ContextVar[str] = ContextVar("spawn_session_key", default="cli:direct")
-        self._origin_message_id: ContextVar[str | None] = ContextVar(
-            "spawn_origin_message_id",
-            default=None,
-        )
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         return cls(manager=ctx.subagent_manager)
-
-    def set_context(self, ctx: RequestContext) -> None:
-        """Set the origin context for subagent announcements."""
-        self._origin_channel.set(ctx.channel)
-        self._origin_chat_id.set(ctx.chat_id)
-        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
-        self._origin_message_id.set(ctx.message_id)
 
     @property
     def name(self) -> str:
@@ -84,13 +69,21 @@ class SpawnTool(Tool, ContextAware):
                 f"({running}/{limit} running). Wait for a running subagent "
                 f"to complete before spawning a new one."
             )
+        request_ctx = current_request_context()
+        origin_channel = request_ctx.channel if request_ctx is not None else "cli"
+        origin_chat_id = request_ctx.chat_id if request_ctx is not None else "direct"
+        session_key = (
+            request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
+            if request_ctx is not None
+            else "cli:direct"
+        )
         return await self._manager.spawn(
             task=task,
             label=label,
-            origin_channel=self._origin_channel.get(),
-            origin_chat_id=self._origin_chat_id.get(),
-            session_key=self._session_key.get(),
-            origin_message_id=self._origin_message_id.get(),
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
+            session_key=session_key,
+            origin_message_id=request_ctx.message_id if request_ctx is not None else None,
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
         )

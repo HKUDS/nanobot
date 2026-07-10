@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStatusEvent,
@@ -1090,20 +1091,24 @@ async def test_process_direct_skip_user_persist_does_not_save_retry_user(
     ]
 
 
-def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     spawn_tool = loop.tools.get("spawn")
     assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
 
-    loop._set_tool_context(
-        "discord",
-        "thread-777",
+    with request_context(RequestContext(
+        channel="discord",
+        chat_id="thread-777",
         session_key="discord:parent-456:thread:thread-777",
-    )
+    )):
+        await spawn_tool.execute(task="inspect context")
 
-    assert spawn_tool._origin_channel.get() == "discord"  # type: ignore[attr-defined]
-    assert spawn_tool._origin_chat_id.get() == "thread-777"  # type: ignore[attr-defined]
-    assert spawn_tool._session_key.get() == "discord:parent-456:thread:thread-777"  # type: ignore[attr-defined]
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["origin_channel"] == "discord"
+    assert call["origin_chat_id"] == "thread-777"
+    assert call["session_key"] == "discord:parent-456:thread:thread-777"
 
 
 @pytest.mark.asyncio
@@ -1422,21 +1427,25 @@ def test_subagent_followup_skips_empty_content() -> None:
     assert session.messages == []
 
 
-def test_set_tool_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
 
-    loop._set_tool_context(
-        "slack",
-        "C123",
+    with request_context(RequestContext(
+        channel="slack",
+        chat_id="C123",
         message_id="msg-123",
         metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
         session_key="slack:C123:1700.42",
-    )
+    )):
+        await spawn_tool.execute(task="inspect thread")
 
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    assert spawn_tool._session_key.get() == "slack:C123:1700.42"
-    assert spawn_tool._origin_message_id.get() == "msg-123"
+    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    assert call["session_key"] == "slack:C123:1700.42"
+    assert call["origin_message_id"] == "msg-123"
 
 
 @pytest.mark.asyncio

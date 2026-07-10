@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.long_task import (
     CompleteGoalTool,
     LongTaskTool,
@@ -24,15 +24,16 @@ from nanobot.session.webui_turns import WebuiTurnCoordinator
 def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:
     lt = LongTaskTool(sessions=sm)
     cg = CompleteGoalTool(sessions=sm)
-    rc = RequestContext(
+    return lt, cg
+
+
+def _request_context(chat_id: str = "c1") -> RequestContext:
+    return RequestContext(
         channel="websocket",
-        chat_id="c1",
-        session_key="websocket:c1",
+        chat_id=chat_id,
+        session_key=f"websocket:{chat_id}",
         metadata={},
     )
-    lt.set_context(rc)
-    cg.set_context(rc)
-    return lt, cg
 
 
 @pytest.mark.asyncio
@@ -40,7 +41,8 @@ async def test_long_task_records_goal_metadata(tmp_path):
     sm = SessionManager(tmp_path)
     lt, _cg = _tools(sm)
 
-    out = await lt.execute(goal="Do the thing", ui_summary="thing")
+    with request_context(_request_context()):
+        out = await lt.execute(goal="Do the thing", ui_summary="thing")
     assert "Goal recorded" in out
 
     sess = sm.get_or_create("websocket:c1")
@@ -56,8 +58,9 @@ async def test_long_task_rejects_second_active_goal(tmp_path):
     sm = SessionManager(tmp_path)
     lt, _cg = _tools(sm)
 
-    await lt.execute(goal="First")
-    out = await lt.execute(goal="Second")
+    with request_context(_request_context()):
+        await lt.execute(goal="First")
+        out = await lt.execute(goal="Second")
     assert "already active" in out
 
 
@@ -66,8 +69,9 @@ async def test_complete_goal_closes_active_goal(tmp_path):
     sm = SessionManager(tmp_path)
     lt, cg = _tools(sm)
 
-    await lt.execute(goal="X")
-    out = await cg.execute(recap="Done.")
+    with request_context(_request_context()):
+        await lt.execute(goal="X")
+        out = await cg.execute(recap="Done.")
     assert "marked complete" in out
 
     sess = sm.get_or_create("websocket:c1")
@@ -84,19 +88,23 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
     ctx_a = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
     ctx_b = RequestContext(channel="websocket", chat_id="b", session_key="websocket:b")
 
-    lt.set_context(ctx_a)
-    task_a = asyncio.create_task(lt.execute(goal="Goal A"))
-    lt.set_context(ctx_b)
-    task_b = asyncio.create_task(lt.execute(goal="Goal B"))
+    async def start_goal(ctx: RequestContext, goal: str) -> str:
+        with request_context(ctx):
+            return await lt.execute(goal=goal)
+
+    task_a = asyncio.create_task(start_goal(ctx_a, "Goal A"))
+    task_b = asyncio.create_task(start_goal(ctx_b, "Goal B"))
     await asyncio.gather(task_a, task_b)
 
     assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["objective"] == "Goal A"
     assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["objective"] == "Goal B"
 
-    cg.set_context(ctx_a)
-    done_a = asyncio.create_task(cg.execute(recap="Done A"))
-    cg.set_context(ctx_b)
-    done_b = asyncio.create_task(cg.execute(recap="Done B"))
+    async def complete_goal(ctx: RequestContext, recap: str) -> str:
+        with request_context(ctx):
+            return await cg.execute(recap=recap)
+
+    done_a = asyncio.create_task(complete_goal(ctx_a, "Done A"))
+    done_b = asyncio.create_task(complete_goal(ctx_b, "Done B"))
     await asyncio.gather(done_a, done_b)
 
     assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["recap"] == "Done A"
@@ -104,19 +112,19 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_goal_tools_context_isolated_across_tool_types(tmp_path):
-    """LongTaskTool and CompleteGoalTool must not share routing context."""
+async def test_goal_tools_share_authoritative_request_context(tmp_path):
+    """Both goal tools resolve routing from the same request snapshot."""
     sm = SessionManager(tmp_path)
     lt = LongTaskTool(sessions=sm)
     cg = CompleteGoalTool(sessions=sm)
     ctx = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
 
-    lt.set_context(ctx)
-    assert cg._request_ctx.get() is None
+    with request_context(ctx):
+        assert lt._session() is sm.get_or_create("websocket:a")
+        assert cg._session() is sm.get_or_create("websocket:a")
 
-    cg.set_context(ctx)
-    assert lt._request_ctx.get() is ctx
-    assert cg._request_ctx.get() is ctx
+    assert lt._session() is None
+    assert cg._session() is None
 
 
 @pytest.mark.asyncio
@@ -137,9 +145,8 @@ async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
         session_key="websocket:chat-99",
         metadata={},
     )
-    lt.set_context(rc)
-
-    await lt.execute(goal="Objective alpha", ui_summary="alpha")
+    with request_context(rc):
+        await lt.execute(goal="Objective alpha", ui_summary="alpha")
 
     bus.publish_outbound.assert_awaited_once()
     call = bus.publish_outbound.await_args.args[0]
@@ -172,12 +179,11 @@ async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
         session_key="websocket:chat-z",
         metadata={},
     )
-    lt.set_context(rc)
-    await lt.execute(goal="X")
+    with request_context(rc):
+        await lt.execute(goal="X")
 
-    bus.publish_outbound.reset_mock()
-    cg.set_context(rc)
-    await cg.execute(recap="Done.")
+        bus.publish_outbound.reset_mock()
+        await cg.execute(recap="Done.")
 
     bus.publish_outbound.assert_awaited_once()
     call = bus.publish_outbound.await_args.args[0]
@@ -190,7 +196,8 @@ async def test_complete_goal_without_active_is_noop_message(tmp_path):
     sm = SessionManager(tmp_path)
     _lt, cg = _tools(sm)
 
-    out = await cg.execute(recap="n/a")
+    with request_context(_request_context()):
+        out = await cg.execute(recap="n/a")
     assert "No active" in out
 
 
@@ -198,7 +205,8 @@ async def test_complete_goal_without_active_is_noop_message(tmp_path):
 async def test_long_task_skips_ws_publish_without_bus(tmp_path):
     sm = SessionManager(tmp_path)
     lt, _cg = _tools(sm)
-    out = await lt.execute(goal="Solo", ui_summary="s")
+    with request_context(_request_context()):
+        out = await lt.execute(goal="Solo", ui_summary="s")
     assert "Goal recorded" in out
 
 

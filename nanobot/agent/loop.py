@@ -63,7 +63,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import (
     Session,
     SessionManager,
@@ -549,32 +549,6 @@ class AgentLoop:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
 
-    def _set_tool_context(
-        self, channel: str, chat_id: str,
-        message_id: str | None = None, metadata: dict | None = None,
-        session_key: str | None = None,
-    ) -> None:
-        """Update context for all tools that need routing info."""
-        from nanobot.agent.tools.context import ContextAware
-
-        effective_key = session_key or session_key_for_channel(
-            channel,
-            chat_id,
-            unified_session=self._unified_session,
-        )
-        request_ctx = RequestContext(
-            channel=channel,
-            chat_id=chat_id,
-            message_id=message_id,
-            session_key=effective_key,
-            metadata=dict(metadata or {}),
-        )
-
-        for name in self.tools.tool_names:
-            tool = self.tools.get(name)
-            if tool and isinstance(tool, ContextAware):
-                tool.set_context(request_ctx)
-
     @staticmethod
     def _runtime_chat_id(msg: InboundMessage) -> str:
         """Return the chat id shown in runtime metadata for the model."""
@@ -835,26 +809,6 @@ class AgentLoop:
             session_metadata=session.metadata if session is not None else None,
         )
         effective_tools = tools or self.tools
-        hook = build_agent_turn_hook(AgentTurnHookSpec(
-            on_progress=on_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            channel=channel,
-            chat_id=chat_id,
-            message_id=message_id,
-            metadata=metadata,
-            session_key=active_session_key,
-            workspace=effective_scope.project_path,
-            tool_hint_max_length=self.tool_hint_max_length,
-            set_tool_context=self._set_tool_context,
-            on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
-            registered_hook_factories=self._hook_factories,
-            turn_hook_factories=list(hook_factories or []),
-            registered_hooks=self._extra_hooks,
-            turn_hooks=list(hooks or []),
-            ephemeral=ephemeral,
-            run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
-        ))
         request_ctx = RequestContext(
             channel=channel,
             chat_id=chat_id,
@@ -880,6 +834,25 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         try:
+            hook = build_agent_turn_hook(AgentTurnHookSpec(
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                channel=channel,
+                chat_id=chat_id,
+                message_id=message_id,
+                metadata=metadata,
+                session_key=active_session_key,
+                workspace=effective_scope.project_path,
+                tool_hint_max_length=self.tool_hint_max_length,
+                on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
+                registered_hook_factories=self._hook_factories,
+                turn_hook_factories=list(hook_factories or []),
+                registered_hooks=self._extra_hooks,
+                turn_hooks=list(hooks or []),
+                ephemeral=ephemeral,
+                run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            ))
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
                 tools=effective_tools,
@@ -1251,10 +1224,6 @@ class AgentLoop:
         if is_subagent and self._persist_subagent_followup(session, msg):
             logger.debug("Subagent result persisted for session {}", key)
             self.sessions.save(session)
-        self._set_tool_context(
-            channel, chat_id, msg.metadata.get("message_id"),
-            msg.metadata, session_key=key,
-        )
         current_role = "assistant" if is_subagent else "user"
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
@@ -1535,13 +1504,6 @@ class AgentLoop:
                 ctx.session,
                 replay_max_messages=self._max_messages,
             )
-        self._set_tool_context(
-            ctx.msg.channel,
-            ctx.msg.chat_id,
-            ctx.msg.metadata.get("message_id"),
-            ctx.msg.metadata,
-            session_key=ctx.session_key,
-        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()

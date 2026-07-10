@@ -159,19 +159,18 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-    from nanobot.agent.tools.context import RequestContext
+    from nanobot.agent.tools.context import RequestContext, request_context
 
     tool = SpawnTool(mgr)
-    tool.set_context(RequestContext(channel="test", chat_id="c1", session_key="test:c1"))
+    with request_context(RequestContext(channel="test", chat_id="c1", session_key="test:c1")):
+        # First spawn succeeds
+        result = await tool.execute(task="first task")
+        assert "started" in result
 
-    # First spawn succeeds
-    result = await tool.execute(task="first task")
-    assert "started" in result
-
-    # Second spawn should be rejected (default limit is 1)
-    result = await tool.execute(task="second task")
-    assert "Cannot spawn subagent" in result
-    assert "concurrency limit reached" in result
+        # Second spawn should be rejected (default limit is 1)
+        result = await tool.execute(task="second task")
+        assert "Cannot spawn subagent" in result
+        assert "concurrency limit reached" in result
 
     # Release the first subagent
     release.set()

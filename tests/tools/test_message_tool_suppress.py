@@ -156,11 +156,12 @@ class TestMessageToolTurnTracking:
 
     def test_sent_in_turn_tracks_same_target(self) -> None:
         tool = MessageTool()
-        from nanobot.agent.tools.context import RequestContext
-        tool.set_context(RequestContext(channel="feishu", chat_id="chat1"))
-        assert not tool._sent_in_turn
-        tool._sent_in_turn = True
-        assert tool._sent_in_turn
+        from nanobot.agent.tools.context import RequestContext, request_context
+
+        with request_context(RequestContext(channel="feishu", chat_id="chat1")):
+            assert not tool._sent_in_turn
+            tool._sent_in_turn = True
+            assert tool._sent_in_turn
 
     def test_start_turn_resets(self) -> None:
         tool = MessageTool()

@@ -1,6 +1,7 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -34,6 +35,16 @@ def bind_request_context(ctx: RequestContext) -> Token[RequestContext | None]:
 
 def reset_request_context(token: Token[RequestContext | None]) -> None:
     _CURRENT_REQUEST_CONTEXT.reset(token)
+
+
+@contextmanager
+def request_context(ctx: RequestContext):
+    """Bind one immutable request snapshot and restore the previous value."""
+    token = bind_request_context(ctx)
+    try:
+        yield ctx
+    finally:
+        reset_request_context(token)
 
 
 def current_request_context() -> RequestContext | None:

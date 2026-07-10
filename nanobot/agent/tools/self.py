@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.runtime_state import RuntimeState
 from nanobot.config_base import Base
 
@@ -41,7 +41,7 @@ def _is_subagent_status(value: Any) -> bool:
     return isinstance(value, SubagentStatus)
 
 
-class MyTool(Tool, ContextAware):
+class MyTool(Tool):
     """Check and set the agent loop's runtime configuration."""
 
     _plugin_discoverable = False  # Requires AgentLoop reference; registered manually
@@ -111,8 +111,6 @@ class MyTool(Tool, ContextAware):
     def __init__(self, runtime_state: RuntimeState, modify_allowed: bool = True) -> None:
         self._runtime_state = runtime_state
         self._modify_allowed = modify_allowed
-        self._channel = ""
-        self._chat_id = ""
 
     def __deepcopy__(self, memo: dict[int, Any]) -> MyTool:
         cls = self.__class__
@@ -120,13 +118,7 @@ class MyTool(Tool, ContextAware):
         memo[id(self)] = result
         result._runtime_state = self._runtime_state
         result._modify_allowed = self._modify_allowed
-        result._channel = self._channel
-        result._chat_id = self._chat_id
         return result
-
-    def set_context(self, ctx: RequestContext) -> None:
-        self._channel = ctx.channel
-        self._chat_id = ctx.chat_id
 
     @property
     def name(self) -> str:
@@ -184,7 +176,12 @@ class MyTool(Tool, ContextAware):
         }
 
     def _audit(self, action: str, detail: str) -> None:
-        session = f"{self._channel}:{self._chat_id}" if self._channel else "unknown"
+        ctx = current_request_context()
+        session = (
+            ctx.session_key or f"{ctx.channel}:{ctx.chat_id}"
+            if ctx is not None and ctx.channel
+            else "unknown"
+        )
         logger.info("self.{} | {} | session:{}", action, detail, session)
 
     # ------------------------------------------------------------------

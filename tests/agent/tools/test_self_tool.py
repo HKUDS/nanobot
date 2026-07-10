@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.self import MyTool
 
 # ---------------------------------------------------------------------------
@@ -1121,14 +1122,26 @@ class TestLastUsageInSummary:
 
 
 # ---------------------------------------------------------------------------
-# set_context (audit session tracking)
+# request context (audit session tracking)
 # ---------------------------------------------------------------------------
 
-class TestSetContext:
+class TestRequestContext:
 
-    def test_set_context_stores_channel_and_chat_id(self):
-        from nanobot.agent.tools.context import RequestContext
+    def test_audit_reads_bound_session(self):
         tool = _make_tool()
-        tool.set_context(RequestContext(channel="feishu", chat_id="oc_abc123"))
-        assert tool._channel == "feishu"
-        assert tool._chat_id == "oc_abc123"
+        ctx = RequestContext(
+            channel="feishu",
+            chat_id="oc_abc123",
+            session_key="feishu:oc_abc123",
+        )
+
+        with patch("nanobot.agent.tools.self.logger.info") as info:
+            with request_context(ctx):
+                tool._audit("modify", "temperature = 0.2")
+
+        info.assert_called_once_with(
+            "self.{} | {} | session:{}",
+            "modify",
+            "temperature = 0.2",
+            "feishu:oc_abc123",
+        )
