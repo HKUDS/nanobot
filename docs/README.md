@@ -42,6 +42,7 @@ full reference first.
 | Use a browser AI agent WebUI | [`guides/ai-agent-webui.md`](./guides/ai-agent-webui.md) |
 | Connect an AI agent to chat apps | [`guides/chat-app-ai-agent.md`](./guides/chat-app-ai-agent.md) |
 | Run long-running agent tasks | [`guides/long-running-ai-agent.md`](./guides/long-running-ai-agent.md) |
+| Schedule or trigger agent turns | [`automations.md`](./automations.md) |
 | Add long-term agent memory | [`guides/ai-agent-memory.md`](./guides/ai-agent-memory.md) |
 | Add MCP tools to an agent | [`guides/mcp-tools-for-ai-agents.md`](./guides/mcp-tools-for-ai-agents.md) |
 | Run an agent from Python | [`guides/python-ai-agent-sdk.md`](./guides/python-ai-agent-sdk.md) |
@@ -89,7 +90,8 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 |---|---|---|
 | Open the bundled browser UI | [`webui.md`](./webui.md) | `nanobot webui`, chat workspace, Apps, Skills, Automations, and settings |
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [`chat-apps.md`](./chat-apps.md) | A gateway-backed chat channel with access control |
-| Use slash commands and automations | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, local triggers, heartbeat tasks, and chat-side controls |
+| Use automations | [`automations.md`](./automations.md) | Scheduled automations, local triggers, heartbeat, WebUI management, and delivery behavior |
+| Use slash commands | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, local triggers, heartbeat tasks, and chat-side controls |
 | Generate images | [`image-generation.md`](./image-generation.md) | Image provider config, WebUI image mode, and artifact behavior |
 | Run several isolated bots | [`multiple-instances.md`](./multiple-instances.md) | Separate configs, workspaces, ports, and sessions |
 | Deploy outside a terminal | [`deployment.md`](./deployment.md) | Docker, systemd user services, and macOS LaunchAgent setup |
@@ -121,6 +123,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | WebSocket/WebUI protocol details | [`websocket.md`](./websocket.md) |
 | OpenAI-compatible API usage | [`openai-api.md`](./openai-api.md) |
 | Python SDK usage | [`python-sdk.md`](./python-sdk.md) |
+| Scheduled automations and local triggers | [`automations.md`](./automations.md) |
 | Multiple configs, workspaces, and ports | [`multiple-instances.md`](./multiple-instances.md) |
 | Security, sandboxing, and SSRF controls | [`configuration.md#security`](./configuration.md#security) |
 | Channel plugin development | [`channel-plugin-guide.md`](./channel-plugin-guide.md) |

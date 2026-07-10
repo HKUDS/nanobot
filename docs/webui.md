@@ -150,25 +150,15 @@ be created from the chat, channel, or session where they are supposed to run so
 nanobot keeps the correct target context. When an automation runs, it normally
 delivers the result back to that linked chat.
 
+For the full automation model, creation flow, trigger CLI usage, and delivery
+semantics, see [`automations.md`](./automations.md).
+
 There are two user-facing automation types:
 
 - Scheduled automations, created by the agent's cron tool, run at a time,
   interval, or cron expression.
 - Local triggers, created with `/trigger <name>`, run when you call a local
   command such as `nanobot trigger trg_8K4P2Q9X "Review PR #4502"`.
-
-If a GitHub webhook, CI system, or another service should wake nanobot up, keep
-that webhook/service outside nanobot and have it call the trigger command with
-the final message.
-
-Trigger deliveries use the same workspace as the gateway. They survive gateway
-restarts and are requeued if the process exits before the linked turn completes.
-If the linked session is already running a turn, the local trigger waits until
-that session is idle instead of being injected into the active turn. This is an
-at-least-once local queue, so repeated delivery is possible after an interrupted
-process. A delivered trigger is recorded as an automation turn in the linked
-session; if the agent receives it but the turn fails, Automations marks the run
-failed instead of retrying indefinitely.
 
 For recurring background checks that should stay quiet unless there is something
 useful to report, use the protected heartbeat job by editing `HEARTBEAT.md`
