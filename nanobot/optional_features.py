@@ -39,6 +39,13 @@ class InstallResult:
     output: str = ""
 
 
+@dataclass(frozen=True)
+class _ChannelSetupState:
+    required: tuple[str | tuple[str, ...], ...] = ()
+    fields: tuple[str, ...] = ()
+    secrets: frozenset[str] = frozenset()
+
+
 _INSTALL_TIMEOUT_SECONDS = 300
 _LOG_OUTPUT_LIMIT = 4000
 
@@ -343,94 +350,108 @@ def channel_enabled(config: Config, name: str) -> bool:
     return bool(getattr(section, "enabled", default_enabled))
 
 
-_CHANNEL_CONFIGURED_KEYS: dict[str, tuple[tuple[str, ...], ...]] = {
-    "dingtalk": (("client_id", "clientId"), ("client_secret", "clientSecret")),
-    "discord": (("token",),),
-    "email": (
-        ("consent_granted", "consentGranted"),
-        ("imap_host", "imapHost"),
-        ("imap_username", "imapUsername"),
-        ("imap_password", "imapPassword"),
-        ("smtp_host", "smtpHost"),
-        ("smtp_username", "smtpUsername"),
-        ("smtp_password", "smtpPassword"),
+def _channel_setup_state(
+    required: tuple[str | tuple[str, ...], ...] = (),
+    fields: tuple[str, ...] = (),
+    secrets: tuple[str, ...] = (),
+) -> _ChannelSetupState:
+    return _ChannelSetupState(required=required, fields=fields, secrets=frozenset(secrets))
+
+
+_CHANNEL_SETUP_STATES: dict[str, _ChannelSetupState] = {
+    "dingtalk": _channel_setup_state(
+        ("clientId", "clientSecret"),
+        ("clientId", "clientSecret", "allowFrom"),
+        ("clientSecret",),
     ),
-    "feishu": (("app_id", "appId"), ("app_secret", "appSecret")),
-    "matrix": (
-        ("homeserver",),
-        ("user_id", "userId"),
-        ("password", "access_token", "accessToken"),
+    "discord": _channel_setup_state(
+        ("token",),
+        ("token", "allowChannels", "groupPolicy"),
+        ("token",),
     ),
-    "mattermost": (("server_url", "serverUrl"), ("token",)),
-    "msteams": (("app_id", "appId"), ("app_password", "appPassword")),
-    "napcat": (("ws_url", "wsUrl"),),
-    "qq": (("app_id", "appId"), ("secret",)),
-    "signal": (("phone_number", "phoneNumber"),),
-    "slack": (("app_token", "appToken"), ("bot_token", "botToken")),
-    "telegram": (("token",),),
-    "wecom": (("bot_id", "botId"), ("secret",)),
-    "weixin": (("token",),),
-}
-
-_CHANNEL_CONFIG_VALUE_FIELDS: dict[str, tuple[str, ...]] = {
-    "dingtalk": ("clientId", "clientSecret", "allowFrom"),
-    "discord": ("token", "allowChannels", "groupPolicy"),
-    "email": (
-        "consentGranted",
-        "imapHost",
-        "imapPort",
-        "imapUsername",
-        "imapPassword",
-        "smtpHost",
-        "smtpPort",
-        "smtpUsername",
-        "smtpPassword",
-        "fromAddress",
-        "pollIntervalSeconds",
-        "allowFrom",
-        "verifyDkim",
-        "verifySpf",
+    "email": _channel_setup_state(
+        (
+            "consentGranted",
+            "imapHost",
+            "imapUsername",
+            "imapPassword",
+            "smtpHost",
+            "smtpUsername",
+            "smtpPassword",
+        ),
+        (
+            "consentGranted",
+            "imapHost",
+            "imapPort",
+            "imapUsername",
+            "imapPassword",
+            "smtpHost",
+            "smtpPort",
+            "smtpUsername",
+            "smtpPassword",
+            "fromAddress",
+            "pollIntervalSeconds",
+            "allowFrom",
+            "verifyDkim",
+            "verifySpf",
+        ),
+        ("imapPassword", "smtpPassword"),
     ),
-    "matrix": ("homeserver", "userId", "password", "accessToken", "groupPolicy", "allowFrom"),
-    "mattermost": ("serverUrl", "token", "teamId", "groupPolicy", "allowFrom"),
-    "msteams": ("appId", "appPassword", "tenantId", "path", "allowFrom"),
-    "napcat": ("wsUrl", "accessToken", "groupPolicy", "allowFrom"),
-    "qq": ("appId", "secret", "msgFormat", "allowFrom"),
-    "signal": ("phoneNumber", "daemonHost", "daemonPort", "dm.allowFrom", "group.allowFrom"),
-    "slack": ("appToken", "botToken", "groupPolicy"),
-    "telegram": ("token", "allowFrom", "groupPolicy"),
-    "wecom": ("botId", "secret", "allowFrom"),
-    "weixin": ("token", "allowFrom"),
+    "feishu": _channel_setup_state(("appId", "appSecret")),
+    "matrix": _channel_setup_state(
+        (
+            "homeserver",
+            "userId",
+            ("password", "accessToken"),
+        ),
+        ("homeserver", "userId", "password", "accessToken", "groupPolicy", "allowFrom"),
+        ("password", "accessToken"),
+    ),
+    "mattermost": _channel_setup_state(
+        ("serverUrl", "token"),
+        ("serverUrl", "token", "teamId", "groupPolicy", "allowFrom"),
+        ("token",),
+    ),
+    "msteams": _channel_setup_state(
+        ("appId", "appPassword"),
+        ("appId", "appPassword", "tenantId", "path", "allowFrom"),
+        ("appPassword",),
+    ),
+    "napcat": _channel_setup_state(
+        ("wsUrl",),
+        ("wsUrl", "accessToken", "groupPolicy", "allowFrom"),
+        ("accessToken",),
+    ),
+    "qq": _channel_setup_state(
+        ("appId", "secret"),
+        ("appId", "secret", "msgFormat", "allowFrom"),
+        ("secret",),
+    ),
+    "signal": _channel_setup_state(
+        ("phoneNumber",),
+        ("phoneNumber", "daemonHost", "daemonPort", "dm.allowFrom", "group.allowFrom"),
+    ),
+    "slack": _channel_setup_state(
+        ("appToken", "botToken"),
+        ("appToken", "botToken", "groupPolicy"),
+        ("appToken", "botToken"),
+    ),
+    "telegram": _channel_setup_state(
+        ("token",),
+        ("token", "allowFrom", "groupPolicy"),
+        ("token",),
+    ),
+    "wecom": _channel_setup_state(
+        ("botId", "secret"),
+        ("botId", "secret", "allowFrom"),
+        ("secret",),
+    ),
+    "weixin": _channel_setup_state(
+        ("token",),
+        ("token", "allowFrom"),
+        ("token",),
+    ),
 }
-
-_CHANNEL_SECRET_VALUE_FIELDS: dict[str, set[str]] = {
-    "dingtalk": {"clientSecret"},
-    "discord": {"token"},
-    "email": {"imapPassword", "smtpPassword"},
-    "matrix": {"password", "accessToken"},
-    "mattermost": {"token"},
-    "msteams": {"appPassword"},
-    "napcat": {"accessToken"},
-    "qq": {"secret"},
-    "slack": {"appToken", "botToken"},
-    "telegram": {"token"},
-    "wecom": {"secret"},
-    "weixin": {"token"},
-}
-
-
-def _channel_section_value(section: Any, aliases: tuple[str, ...]) -> Any:
-    if isinstance(section, dict):
-        for alias in aliases:
-            value = section.get(alias)
-            if value:
-                return value
-        return None
-    for alias in aliases:
-        value = getattr(section, alias, None)
-        if value:
-            return value
-    return None
 
 
 def _camel_to_snake(value: str) -> str:
@@ -494,19 +515,36 @@ def _channel_config_snapshot(section: Any, name: str) -> tuple[dict[str, str], l
     if not isinstance(section, dict):
         return {}, []
 
+    spec = _CHANNEL_SETUP_STATES.get(name)
+    if spec is None:
+        return {}, []
+
     values: dict[str, str] = {}
     configured_fields: list[str] = []
-    secret_fields = _CHANNEL_SECRET_VALUE_FIELDS.get(name, set())
-    for field in _CHANNEL_CONFIG_VALUE_FIELDS.get(name, ()):
+    for field in spec.fields:
         value = _channel_field_value(section, field)
         if not _channel_value_present(value):
             continue
         key = f"channels.{name}.{field}"
         configured_fields.append(key)
-        if field in secret_fields:
+        if field in spec.secrets:
             continue
         values[key] = _stringify_channel_value(value)
     return values, configured_fields
+
+
+def _channel_requirement_present(section: Any, requirement: str | tuple[str, ...]) -> bool:
+    fields = requirement if isinstance(requirement, tuple) else (requirement,)
+    return any(_channel_value_present(_channel_field_value(section, field)) for field in fields)
+
+
+def _channel_has_required_setup(section: Any, name: str) -> bool:
+    spec = _CHANNEL_SETUP_STATES.get(name)
+    return bool(
+        spec
+        and spec.required
+        and all(_channel_requirement_present(section, requirement) for requirement in spec.required)
+    )
 
 
 def _feishu_instance_display_name(config: dict[str, Any]) -> str:
@@ -535,14 +573,14 @@ def channel_configured(config: Config, name: str) -> bool:
         from nanobot.channels.feishu import FeishuChannel
 
         return any(
-            all(_channel_section_value(spec.config, aliases) for aliases in _CHANNEL_CONFIGURED_KEYS["feishu"])
-            for spec in feishu_instance_specs(section, FeishuChannel.default_config())
+            _channel_has_required_setup(instance.config, "feishu")
+            for instance in feishu_instance_specs(section, FeishuChannel.default_config())
         )
 
-    required_keys = _CHANNEL_CONFIGURED_KEYS.get(name)
-    if not required_keys:
+    spec = _CHANNEL_SETUP_STATES.get(name)
+    if not spec or not spec.required:
         return channel_enabled(config, name)
-    return all(_channel_section_value(section, aliases) for aliases in required_keys)
+    return _channel_has_required_setup(section, name)
 
 
 def optional_features_payload(
@@ -611,10 +649,7 @@ def optional_features_payload(
                     "identity_source": _feishu_instance_identity_source(spec.config),
                     "domain": spec.config.get("domain") or "feishu",
                     "enabled": bool(spec.config.get("enabled", False)),
-                    "configured": all(
-                        _channel_section_value(spec.config, aliases)
-                        for aliases in _CHANNEL_CONFIGURED_KEYS["feishu"]
-                    ),
+                    "configured": _channel_has_required_setup(spec.config, "feishu"),
                     "app_id": spec.config.get("appId") or spec.config.get("app_id") or "",
                     "group_policy": spec.config.get("groupPolicy") or "mention",
                     "topic_isolation": bool(spec.config.get("topicIsolation", True)),

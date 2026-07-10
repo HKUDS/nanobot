@@ -5374,7 +5374,6 @@ type ChannelSetupPresentation = {
   summary?: string;
   tryIt?: string;
   steps: string[];
-  configKeys?: string[];
   fields?: ChannelConfigField[];
   manualFields?: ChannelConfigField[];
   actions?: ChannelSetupAction[];
@@ -5541,12 +5540,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Keep this channel enabled while using the WebUI.",
         "Change host, port, or token only from config.json when you need a custom local setup.",
       ],
-      configKeys: [
-        "channels.websocket.enabled",
-        "channels.websocket.host",
-        "channels.websocket.port",
-        "channels.websocket.token",
-      ],
     },
   },
   telegram: {
@@ -5568,11 +5561,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create a bot with BotFather and copy the bot token.",
         "Add the token under channels.telegram.token; optionally restrict allowFrom and groupPolicy.",
         "Restart nanobot, then send the bot a direct message or mention it in a group.",
-      ],
-      configKeys: [
-        "channels.telegram.token",
-        "channels.telegram.allowFrom",
-        "channels.telegram.groupPolicy",
       ],
       fields: [
         {
@@ -5621,12 +5609,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Click Connect and scan the QR code with Feishu or Lark on your phone.",
         "Approve the app connection. nanobot saves the App ID and Secret automatically.",
         "Send the bot a direct message or mention it in a Feishu group to test it.",
-      ],
-      configKeys: [
-        "channels.feishu.appId",
-        "channels.feishu.appSecret",
-        "channels.feishu.groupPolicy",
-        "channels.feishu.allowFrom",
       ],
       manualFields: [
         {
@@ -5692,11 +5674,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Add the app token and bot token under channels.slack.",
         "Restart nanobot, then mention the app or send it a direct message in Slack.",
       ],
-      configKeys: [
-        "channels.slack.appToken",
-        "channels.slack.botToken",
-        "channels.slack.groupPolicy",
-      ],
       fields: [
         {
           key: "channels.slack.appToken",
@@ -5742,12 +5719,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Invite the bot to your server with message read/send and slash command permissions.",
         "Add the token under channels.discord.token; optionally restrict allowFrom and allowChannels.",
         "Restart nanobot, then mention the bot or use its slash command in Discord.",
-      ],
-      configKeys: [
-        "channels.discord.token",
-        "channels.discord.allowFrom",
-        "channels.discord.allowChannels",
-        "channels.discord.groupPolicy",
       ],
       fields: [
         {
@@ -5796,21 +5767,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Fill IMAP settings for receiving unread mail, then SMTP settings for sending replies.",
         "Set consentGranted to true only after confirming this mailbox may be processed by nanobot.",
         "Restart nanobot, then send a test email to the mailbox.",
-      ],
-      configKeys: [
-        "channels.email.consentGranted",
-        "channels.email.imapHost",
-        "channels.email.imapPort",
-        "channels.email.imapUsername",
-        "channels.email.imapPassword",
-        "channels.email.smtpHost",
-        "channels.email.smtpPort",
-        "channels.email.smtpUsername",
-        "channels.email.smtpPassword",
-        "channels.email.fromAddress",
-        "channels.email.allowFrom",
-        "channels.email.verifyDkim",
-        "channels.email.verifySpf",
       ],
       fields: [
         {
@@ -5925,12 +5881,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Add homeserver and login credentials under channels.matrix.",
         "Invite the account into the rooms nanobot should read, then restart nanobot.",
       ],
-      configKeys: [
-        "channels.matrix.homeserver",
-        "channels.matrix.userId",
-        "channels.matrix.password",
-        "channels.matrix.accessToken",
-      ],
       fields: [
         {
           key: "channels.matrix.homeserver",
@@ -5990,12 +5940,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Invite the bot to the channels it should read.",
         "Restart nanobot, then mention the bot or send a direct message.",
       ],
-      configKeys: [
-        "channels.mattermost.serverUrl",
-        "channels.mattermost.token",
-        "channels.mattermost.teamId",
-        "channels.mattermost.groupPolicy",
-      ],
       fields: [
         {
           key: "channels.mattermost.serverUrl",
@@ -6046,12 +5990,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Scan the QR code with WhatsApp on your phone.",
         "Restart nanobot after the account state is saved, then send a direct test message.",
       ],
-      configKeys: [
-        "channels.whatsapp.enabled",
-        "channels.whatsapp.allowFrom",
-        "channels.whatsapp.groupPolicy",
-        "channels.whatsapp.databasePath",
-      ],
       manualFields: [
         {
           key: "channels.whatsapp.allowFrom",
@@ -6088,11 +6026,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create or choose a DingTalk app with Stream mode enabled.",
         "Add Client ID and Client Secret.",
         "Restart nanobot, then send a test message from DingTalk.",
-      ],
-      configKeys: [
-        "channels.dingtalk.clientId",
-        "channels.dingtalk.clientSecret",
-        "channels.dingtalk.allowFrom",
       ],
       fields: [
         {
@@ -6137,7 +6070,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Add Bot ID and Secret.",
         "Restart nanobot, then send a test message from WeCom.",
       ],
-      configKeys: ["channels.wecom.botId", "channels.wecom.secret", "channels.wecom.allowFrom"],
       fields: [
         {
           key: "channels.wecom.botId",
@@ -6181,7 +6113,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Keep the local gateway running while WeChat receives messages.",
         "Send a direct test message to confirm the account is connected.",
       ],
-      configKeys: ["channels.weixin.enabled", "channels.weixin.allowFrom", "channels.weixin.token"],
       manualFields: [
         {
           key: "channels.weixin.allowFrom",
@@ -6218,12 +6149,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create or choose a QQ bot application and copy its App ID and Secret.",
         "Add appId and secret under channels.qq.",
         "Restart nanobot, then send a direct or group test message from QQ.",
-      ],
-      configKeys: [
-        "channels.qq.appId",
-        "channels.qq.secret",
-        "channels.qq.allowFrom",
-        "channels.qq.msgFormat",
       ],
       fields: [
         {
@@ -6276,14 +6201,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Start signal-cli in HTTP daemon mode for the same phone number.",
         "Set phoneNumber plus daemon host and port under channels.signal.",
         "Restart nanobot, then send a direct test message from Signal.",
-      ],
-      configKeys: [
-        "channels.signal.phoneNumber",
-        "channels.signal.daemonHost",
-        "channels.signal.daemonPort",
-        "channels.signal.allowFrom",
-        "channels.signal.dm.allowFrom",
-        "channels.signal.group.allowFrom",
       ],
       fields: [
         {
@@ -6342,16 +6259,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Add appId and appPassword under channels.msteams.",
         "Restart nanobot, then install the app in Teams and send a test message.",
       ],
-      configKeys: [
-        "channels.msteams.appId",
-        "channels.msteams.appPassword",
-        "channels.msteams.tenantId",
-        "channels.msteams.host",
-        "channels.msteams.port",
-        "channels.msteams.path",
-        "channels.msteams.allowFrom",
-        "channels.msteams.validateInboundAuth",
-      ],
       fields: [
         {
           key: "channels.msteams.appId",
@@ -6406,13 +6313,6 @@ const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Start NapCat and enable its OneBot WebSocket server.",
         "Set wsUrl to the NapCat WebSocket endpoint; add accessToken if NapCat requires one.",
         "Restart nanobot, then send a QQ test message through NapCat.",
-      ],
-      configKeys: [
-        "channels.napcat.wsUrl",
-        "channels.napcat.accessToken",
-        "channels.napcat.allowFrom",
-        "channels.napcat.groupPolicy",
-        "channels.napcat.groupPolicyOverrides",
       ],
       fields: [
         {
@@ -8280,7 +8180,6 @@ function channelSetup(feature: NanobotFeatureInfo): ChannelSetupPresentation {
       "Add the credentials required by that platform, using the channel documentation as the source of truth.",
       "Restart nanobot, then send a small test message from that platform.",
     ],
-    configKeys: [`channels.${feature.name}.enabled`],
   };
 }
 
