@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import save_config
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import GenerationSettings
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
 from nanobot.webui.settings_api import update_agent_settings
@@ -97,6 +97,37 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
     assert not hasattr(loop.runner, "provider")
+
+
+def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path) -> None:
+    base_provider = _provider("base-model")
+    fast_provider = _provider("fast-model")
+    fast_snapshot = ProviderSnapshot(
+        provider=fast_provider,
+        model="fast-model",
+        context_window_tokens=2000,
+        signature=("fast-model", "auto", "same-runtime"),
+    )
+    published: list[tuple[str, str | None]] = []
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=base_provider,
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        provider_signature=("base-model", "auto", "initial"),
+        provider_snapshot_loader=lambda: fast_snapshot,
+        model_presets={"fast": ModelPresetConfig(model="fast-model")},
+        model_preset="fast",
+        preset_snapshot_loader=lambda _name: fast_snapshot,
+        runtime_model_publisher=lambda model, preset: published.append((model, preset)),
+    )
+
+    runtime = loop.llm_runtime()
+
+    assert runtime.model_preset is None
+    assert loop.model_preset is None
+    assert published == [("fast-model", None)]
 
 
 def test_next_turn_captures_generation_changed_after_previous_admission(

@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -24,6 +25,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
@@ -81,9 +83,11 @@ class SubagentManager:
 
     def __init__(
         self,
-        workspace: Path,
-        bus: MessageBus,
-        max_tool_result_chars: int,
+        provider: LLMProvider | None = None,
+        workspace: Path | None = None,
+        bus: MessageBus | None = None,
+        max_tool_result_chars: int | None = None,
+        model: str | None = None,
         tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
@@ -92,7 +96,31 @@ class SubagentManager:
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
+        if workspace is None:
+            raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
+        if bus is None:
+            raise TypeError("SubagentManager.__init__() missing required argument: 'bus'")
+        if max_tool_result_chars is None:
+            raise TypeError(
+                "SubagentManager.__init__() missing required argument: 'max_tool_result_chars'"
+            )
+        if model is not None and provider is None:
+            raise TypeError("SubagentManager model compatibility argument requires provider")
+
         defaults = AgentDefaults()
+        self._compat_runtime: LLMRuntime | None = None
+        if provider is not None:
+            warnings.warn(
+                "SubagentManager provider/model constructor arguments are deprecated; "
+                "pass runtime=... to spawn() instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._compat_runtime = LLMRuntime.capture(
+                provider,
+                model or provider.get_default_model(),
+                context_window_tokens=defaults.context_window_tokens,
+            )
         self.workspace = workspace
         self.bus = bus
         self.tools_config = tools_config or ToolsConfig()
@@ -119,6 +147,41 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+
+    def set_provider(self, provider: LLMProvider, model: str) -> None:
+        """Update the deprecated runtime source used by legacy ``spawn`` calls."""
+        warnings.warn(
+            "SubagentManager.set_provider() is deprecated; pass runtime=... to spawn() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        context_window_tokens = (
+            self._compat_runtime.context_window_tokens
+            if self._compat_runtime is not None
+            else AgentDefaults().context_window_tokens
+        )
+        self._compat_runtime = LLMRuntime.capture(
+            provider,
+            model,
+            context_window_tokens=context_window_tokens,
+        )
+
+    def _compat_spawn_runtime(self) -> LLMRuntime:
+        runtime = self._compat_runtime
+        if runtime is None:
+            raise TypeError(
+                "SubagentManager.spawn() missing required keyword-only argument: 'runtime'"
+            )
+        warnings.warn(
+            "SubagentManager.spawn() without runtime is deprecated; pass runtime=... explicitly",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return LLMRuntime.capture(
+            runtime.provider,
+            runtime.model,
+            context_window_tokens=runtime.context_window_tokens,
+        )
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -161,9 +224,11 @@ class SubagentManager:
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
-        runtime: LLMRuntime,
+        runtime: LLMRuntime | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
+        if runtime is None:
+            runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]

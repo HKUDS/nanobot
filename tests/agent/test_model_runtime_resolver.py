@@ -139,6 +139,38 @@ def test_resolver_refresh_preserves_unchanged_active_preset() -> None:
     assert resolver.model_preset == "fast"
 
 
+def test_refresh_clears_preset_when_new_default_has_same_snapshot_signature() -> None:
+    initial = _runtime()
+    preset_provider = _provider()
+    preset_snapshot = ProviderSnapshot(
+        provider=preset_provider,
+        model="fast-model",
+        context_window_tokens=20_000,
+        signature=("fast-model", "auto", "same-runtime"),
+    )
+    default_snapshot = ProviderSnapshot(
+        provider=preset_provider,
+        model="fast-model",
+        context_window_tokens=20_000,
+        signature=preset_snapshot.signature,
+    )
+    resolver = ModelRuntimeResolver(
+        initial,
+        model_presets={"fast": ModelPresetConfig(model="fast-model")},
+        provider_snapshot_loader=lambda: default_snapshot,
+        preset_snapshot_loader=lambda _name: preset_snapshot,
+    )
+    resolver.select_preset("fast")
+
+    refreshed = resolver.refresh()
+
+    assert refreshed is resolver.runtime
+    assert refreshed is not None
+    assert resolver.model_preset is None
+    assert resolver.runtime.model_preset is None
+    assert "_active_preset" not in resolver.__dict__
+
+
 def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:
     provider = _provider(temperature=0.2, max_tokens=2048)
     resolver = ModelRuntimeResolver(_runtime(provider))

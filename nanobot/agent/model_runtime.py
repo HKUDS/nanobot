@@ -31,7 +31,6 @@ class ModelRuntimeResolver:
         self._model_presets = dict(model_presets or {})
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
-        self._active_preset = initial_runtime.model_preset
         self._tracks_provider_generation = initial_runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             initial_runtime.snapshot_signature
@@ -48,7 +47,7 @@ class ModelRuntimeResolver:
 
     @property
     def model_preset(self) -> str | None:
-        return self._active_preset
+        return self._runtime.model_preset
 
     @property
     def provider_signature(self) -> tuple[object, ...] | None:
@@ -79,7 +78,6 @@ class ModelRuntimeResolver:
         """Select a snapshot as the default for future turns."""
         runtime = self.resolve_snapshot(snapshot, model_preset=model_preset)
         self._runtime = runtime
-        self._active_preset = model_preset
         self._tracks_provider_generation = model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             runtime.snapshot_signature
@@ -101,7 +99,6 @@ class ModelRuntimeResolver:
         """Select a named preset as the default for future turns."""
         runtime = self.resolve_preset(name)
         self._runtime = runtime
-        self._active_preset = runtime.model_preset
         self._tracks_provider_generation = False
         return runtime
 
@@ -114,7 +111,6 @@ class ModelRuntimeResolver:
             model=model.strip(),
             model_preset=None,
         )
-        self._active_preset = None
         return self._runtime
 
     def select_context_window(self, context_window_tokens: int) -> LLMRuntime:
@@ -154,23 +150,28 @@ class ModelRuntimeResolver:
 
         snapshot = self._provider_snapshot_loader()
         default_selection = preset_helpers.default_selection_signature(snapshot.signature)
-        active_preset = self._active_preset
+        active_preset = self._runtime.model_preset
         if active_preset and self._default_selection_signature in (None, default_selection):
-            self._default_selection_signature = default_selection
             runtime = self.resolve_preset(active_preset)
         else:
             active_preset = None
-            self._active_preset = None
-            self._default_selection_signature = default_selection
             runtime = self.resolve_snapshot(snapshot)
 
-        if runtime.snapshot_signature == self._runtime.snapshot_signature:
+        unchanged = (
+            runtime.snapshot_signature == self._runtime.snapshot_signature
+            and runtime.model_preset == self._runtime.model_preset
+        )
+        if unchanged:
+            self._default_selection_signature = default_selection
             return None
-        self._runtime = runtime
-        self._active_preset = active_preset
-        self._tracks_provider_generation = active_preset is None
-        self._default_selection_signature = preset_helpers.default_selection_signature(
-            runtime.snapshot_signature
+        (
+            self._runtime,
+            self._tracks_provider_generation,
+            self._default_selection_signature,
+        ) = (
+            runtime,
+            active_preset is None,
+            default_selection,
         )
         return runtime
 
@@ -197,6 +198,6 @@ class ModelRuntimeResolver:
                 snapshot_signature=("model_override", model),
             )
 
-        base = config.resolve_preset(self._active_preset)
+        base = config.resolve_preset(self.model_preset)
         preset = base.model_copy(update={"model": model, "provider": "auto"})
         return self.resolve_snapshot(build_provider_snapshot(config, preset=preset))

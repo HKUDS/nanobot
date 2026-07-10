@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent import SubagentManager
 from nanobot.agent.hook import AgentHookContext
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import (
-    SubagentManager,
     SubagentStatus,
     _SubagentHook,
 )
@@ -96,6 +96,78 @@ class TestRuntimeOwnership:
         assert not hasattr(sm, "model")
         assert not hasattr(sm, "context_window_tokens")
         assert not hasattr(sm.runner, "provider")
+
+
+class TestLegacyCompatibility:
+    def test_accepts_exported_legacy_constructor_positionally(self, tmp_path):
+        provider = MagicMock(spec=LLMProvider)
+        provider.generation = GenerationSettings(temperature=0.2, max_tokens=2048)
+
+        with pytest.warns(DeprecationWarning, match="provider"):
+            sm = SubagentManager(
+                provider,
+                tmp_path,
+                MessageBus(),
+                16_000,
+                "legacy-model",
+            )
+
+        assert sm.workspace == tmp_path
+        assert sm.max_tool_result_chars == 16_000
+        assert not hasattr(sm, "provider")
+        assert not hasattr(sm, "model")
+
+    @pytest.mark.asyncio
+    async def test_legacy_spawn_captures_runtime_at_admission(self, tmp_path):
+        provider = MagicMock(spec=LLMProvider)
+        provider.generation = GenerationSettings(temperature=0.2, max_tokens=2048)
+        with pytest.warns(DeprecationWarning, match="provider"):
+            sm = SubagentManager(
+                provider=provider,
+                workspace=tmp_path,
+                bus=MessageBus(),
+                max_tool_result_chars=16_000,
+                model="legacy-model",
+            )
+        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+            final_content="done", messages=[], stop_reason="completed",
+        ))
+        provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
+
+        with pytest.warns(DeprecationWarning, match="runtime"):
+            await sm.spawn("legacy task")
+        await _drain_subagent_tasks(sm)
+
+        runtime = sm.runner.run.await_args.args[0].runtime
+        assert runtime.provider is provider
+        assert runtime.model == "legacy-model"
+        assert runtime.generation == GenerationSettings(0.8, 512, None)
+
+    @pytest.mark.asyncio
+    async def test_set_provider_supports_future_legacy_spawns(self, tmp_path):
+        sm = _manager(tmp_path)
+        provider = MagicMock(spec=LLMProvider)
+        provider.generation = GenerationSettings(temperature=0.3, max_tokens=1024)
+        with pytest.warns(DeprecationWarning, match="set_provider"):
+            sm.set_provider(provider, "replacement-model")
+        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+            final_content="done", messages=[], stop_reason="completed",
+        ))
+
+        with pytest.warns(DeprecationWarning, match="runtime"):
+            await sm.spawn("legacy task")
+        await _drain_subagent_tasks(sm)
+
+        runtime = sm.runner.run.await_args.args[0].runtime
+        assert runtime.provider is provider
+        assert runtime.model == "replacement-model"
+
+    @pytest.mark.asyncio
+    async def test_new_constructor_still_requires_explicit_spawn_runtime(self, tmp_path):
+        sm = _manager(tmp_path)
+
+        with pytest.raises(TypeError, match="runtime"):
+            await sm.spawn("task")
 
 
 # ---------------------------------------------------------------------------
