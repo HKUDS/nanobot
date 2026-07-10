@@ -35,6 +35,12 @@ def _make_mock_loop(**overrides):
     loop._concurrency_gate = None
     loop._unified_session = False
     loop._extra_hooks = []
+    loop.set_runtime_model.side_effect = lambda value: setattr(loop, "model", value)
+    loop.set_runtime_context_window.side_effect = lambda value: setattr(
+        loop,
+        "context_window_tokens",
+        value,
+    )
 
     # web_config mock — needed for check tests
     loop.web_config = MagicMock()
@@ -237,12 +243,12 @@ class TestModifyRestricted:
 
     @pytest.mark.asyncio
     async def test_modify_context_window_valid(self):
-        loop = _make_mock_loop(_sync_replay_max_messages=MagicMock())
+        loop = _make_mock_loop()
         tool = _make_tool(runtime_state=loop)
         result = await tool.execute(action="set", key="context_window_tokens", value=131072)
         assert "Set context_window_tokens" in result
         assert loop.context_window_tokens == 131072
-        loop._sync_replay_max_messages.assert_called_once_with()
+        loop.set_runtime_context_window.assert_called_once_with(131072)
 
     @pytest.mark.asyncio
     async def test_modify_none_value_for_restricted_int(self):

@@ -6,6 +6,7 @@ import nanobot.agent.memory as memory_module
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
+from nanobot.session.manager import replay_max_messages_for_context
 
 
 def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -> AgentLoop:
@@ -222,7 +223,7 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
     loop.consolidator.maybe_consolidate_by_tokens.assert_any_await(
         session,
         runtime=runtime,
-        replay_max_messages=loop._max_messages,
+        replay_max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
     )
     assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
     assert all(

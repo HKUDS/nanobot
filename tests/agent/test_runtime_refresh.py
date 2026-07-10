@@ -18,7 +18,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     return provider
 
 
-def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
+def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
     loop = AgentLoop(
@@ -35,8 +35,9 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
         ),
     )
 
-    loop._refresh_provider_snapshot()
+    runtime = loop.llm_runtime()
 
+    assert runtime is loop.runtime_resolver.runtime
     assert loop.provider is new_provider
     assert loop.model == "new-model"
     assert loop.context_window_tokens == 2000
@@ -48,6 +49,29 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     assert not hasattr(loop.consolidator, "model")
     assert not hasattr(loop.consolidator, "context_window_tokens")
     assert not hasattr(loop.consolidator, "max_completion_tokens")
+
+
+def test_loop_has_no_mutable_runtime_mirrors_or_legacy_snapshot_api(tmp_path: Path) -> None:
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider("test-model"),
+        workspace=tmp_path,
+        model="test-model",
+        context_window_tokens=1000,
+    )
+
+    assert {
+        "provider",
+        "model",
+        "context_window_tokens",
+        "model_presets",
+        "_active_preset",
+        "_provider_signature",
+        "_max_messages",
+    }.isdisjoint(loop.__dict__)
+    assert not hasattr(loop, "_apply_provider_snapshot")
+    assert not hasattr(loop, "_build_model_preset_snapshot")
+    assert not hasattr(loop, "_sync_replay_max_messages")
 
 
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
@@ -118,7 +142,7 @@ def test_settings_context_window_refreshes_runtime_state(
     loop = AgentLoop.from_config(config, provider_snapshot_loader=loader)
 
     payload = update_agent_settings({"context_window_tokens": ["262144"]})
-    loop._refresh_provider_snapshot()
+    loop.llm_runtime()
 
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144

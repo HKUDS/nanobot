@@ -19,6 +19,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMResponse
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
@@ -69,8 +70,17 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
     assert runtime.model == "test-model"
 
     next_provider = MagicMock()
-    loop.provider = next_provider
-    loop.model = "next-model"
+    next_provider.generation = SimpleNamespace(
+        temperature=0.1,
+        max_tokens=4096,
+        reasoning_effort=None,
+    )
+    loop.runtime_resolver.adopt_snapshot(ProviderSnapshot(
+        provider=next_provider,
+        model="next-model",
+        context_window_tokens=runtime.context_window_tokens,
+        signature=("next-model",),
+    ))
     runtime = loop.llm_runtime()
 
     assert runtime.provider is next_provider
