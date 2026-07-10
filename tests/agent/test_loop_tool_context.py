@@ -1,12 +1,18 @@
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import (
+    RequestContext,
+    bind_request_context,
+    current_request_context,
+    reset_request_context,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
-from nanobot.agent.tools.context import RequestContext
 
 
 class _ContextRecordingTool:
@@ -87,3 +93,92 @@ async def test_loop_hook_preserves_metadata_when_resetting_tool_context(tmp_path
         "metadata": metadata,
         "session_key": "slack:C123:111.222",
     }
+
+
+def test_request_context_nested_bind_restores_outer_context() -> None:
+    outer = RequestContext(channel="slack", chat_id="outer", session_key="slack:outer")
+    inner = RequestContext(channel="email", chat_id="inner", session_key="email:inner")
+
+    outer_token = bind_request_context(outer)
+    try:
+        assert current_request_context() is outer
+        inner_token = bind_request_context(inner)
+        try:
+            assert current_request_context() is inner
+        finally:
+            reset_request_context(inner_token)
+        assert current_request_context() is outer
+    finally:
+        reset_request_context(outer_token)
+
+    assert current_request_context() is None
+
+
+@pytest.mark.asyncio
+async def test_request_context_bindings_are_isolated_between_concurrent_tasks() -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def observe(ctx: RequestContext, *, wait_first: bool) -> RequestContext | None:
+        token = bind_request_context(ctx)
+        try:
+            if wait_first:
+                entered.set()
+                await release.wait()
+            else:
+                await entered.wait()
+                release.set()
+            await asyncio.sleep(0)
+            return current_request_context()
+        finally:
+            reset_request_context(token)
+
+    first = RequestContext(channel="feishu", chat_id="first", session_key="feishu:first")
+    second = RequestContext(channel="telegram", chat_id="second", session_key="telegram:second")
+
+    observed = await asyncio.gather(
+        observe(first, wait_first=True),
+        observe(second, wait_first=False),
+    )
+
+    assert observed == [first, second]
+    assert current_request_context() is None
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_restores_outer_request_context_after_runner_exception(
+    tmp_path: Path,
+) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    outer = RequestContext(channel="test", chat_id="outer", session_key="test:outer")
+
+    async def fail_run(_spec):
+        current = current_request_context()
+        assert current is not None
+        assert current.channel == "slack"
+        assert current.chat_id == "C123"
+        assert current.session_key == "slack:C123:111.222"
+        raise RuntimeError("runner failed")
+
+    loop.runner.run = AsyncMock(side_effect=fail_run)
+    outer_token = bind_request_context(outer)
+    try:
+        with pytest.raises(RuntimeError, match="runner failed"):
+            await loop._run_agent_loop(
+                [],
+                channel="slack",
+                chat_id="C123",
+                session_key="slack:C123:111.222",
+            )
+        assert current_request_context() is outer
+    finally:
+        reset_request_context(outer_token)
+
+    assert current_request_context() is None
