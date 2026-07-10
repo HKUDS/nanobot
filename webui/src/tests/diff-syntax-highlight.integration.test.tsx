@@ -43,9 +43,11 @@ describe("DiffSyntaxHighlight with Prism", () => {
     const highlighted = await screen.findByTestId("syntax-highlighted-diff-hunk");
     await waitFor(
       () => {
-        expect(highlighted.querySelectorAll('td:last-child span[style*="color"]')).not.toHaveLength(
-          0,
+        const tokens = highlighted.querySelectorAll<HTMLElement>(
+          'td:last-child span[style*="color"]',
         );
+        expect(tokens).not.toHaveLength(0);
+        expect(new Set([...tokens].map((token) => token.style.color)).size).toBeGreaterThan(1);
       },
       { timeout: 10_000 },
     );
