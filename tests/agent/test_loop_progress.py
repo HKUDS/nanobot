@@ -21,6 +21,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
@@ -815,8 +816,14 @@ class TestToolEventProgress:
         ))
 
         assert len(scheduled_title) == 1
-        loop.provider = MagicMock()
-        loop.model = "switched-after-turn"
+        next_provider = MagicMock()
+        next_provider.generation = loop.llm_runtime().generation
+        loop.runtime_resolver.adopt_snapshot(ProviderSnapshot(
+            provider=next_provider,
+            model="switched-after-turn",
+            context_window_tokens=loop.context_window_tokens,
+            signature=("switched-after-turn",),
+        ))
 
         await scheduled_title[0]  # type: ignore[misc]
 

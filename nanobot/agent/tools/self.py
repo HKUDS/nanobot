@@ -57,7 +57,7 @@ class MyTool(Tool):
 
     BLOCKED = frozenset({
         # Core infrastructure
-        "bus", "provider", "_running", "tools",
+        "bus", "provider", "runtime_resolver", "_running", "tools",
         # Config management
         "_runtime_vars",
         # Subsystems
@@ -107,6 +107,11 @@ class MyTool(Tool):
     }
 
     _MAX_RUNTIME_KEYS = 64
+    _MODEL_RUNTIME_FIELDS = frozenset({
+        "model",
+        "model_preset",
+        "context_window_tokens",
+    })
 
     def __init__(self, runtime_state: RuntimeState, modify_allowed: bool = True) -> None:
         self._runtime_state = runtime_state
@@ -325,9 +330,20 @@ class MyTool(Tool):
 
     # -- inspect --
 
+    def _current_runtime_value(self, key: str) -> tuple[bool, Any]:
+        request_ctx = current_request_context()
+        runtime = request_ctx.runtime if request_ctx is not None else None
+        if runtime is None or key not in self._MODEL_RUNTIME_FIELDS:
+            return False, None
+        return True, getattr(runtime, key)
+
     def _inspect(self, key: str | None) -> str:
         if not key:
             return self._inspect_all()
+        if "." not in key:
+            found, value = self._current_runtime_value(key)
+            if found:
+                return self._format_value(value, key)
         top = key.split(".")[0]
         if top in self._DENIED_ATTRS or top.startswith("__"):
             return ToolResult.error(f"Error: '{top}' is not accessible")
@@ -353,8 +369,13 @@ class MyTool(Tool):
         parts: list[str] = []
         # RESTRICTED keys
         for k in self.RESTRICTED:
-            parts.append(self._format_value(getattr(state, k, None), k))
-        parts.append(self._format_value(state.model_preset, "model_preset"))
+            found, value = self._current_runtime_value(k)
+            parts.append(self._format_value(value if found else getattr(state, k, None), k))
+        found, value = self._current_runtime_value("model_preset")
+        parts.append(self._format_value(
+            value if found else state.model_preset,
+            "model_preset",
+        ))
         # Other useful top-level keys shown in description
         for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "workspace_sandbox", "subagents"):
             if _has_real_attr(state, k):
@@ -432,13 +453,16 @@ class MyTool(Tool):
             return ToolResult.error(f"Error: '{key}' must be <= {spec['max']}")
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
             return ToolResult.error(f"Error: '{key}' must be at least {spec['min_len']} characters")
-        setattr(self._runtime_state, key, value)
         if key == "model":
-            self._runtime_state._active_preset = None
-        sync_replay = getattr(self._runtime_state, "_sync_replay_max_messages", None)
-        if key == "context_window_tokens" and callable(sync_replay):
-            sync_replay()
-        if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
+            self._runtime_state.set_runtime_model(value)
+        elif key == "context_window_tokens":
+            self._runtime_state.set_runtime_context_window(value)
+        else:
+            setattr(self._runtime_state, key, value)
+        if key == "max_iterations" and hasattr(
+            self._runtime_state,
+            "_sync_subagent_runtime_limits",
+        ):
             self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
         return f"Set {key} = {value!r} (was {old!r})"

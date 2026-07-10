@@ -349,7 +349,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
     name = parts[0]
     try:
-        loop.set_model_preset(name)
+        runtime = loop.set_model_preset(name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -362,11 +362,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             metadata=metadata,
         )
 
-    max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
+    max_tokens = runtime.generation.max_tokens
     lines = [
-        f"Switched model preset to `{loop.model_preset}`.",
-        f"- Model: `{loop.model}`",
-        f"- Context window: {loop.context_window_tokens}",
+        f"Switched model preset to `{runtime.model_preset}`.",
+        f"- Model: `{runtime.model}`",
+        f"- Context window: {runtime.context_window_tokens}",
     ]
     if max_tokens is not None:
         lines.append(f"- Max output tokens: {max_tokens}")

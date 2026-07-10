@@ -245,8 +245,8 @@ class TestRestartCommand:
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
         runtime = loop.llm_runtime()
-        loop.model = "replacement-model"
-        loop.context_window_tokens = 10
+        loop.set_runtime_model("replacement-model")
+        loop.set_runtime_context_window(10)
         loop.provider.generation = SimpleNamespace(
             temperature=1.0,
             max_tokens=1,
