@@ -607,82 +607,8 @@ def _match_end_line(match: _MatchSpan) -> int:
     return match.line + comparable.count("\n")
 
 
-def _line_distance_to_match(match: _MatchSpan, line: int) -> int:
-    end_line = _match_end_line(match)
-    if match.line <= line <= end_line:
-        return 0
-    if line < match.line:
-        return match.line - line
-    return line - end_line
-
-
-def _format_match_locations(matches: list[_MatchSpan], *, max_items: int = 5) -> str:
-    locations: list[str] = []
-    for match in matches[:max_items]:
-        end_line = _match_end_line(match)
-        if end_line == match.line:
-            locations.append(f"line {match.line}")
-        else:
-            locations.append(f"lines {match.line}-{end_line}")
-    if len(matches) > max_items:
-        locations.append("...")
-    return ", ".join(locations)
-
-
-def _line_guard_error(
-    *,
-    guard_name: str,
-    guard_line: int,
-    matches: list[_MatchSpan],
-    max_distance: int,
-) -> str:
-    nearest = min(matches, key=lambda match: _line_distance_to_match(match, guard_line))
-    distance = _line_distance_to_match(nearest, guard_line)
-    return ToolResult.error(
-        f"Error: {guard_name} {guard_line} does not match the old_text location. "
-        f"old_text appears at {_format_match_locations(matches)}. "
-        f"Nearest distance is {distance} line(s); allowed distance is {max_distance}. "
-        "Re-read the intended region and copy old_text from the target line, "
-        "or adjust the line guard."
-    )
-
-
-def _start_line_guard_error(
-    *,
-    guard_line: int,
-    matches: list[_MatchSpan],
-) -> str:
-    nearest = min(matches, key=lambda match: abs(match.line - guard_line))
-    distance = abs(nearest.line - guard_line)
-    return ToolResult.error(
-        f"Error: target_start_line {guard_line} does not match the old_text start. "
-        f"old_text appears at {_format_match_locations(matches)}. "
-        f"Nearest start-line distance is {distance} line(s). "
-        "Re-read the intended region and copy old_text starting at the target block line."
-    )
-
-
-def _matches_for_line_guards(
-    matches: list[_MatchSpan],
-    *,
-    target_line: int | None,
-    target_line_window: int,
-    target_start_line: int | None,
-) -> list[_MatchSpan]:
-    candidates = matches
-    if target_line is not None:
-        candidates = [
-            match
-            for match in candidates
-            if _line_distance_to_match(match, target_line) <= target_line_window
-        ]
-    if target_start_line is not None:
-        candidates = [
-            match
-            for match in candidates
-            if match.line == target_start_line
-        ]
-    return candidates
+def _match_covers_line(match: _MatchSpan, line: int) -> bool:
+    return match.line <= line <= _match_end_line(match)
 
 
 def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
@@ -859,44 +785,8 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         line_hint=IntegerSchema(
             1,
             description=(
-                "Optional 1-based line hint copied from read_file. Used to choose "
-                "the nearest match and reject matches outside line_hint_window."
-            ),
-            minimum=1,
-            nullable=True,
-        ),
-        line_hint_window=IntegerSchema(
-            5,
-            description=(
-                "Maximum line distance allowed between line_hint and the selected "
-                "old_text match (default 5)."
-            ),
-            minimum=0,
-            nullable=True,
-        ),
-        target_line=IntegerSchema(
-            1,
-            description=(
-                "Optional 1-based line from read_file that the selected old_text "
-                "match must cover. Prefer this when editing a specific numbered line."
-            ),
-            minimum=1,
-            nullable=True,
-        ),
-        target_line_window=IntegerSchema(
-            0,
-            description=(
-                "Maximum line distance allowed around target_line (default 0, "
-                "meaning old_text must cover target_line)."
-            ),
-            minimum=0,
-            nullable=True,
-        ),
-        target_start_line=IntegerSchema(
-            1,
-            description=(
-                "Optional 1-based line where the selected old_text match must start. "
-                "Use this for block edits that must begin at a specific numbered line."
+                "Optional exact 1-based target line copied from read_file. "
+                "The selected old_text match must cover this line."
             ),
             minimum=1,
             nullable=True,
@@ -916,7 +806,6 @@ class EditFileTool(_FsTool):
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
-    _DEFAULT_LINE_HINT_WINDOW = 5
 
     @property
     def name(self) -> str:
@@ -930,9 +819,8 @@ class EditFileTool(_FsTool):
             "with old_text copied from read_file. For multi-file, structural, "
             "or generated code edits, prefer apply_patch. If old_text matches "
             "multiple times, provide more context or set occurrence, line_hint, "
-            "target_line, target_start_line, replace_all, and expected_replacements. "
-            "Prefer target_line when editing from numbered read_file output. Use "
-            "target_start_line when a block edit must start at a specific line. "
+            "replace_all, and expected_replacements. When editing from numbered "
+            "read_file output, set line_hint to the exact target line. "
             "Shows closest-match diagnostics on failure."
         )
 
@@ -945,10 +833,7 @@ class EditFileTool(_FsTool):
         self, path: str | None = None, old_text: str | None = None,
         new_text: str | None = None,
         replace_all: bool = False, occurrence: int | None = None,
-        line_hint: int | None = None, line_hint_window: int | None = None,
-        target_line: int | None = None, target_line_window: int | None = None,
-        target_start_line: int | None = None,
-        expected_replacements: int | None = None, **kwargs: Any,
+        line_hint: int | None = None, expected_replacements: int | None = None, **kwargs: Any,
     ) -> str:
         try:
             if not path:
@@ -961,22 +846,6 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: occurrence must be >= 1.")
             if line_hint is not None and line_hint < 1:
                 return ToolResult.error("Error: line_hint must be >= 1.")
-            if line_hint_window is not None and line_hint_window < 0:
-                return ToolResult.error("Error: line_hint_window must be >= 0.")
-            if target_line is not None and target_line < 1:
-                return ToolResult.error("Error: target_line must be >= 1.")
-            if target_line_window is not None and target_line_window < 0:
-                return ToolResult.error("Error: target_line_window must be >= 0.")
-            if target_start_line is not None and target_start_line < 1:
-                return ToolResult.error("Error: target_start_line must be >= 1.")
-            if line_hint_window is not None and line_hint is None:
-                return ToolResult.error("Error: line_hint_window requires line_hint.")
-            if target_line_window is not None and target_line is None:
-                return ToolResult.error("Error: target_line_window requires target_line.")
-            if line_hint is not None and target_line is not None:
-                return ToolResult.error("Error: line_hint cannot be used with target_line.")
-            if line_hint is not None and target_start_line is not None:
-                return ToolResult.error("Error: line_hint cannot be used with target_start_line.")
             if expected_replacements is not None and expected_replacements < 1:
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
@@ -1025,79 +894,23 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: occurrence cannot be used with replace_all=true.")
             if replace_all and line_hint is not None:
                 return ToolResult.error("Error: line_hint cannot be used with replace_all=true.")
-            if replace_all and target_line is not None:
-                return ToolResult.error("Error: target_line cannot be used with replace_all=true.")
-            if replace_all and target_start_line is not None:
-                return ToolResult.error("Error: target_start_line cannot be used with replace_all=true.")
             if occurrence is not None and line_hint is not None:
                 return ToolResult.error("Error: line_hint cannot be used with occurrence.")
-            if occurrence is not None and target_line is not None:
-                return ToolResult.error("Error: target_line cannot be used with occurrence.")
-            if occurrence is not None and target_start_line is not None:
-                return ToolResult.error("Error: target_start_line cannot be used with occurrence.")
-            if count > 1 and not replace_all:
-                if occurrence is not None:
-                    if occurrence > count:
-                        return ToolResult.error(
-                            f"Error: occurrence {occurrence} is out of range; "
-                            f"old_text appears {count} times."
-                        )
-                elif line_hint is not None:
-                    nearest = min(matches, key=lambda match: _line_distance_to_match(match, line_hint))
-                    distance = _line_distance_to_match(nearest, line_hint)
-                    if sum(
-                        1 for match in matches
-                        if _line_distance_to_match(match, line_hint) == distance
-                    ) > 1:
-                        return ToolResult.error(
-                            f"Error: line_hint {line_hint} is ambiguous; "
-                            f"old_text appears {count} times."
-                        )
-                elif target_line is not None or target_start_line is not None:
-                    target_window = target_line_window if target_line_window is not None else 0
-                    candidates = _matches_for_line_guards(
-                        matches,
-                        target_line=target_line,
-                        target_line_window=target_window,
-                        target_start_line=target_start_line,
-                    )
-                    if not candidates:
-                        if target_start_line is not None:
-                            start_candidates = [
-                                match for match in matches if match.line == target_start_line
-                            ]
-                            if not start_candidates:
-                                return _start_line_guard_error(
-                                    guard_line=target_start_line,
-                                    matches=matches,
-                                )
-                        return _line_guard_error(
-                            guard_name="target_line",
-                            guard_line=target_line or 1,
-                            matches=matches,
-                            max_distance=target_window,
-                        )
-                    if len(candidates) > 1:
-                        return ToolResult.error(
-                            f"Error: target_line {target_line} is ambiguous; "
-                            f"old_text appears {count} times at "
-                            f"{_format_match_locations(candidates)}."
-                        )
-                else:
-                    line_numbers = [match.line for match in matches]
-                    preview = ", ".join(f"line {n}" for n in line_numbers[:3])
-                    if len(line_numbers) > 3:
-                        preview += ", ..."
-                    location_hint = f" at {preview}" if preview else ""
-                    return (
-                        f"Warning: old_text appears {count} times{location_hint}. "
-                        "Provide more context, set occurrence to choose one match, "
-                        "or set replace_all=true."
-                    )
-            elif occurrence is not None and occurrence > count:
+            if occurrence is not None and occurrence > count:
                 return ToolResult.error(
                     f"Error: occurrence {occurrence} is out of range; "
-                    f"old_text appears {count} time."
+                    f"old_text appears {count} time(s)."
+                )
+            if count > 1 and not replace_all and occurrence is None and line_hint is None:
+                line_numbers = [match.line for match in matches]
+                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+                if len(line_numbers) > 3:
+                    preview += ", ..."
+                location_hint = f" at {preview}" if preview else ""
+                return (
+                    f"Warning: old_text appears {count} times{location_hint}. "
+                    "Provide more context, set occurrence to choose one match, "
+                    "or set replace_all=true."
                 )
 
             norm_new = new_text.replace("\r\n", "\n")
@@ -1108,48 +921,27 @@ class EditFileTool(_FsTool):
 
             if replace_all:
                 selected = matches
-            elif target_line is not None or target_start_line is not None:
-                target_window = target_line_window if target_line_window is not None else 0
-                candidates = _matches_for_line_guards(
-                    matches,
-                    target_line=target_line,
-                    target_line_window=target_window,
-                    target_start_line=target_start_line,
-                )
+            elif occurrence is not None:
+                selected = [matches[occurrence - 1]]
+            elif line_hint is not None:
+                candidates = [match for match in matches if _match_covers_line(match, line_hint)]
                 if not candidates:
-                    if target_start_line is not None:
-                        start_candidates = [
-                            match for match in matches if match.line == target_start_line
-                        ]
-                        if not start_candidates:
-                            return _start_line_guard_error(
-                                guard_line=target_start_line,
-                                matches=matches,
-                            )
-                    return _line_guard_error(
-                        guard_name="target_line",
-                        guard_line=target_line or 1,
-                        matches=matches,
-                        max_distance=target_window,
+                    locations = ", ".join(f"line {match.line}" for match in matches[:3])
+                    if len(matches) > 3:
+                        locations += ", ..."
+                    return ToolResult.error(
+                        f"Error: line_hint {line_hint} does not match the old_text location. "
+                        f"old_text appears at {locations}. Re-read the intended region and "
+                        "copy old_text that covers the target line."
+                    )
+                if len(candidates) > 1:
+                    return ToolResult.error(
+                        f"Error: line_hint {line_hint} is ambiguous; "
+                        f"old_text appears {len(candidates)} times on that line."
                     )
                 selected = candidates
-            elif line_hint is not None:
-                nearest = min(matches, key=lambda match: _line_distance_to_match(match, line_hint))
-                window = (
-                    self._DEFAULT_LINE_HINT_WINDOW
-                    if line_hint_window is None
-                    else line_hint_window
-                )
-                if _line_distance_to_match(nearest, line_hint) > window:
-                    return _line_guard_error(
-                        guard_name="line_hint",
-                        guard_line=line_hint,
-                        matches=matches,
-                        max_distance=window,
-                    )
-                selected = [nearest]
             else:
-                selected = [matches[occurrence - 1 if occurrence else 0]]
+                selected = [matches[0]]
             if expected_replacements is not None and len(selected) != expected_replacements:
                 return ToolResult.error(
                     f"Error: expected {expected_replacements} replacements but "
