@@ -16,70 +16,17 @@ from typing import Any
 import httpx
 
 from nanobot.config.loader import load_config
+from nanobot.webui.channel_setup import channel_setup_spec
 
 CheckStatus = str
 SetupStatus = str
 
 _TIMEOUT_SECONDS = 4.0
 
-_SECRET_FIELDS: dict[str, set[str]] = {
-    "telegram": {"token"},
-    "slack": {"appToken", "botToken"},
-    "discord": {"token"},
-    "email": {"imapPassword", "smtpPassword"},
-    "matrix": {"password", "accessToken"},
-    "mattermost": {"token"},
-    "dingtalk": {"clientSecret"},
-    "wecom": {"secret"},
-    "qq": {"secret"},
-    "msteams": {"appPassword"},
-    "napcat": {"accessToken"},
-    "feishu": {"appSecret"},
-    "weixin": {"token"},
-}
 
-_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
-    "telegram": ("token",),
-    "slack": ("appToken", "botToken"),
-    "discord": ("token",),
-    "email": (
-        "consentGranted",
-        "imapHost",
-        "imapUsername",
-        "imapPassword",
-        "smtpHost",
-        "smtpUsername",
-        "smtpPassword",
-    ),
-    "matrix": ("homeserver", "userId"),
-    "mattermost": ("serverUrl", "token"),
-    "dingtalk": ("clientId", "clientSecret"),
-    "wecom": ("botId", "secret"),
-    "qq": ("appId", "secret"),
-    "signal": ("phoneNumber",),
-    "msteams": ("appId", "appPassword"),
-    "napcat": ("wsUrl",),
-    "feishu": ("appId", "appSecret"),
-}
-
-_OFFICIAL_ACTIONS: dict[str, str] = {
-    "slack": "https://api.slack.com/apps",
-    "telegram": "https://t.me/BotFather",
-    "discord": "https://discord.com/developers/applications",
-    "email": "https://support.google.com/accounts/answer/185833",
-    "matrix": "https://matrix.org/ecosystem/clients/",
-    "mattermost": "https://developers.mattermost.com/integrate/reference/bot-accounts/",
-    "dingtalk": "https://open.dingtalk.com/",
-    "wecom": "https://developer.work.weixin.qq.com/",
-    "qq": "https://q.qq.com/",
-    "signal": "https://github.com/bbernhard/signal-cli-rest-api",
-    "msteams": "https://dev.teams.microsoft.com/apps",
-    "napcat": "https://napneko.github.io/",
-    "feishu": "https://open.feishu.cn/app",
-    "whatsapp": "https://faq.whatsapp.com/",
-    "weixin": "https://weixin.qq.com/",
-    "websocket": "http://127.0.0.1:8765",
-}
+def _official_action(name: str) -> str | None:
+    spec = channel_setup_spec(name)
+    return spec.official_url if spec is not None else None
 
 
 def validate_channel_config(
@@ -112,7 +59,7 @@ def _validate_websocket(name: str, values: dict[str, Any]) -> dict[str, Any]:
             "Managed by WebUI",
             "pass",
             "The browser workbench prepares the local WebSocket channel.",
-            action_url=_OFFICIAL_ACTIONS["websocket"],
+            action_url=_official_action(name),
         )
     ]
     return _payload(name, "connected" if _enabled(values) else "configured", checks, can_enable=True)
@@ -189,7 +136,7 @@ def _validate_slack(name: str, values: dict[str, Any]) -> dict[str, Any]:
                 "Socket Mode app token",
                 "pass" if app_token.startswith("xapp-") else "fail",
                 "App-level Socket Mode tokens start with xapp-.",
-                action_url=_OFFICIAL_ACTIONS["slack"],
+                action_url=_official_action(name),
             )
         )
     if bot_token:
@@ -199,7 +146,7 @@ def _validate_slack(name: str, values: dict[str, Any]) -> dict[str, Any]:
                 "Bot token",
                 "pass" if bot_token.startswith("xoxb-") else "fail",
                 "Bot tokens start with xoxb- after installing the Slack app.",
-                action_url=_OFFICIAL_ACTIONS["slack"],
+                action_url=_official_action(name),
             )
         )
         if bot_token.startswith("xoxb-"):
@@ -314,7 +261,7 @@ def _validate_cli_handoff(name: str, values: dict[str, Any]) -> dict[str, Any]:
             "Terminal login",
             "skipped",
             "This channel uses a terminal QR login flow.",
-            action_url=_OFFICIAL_ACTIONS.get(name),
+            action_url=_official_action(name),
         )
     )
     return _payload(name, "needs_setup", checks, missing_fields=["terminal_login"], can_enable=False)
@@ -322,7 +269,8 @@ def _validate_cli_handoff(name: str, values: dict[str, Any]) -> dict[str, Any]:
 
 def _validate_generic(name: str, values: dict[str, Any]) -> dict[str, Any]:
     checks, missing = _required_checks(name, values)
-    if name in _REQUIRED_FIELDS:
+    spec = channel_setup_spec(name)
+    if spec is not None and spec.required:
         checks.append(_check("manual_review", "Manual setup", "skipped", "This channel can be checked from saved fields, but not fully verified in-browser."))
         return _status_from_checks(name, checks, missing)
     if _enabled(values):
@@ -368,7 +316,8 @@ def _merge_form_values(
 ) -> dict[str, Any]:
     merged = dict(values)
     prefix = f"channels.{name}."
-    secrets = _SECRET_FIELDS.get(name, set())
+    spec = channel_setup_spec(name)
+    secrets = spec.secrets if spec is not None else frozenset()
     for raw_key, raw_value in raw_values.items():
         if not isinstance(raw_key, str) or not raw_key:
             continue
@@ -382,7 +331,8 @@ def _merge_form_values(
 def _required_checks(name: str, values: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     checks: list[dict[str, Any]] = []
     missing: list[str] = []
-    for field in _REQUIRED_FIELDS.get(name, ()):
+    spec = channel_setup_spec(name)
+    for field in spec.simple_required_fields if spec is not None else ():
         value = _get(values, field)
         if field == "consentGranted":
             if not _truthy(value):

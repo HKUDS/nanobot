@@ -27,6 +27,7 @@ from nanobot.webui.channel_connect import (
     FeishuConnectStore,
     WeixinConnectStore,
 )
+from nanobot.webui.channel_setup import channel_setup_spec
 from nanobot.webui.channel_validation import validate_channel_config
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
@@ -60,95 +61,6 @@ _CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values"
 _CHANNEL_VALUES_HEADER_MAX_BYTES = 64 * 1024
 
 _SKIP_FIELD = object()
-
-_GROUP_POLICY_VALUES = {"mention", "open", "allowlist"}
-_CHANNEL_CONFIG_FIELDS: dict[str, dict[str, Any]] = {
-    "telegram": {
-        "token": "secret",
-        "allowFrom": "list",
-        "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
-    },
-    "slack": {
-        "appToken": "secret",
-        "botToken": "secret",
-        "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
-    },
-    "discord": {
-        "token": "secret",
-        "allowFrom": "list",
-        "allowChannels": "list",
-        "groupPolicy": ("enum", {"mention", "open"}),
-    },
-    "email": {
-        "consentGranted": "bool",
-        "imapHost": "string",
-        "imapPort": "int",
-        "imapUsername": "string",
-        "imapPassword": "secret",
-        "smtpHost": "string",
-        "smtpPort": "int",
-        "smtpUsername": "string",
-        "smtpPassword": "secret",
-        "fromAddress": "string",
-        "pollIntervalSeconds": "int",
-        "allowFrom": "list",
-        "verifyDkim": "bool",
-        "verifySpf": "bool",
-    },
-    "matrix": {
-        "homeserver": "string",
-        "userId": "string",
-        "password": "secret",
-        "accessToken": "secret",
-        "deviceId": "string",
-        "groupPolicy": ("enum", _GROUP_POLICY_VALUES),
-    },
-    "dingtalk": {
-        "clientId": "string",
-        "clientSecret": "secret",
-        "allowFrom": "list",
-    },
-    "wecom": {
-        "botId": "string",
-        "secret": "secret",
-        "allowFrom": "list",
-    },
-    "qq": {
-        "appId": "string",
-        "secret": "secret",
-        "allowFrom": "list",
-        "msgFormat": ("enum", {"plain", "markdown"}),
-    },
-    "signal": {
-        "phoneNumber": "string",
-        "daemonHost": "string",
-        "daemonPort": "int",
-        "allowFrom": "list",
-        "dm.allowFrom": "list",
-        "group.allowFrom": "list",
-    },
-    "msteams": {
-        "appId": "string",
-        "appPassword": "secret",
-        "tenantId": "string",
-        "path": "string",
-        "allowFrom": "list",
-    },
-    "napcat": {
-        "wsUrl": "string",
-        "accessToken": "secret",
-        "allowFrom": "list",
-        "groupPolicy": ("enum", {"mention", "open"}),
-    },
-    "feishu": {
-        "appId": "string",
-        "appSecret": "secret",
-        "domain": ("enum", {"feishu", "lark"}),
-        "groupPolicy": ("enum", {"mention", "open"}),
-        "allowFrom": "list",
-        "topicIsolation": "bool",
-    },
-}
 
 _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/enable": "enable",
@@ -712,9 +624,10 @@ class WebUISettingsRouter:
     ) -> list[str]:
         if not name:
             raise WebUISettingsError("missing channel name")
-        field_types = _CHANNEL_CONFIG_FIELDS.get(name)
-        if field_types is None:
+        setup_spec = channel_setup_spec(name)
+        if setup_spec is None:
             raise WebUISettingsError(f"channel '{name}' cannot be configured from WebUI", status=404)
+        field_types = setup_spec.route_field_types
         if not raw_values:
             return []
 

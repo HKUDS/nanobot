@@ -21,6 +21,12 @@ from nanobot.channels._feishu_instances import (
 )
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
+from nanobot.webui.channel_setup import (
+    channel_field_value,
+    channel_setup_spec,
+    channel_value_present,
+    stringify_channel_value,
+)
 
 
 class OptionalFeatureError(Exception):
@@ -37,13 +43,6 @@ class InstallResult:
     pip_cmd: list[str]
     failed_cmd: list[str] | None = None
     output: str = ""
-
-
-@dataclass(frozen=True)
-class _ChannelSetupState:
-    required: tuple[str | tuple[str, ...], ...] = ()
-    fields: tuple[str, ...] = ()
-    secrets: frozenset[str] = frozenset()
 
 
 _INSTALL_TIMEOUT_SECONDS = 300
@@ -350,219 +349,33 @@ def channel_enabled(config: Config, name: str) -> bool:
     return bool(getattr(section, "enabled", default_enabled))
 
 
-def _channel_setup_state(
-    required: tuple[str | tuple[str, ...], ...] = (),
-    fields: tuple[str, ...] = (),
-    secrets: tuple[str, ...] = (),
-) -> _ChannelSetupState:
-    return _ChannelSetupState(required=required, fields=fields, secrets=frozenset(secrets))
-
-
-_CHANNEL_SETUP_STATES: dict[str, _ChannelSetupState] = {
-    "dingtalk": _channel_setup_state(
-        ("clientId", "clientSecret"),
-        ("clientId", "clientSecret", "allowFrom"),
-        ("clientSecret",),
-    ),
-    "discord": _channel_setup_state(
-        ("token",),
-        ("token", "allowChannels", "groupPolicy"),
-        ("token",),
-    ),
-    "email": _channel_setup_state(
-        (
-            "consentGranted",
-            "imapHost",
-            "imapUsername",
-            "imapPassword",
-            "smtpHost",
-            "smtpUsername",
-            "smtpPassword",
-        ),
-        (
-            "consentGranted",
-            "imapHost",
-            "imapPort",
-            "imapUsername",
-            "imapPassword",
-            "smtpHost",
-            "smtpPort",
-            "smtpUsername",
-            "smtpPassword",
-            "fromAddress",
-            "pollIntervalSeconds",
-            "allowFrom",
-            "verifyDkim",
-            "verifySpf",
-        ),
-        ("imapPassword", "smtpPassword"),
-    ),
-    "feishu": _channel_setup_state(("appId", "appSecret")),
-    "matrix": _channel_setup_state(
-        (
-            "homeserver",
-            "userId",
-            ("password", "accessToken"),
-        ),
-        (
-            "homeserver",
-            "userId",
-            "password",
-            "accessToken",
-            "deviceId",
-            "groupPolicy",
-            "allowFrom",
-        ),
-        ("password", "accessToken"),
-    ),
-    "mattermost": _channel_setup_state(
-        ("serverUrl", "token"),
-        ("serverUrl", "token", "teamId", "groupPolicy", "allowFrom"),
-        ("token",),
-    ),
-    "msteams": _channel_setup_state(
-        ("appId", "appPassword"),
-        ("appId", "appPassword", "tenantId", "path", "allowFrom"),
-        ("appPassword",),
-    ),
-    "napcat": _channel_setup_state(
-        ("wsUrl",),
-        ("wsUrl", "accessToken", "groupPolicy", "allowFrom"),
-        ("accessToken",),
-    ),
-    "qq": _channel_setup_state(
-        ("appId", "secret"),
-        ("appId", "secret", "msgFormat", "allowFrom"),
-        ("secret",),
-    ),
-    "signal": _channel_setup_state(
-        ("phoneNumber",),
-        ("phoneNumber", "daemonHost", "daemonPort", "dm.allowFrom", "group.allowFrom"),
-    ),
-    "slack": _channel_setup_state(
-        ("appToken", "botToken"),
-        ("appToken", "botToken", "groupPolicy"),
-        ("appToken", "botToken"),
-    ),
-    "telegram": _channel_setup_state(
-        ("token",),
-        ("token", "allowFrom", "groupPolicy"),
-        ("token",),
-    ),
-    "wecom": _channel_setup_state(
-        ("botId", "secret"),
-        ("botId", "secret", "allowFrom"),
-        ("secret",),
-    ),
-    "weixin": _channel_setup_state(
-        ("token",),
-        ("token", "allowFrom"),
-        ("token",),
-    ),
-}
-
-
-def _camel_to_snake(value: str) -> str:
-    chars: list[str] = []
-    for char in value:
-        if char.isupper():
-            if chars:
-                chars.append("_")
-            chars.append(char.lower())
-        else:
-            chars.append(char)
-    return "".join(chars)
-
-
-def _channel_field_value(section: Any, field_path: str) -> Any:
-    current = section
-    for part in field_path.split("."):
-        candidates = (part, _camel_to_snake(part))
-        if isinstance(current, dict):
-            found = False
-            for candidate in candidates:
-                if candidate in current:
-                    current = current[candidate]
-                    found = True
-                    break
-            if not found:
-                return None
-            continue
-        for candidate in candidates:
-            if hasattr(current, candidate):
-                current = getattr(current, candidate)
-                break
-        else:
-            return None
-    return current
-
-
-def _channel_value_present(value: Any) -> bool:
-    if value is None:
-        return False
-    if value == "":
-        return False
-    if value == []:
-        return False
-    if value == {}:
-        return False
-    return True
-
-
-def _stringify_channel_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
-    return str(value)
-
-
 def _channel_config_snapshot(section: Any, name: str) -> tuple[dict[str, str], list[str]]:
     if hasattr(section, "model_dump"):
         section = section.model_dump(mode="json", by_alias=True)
     if not isinstance(section, dict):
         return {}, []
 
-    spec = _CHANNEL_SETUP_STATES.get(name)
+    spec = channel_setup_spec(name)
     if spec is None:
         return {}, []
 
     values: dict[str, str] = {}
     configured_fields: list[str] = []
-    for field in spec.fields:
-        value = _channel_field_value(section, field)
-        if not _channel_value_present(value):
+    for field in spec.snapshot_fields:
+        value = channel_field_value(section, field)
+        if not channel_value_present(value):
             continue
         key = f"channels.{name}.{field}"
         configured_fields.append(key)
         if field in spec.secrets:
             continue
-        values[key] = _stringify_channel_value(value)
+        values[key] = stringify_channel_value(value)
     return values, configured_fields
 
 
-def _channel_requirement_present(section: Any, requirement: str | tuple[str, ...]) -> bool:
-    fields = requirement if isinstance(requirement, tuple) else (requirement,)
-    return any(_channel_value_present(_channel_field_value(section, field)) for field in fields)
-
-
 def _channel_has_required_setup(section: Any, name: str) -> bool:
-    if name == "matrix":
-        homeserver = _channel_requirement_present(section, "homeserver")
-        user_id = _channel_requirement_present(section, "userId")
-        password = _channel_requirement_present(section, "password")
-        token_login = _channel_requirement_present(
-            section,
-            "accessToken",
-        ) and _channel_requirement_present(section, "deviceId")
-        return homeserver and user_id and (password or token_login)
-
-    spec = _CHANNEL_SETUP_STATES.get(name)
-    return bool(
-        spec
-        and spec.required
-        and all(_channel_requirement_present(section, requirement) for requirement in spec.required)
-    )
+    spec = channel_setup_spec(name)
+    return bool(spec and spec.is_configured(section))
 
 
 def _local_login_state_present(section: Any, name: str) -> bool:
@@ -570,7 +383,7 @@ def _local_login_state_present(section: Any, name: str) -> bool:
     from nanobot.config.loader import get_config_path
 
     if name == "weixin":
-        configured_dir = _channel_field_value(section, "stateDir")
+        configured_dir = channel_field_value(section, "stateDir")
         state_dir = (
             Path(str(configured_dir)).expanduser()
             if configured_dir
@@ -583,7 +396,7 @@ def _local_login_state_present(section: Any, name: str) -> bool:
         return bool(str(payload.get("token") or "").strip())
 
     if name == "whatsapp":
-        configured_path = _channel_field_value(section, "databasePath")
+        configured_path = channel_field_value(section, "databasePath")
         database_path = (
             Path(str(configured_path)).expanduser()
             if configured_path
@@ -629,7 +442,7 @@ def channel_configured(config: Config, name: str) -> bool:
             for instance in feishu_instance_specs(section, FeishuChannel.default_config())
         )
 
-    spec = _CHANNEL_SETUP_STATES.get(name)
+    spec = channel_setup_spec(name)
     if not spec or not spec.required:
         return channel_enabled(config, name)
     return _channel_has_required_setup(section, name)
