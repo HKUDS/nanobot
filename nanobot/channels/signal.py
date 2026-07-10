@@ -6,7 +6,6 @@ import asyncio
 import json
 import re
 import shutil
-import unicodedata
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -21,6 +20,11 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.markdown import (
+    protect_fenced_code_blocks,
+    render_pipe_table_box,
+    replace_pipe_tables,
+)
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.pairing import is_approved
@@ -34,7 +38,6 @@ class _Run:
     opaque: bool = False  # code / table content — skip further pattern processing
 
 
-_SIG_CODE_BLOCK_RE = re.compile(r"```(?:\w+)?\n?([\s\S]*?)```")
 _SIG_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _SIG_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
 _SIG_BLOCKQUOTE_RE = re.compile(r"^>\s*(.*)$", re.MULTILINE)
@@ -48,61 +51,14 @@ _SIG_ITALIC_RE = re.compile(
 _SIG_STRIKE_RE = re.compile(r"~~(.+?)~~|(?<![~\w])~([^~\n]+)~(?![~\w])", re.DOTALL)
 _SIG_TOKEN_RE = re.compile(r"\x00C(\d+)\x00")
 
-# Patterns used to strip inline markdown when rendering table cells as plain
-# text. Defined separately from the styling regexes above because the cell
-# stripper needs a fixed, narrow subset (no single-asterisk italic, no
-# single-tilde strikethrough) and benefits from each pattern's group 1 being
-# the content directly.
-_SIG_CELL_STRIP_PATTERNS: tuple[tuple[re.Pattern, str], ...] = (
-    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),
-    (re.compile(r"__(.+?)__"), r"\1"),
-    (re.compile(r"~~(.+?)~~"), r"\1"),
-    (re.compile(r"`([^`]+)`"), r"\1"),
-)
-
-
 def _utf16_len(s: str) -> int:
     """UTF-16 code-unit length, matching Signal BodyRange semantics."""
     return len(s.encode("utf-16-le")) // 2
 
 
-def _sig_strip_cell(s: str) -> str:
-    """Strip inline markdown from a table cell for plain-text rendering."""
-    for pattern, repl in _SIG_CELL_STRIP_PATTERNS:
-        s = pattern.sub(repl, s)
-    return s.strip()
-
-
 def _sig_render_table(table_lines: list[str]) -> str:
     """Render a markdown pipe-table as fixed-width plain text."""
-
-    def dw(s: str) -> int:
-        return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
-
-    rows: list[list[str]] = []
-    has_sep = False
-    for line in table_lines:
-        cells = [_sig_strip_cell(c) for c in line.strip().strip("|").split("|")]
-        if all(re.match(r"^:?-+:?$", c) for c in cells if c):
-            has_sep = True
-            continue
-        rows.append(cells)
-    if not rows or not has_sep:
-        return "\n".join(table_lines)
-
-    ncols = max(len(r) for r in rows)
-    for r in rows:
-        r.extend([""] * (ncols - len(r)))
-    widths = [max(dw(r[c]) for r in rows) for c in range(ncols)]
-
-    def dr(cells: list[str]) -> str:
-        return "  ".join(f"{c}{' ' * (w - dw(c))}" for c, w in zip(cells, widths))
-
-    out = [dr(rows[0])]
-    out.append("  ".join("─" * w for w in widths))
-    for row in rows[1:]:
-        out.append(dr(row))
-    return "\n".join(out)
+    return render_pipe_table_box(table_lines)
 
 
 def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
@@ -116,34 +72,18 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
 
     # Phase 1 (text-level): extract code blocks and tables with placeholder tokens
     # so they're protected from inline-style processing.
-    protected: list[str] = []
-
-    def save_code(m: re.Match) -> str:
-        protected.append(m.group(1))
-        return f"\x00C{len(protected) - 1}\x00"
-
-    text = _SIG_CODE_BLOCK_RE.sub(save_code, text)
+    text, protected = protect_fenced_code_blocks(text, lambda i: f"\x00C{i}\x00")
 
     # Detect and render pipe-tables line by line.
-    lines = text.split("\n")
-    rebuilt: list[str] = []
-    i = 0
-    while i < len(lines):
-        if re.match(r"^\s*\|.+\|", lines[i]):
-            tbl: list[str] = []
-            while i < len(lines) and re.match(r"^\s*\|.+\|", lines[i]):
-                tbl.append(lines[i])
-                i += 1
-            rendered = _sig_render_table(tbl)
-            if rendered != "\n".join(tbl):
-                protected.append(rendered)
-                rebuilt.append(f"\x00C{len(protected) - 1}\x00")
-            else:
-                rebuilt.extend(tbl)
-        else:
-            rebuilt.append(lines[i])
-            i += 1
-    text = "\n".join(rebuilt)
+    def save_table(table_lines: list[str]) -> str:
+        table_text = "\n".join(table_lines)
+        rendered = _sig_render_table(table_lines)
+        if rendered == table_text:
+            return table_text
+        protected.append(rendered)
+        return f"\x00C{len(protected) - 1}\x00"
+
+    text = replace_pipe_tables(text, save_table)
 
     # Phase 2 (run-based): process inline patterns.
     runs: list[_Run] = [_Run(text)]

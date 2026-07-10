@@ -25,6 +25,11 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.markdown import (
+    parse_pipe_table_rows,
+    protect_fenced_code_blocks,
+    strip_basic_inline_markdown,
+)
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
@@ -1044,15 +1049,6 @@ class FeishuChannel(BaseChannel):
 
     _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
-    _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
-
-    # Markdown formatting patterns that should be stripped from plain-text
-    # surfaces like table cells and heading text.
-    _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-    _MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__")
-    _MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
-    _MD_STRIKE_RE = re.compile(r"~~(.+?)~~")
-
     @classmethod
     def _strip_md_formatting(cls, text: str) -> str:
         """Strip markdown formatting markers from text for plain display.
@@ -1060,37 +1056,31 @@ class FeishuChannel(BaseChannel):
         Feishu table cells do not support markdown rendering, so we remove
         the formatting markers to keep the text readable.
         """
-        # Remove bold markers
-        text = cls._MD_BOLD_RE.sub(r"\1", text)
-        text = cls._MD_BOLD_UNDERSCORE_RE.sub(r"\1", text)
-        # Remove italic markers
-        text = cls._MD_ITALIC_RE.sub(r"\1", text)
-        # Remove strikethrough markers
-        text = cls._MD_STRIKE_RE.sub(r"\1", text)
-        return text
+        text = strip_basic_inline_markdown(text)
+        return re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", text)
 
     @classmethod
     def _parse_md_table(cls, table_text: str) -> dict | None:
         """Parse a markdown table into a Feishu table element."""
         lines = [_line.strip() for _line in table_text.strip().split("\n") if _line.strip()]
-        if len(lines) < 3:
+        rows, has_separator = parse_pipe_table_rows(lines)
+        if len(lines) < 3 or not rows or not has_separator:
             return None
+        rows = [[cls._strip_md_formatting(cell) for cell in row] for row in rows]
 
-        def split(_line: str) -> list[str]:
-            return [c.strip() for c in _line.strip("|").split("|")]
-
-        headers = [cls._strip_md_formatting(h) for h in split(lines[0])]
-        rows = [[cls._strip_md_formatting(c) for c in split(_line)] for _line in lines[2:]]
+        headers = rows[0]
+        body_rows = rows[1:]
         columns = [
             {"tag": "column", "name": f"c{i}", "display_name": h, "width": "auto"}
             for i, h in enumerate(headers)
         ]
         return {
             "tag": "table",
-            "page_size": len(rows) + 1,
+            "page_size": len(body_rows) + 1,
             "columns": columns,
             "rows": [
-                {f"c{i}": r[i] if i < len(r) else "" for i in range(len(headers))} for r in rows
+                {f"c{i}": row[i] if i < len(row) else "" for i in range(len(headers))}
+                for row in body_rows
             ],
         }
 
@@ -1142,11 +1132,11 @@ class FeishuChannel(BaseChannel):
 
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
-        protected = content
-        code_blocks = []
-        for m in self._CODE_BLOCK_RE.finditer(content):
-            code_blocks.append(m.group(1))
-            protected = protected.replace(m.group(1), f"\x00CODE{len(code_blocks) - 1}\x00", 1)
+        protected, code_blocks = protect_fenced_code_blocks(
+            content,
+            lambda i: f"\x00CODE{i}\x00",
+            include_fence=True,
+        )
 
         elements = []
         last_end = 0
