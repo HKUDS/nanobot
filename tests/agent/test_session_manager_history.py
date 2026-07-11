@@ -430,15 +430,12 @@ def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     }]
 
 
-def test_get_history_does_not_duplicate_persisted_capability_runtime_context():
+def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
     content, marker = append_runtime_context(
         "please use @drawio",
         [RuntimeContextBlock(
             source="cli_apps",
             content="[Runtime Context]\nCLI App Attachment: @drawio",
-        ), RuntimeContextBlock(
-            source="mcp",
-            content="[Runtime Context]\nMCP Preset Attachment: @linear",
         )],
     )
     session = Session(key="test:cli-app-persisted")
@@ -449,7 +446,6 @@ def test_get_history_does_not_duplicate_persisted_capability_runtime_context():
             "name": "drawio",
             "entry_point": "cli-anything-drawio",
         }],
-        "mcp_presets": [{"name": "linear", "transport": "stdio"}],
         RUNTIME_CONTEXT_HISTORY_META: marker,
     })
 
@@ -461,8 +457,21 @@ def test_get_history_does_not_duplicate_persisted_capability_runtime_context():
 
     assert model_history == [{"role": "user", "content": content}]
     assert model_history[0]["content"].count("CLI App Attachment: @drawio") == 1
-    assert model_history[0]["content"].count("MCP Preset Attachment: @linear") == 1
     assert public_history == [{"role": "user", "content": "please use @drawio"}]
+
+
+def test_get_history_does_not_synthesize_mcp_preset_attachment():
+    session = Session(key="test:mcp-preset")
+    session.messages.append({
+        "role": "user",
+        "content": "please use @linear",
+        "mcp_presets": [{"name": "linear", "transport": "stdio"}],
+    })
+
+    assert session.get_history(max_messages=500) == [{
+        "role": "user",
+        "content": "please use @linear",
+    }]
 
 
 def test_public_history_does_not_synthesize_legacy_capability_context():

@@ -238,30 +238,6 @@ class Session:
                 if cli_lines:
                     breadcrumbs = "\n".join(cli_lines)
                     content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
-            mcp_presets = message.get("mcp_presets")
-            if (
-                include_runtime_context
-                and not has_persisted_runtime_context
-                and role == "user"
-                and isinstance(mcp_presets, list)
-                and mcp_presets
-                and isinstance(content, str)
-            ):
-                mcp_lines: list[str] = []
-                for item in mcp_presets[:8]:
-                    if not isinstance(item, dict):
-                        continue
-                    name = str(item.get("name") or "").strip().lower()
-                    if not name:
-                        continue
-                    transport = str(item.get("transport") or "mcp").strip() or "mcp"
-                    mcp_lines.append(
-                        f"[MCP Preset Attachment: @{name}; tool_prefix=mcp_{name}_; "
-                        f"transport={transport}]"
-                    )
-                if mcp_lines:
-                    breadcrumbs = "\n".join(mcp_lines)
-                    content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
             if role == "assistant" and isinstance(content, str) and not content.strip():
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
