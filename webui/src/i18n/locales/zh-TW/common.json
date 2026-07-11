@@ -485,6 +485,7 @@
       "description": "把聊天應用、郵箱和 WebUI 連接到 nanobot。",
       "caption": "{{enabled}} 個已啟用 · 共 {{total}} 個渠道",
       "searchPlaceholder": "搜尋渠道",
+      "backToChannels": "所有渠道",
       "catalog": "渠道",
       "loading": "正在載入渠道...",
       "empty": "沒有符合的渠道。",

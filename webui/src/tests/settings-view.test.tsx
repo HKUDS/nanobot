@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -201,6 +201,22 @@ function renderSettingsView(
 }
 
 describe("SettingsView Apps catalog", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(min-width: 1280px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+  });
+
   afterEach(() => {
     localStorage.removeItem("nanobot-webui.settings-preferences");
     vi.useRealTimers();
@@ -865,6 +881,65 @@ describe("SettingsView Apps catalog", () => {
       "aria-checked",
       "true",
     );
+  });
+
+  it("uses a list-to-detail navigation stack on compact screens", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "email",
+              display_name: "Email",
+              type: "channel",
+              enabled: false,
+              installed: true,
+              ready: false,
+              status: "not_enabled",
+              install_supported: true,
+              requires_restart: true,
+            }],
+            enabled_count: 0,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "channels" });
+
+    const emailRow = await screen.findByRole("button", { name: "View Email settings" });
+    expect(screen.getByPlaceholderText("Search channels")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Email channel" })).not.toBeInTheDocument();
+
+    fireEvent.click(emailRow);
+
+    expect(screen.getByRole("button", { name: "All channels" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Email channel" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search channels")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All channels" }));
+
+    expect(screen.getByPlaceholderText("Search channels")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View Email settings" })).toBeInTheDocument();
   });
 
   it("saves Discord credentials from the channel setup panel", async () => {

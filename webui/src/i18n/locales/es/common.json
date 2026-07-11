@@ -485,6 +485,7 @@
       "description": "Conecta nanobot con apps de chat. Instalar soporte solo añade el paquete de integración; la mayoría de canales aún necesitan tokens o configuración del espacio de trabajo.",
       "caption": "{{enabled}} activados · {{total}} canales",
       "searchPlaceholder": "Buscar canales",
+      "backToChannels": "Todos los canales",
       "catalog": "Canales",
       "loading": "Cargando canales...",
       "empty": "Ningún canal coincide con este filtro.",

@@ -485,6 +485,7 @@
       "description": "Connect chat apps, email, and WebUI to nanobot.",
       "caption": "{{enabled}} enabled · {{total}} channels",
       "searchPlaceholder": "Search channels",
+      "backToChannels": "All channels",
       "catalog": "Channels",
       "loading": "Loading Channels...",
       "empty": "No channels match this filter.",

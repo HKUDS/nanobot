@@ -3,6 +3,7 @@ import {
   useEffect,
   forwardRef,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -135,6 +136,7 @@ import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   logoFallbackUrls,
   providerBrand,
@@ -1791,7 +1793,7 @@ export function SettingsView({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row",
+        "flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row",
         showSidebar
           ? "bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)]"
           : "bg-background",
@@ -1848,14 +1850,14 @@ export function SettingsView({
       <main
         className={cn(
           "min-w-0 flex-1 [scrollbar-gutter:stable]",
-          activeSection === "channels" ? "overflow-hidden" : "overflow-y-auto",
+          activeSection === "channels" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
         )}
       >
         <div
           className={cn(
             "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
             activeSection === "channels" ? "max-w-[1240px] xl:px-10" : "max-w-[920px]",
-            activeSection === "channels" && "flex h-full min-h-0 flex-col",
+            activeSection === "channels" && "flex min-h-full flex-col xl:h-full xl:min-h-0",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -1895,7 +1897,8 @@ export function SettingsView({
             <div
               className={cn(
                 "space-y-5",
-                activeSection === "channels" && "flex min-h-0 flex-1 flex-col overflow-hidden",
+                activeSection === "channels" &&
+                  "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}
             >
               {error ? (
@@ -1949,19 +1952,19 @@ function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-3 pb-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
-        hostChromeInset ? "pt-[4.25rem] md:pt-[4.25rem]" : "pt-4 md:pt-4",
+        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-3 pb-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none lg:w-[17rem] lg:border-b-0 lg:border-r lg:px-3 lg:pb-4 lg:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
+        hostChromeInset ? "pt-[4.25rem] lg:pt-[4.25rem]" : "pt-4 lg:pt-4",
       )}
     >
       <button
         type="button"
         onClick={onBackToChat}
-        className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground md:mb-3"
+        className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3"
       >
         <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
         {t("settings.backToChat")}
       </button>
-      <div className="mb-3 px-1 md:mb-4 md:px-2">
+      <div className="mb-3 px-1 lg:mb-4 lg:px-2">
         <h2 className="text-[18px] font-normal tracking-normal text-foreground">
           {t("settings.sidebar.title")}
         </h2>
@@ -1969,7 +1972,7 @@ function SettingsSidebar({
 
       <nav
         aria-label={t("settings.sidebar.ariaLabel")}
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0"
+        className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:block lg:space-y-1 lg:overflow-visible lg:px-0 lg:pb-0"
       >
         {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
           const active = key === activeSection;
@@ -1980,7 +1983,7 @@ function SettingsSidebar({
               aria-current={active ? "page" : undefined}
               onClick={() => onSelectSection(key)}
               className={cn(
-                "flex h-9 w-auto shrink-0 items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors md:w-full md:rounded-[10px] md:px-2.5",
+                "flex h-9 w-auto shrink-0 snap-start items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors lg:w-full lg:rounded-[10px] lg:px-2.5",
                 active
                   ? "bg-muted/90 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]"
                   : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
@@ -1993,7 +1996,7 @@ function SettingsSidebar({
         })}
       </nav>
 
-      <div className="hidden md:mt-auto md:block md:pt-4">
+      <div className="hidden lg:mt-auto lg:block lg:pt-4">
         {onLogout && !hostChromeInset ? (
           <Button
             type="button"
@@ -5200,6 +5203,10 @@ function ChannelsSettings({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const normalizedQuery = query.trim().toLowerCase();
   const [filter, setFilter] = useState<ChannelFilter>("all");
+  const splitLayout = useMediaQuery("(min-width: 1280px)");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const compactDetailTopRef = useRef<HTMLButtonElement>(null);
+  const [compactDetailOpen, setCompactDetailOpen] = useState(false);
   const allChannels = (nanobotFeatures?.features ?? [])
     .filter((feature) => feature.type === "channel")
     .filter((feature) => !HIDDEN_WEBUI_CHANNELS.has(feature.name))
@@ -5225,63 +5232,105 @@ function ChannelsSettings({
   useEffect(() => {
     if (!channels.length) {
       if (selectedChannelName !== null) setSelectedChannelName(null);
+      setCompactDetailOpen(false);
       return;
     }
     if (!selectedChannelName || !channels.some((feature) => feature.name === selectedChannelName)) {
       setSelectedChannelName(channels[0].name);
+      setCompactDetailOpen(false);
     }
   }, [channels, selectedChannelName]);
 
+  useEffect(() => {
+    if (splitLayout) return;
+    const resetScroll = () => {
+      let node = containerRef.current?.parentElement ?? null;
+      while (node) {
+        node.scrollTop = 0;
+        node = node.parentElement;
+      }
+      if (compactDetailOpen) {
+        compactDetailTopRef.current?.scrollIntoView?.({ block: "start" });
+      }
+    };
+    resetScroll();
+    const frame = window.requestAnimationFrame(resetScroll);
+    return () => window.cancelAnimationFrame(frame);
+  }, [compactDetailOpen, selectedChannelName, splitLayout]);
+
+  const openChannel = (name: string) => {
+    setSelectedChannelName(name);
+    if (!splitLayout) setCompactDetailOpen(true);
+  };
+
+  const setupPanel = selectedChannel ? (
+    <ChannelSetupPanel
+      token={token}
+      feature={selectedChannel}
+      actionKey={actionKey}
+      chatAppsDocsUrl={chatAppsDocsUrl}
+      showBrandLogos={showBrandLogos}
+      onAction={onAction}
+      onFeaturesUpdate={onFeaturesUpdate}
+    />
+  ) : null;
+  const showingCompactDetail = !splitLayout && compactDetailOpen && selectedChannel !== null;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <section className="shrink-0 space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
-            {tx(
-              "settings.channels.description",
-              "Connect chat apps, email, and WebUI to nanobot.",
-            )}
-          </p>
-          <div className="flex flex-wrap gap-2 text-[12px] font-medium text-muted-foreground">
-            <span className="rounded-full bg-muted/70 px-2.5 py-1">
-              {t("settings.channels.caption", {
-                enabled: enabledCount,
-                total: allChannels.length,
-                defaultValue: "{{enabled}} enabled · {{total}} channels",
-              })}
-            </span>
+    <div
+      ref={containerRef}
+      className="flex min-h-full flex-1 flex-col xl:min-h-0 xl:overflow-hidden"
+    >
+      {!showingCompactDetail ? (
+        <section className="shrink-0 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
+              {tx(
+                "settings.channels.description",
+                "Connect chat apps, email, and WebUI to nanobot.",
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2 text-[12px] font-medium text-muted-foreground">
+              <span className="rounded-full bg-muted/70 px-2.5 py-1">
+                {t("settings.channels.caption", {
+                  enabled: enabledCount,
+                  total: allChannels.length,
+                  defaultValue: "{{enabled}} enabled · {{total}} channels",
+                })}
+              </span>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={tx("settings.channels.searchPlaceholder", "Search channels")}
-              className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
-            />
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                placeholder={tx("settings.channels.searchPlaceholder", "Search channels")}
+                className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
+              />
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-1.5 rounded-[14px] bg-muted/55 p-1">
+              {filterOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setFilter(option.value)}
+                  className={cn(
+                    "rounded-[11px] px-3 py-1.5 text-[12px] font-medium transition-colors",
+                    filter === option.value
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {option.label}
+                  <span className="ml-1 text-[11px] text-muted-foreground">{option.count}</span>
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-1.5 rounded-[14px] bg-muted/55 p-1">
-            {filterOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setFilter(option.value)}
-                className={cn(
-                  "rounded-[11px] px-3 py-1.5 text-[12px] font-medium transition-colors",
-                  filter === option.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {option.label}
-                <span className="ml-1 text-[11px] text-muted-foreground">{option.count}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       {statusMessage ? (
         <div className="mt-3 shrink-0">
@@ -5303,14 +5352,20 @@ function ChannelsSettings({
         </div>
       ) : null}
 
-      <section className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden">
+      <section
+        className={cn(
+          "flex flex-1 flex-col",
+          showingCompactDetail ? "mt-1" : "mt-5",
+          splitLayout && "min-h-0 overflow-hidden",
+        )}
+      >
         {loading && !nanobotFeatures ? (
           <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
             {tx("settings.channels.loading", "Loading Channels...")}
           </div>
-        ) : channels.length ? (
-          <div className="grid min-h-0 flex-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(400px,460px)]">
+        ) : channels.length ? splitLayout ? (
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(400px,460px)] gap-6 overflow-hidden">
             <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
               {channels.map((feature) => (
                 <ChannelCatalogRow
@@ -5318,23 +5373,36 @@ function ChannelsSettings({
                   feature={feature}
                   selected={selectedChannel?.name === feature.name}
                   showBrandLogos={showBrandLogos}
-                  onSelect={() => setSelectedChannelName(feature.name)}
+                  onSelect={() => openChannel(feature.name)}
                 />
               ))}
             </div>
-            {selectedChannel ? (
-              <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
-                <ChannelSetupPanel
-                  token={token}
-                  feature={selectedChannel}
-                  actionKey={actionKey}
-                  chatAppsDocsUrl={chatAppsDocsUrl}
-                  showBrandLogos={showBrandLogos}
-                  onAction={onAction}
-                  onFeaturesUpdate={onFeaturesUpdate}
-                />
-              </div>
-            ) : null}
+            <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">{setupPanel}</div>
+          </div>
+        ) : showingCompactDetail ? (
+          <div className="pb-6">
+            <button
+              ref={compactDetailTopRef}
+              type="button"
+              onClick={() => setCompactDetailOpen(false)}
+              className="mb-4 inline-flex h-9 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+              {tx("settings.channels.backToChannels", "All channels")}
+            </button>
+            {setupPanel}
+          </div>
+        ) : (
+          <div className="space-y-1 pb-6">
+            {channels.map((feature) => (
+              <ChannelCatalogRow
+                key={feature.name}
+                feature={feature}
+                selected={false}
+                showBrandLogos={showBrandLogos}
+                onSelect={() => openChannel(feature.name)}
+              />
+            ))}
           </div>
         ) : (
           <div className="min-h-0 flex-1 px-3 py-12 text-center text-sm text-muted-foreground">
@@ -5343,7 +5411,7 @@ function ChannelsSettings({
         )}
       </section>
 
-      <div className="shrink-0 pt-2">
+      <div className={cn("shrink-0 pt-2", showingCompactDetail && "hidden")}>
         <ThirdPartyBrandNotice />
       </div>
     </div>

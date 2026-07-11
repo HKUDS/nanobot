@@ -485,6 +485,7 @@
       "description": "nanobot을 채팅 앱에 연결합니다. 지원 설치는 통합 패키지만 추가하며, 대부분의 채널은 여전히 토큰이나 워크스페이스 설정이 필요합니다.",
       "caption": "{{enabled}}개 활성화됨 · 총 {{total}}개 채널",
       "searchPlaceholder": "채널 검색",
+      "backToChannels": "모든 채널",
       "catalog": "채널",
       "loading": "채널을 불러오는 중...",
       "empty": "일치하는 채널이 없습니다.",

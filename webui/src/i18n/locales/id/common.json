@@ -485,6 +485,7 @@
       "description": "Hubungkan nanobot ke aplikasi chat. Memasang dukungan hanya menambahkan paket integrasi; sebagian besar kanal tetap memerlukan token atau pengaturan workspace.",
       "caption": "{{enabled}} aktif · {{total}} kanal",
       "searchPlaceholder": "Cari kanal",
+      "backToChannels": "Semua kanal",
       "catalog": "Kanal",
       "loading": "Memuat kanal...",
       "empty": "Tidak ada kanal yang cocok dengan filter ini.",

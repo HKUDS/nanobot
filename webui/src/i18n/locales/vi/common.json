@@ -485,6 +485,7 @@
       "description": "Kết nối nanobot với các ứng dụng chat. Cài đặt hỗ trợ chỉ thêm gói tích hợp; hầu hết kênh vẫn cần token hoặc cấu hình workspace.",
       "caption": "{{enabled}} đã bật · {{total}} kênh",
       "searchPlaceholder": "Tìm kênh",
+      "backToChannels": "Tất cả kênh",
       "catalog": "Kênh",
       "loading": "Đang tải kênh...",
       "empty": "Không có kênh nào phù hợp.",
