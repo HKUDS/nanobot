@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -132,7 +133,9 @@ async def test_api_key_protects_api_routes_but_not_health(aiohttp_client, mock_a
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_api_routes_allow_requests_without_configured_api_key(aiohttp_client, mock_agent) -> None:
+async def test_api_routes_allow_requests_without_configured_api_key(
+    aiohttp_client, mock_agent
+) -> None:
     app = create_app(mock_agent, model_name="test-model")
     client = await aiohttp_client(app)
 
@@ -187,7 +190,7 @@ async def test_model_mismatch_returns_400() -> None:
         "agent_loop": _make_mock_agent(),
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
@@ -211,7 +214,7 @@ async def test_single_user_message_required() -> None:
         "agent_loop": _make_mock_agent(),
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
@@ -232,7 +235,7 @@ async def test_single_user_message_must_have_user_role() -> None:
         "agent_loop": _make_mock_agent(),
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
@@ -344,6 +347,72 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_custom_session_requests_are_serialized(aiohttp_client) -> None:
+    active = 0
+    max_active = 0
+    seen_sessions: list[str] = []
+
+    async def slow_process(content, session_key="", channel="", chat_id="", **kwargs):
+        nonlocal active, max_active
+        seen_sessions.append(session_key)
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        return content
+
+    agent = MagicMock()
+    agent.process_direct = slow_process
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
+
+    app = create_app(agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    async def send():
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=AUTH_HEADERS,
+            json={
+                "messages": [{"role": "user", "content": "hello"}],
+                "session_id": "same-session",
+            },
+        )
+        assert resp.status == 200
+        await resp.json()
+
+    await asyncio.gather(send(), send())
+
+    assert max_active == 1
+    assert seen_sessions == ["api:same-session", "api:same-session"]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_idle_custom_session_locks_do_not_accumulate(aiohttp_client) -> None:
+    agent = _make_mock_agent("ok")
+    app = create_app(agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    for index in range(20):
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=AUTH_HEADERS,
+            json={
+                "messages": [{"role": "user", "content": "hello"}],
+                "session_id": f"session-{index}",
+            },
+        )
+        assert resp.status == 200
+        await resp.json()
+
+    gc.collect()
+    assert len(app["session_locks"]) == 0
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_models_endpoint(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
     resp = await client.get("/v1/models", headers=AUTH_HEADERS)
@@ -406,7 +475,10 @@ async def test_multimodal_remote_image_url_returns_400(aiohttp_client, mock_agen
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "describe this"},
-                        {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.com/image.png"},
+                        },
                     ],
                 }
             ]
@@ -519,7 +591,15 @@ async def test_process_direct_accepts_media() -> None:
 
     captured_msg = None
 
-    async def fake_process(msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None, ephemeral=False):
+    async def fake_process(
+        msg,
+        *,
+        session_key="",
+        on_progress=None,
+        on_stream=None,
+        on_stream_end=None,
+        ephemeral=False,
+    ):
         nonlocal captured_msg
         captured_msg = msg
         return None
