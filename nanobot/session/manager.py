@@ -216,7 +216,8 @@ class Session:
                 content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
             cli_apps = message.get("cli_apps")
             if (
-                not has_persisted_runtime_context
+                include_runtime_context
+                and not has_persisted_runtime_context
                 and role == "user"
                 and isinstance(cli_apps, list)
                 and cli_apps
@@ -239,7 +240,8 @@ class Session:
                     content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
             mcp_presets = message.get("mcp_presets")
             if (
-                not has_persisted_runtime_context
+                include_runtime_context
+                and not has_persisted_runtime_context
                 and role == "user"
                 and isinstance(mcp_presets, list)
                 and mcp_presets

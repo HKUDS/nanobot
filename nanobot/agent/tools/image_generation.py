@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.schema import (
     ArraySchema,
     IntegerSchema,
@@ -21,6 +22,7 @@ from nanobot.providers.image_generation import (
     ImageGenerationProvider,
     get_image_gen_provider,
 )
+from nanobot.runtime_context import RuntimeContextBlock
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 from nanobot.utils.artifacts import (
@@ -29,6 +31,7 @@ from nanobot.utils.artifacts import (
     store_generated_image_artifact,
 )
 from nanobot.utils.helpers import detect_image_mime
+from nanobot.utils.image_generation_intent import image_generation_runtime_context
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ProviderConfig
@@ -115,6 +118,18 @@ class ImageGenerationTool(Tool):
             "Returns artifact ids and local paths. For edits, pass prior generated image paths "
             "or user image paths as reference_images."
         )
+
+    def runtime_context_provider(self):
+        return self._provide_runtime_context
+
+    async def _provide_runtime_context(
+        self,
+        request: RequestContext,
+    ) -> RuntimeContextBlock | None:
+        content = image_generation_runtime_context(request.metadata)
+        if not content:
+            return None
+        return RuntimeContextBlock(source="image_generation", content=content)
 
     def _provider_config(self) -> ProviderConfig | None:
         return self.provider_configs.get(self.config.provider)

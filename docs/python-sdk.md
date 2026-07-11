@@ -599,7 +599,8 @@ async with Nanobot.from_config() as bot:
 | `await ingest(session_key, messages, metadata=None, source=None, save=True)` | Import existing transcript messages without running the model. |
 | `get(session_key)` | Return a `SessionSnapshot`, or `None` if missing. |
 | `list()` | Return compact `SessionInfo` rows. |
-| `export(session_key)` | Return a full `SessionSnapshot` suitable for JSON serialization. |
+| `export(session_key)` | Return a trusted full `SessionSnapshot`, including model-only runtime context, suitable for JSON serialization. |
+| `await restore(snapshot, session_key=None, save=True)` | Restore a trusted exported snapshot into an empty session; the returned snapshot is display-safe. |
 | `clear(session_key)` | Clear and persist one session. |
 | `delete(session_key)` | Delete one session from disk and cache. |
 | `flush()` | Flush cached sessions to durable storage. |
@@ -607,6 +608,11 @@ async with Nanobot.from_config() as bot:
 Ingested messages must include `role` and `content`. Roles may be `user`,
 `assistant`, `tool`, or `system`. Other fields, such as `timestamp`,
 `source_session_id`, or `source_date`, are persisted as message metadata.
+
+`get()` and snapshots returned by ordinary SDK operations are display-safe and omit
+model-only runtime context. `export()` is an explicit backup boundary and includes
+that internal context so `restore()` can preserve the exact model-visible history.
+Do not expose exported snapshots directly to chat users.
 
 ### `bot.memory`
 
