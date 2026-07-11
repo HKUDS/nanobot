@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from nio import RoomSendResponse, SyncError
 
 import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.matrix import (
     MATRIX_HTML_FORMAT,
@@ -21,6 +23,10 @@ from nanobot.channels.matrix import (
 )
 
 _ROOM_SEND_UNSET = object()
+
+
+def test_default_e2ee_matches_platform_support() -> None:
+    assert MatrixConfig().e2ee_enabled is (sys.platform != "win32")
 
 
 class _DummyTask:
@@ -292,7 +298,7 @@ async def test_start_skips_load_store_when_device_id_missing(
         "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
     )
 
-    channel = MatrixChannel(_make_config(device_id=""), MessageBus())
+    channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=True), MessageBus())
     await channel.start()
 
     assert len(clients) == 1
@@ -319,7 +325,7 @@ async def test_register_event_callbacks_uses_media_base_filter() -> None:
 
 
 def test_register_to_device_callbacks_when_sas_verification_enabled() -> None:
-    channel = MatrixChannel(_make_config(sas_verification=True), MessageBus())
+    channel = MatrixChannel(_make_config(e2ee_enabled=True, sas_verification=True), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
@@ -347,7 +353,11 @@ def test_register_to_device_callbacks_skips_when_e2ee_disabled() -> None:
 async def test_sas_verification_start_accepts_allowed_sender(monkeypatch) -> None:
     _patch_key_verification_events(monkeypatch)
     channel = MatrixChannel(
-        _make_config(allow_from=["@alice:matrix.org"], sas_verification=True),
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
         MessageBus(),
     )
     client = _FakeAsyncClient("", "", "", None)
@@ -366,7 +376,11 @@ async def test_sas_verification_start_accepts_allowed_sender(monkeypatch) -> Non
 async def test_sas_verification_ignores_denied_sender(monkeypatch) -> None:
     _patch_key_verification_events(monkeypatch)
     channel = MatrixChannel(
-        _make_config(allow_from=["@alice:matrix.org"], sas_verification=True),
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
         MessageBus(),
     )
     client = _FakeAsyncClient("", "", "", None)
@@ -402,7 +416,11 @@ async def test_sas_verification_ignores_when_disabled(monkeypatch) -> None:
 async def test_sas_verification_key_confirms_allowed_sender(monkeypatch) -> None:
     _patch_key_verification_events(monkeypatch)
     channel = MatrixChannel(
-        _make_config(allow_from=["@alice:matrix.org"], sas_verification=True),
+        _make_config(
+            allow_from=["@alice:matrix.org"],
+            e2ee_enabled=True,
+            sas_verification=True,
+        ),
         MessageBus(),
     )
     client = _FakeAsyncClient("", "", "", None)
@@ -1202,7 +1220,7 @@ async def test_on_media_message_handles_decrypt_error(monkeypatch, tmp_path) -> 
 
 @pytest.mark.asyncio
 async def test_send_clears_typing_after_send() -> None:
-    channel = MatrixChannel(_make_config(), MessageBus())
+    channel = MatrixChannel(_make_config(e2ee_enabled=True), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
@@ -1522,7 +1540,7 @@ async def test_send_progress_keeps_typing_keepalive_running() -> None:
             channel="matrix",
             chat_id="!room:matrix.org",
             content="working...",
-            metadata={"_progress": True, "_progress_kind": "reasoning"},
+            event=ProgressEvent(content="working..."),
         )
     )
 
@@ -1544,7 +1562,7 @@ async def test_send_empty_content_does_not_call_room_send() -> None:
             channel="matrix",
             chat_id="!room:matrix.org",
             content="",
-            metadata={"_progress": True},
+            event=ProgressEvent(),
         )
     )
 
@@ -1563,7 +1581,7 @@ async def test_send_whitespace_only_content_does_not_call_room_send() -> None:
             channel="matrix",
             chat_id="!room:matrix.org",
             content="   \n\n  ",
-            metadata={"_progress": True},
+            event=ProgressEvent(content="   \n\n  "),
         )
     )
 
@@ -1883,7 +1901,7 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
         last_edit=100.0,
     )
 
-    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True})
+    await channel.send_delta("!room:matrix.org", "", stream_end=True)
 
     assert "!room:matrix.org" not in channel._stream_bufs
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
@@ -1893,6 +1911,36 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
         "rel_type": "m.replace",
         "event_id": "event-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_keeps_same_room_stream_ids_independent(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    event_ids = ["event-a", "event-b"]
+
+    async def _send_room_content(room_id, content):
+        client.room_send_calls.append({"room_id": room_id, "content": content})
+        return SimpleNamespace(event_id=event_ids.pop(0) if event_ids else "event-final")
+
+    monkeypatch.setattr(channel, "_send_room_content", _send_room_content)
+
+    await channel.send_delta("!room:matrix.org", "A", stream_id="stream-a")
+    await channel.send_delta("!room:matrix.org", "B", stream_id="stream-b")
+    await channel.send_delta("!room:matrix.org", "1", stream_id="stream-a")
+    await channel.send_delta("!room:matrix.org", "2", stream_id="stream-b")
+
+    await channel.send_delta("!room:matrix.org", "", stream_id="stream-a", stream_end=True)
+    await channel.send_delta("!room:matrix.org", "", stream_id="stream-b", stream_end=True)
+
+    final_a = client.room_send_calls[-2]["content"]
+    final_b = client.room_send_calls[-1]["content"]
+    assert final_a["body"] == "A1"
+    assert final_a["m.relates_to"]["event_id"] == "event-a"
+    assert final_b["body"] == "B2"
+    assert final_b["m.relates_to"]["event_id"] == "event-b"
 
 
 @pytest.mark.asyncio
@@ -1933,7 +1981,7 @@ async def test_send_delta_threaded_edit_keeps_replace_and_thread_relation(monkey
     }
     await channel.send_delta("!room:matrix.org", "Hello", metadata)
     await channel.send_delta("!room:matrix.org", " world", metadata)
-    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True, **metadata})
+    await channel.send_delta("!room:matrix.org", "", metadata, stream_end=True)
 
     edit_content = client.room_send_calls[1]["content"]
     final_content = client.room_send_calls[2]["content"]
@@ -1966,7 +2014,7 @@ async def test_send_delta_stream_end_noop_when_buffer_missing() -> None:
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
-    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True})
+    await channel.send_delta("!room:matrix.org", "", stream_end=True)
 
     assert client.room_send_calls == []
     assert client.typing_calls == []

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import mimetypes
+import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from nanobot.security.workspace_policy import is_path_within
 try:
     import aiohttp
     import nh3
-    from mistune import create_markdown
+    from mistune import HTMLRenderer, create_markdown
     from nio import (
         AsyncClient,
         AsyncClientConfig,
@@ -45,10 +46,11 @@ try:
     from nio.exceptions import EncryptionError
 except ImportError as e:
     raise ImportError(
-        "Matrix dependencies not installed. Run: pip install nanobot-ai[matrix]"
+        "Matrix dependencies not installed. Run: nanobot plugins enable matrix"
     ) from e
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
@@ -75,7 +77,7 @@ class _MediaTooLargeError(Exception):
     """Raised when an inbound Matrix media download exceeds the configured cap."""
 
 MATRIX_MARKDOWN = create_markdown(
-    escape=True,
+    renderer=HTMLRenderer(escape=True, allow_harmful_protocols=("mxc://",)),
     plugins=["table", "strikethrough", "url", "superscript", "subscript"],
 )
 
@@ -190,6 +192,10 @@ def _build_matrix_text_content(
     return content
 
 
+def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
+    return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -199,7 +205,7 @@ class MatrixConfig(Base):
     password: str = ""
     access_token: str = ""
     device_id: str = ""
-    e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
+    e2ee_enabled: bool = Field(default=sys.platform != "win32", alias="e2eeEnabled")
     sas_verification: bool = Field(default=False, alias="sasVerification")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024
@@ -504,7 +510,7 @@ class MatrixChannel(BaseChannel):
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
         relates_to = self._build_thread_relates_to(msg.metadata)
-        is_progress = bool((msg.metadata or {}).get("_progress"))
+        is_progress = isinstance(msg.event, ProgressEvent)
         try:
             failures: list[str] = []
             if candidates:
@@ -528,12 +534,21 @@ class MatrixChannel(BaseChannel):
             if not is_progress:
                 await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        meta = metadata or {}
+    async def send_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
+    ) -> None:
         relates_to = self._build_thread_relates_to(metadata)
 
-        if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(chat_id, None)
+        if stream_end:
+            stream_key = _matrix_stream_key(chat_id, stream_id)
+            buf = self._stream_bufs.pop(stream_key, None)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -547,10 +562,11 @@ class MatrixChannel(BaseChannel):
             await self._send_room_content(chat_id, content)
             return
 
-        buf = self._stream_bufs.get(chat_id)
+        stream_key = _matrix_stream_key(chat_id, stream_id)
+        buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _StreamBuf()
-            self._stream_bufs[chat_id] = buf
+            self._stream_bufs[stream_key] = buf
         buf.text += delta
 
         if not buf.text.strip():

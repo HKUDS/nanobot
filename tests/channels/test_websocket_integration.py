@@ -16,6 +16,7 @@ import websockets
 from ws_test_client import WsTestClient, issue_token, issue_token_ok
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.webui.gateway_services import build_gateway_services
 
@@ -213,8 +214,7 @@ async def test_server_send_message(bus: MagicMock) -> None:
 
 @pytest.mark.asyncio
 async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
-    """``_tool_hint`` metadata must surface as ``kind: "tool_hint"`` so WS
-    clients render breadcrumbs separately from conversational replies."""
+    """Tool-hint progress events surface as ``kind: "tool_hint"``."""
     ch = _ch(bus, 29919)
     t = asyncio.create_task(ch.start())
     await asyncio.sleep(0.3)
@@ -232,7 +232,7 @@ async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
             await ch.send(OutboundMessage(
                 channel="websocket", chat_id=ready.chat_id,
                 content='weather("get")',
-                metadata={"_progress": True, "_tool_hint": True},
+                event=ProgressEvent(content='weather("get")', tool_hint=True),
             ))
             hint = await c.recv_message()
             assert hint.raw.get("kind") == "tool_hint"
@@ -242,7 +242,7 @@ async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
             await ch.send(OutboundMessage(
                 channel="websocket", chat_id=ready.chat_id,
                 content="thinking…",
-                metadata={"_progress": True},
+                event=ProgressEvent(content="thinking…"),
             ))
             prog = await c.recv_message()
             assert prog.raw.get("kind") == "progress"
@@ -284,8 +284,8 @@ async def test_streaming_deltas_and_end(bus: MagicMock) -> None:
         async with WsTestClient("ws://127.0.0.1:29911/", client_id="s") as c:
             cid = (await c.recv_ready()).chat_id
             for part in ("Hello", " ", "world", "!"):
-                await ch.send_delta(cid, part, {"_stream_delta": True, "_stream_id": "s1"})
-            await ch.send_delta(cid, "", {"_stream_end": True, "_stream_id": "s1"})
+                await ch.send_delta(cid, part, stream_id="s1")
+            await ch.send_delta(cid, "", stream_id="s1", stream_end=True)
 
             msgs = await c.collect_stream()
             deltas = [m for m in msgs if m.event == "delta"]
@@ -305,12 +305,12 @@ async def test_interleaved_streams(bus: MagicMock) -> None:
     try:
         async with WsTestClient("ws://127.0.0.1:29912/", client_id="i") as c:
             cid = (await c.recv_ready()).chat_id
-            await ch.send_delta(cid, "A1", {"_stream_delta": True, "_stream_id": "sa"})
-            await ch.send_delta(cid, "B1", {"_stream_delta": True, "_stream_id": "sb"})
-            await ch.send_delta(cid, "A2", {"_stream_delta": True, "_stream_id": "sa"})
-            await ch.send_delta(cid, "", {"_stream_end": True, "_stream_id": "sa"})
-            await ch.send_delta(cid, "B2", {"_stream_delta": True, "_stream_id": "sb"})
-            await ch.send_delta(cid, "", {"_stream_end": True, "_stream_id": "sb"})
+            await ch.send_delta(cid, "A1", stream_id="sa")
+            await ch.send_delta(cid, "B1", stream_id="sb")
+            await ch.send_delta(cid, "A2", stream_id="sa")
+            await ch.send_delta(cid, "", stream_id="sa", stream_end=True)
+            await ch.send_delta(cid, "B2", stream_id="sb")
+            await ch.send_delta(cid, "", stream_id="sb", stream_end=True)
 
             msgs = await c.recv_n(6)
             sa = "".join(m.text for m in msgs if m.event == "delta" and m.stream_id == "sa")

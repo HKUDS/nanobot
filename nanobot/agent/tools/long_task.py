@@ -16,12 +16,11 @@ There is **no** sub-agent orchestrator and **no** special WebSocket ``agent_ui``
 
 from __future__ import annotations
 
-from contextvars import ContextVar
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
 from nanobot.session.goal_state import (
@@ -39,7 +38,7 @@ def _iso_now() -> str:
     return datetime.now().isoformat()
 
 
-class _GoalToolsMixin(ContextAware):
+class _GoalToolsMixin:
     """Shared routing context + Session lookup."""
 
     def __init__(
@@ -49,19 +48,9 @@ class _GoalToolsMixin(ContextAware):
     ) -> None:
         self._sessions = sessions
         self._runtime_events = runtime_events
-        # Each subclass gets its own ContextVar so concurrent tasks across
-        # different tool types (LongTaskTool vs CompleteGoalTool) do not
-        # interfere with each other.
-        self._request_ctx: ContextVar[RequestContext | None] = ContextVar(
-            f"{self.__class__.__name__}_request_ctx",
-            default=None,
-        )
-
-    def set_context(self, ctx: RequestContext) -> None:
-        self._request_ctx.set(ctx)
 
     def _session(self):
-        request_ctx = self._request_ctx.get()
+        request_ctx = current_request_context()
         if request_ctx is None:
             return None
         key = request_ctx.session_key
@@ -72,7 +61,7 @@ class _GoalToolsMixin(ContextAware):
     async def _publish_goal_state_changed(self, metadata: dict[str, Any]) -> None:
         """Publish authoritative goal metadata as a runtime event."""
         runtime_events = self._runtime_events
-        rc = self._request_ctx.get()
+        rc = current_request_context()
         if runtime_events is None or rc is None:
             return
         cid = (rc.chat_id or "").strip()
@@ -150,12 +139,12 @@ class LongTaskTool(Tool, _GoalToolsMixin):
     async def execute(self, goal: str, ui_summary: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
-            return (
+            return ToolResult.error(
                 "Error: long_task requires an active chat session (missing routing context)."
             )
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if isinstance(prior, dict) and prior.get("status") == "active":
-            return (
+            return ToolResult.error(
                 "Error: a sustained goal is already active. "
                 "Use complete_goal when finished, or ask the user before replacing it."
             )
@@ -230,7 +219,7 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
     async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
-            return "Error: complete_goal requires an active chat session."
+            return ToolResult.error("Error: complete_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active goal to complete."

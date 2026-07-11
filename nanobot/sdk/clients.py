@@ -13,6 +13,7 @@ from nanobot.sdk.types import (
     snapshot_from_payload,
     snapshot_from_session,
 )
+from nanobot.session.manager import replay_max_messages_for_context
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -151,15 +152,21 @@ class RuntimeClient:
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Run token/replay-window consolidation for one session."""
         session = self._loop.sessions.get_or_create(session_key)
+        runtime = self._loop.llm_runtime()
         await self._loop.consolidator.maybe_consolidate_by_tokens(
             session,
-            replay_max_messages=self._loop._max_messages,
+            runtime=runtime,
+            replay_max_messages=replay_max_messages_for_context(
+                runtime.context_window_tokens
+            ),
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 8) -> str | None:
         """Run idle-session compaction for one session and return the summary."""
+        runtime = self._loop.llm_runtime()
         return await self._loop.consolidator.compact_idle_session(
             session_key,
+            runtime=runtime,
             max_suffix=max_suffix,
         )

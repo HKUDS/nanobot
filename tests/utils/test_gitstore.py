@@ -98,6 +98,51 @@ class TestLineAges:
         assert age_by_line["- keep"] == 30
 
 
+class TestSummarizeWorkingTree:
+    """Ground-truth diff summary used to keep Dream audit records honest."""
+
+    def test_empty_when_not_initialized(self, tmp_path):
+        git = GitStore(tmp_path, tracked_files=["MEMORY.md"])
+        assert git.summarize_working_tree(["MEMORY.md"]) == ""
+
+    def test_empty_when_no_changes(self, git):
+        assert git.summarize_working_tree(["MEMORY.md", "SOUL.md"]) == ""
+
+    def test_summarizes_real_change(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("# Memory\n- new fact\n", encoding="utf-8")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: +2 -0" in summary
+        assert "new fact" in summary
+        assert "1 file changed, 2 insertions(+), 0 deletions(-)" in summary
+
+    def test_only_reports_requested_paths(self, git, tmp_path):
+        # MEMORY.md changes, but we only ask about the unchanged SOUL.md.
+        (tmp_path / "MEMORY.md").write_text("changed\n", encoding="utf-8")
+        assert git.summarize_working_tree(["SOUL.md"]) == ""
+
+    def test_counts_additions_and_removals(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("# M\n- keep\n- new\n", encoding="utf-8")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: +3 -0" in summary
+
+    def test_detects_deletion(self, git, tmp_path):
+        # File removed from the working tree (must have content first; the
+        # fixture's tracked files start empty, so an empty-file delete is a no-op).
+        (tmp_path / "MEMORY.md").write_text("has content\n", encoding="utf-8")
+        git.auto_commit("add content")
+        (tmp_path / "MEMORY.md").unlink()
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert summary  # a removal is still a change
+        assert "deletion" in summary
+
+    def test_non_utf8_file_marked_binary_without_replacement_chars(self, git, tmp_path):
+        # Invalid UTF-8 must not leak replacement chars into the audit record.
+        (tmp_path / "MEMORY.md").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x01")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: binary or non-UTF-8 file changed" in summary
+        assert "\ufffd" not in summary  # no U+FFFD replacement chars leaked
+
+
 class TestNestedRepoProtection:
     """Regression tests for GitHub issue #2980: nested repo protection."""
 

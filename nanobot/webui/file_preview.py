@@ -28,7 +28,7 @@ def file_preview_payload(
     scope: WorkspaceScope,
     max_bytes: int = MAX_FILE_PREVIEW_BYTES,
 ) -> dict[str, Any]:
-    """Return a text preview for a file inside the session workspace."""
+    """Return a text preview for a file allowed by the session workspace scope."""
 
     path = _clean_preview_path(raw_path)
     if not path:
@@ -40,7 +40,7 @@ def file_preview_payload(
         resolved = resolve_allowed_path(
             path,
             workspace=scope.project_path,
-            allowed_root=scope.project_path,
+            allowed_root=scope.project_path if scope.restrict_to_workspace else None,
             strict=True,
         )
     except FileNotFoundError as e:

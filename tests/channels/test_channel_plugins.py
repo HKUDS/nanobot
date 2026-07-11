@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
+import sys
+import tomllib
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import (
+    ProgressEvent,
+    StreamDeltaEvent,
+    StreamedResponseEvent,
+    StreamEndEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
@@ -63,6 +76,28 @@ def _make_entry_point(name: str, cls: type):
     """Create a mock entry point that returns *cls* on load()."""
     ep = SimpleNamespace(name=name, load=lambda _cls=cls: _cls)
     return ep
+
+
+def _stub_optional_feature_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    extras: dict[str, list[str] | None],
+    installed: bool,
+    commands: list[list[str]] | None = None,
+    channels: list[str] | None = None,
+    channel_cls: type[BaseChannel] | None = None,
+) -> None:
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: channels or [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    if channel_cls is not None:
+        monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: channel_cls)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: extras)
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: installed)
+    if commands is not None:
+        monkeypatch.setattr(
+            "nanobot.optional_features.run_install_command",
+            lambda argv: commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +231,23 @@ def test_discover_enabled_imports_only_enabled_builtins():
     assert loaded == ["enabled"]
 
 
+def test_discover_enabled_warns_for_enabled_builtin_import_errors():
+    from nanobot.channels.registry import discover_enabled
+
+    with (
+        patch("nanobot.channels.registry.load_channel_class", side_effect=ImportError("missing sdk")),
+        patch(_EP_TARGET, return_value=[]),
+        patch("nanobot.channels.registry.logger.warning") as warning,
+    ):
+        result = discover_enabled({"matrix"}, _names=["matrix"], warn_import_errors=True)
+
+    assert result == {}
+    warning.assert_called_once()
+    assert warning.call_args.args[0] == "Enabled built-in channel '{}' is not available: {}"
+    assert warning.call_args.args[1] == "matrix"
+    assert "missing sdk" in str(warning.call_args.args[2])
+
+
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
@@ -205,6 +257,20 @@ def test_discover_all_builtin_shadows_plugin():
 
     assert "telegram" in result
     assert result["telegram"] is not _FakeTelegram
+
+
+def test_discover_all_builtin_name_shadows_plugin_when_dependency_missing():
+    from nanobot.channels.registry import discover_all
+
+    ep = _make_entry_point("telegram", _FakeTelegram)
+    with (
+        patch("nanobot.channels.registry.discover_channel_names", return_value=["telegram"]),
+        patch("nanobot.channels.registry.load_channel_class", side_effect=ImportError("missing")),
+        patch(_EP_TARGET, return_value=[ep]),
+    ):
+        result = discover_all()
+
+    assert "telegram" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +302,54 @@ async def test_manager_loads_plugin_from_dict_config():
 
     assert "fakeplugin" in mgr.channels
     assert isinstance(mgr.channels["fakeplugin"], _FakePlugin)
+
+
+def test_manager_loads_websocket_from_default_config():
+    from nanobot.channels.manager import ChannelManager
+
+    class _FakeWebSocket(_FakePlugin):
+        name = "websocket"
+        display_name = "WebSocket"
+
+        def __init__(self, config, bus, *, gateway):
+            super().__init__(config, bus)
+            self.gateway = gateway
+
+    seen_enabled: set[str] = set()
+
+    def _discover_enabled(enabled_names: set[str], _names=None, warn_import_errors: bool = False):
+        seen_enabled.update(enabled_names)
+        return {"websocket": _FakeWebSocket} if "websocket" in enabled_names else {}
+
+    with (
+        patch("nanobot.channels.registry.discover_channel_names", return_value=["websocket"]),
+        patch("nanobot.channels.registry.discover_enabled", side_effect=_discover_enabled),
+    ):
+        mgr = ChannelManager(Config(), MessageBus(), webui_static_dist=False)
+
+    assert "websocket" in seen_enabled
+    assert mgr.channels["websocket"].config["enabled"] is True
+    assert mgr.channels["websocket"].config["host"] == "127.0.0.1"
+
+
+def test_manager_respects_explicitly_disabled_websocket_config():
+    from nanobot.channels.manager import ChannelManager
+
+    seen_enabled: set[str] = set()
+
+    def _discover_enabled(enabled_names: set[str], _names=None, warn_import_errors: bool = False):
+        seen_enabled.update(enabled_names)
+        return {}
+
+    config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
+    with (
+        patch("nanobot.channels.registry.discover_channel_names", return_value=["websocket"]),
+        patch("nanobot.channels.registry.discover_enabled", side_effect=_discover_enabled),
+    ):
+        mgr = ChannelManager(config, MessageBus(), webui_static_dist=False)
+
+    assert "websocket" not in seen_enabled
+    assert "websocket" not in mgr.channels
 
 
 @pytest.mark.asyncio
@@ -503,6 +617,593 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
     assert seen["config_path"] == config_path.resolve()
 
 
+def test_plugins_list_shows_available_features(monkeypatch):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+
+    runner = CliRunner()
+    config = Config.model_validate({"channels": {"weixin": {"enabled": True}}})
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: config)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"weixin": ["qrcode[pil]>=8.0"], "bedrock": ["boto3>=1.43.0"]},
+    )
+
+    result = runner.invoke(app, ["plugins", "list"])
+
+    assert result.exit_code == 0
+    assert "Available Features" in result.stdout
+    assert "weixin" in result.stdout
+    assert "bedrock" in result.stdout
+    assert "channel" in result.stdout
+    assert "feature" in result.stdout
+    assert " - " not in result.stdout
+
+
+def test_plugins_enable_channel_installs_extra_and_writes_config(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    class _WeixinChannel(_FakePlugin):
+        name = "weixin"
+        display_name = "Weixin"
+
+        @classmethod
+        def default_config(cls):
+            return {"enabled": False, "token": "", "allowFrom": []}
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"weixin": {"enabled": False, "token": "keep"}}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"weixin": ["qrcode[pil]>=8.0", "pycryptodome>=3.20.0"]},
+        installed=False,
+        commands=commands,
+        channels=["weixin"],
+        channel_cls=_WeixinChannel,
+    )
+
+    result = runner.invoke(app, ["plugins", "enable", "weixin", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert commands == [
+        [sys.executable, "-m", "pip", "install", "qrcode[pil]>=8.0", "pycryptodome>=3.20.0"]
+    ]
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["weixin"]["enabled"] is True
+    assert data["channels"]["weixin"]["token"] == "keep"
+    assert data["channels"]["weixin"]["allowFrom"] == []
+
+
+def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli import commands as cli_commands
+    from nanobot.cli.commands import app
+
+    commands: list[list[str]] = []
+    log_flags: list[bool] = []
+    config_path = tmp_path / "config.json"
+    original_set_logs = cli_commands._set_nanobot_logs
+
+    def _set_logs(enabled: bool) -> None:
+        log_flags.append(enabled)
+        original_set_logs(enabled)
+
+    runner = CliRunner()
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"bedrock": ["boto3>=1.43.0"]},
+        installed=False,
+        commands=commands,
+    )
+    monkeypatch.setattr("nanobot.cli.commands._set_nanobot_logs", _set_logs)
+
+    result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert log_flags == [False]
+    assert commands == [[sys.executable, "-m", "pip", "install", "boto3>=1.43.0"]]
+    assert "Installing optional feature" not in result.output
+    assert not config_path.exists()
+
+
+def test_plugins_enable_logs_option_enables_nanobot_logs(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli import commands as cli_commands
+    from nanobot.cli.commands import app
+
+    config_path = tmp_path / "config.json"
+    log_flags: list[bool] = []
+    original_set_logs = cli_commands._set_nanobot_logs
+
+    def _set_logs(enabled: bool) -> None:
+        log_flags.append(enabled)
+        original_set_logs(enabled)
+
+    runner = CliRunner()
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"bedrock": ["boto3>=1.43.0"]},
+        installed=False,
+        commands=[],
+    )
+    monkeypatch.setattr("nanobot.cli.commands._set_nanobot_logs", _set_logs)
+
+    result = runner.invoke(
+        app,
+        ["plugins", "enable", "bedrock", "--logs", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert log_flags == [True]
+    assert "Enabled feature 'bedrock'" in result.output
+
+
+def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+
+    runner = CliRunner()
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"bedrock": ["boto3>=1.43.0"]},
+        installed=True,
+        commands=commands,
+    )
+
+    result = runner.invoke(app, ["plugins", "enable", "bedrock", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert commands == []
+    assert not config_path.exists()
+
+
+def test_plugins_disable_channel_writes_config(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    result = runner.invoke(app, ["plugins", "disable", "matrix", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert "Disabled channel 'matrix'" in result.output
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["enabled"] is False
+    assert data["channels"]["matrix"]["homeserver"] == "keep"
+
+
+def test_plugins_disable_rejects_non_channel_and_allows_websocket(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    config_path = tmp_path / "config.json"
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names",
+        lambda: ["matrix", "websocket"],
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+
+    non_channel = runner.invoke(
+        app,
+        ["plugins", "disable", "bedrock", "--config", str(config_path)],
+    )
+    websocket = runner.invoke(
+        app,
+        ["plugins", "disable", "websocket", "--config", str(config_path)],
+    )
+
+    assert non_channel.exit_code == 1
+    assert "Feature 'bedrock' cannot be disabled" in non_channel.output
+    assert websocket.exit_code == 0
+    assert "Disabled channel 'websocket'" in websocket.output
+    assert json.loads(config_path.read_text(encoding="utf-8"))["channels"]["websocket"][
+        "enabled"
+    ] is False
+
+
+def test_enable_optional_feature_blocks_install_when_disallowed(monkeypatch, tmp_path):
+    from nanobot.optional_features import OptionalFeatureError, enable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        enable_optional_feature("bedrock", config_path=config_path, allow_install=False)
+
+    assert exc.value.status == 403
+    assert "remote WebUI is disabled" in exc.value.message
+    assert not config_path.exists()
+
+
+def test_enable_optional_feature_skips_install_when_dependency_present(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.optional_features import InstallResult, enable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    install_calls: list[str] = []
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
+
+    def _install_extra(
+        name: str,
+        deps: list[str] | None,
+        *,
+        runner,
+    ) -> InstallResult:
+        install_calls.append(name)
+        return InstallResult(True, f"{name} support", ["python", "-m", "pip", "install", name])
+
+    monkeypatch.setattr("nanobot.optional_features.install_extra", _install_extra)
+
+    payload = enable_optional_feature("bedrock", config_path=config_path, allow_install=False)
+
+    assert install_calls == []
+    assert payload["last_action"]["message"] == "Enabled feature 'bedrock'"
+    assert payload["requires_restart"] is True
+    assert not config_path.exists()
+
+
+def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
+    from nanobot.optional_features import (
+        InstallResult,
+        OptionalFeatureError,
+        enable_optional_feature,
+    )
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr(
+        "nanobot.optional_features.install_extra",
+        lambda _name, _deps, *, runner: InstallResult(
+            False,
+            "bedrock support",
+            ["python", "-m", "pip", "install", "boto3>=1.43.0"],
+            failed_cmd=["python", "-m", "pip", "install", "boto3>=1.43.0"],
+            output="network unavailable",
+        ),
+    )
+
+    with pytest.raises(OptionalFeatureError) as exc:
+        enable_optional_feature("bedrock", config_path=config_path)
+
+    assert exc.value.status == 500
+    assert "Failed:" in exc.value.message
+    assert "network unavailable" in exc.value.message
+    assert not config_path.exists()
+
+
+def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.optional_features import OptionalFeatureError, disable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_channel_names",
+        lambda: ["matrix", "websocket"],
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"bedrock": ["boto3>=1.43.0"]},
+    )
+
+    with pytest.raises(OptionalFeatureError) as unknown:
+        disable_optional_feature("missing", config_path=config_path)
+    assert unknown.value.status == 404
+    assert "Unknown feature: missing" in unknown.value.message
+
+    with pytest.raises(OptionalFeatureError) as non_channel:
+        disable_optional_feature("bedrock", config_path=config_path)
+    assert non_channel.value.status == 400
+    assert non_channel.value.message == "Feature 'bedrock' cannot be disabled"
+
+    assert not config_path.exists()
+
+
+def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path):
+    from nanobot.optional_features import disable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    config_path.write_text(
+        json.dumps({"channels": {"matrix": {"enabled": True, "homeserver": "keep"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix", "websocket"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = disable_optional_feature("matrix", config_path=config_path)
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["matrix"]["enabled"] is False
+    assert data["channels"]["matrix"]["homeserver"] == "keep"
+    assert payload["last_action"]["message"] == "Disabled channel 'matrix'"
+    assert payload["requires_restart"] is True
+
+    payload = disable_optional_feature("websocket", config_path=config_path)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data["channels"]["websocket"]["enabled"] is False
+    assert payload["last_action"]["message"] == "Disabled channel 'websocket'"
+
+
+def test_optional_features_payload_counts_enabled_channel_with_missing_dependency(
+    monkeypatch,
+):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({"channels": {"matrix": {"enabled": True}}})
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"matrix": ["matrix-nio>=0.25.2"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+
+    payload = optional_features_payload(config=config)
+
+    matrix = payload["features"][0]
+    assert matrix["name"] == "matrix"
+    assert matrix["enabled"] is True
+    assert matrix["installed"] is False
+    assert matrix["ready"] is False
+    assert payload["enabled_count"] == 1
+
+
+def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
+    from nanobot import optional_features
+
+    calls: list[list[str]] = []
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="No module named pip")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    assert optional_features.install_extra("weixin", None, runner=_run).ok is True
+    assert calls == [
+        [sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
+        [sys.executable, "-m", "ensurepip", "--upgrade"],
+        [sys.executable, "-m", "pip", "install", "nanobot-ai[weixin]"],
+    ]
+
+
+def test_install_extra_logs_command_and_output(monkeypatch):
+    from nanobot import optional_features
+
+    records: list[str] = []
+
+    class _Logger:
+        def info(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout="install ok", stderr="")
+
+    monkeypatch.setattr(optional_features, "logger", _Logger())
+
+    result = optional_features.install_extra("weixin", ["qrcode[pil]>=8.0"], runner=_run)
+
+    assert result.ok is True
+    assert any("Installing optional feature 'weixin':" in record for record in records)
+    assert any("Optional feature 'weixin' install exited with code 0" in record for record in records)
+    assert any("install ok" in record for record in records)
+
+
+def test_run_install_command_returns_failure_on_timeout(monkeypatch):
+    from nanobot import optional_features
+
+    def _run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["pip"], 300, output="partial", stderr=b"still running")
+
+    monkeypatch.setattr(optional_features.subprocess, "run", _run)
+
+    result = optional_features.run_install_command(["pip"])
+
+    assert result.returncode == 124
+    assert result.stdout == "partial"
+    assert result.stderr == "still running\nTimed out after 300s"
+
+
+def test_optional_dependency_metadata_for_enable():
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    deps = data["project"]["optional-dependencies"]
+    required = data["project"]["dependencies"]
+
+    assert "boto3>=1.43.0" not in data["project"]["dependencies"]
+    assert deps["bedrock"] == ["boto3>=1.43.0"]
+    for dep_name in (
+        "aiohttp",
+        "dingtalk-stream",
+        "lark-oapi",
+        "msgpack",
+        "openpyxl",
+        "pypdf",
+        "python-telegram-bot",
+        "python-docx",
+        "python-pptx",
+        "python-socketio",
+        "qq-botpy",
+        "slack-sdk",
+        "slackify-markdown",
+    ):
+        assert not any(dep.startswith(dep_name) for dep in required)
+    assert deps["dingtalk"] == ["dingtalk-stream>=0.24.0,<1.0.0"]
+    assert deps["documents"] == [
+        "pypdf>=5.0.0,<6.0.0",
+        "python-docx>=1.1.0,<2.0.0",
+        "openpyxl>=3.1.0,<4.0.0",
+        "python-pptx>=1.0.0,<2.0.0",
+    ]
+    assert deps["feishu"] == ["lark-oapi>=1.5.0,<2.0.0"]
+    assert deps["mochat"] == [
+        "python-socketio>=5.16.0,<6.0.0",
+        "msgpack>=1.1.0,<2.0.0",
+    ]
+    assert deps["napcat"] == ["aiohttp>=3.9.0,<4.0.0"]
+    assert deps["qq"] == ["aiohttp>=3.9.0,<4.0.0", "qq-botpy>=1.2.0,<2.0.0"]
+    assert deps["slack"] == [
+        "aiohttp>=3.9.0,<4.0.0",
+        "slack-sdk>=3.39.0,<4.0.0",
+        "slackify-markdown>=0.2.0,<1.0.0",
+    ]
+    assert any(dep.startswith("python-telegram-bot") for dep in deps["telegram"])
+    assert any(
+        dep.startswith("matrix-nio>=0.25.2") and "sys_platform == 'win32'" in dep
+        for dep in deps["matrix"]
+    )
+
+
+def test_optional_dependency_groups_falls_back_to_package_metadata(monkeypatch):
+    from nanobot import optional_features
+
+    class _Metadata:
+        def get_all(self, key: str):
+            assert key == "Provides-Extra"
+            return ["bedrock", "dev"]
+
+    monkeypatch.setattr(optional_features, "load_pyproject", lambda _path: {})
+    monkeypatch.setattr("importlib.metadata.metadata", lambda _name: _Metadata())
+    monkeypatch.setattr(
+        "importlib.metadata.requires",
+        lambda _name: [
+            "packaging>=24.0",
+            "boto3>=1.43.0; extra == 'bedrock'",
+            "pytest>=8.0; extra == 'dev'",
+        ],
+    )
+
+    deps = optional_features.optional_dependency_groups()
+
+    assert deps == {"bedrock": ["boto3>=1.43.0; extra == 'bedrock'"]}
+    assert optional_features.install_args_for_extra("bedrock", deps["bedrock"]) == (
+        ["boto3>=1.43.0"],
+        "bedrock support",
+    )
+
+
+def test_install_args_for_extra_resolves_metadata_markers_for_current_platform():
+    from nanobot import optional_features
+
+    current_platform = sys.platform
+    deps = [
+        f"current-platform-package>=1.0; sys_platform == '{current_platform}' and extra == 'matrix'",
+        "other-platform-package>=1.0; sys_platform == 'never' and extra == 'matrix'",
+    ]
+
+    assert optional_features.install_args_for_extra("matrix", deps) == (
+        ["current-platform-package>=1.0"],
+        "matrix support",
+    )
+
+
+def test_requirement_installed_validates_requested_extras(monkeypatch):
+    from nanobot import optional_features
+
+    class _Metadata:
+        def __init__(self, extras: list[str] | None = None) -> None:
+            self._extras = extras or []
+
+        def get_all(self, key: str):
+            assert key == "Provides-Extra"
+            return self._extras
+
+    class _Distribution:
+        def __init__(
+            self,
+            version: str,
+            *,
+            requires: list[str] | None = None,
+            extras: list[str] | None = None,
+        ) -> None:
+            self.version = version
+            self.requires = requires or []
+            self.metadata = _Metadata(extras)
+
+    installed: dict[str, _Distribution] = {
+        "qrcode": _Distribution(
+            "8.2",
+            requires=["pillow>=9.1; extra == 'pil'"],
+            extras=["pil"],
+        ),
+    }
+
+    def _distribution(name: str) -> _Distribution:
+        normalized = name.lower()
+        if normalized not in installed:
+            raise PackageNotFoundError(name)
+        return installed[normalized]
+
+    monkeypatch.setattr(optional_features, "distribution", _distribution)
+
+    assert optional_features.requirement_installed("qrcode>=8.0") is True
+    assert optional_features.requirement_installed("qrcode[pil]>=8.0") is False
+
+    installed["pillow"] = _Distribution("10.0")
+
+    assert optional_features.requirement_installed("qrcode[pil]>=8.0") is True
+
+
 @pytest.mark.asyncio
 async def test_manager_skips_disabled_plugin():
     fake_config = SimpleNamespace(
@@ -530,19 +1231,19 @@ async def test_manager_skips_disabled_plugin():
 
 def test_builtin_channel_default_config():
     """Built-in channels expose default_config() returning a dict with 'enabled': False."""
-    from nanobot.channels.telegram import TelegramChannel
-    cfg = TelegramChannel.default_config()
+    from nanobot.channels.dingtalk import DingTalkChannel
+    cfg = DingTalkChannel.default_config()
     assert isinstance(cfg, dict)
     assert cfg["enabled"] is False
-    assert "token" in cfg
+    assert "clientId" in cfg
 
 
 def test_builtin_channel_init_from_dict():
     """Built-in channels accept a raw dict and convert to Pydantic internally."""
-    from nanobot.channels.telegram import TelegramChannel
+    from nanobot.channels.dingtalk import DingTalkChannel
     bus = MessageBus()
-    ch = TelegramChannel({"enabled": False, "token": "test-tok", "allowFrom": ["*"]}, bus)
-    assert ch.config.token == "test-tok"
+    ch = DingTalkChannel({"enabled": False, "clientId": "test-id", "allowFrom": ["*"]}, bus)
+    assert ch.config.client_id == "test-id"
     assert ch.config.allow_from == ["*"]
 
 
@@ -718,7 +1419,7 @@ async def test_send_with_retry_no_retry_when_max_is_zero():
 
 @pytest.mark.asyncio
 async def test_send_with_retry_calls_send_delta():
-    """_send_with_retry should call send_delta when metadata has _stream_delta."""
+    """_send_with_retry should call send_delta for stream delta events."""
     send_delta_called = False
 
     class _StreamingChannel(BaseChannel):
@@ -734,7 +1435,16 @@ async def test_send_with_retry_calls_send_delta():
         async def send(self, msg: OutboundMessage) -> None:
             pass  # Should not be called
 
-        async def send_delta(self, chat_id: str, delta: str, metadata: dict | None = None) -> None:
+        async def send_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+            *,
+            stream_id: str | None = None,
+            stream_end: bool = False,
+            resuming: bool = False,
+        ) -> None:
             nonlocal send_delta_called
             send_delta_called = True
 
@@ -749,9 +1459,10 @@ async def test_send_with_retry_calls_send_delta():
     mgr.channels = {"streaming": _StreamingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
 
-    msg = OutboundMessage(
-        channel="streaming", chat_id="123", content="test delta",
-        metadata={"_stream_delta": True}
+    msg = outbound_message_for_event(
+        channel="streaming",
+        chat_id="123",
+        event=StreamDeltaEvent(content="test delta"),
     )
     await mgr._send_with_retry(mgr.channels["streaming"], msg)
 
@@ -759,8 +1470,136 @@ async def test_send_with_retry_calls_send_delta():
 
 
 @pytest.mark.asyncio
+async def test_send_with_retry_supports_legacy_stream_delta_signature():
+    """External plugins with the old send_delta signature should keep working."""
+    calls: list[tuple[str, str, dict]] = []
+
+    class _LegacyStreamingChannel(BaseChannel):
+        name = "legacy_streaming"
+        display_name = "Legacy Streaming"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+        async def send_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+        ) -> None:
+            calls.append((chat_id, delta, dict(metadata or {})))
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"legacy_streaming": _LegacyStreamingChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    await mgr._send_with_retry(
+        mgr.channels["legacy_streaming"],
+        outbound_message_for_event(
+            channel="legacy_streaming",
+            chat_id="123",
+            event=StreamDeltaEvent(content="hello", stream_id="s1"),
+        ),
+    )
+    await mgr._send_with_retry(
+        mgr.channels["legacy_streaming"],
+        outbound_message_for_event(
+            channel="legacy_streaming",
+            chat_id="123",
+            event=StreamEndEvent(content="", stream_id="s1", resuming=True),
+        ),
+    )
+
+    assert calls == [
+        ("123", "hello", {"_stream_id": "s1", "_stream_delta": True}),
+        ("123", "", {"_stream_id": "s1", "_stream_end": True}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_supports_legacy_reasoning_signature():
+    """External plugins with the old reasoning hook signature should keep working."""
+    deltas: list[tuple[str, str, dict]] = []
+    ends: list[tuple[str, dict]] = []
+
+    class _LegacyReasoningChannel(BaseChannel):
+        name = "legacy_reasoning"
+        display_name = "Legacy Reasoning"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+        async def send_reasoning_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+        ) -> None:
+            deltas.append((chat_id, delta, dict(metadata or {})))
+
+        async def send_reasoning_end(
+            self,
+            chat_id: str,
+            metadata: dict | None = None,
+        ) -> None:
+            ends.append((chat_id, dict(metadata or {})))
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"legacy_reasoning": _LegacyReasoningChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    await mgr._send_with_retry(
+        mgr.channels["legacy_reasoning"],
+        outbound_message_for_event(
+            channel="legacy_reasoning",
+            chat_id="123",
+            event=ProgressEvent(content="thinking", reasoning_delta=True, stream_id="r1"),
+        ),
+    )
+    await mgr._send_with_retry(
+        mgr.channels["legacy_reasoning"],
+        outbound_message_for_event(
+            channel="legacy_reasoning",
+            chat_id="123",
+            event=ProgressEvent(reasoning_end=True, stream_id="r1"),
+        ),
+    )
+
+    assert deltas == [
+        ("123", "thinking", {"_reasoning_delta": True, "_stream_id": "r1"}),
+    ]
+    assert ends == [
+        ("123", {"_reasoning_end": True, "_stream_id": "r1"}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_send_with_retry_skips_send_when_streamed():
-    """_send_with_retry should not call send when metadata has _streamed flag."""
+    """_send_with_retry should not call send for streamed response events."""
     send_called = False
     send_delta_called = False
 
@@ -778,7 +1617,16 @@ async def test_send_with_retry_skips_send_when_streamed():
             nonlocal send_called
             send_called = True
 
-        async def send_delta(self, chat_id: str, delta: str, metadata: dict | None = None) -> None:
+        async def send_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+            *,
+            stream_id: str | None = None,
+            stream_end: bool = False,
+            resuming: bool = False,
+        ) -> None:
             nonlocal send_delta_called
             send_delta_called = True
 
@@ -793,10 +1641,11 @@ async def test_send_with_retry_skips_send_when_streamed():
     mgr.channels = {"streamed": _StreamedChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
 
-    # _streamed means message was already sent via send_delta, so skip send
-    msg = OutboundMessage(
-        channel="streamed", chat_id="123", content="test",
-        metadata={"_streamed": True}
+    msg = outbound_message_for_event(
+        channel="streamed",
+        chat_id="123",
+        event=StreamedResponseEvent(),
+        content="test",
     )
     await mgr._send_with_retry(mgr.channels["streamed"], msg)
 

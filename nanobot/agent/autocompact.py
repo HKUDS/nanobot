@@ -12,6 +12,7 @@ from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 
 class AutoCompact:
@@ -62,8 +63,12 @@ class AutoCompact:
     def _is_internal_session(cls, key: str) -> bool:
         return key.startswith(cls._INTERNAL_SESSION_PREFIXES)
 
-    def check_expired(self, schedule_background: Callable[[Coroutine], None],
-                      active_session_keys: Collection[str] = ()) -> None:
+    def check_expired(
+        self,
+        schedule_background: Callable[[Coroutine], None],
+        resolve_runtime: Callable[[], LLMRuntime],
+        active_session_keys: Collection[str] = (),
+    ) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
         now = datetime.now()
         for info in self.sessions.list_sessions():
@@ -74,16 +79,19 @@ class AutoCompact:
                 continue
             updated_at = info.get("updated_at")
             if self._is_expired(updated_at, now) and self._has_compactable_idle_tail(key):
+                runtime = resolve_runtime()
                 self._archiving.add(key)
-                schedule_background(self._archive(key))
+                schedule_background(self._archive(key, runtime=runtime))
 
-    async def _archive(self, key: str) -> None:
+    async def _archive(self, key: str, *, runtime: LLMRuntime) -> None:
         if self._is_internal_session(key):
             self._archiving.discard(key)
             return
         try:
             summary = await self.consolidator.compact_idle_session(
-                key, self._RECENT_SUFFIX_MESSAGES,
+                key,
+                runtime=runtime,
+                max_suffix=self._RECENT_SUFFIX_MESSAGES,
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)

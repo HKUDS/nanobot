@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import secrets
 import string
 import time
@@ -70,6 +71,7 @@ _KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.7-code",
     "kimi-k2.7-code-highspeed",
 })
+_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
 # because it does not support thinking.
@@ -163,6 +165,62 @@ def _float_env(name: str, default: float) -> float:
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
+
+
+def _strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```") or not stripped.endswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
+    """Normalize common text-format tool call blocks into structured calls."""
+    if not content or "<tool_call>" not in content:
+        return content, []
+
+    tool_calls: list[ToolCallRequest] = []
+    spans: list[tuple[int, int]] = []
+    for match in _TEXT_TOOL_CALL_RE.finditer(content):
+        try:
+            payload = json.loads(_strip_json_fence(match.group(1)))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        nested = payload.get("tool_call")
+        if isinstance(nested, dict):
+            payload = nested
+        function = payload.get("function")
+        if not isinstance(function, dict):
+            function = payload
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+
+        arguments = function.get("arguments", payload.get("arguments", {}))
+        tool_calls.append(ToolCallRequest(
+            id=str(payload.get("id") or _short_tool_id()),
+            name=name,
+            arguments=parse_tool_arguments(arguments),
+        ))
+        spans.append(match.span())
+
+    if not tool_calls:
+        return content, []
+
+    visible_parts: list[str] = []
+    last = 0
+    for start, end in spans:
+        visible_parts.append(content[last:start])
+        last = end
+    visible_parts.append(content[last:])
+    visible_content = "".join(visible_parts).strip() or None
+    return visible_content, tool_calls
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -1161,6 +1219,8 @@ class OpenAICompatProvider(LLMProvider):
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
                 ))
+            if not parsed_tool_calls:
+                content, parsed_tool_calls = _extract_text_tool_calls(content)
 
             return LLMResponse(
                 content=content,
@@ -1206,6 +1266,8 @@ class OpenAICompatProvider(LLMProvider):
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
             ))
+        if not tool_calls:
+            content, tool_calls = _extract_text_tool_calls(content)
 
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
@@ -1343,19 +1405,24 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
+        content = "".join(content_parts) or None
+        tool_calls = [
+            ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=b["name"],
+                arguments=parse_tool_arguments(b["arguments"]),
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            )
+            for b in tc_bufs.values()
+        ]
+        if not tool_calls:
+            content, tool_calls = _extract_text_tool_calls(content)
+
         return LLMResponse(
-            content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=b["name"],
-                    arguments=parse_tool_arguments(b["arguments"]),
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-            ],
+            content=content,
+            tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
