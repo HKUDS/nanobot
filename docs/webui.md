@@ -111,21 +111,20 @@ for provider setup and output behavior.
 
 ## Apps
 
-Open Apps from the sidebar or settings navigation to manage integrations that
-nanobot can call from a chat. Nanobot features can enable built-in channels and
-optional capabilities such as `bedrock` or `documents`. CLI Apps install local
-adapters that nanobot runs on your machine; they do not modify the native apps
-themselves. MCP presets add predefined MCP server configurations.
+Open Apps from the sidebar to manage tools that nanobot can attach to a chat
+turn. The default **Ready** view shows only tools that can be used immediately:
 
-Enabling a Nanobot feature may install Python packages into the environment
-running nanobot. By default, the WebUI can install missing packages only when
-you open it on the same machine as nanobot. If you open the WebUI from another
-device, a domain name, a tunnel, or a reverse proxy, package install is blocked
-unless you explicitly allow it with `tools.webuiAllowRemotePackageInstall`.
+- **Apps** are local command-line adapters that nanobot runs on your machine.
+  Installing an adapter does not modify the native desktop or web app it
+  connects to.
+- **Integrations** are MCP servers. Presets provide known configurations, and
+  the custom integration panel accepts stdio, HTTP, and SSE servers.
 
-Optional feature installs use your existing pip download settings. If PyPI is
-slow or unavailable from your network, configure pip or set `PIP_INDEX_URL`
-before starting nanobot.
+Apps intentionally does not list nanobot runtime support packages such as
+`api`, `bedrock`, `documents`, or `pdf`. Those packages enable providers,
+document readers, servers, or channels; they are not tools that can be attached
+to a turn with `@`. Manage them with the relevant Settings section or with
+`nanobot plugins`. See [`cli-reference.md`](./cli-reference.md#optional-features).
 
 Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
 preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
@@ -133,8 +132,8 @@ extraction tools without requiring an API key. This does not replace nanobot's
 built-in web search provider; mention the Firecrawl MCP preset with `@` when a
 turn needs Firecrawl's richer web data tools.
 
-After an App or MCP preset is available, mention it from the composer with `@`
-to attach that capability to the next message.
+After an App or integration is available, mention it from the composer with
+`@` to attach that tool to the next message.
 
 ## Skills
 
@@ -222,10 +221,10 @@ The gateway refuses to start with `host` set to `"0.0.0.0"` unless `token` or
 `http://<your-ip>:8765` from the other device and enter the secret in the login
 form.
 
-Remote WebUI clients can view Apps and toggle already-installed features with a
-valid token, but they cannot install missing Python packages by default. To allow
-trusted remote admins to install optional feature dependencies from the WebUI,
-opt in explicitly:
+Remote WebUI clients with a valid token can view and use Apps. Actions that
+install missing nanobot support packages, such as adding a channel dependency,
+are blocked by default. To let trusted remote administrators change the Python
+environment through the WebUI, opt in explicitly:
 
 ```json
 {
