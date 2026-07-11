@@ -144,6 +144,13 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
+    if not loop.is_destructive_command_authorized(msg):
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="You are not authorized to stop tasks.",
+            metadata=dict(msg.metadata or {}),
+        )
     total = await loop._cancel_active_tasks(ctx.key)
     # Also drain pending queue to prevent mid-turn injection deadlock
     pending = loop._pending_queues.pop(ctx.key, None)
@@ -164,6 +171,13 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
     """Restart the process."""
     msg = ctx.msg
+    if not ctx.loop.is_destructive_command_authorized(msg):
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="You are not authorized to restart nanobot.",
+            metadata=dict(msg.metadata or {}),
+        )
     set_restart_notice_to_env(
         channel=msg.channel,
         chat_id=msg.chat_id,

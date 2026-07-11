@@ -237,6 +237,11 @@ class AgentLoop:
         self.runtime_events = runtime_events or RuntimeEventBus()
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
+        self.admin_senders = frozenset(
+            str(sender).strip()
+            for sender in (getattr(channels_config, "admin_senders", None) or [])
+            if str(sender).strip()
+        )
         self.restart_mode = restart_mode
         self.provider = provider
         self._provider_snapshot_loader = provider_snapshot_loader
@@ -691,6 +696,20 @@ class AgentLoop:
             await self.bus.publish_outbound(result)
         else:
             logger.warning("Command '{}' matched but dispatch returned None", raw)
+
+    def is_destructive_command_authorized(self, msg: InboundMessage) -> bool:
+        """Return whether *msg* may run process/task destructive commands."""
+        # Direct AgentLoop users (for example the SDK and unit-test harnesses)
+        # do not have channel authorization configuration.  Their caller owns
+        # the process, so retain the existing programmatic behavior.  Loops
+        # created from Config always receive ChannelsConfig and are protected.
+        if self.channels_config is None or msg.channel in {"cli", "system"}:
+            return True
+        return bool(
+            msg.sender_id in self.admin_senders
+            or f"{msg.channel}:{msg.sender_id}" in self.admin_senders
+            or "*" in self.admin_senders
+        )
 
     async def _cancel_active_tasks(self, key: str) -> int:
         """Cancel and await all active tasks and subagents for *key*.

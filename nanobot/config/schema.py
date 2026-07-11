@@ -34,6 +34,14 @@ class ChannelsConfig(Base):
     show_reasoning: bool = True  # surface model reasoning when channel implements it
     extract_document_text: bool = True  # extract text from document attachments before sending to the model
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
+    admin_senders: list[str] = Field(default_factory=list)
+    """Sender IDs allowed to run destructive priority commands.
+
+    Entries may be bare sender IDs (matching across channels) or
+    ``channel:sender_id`` values for channel-scoped authorization.  An empty
+    list deliberately denies destructive priority commands from chat channels;
+    local CLI/system control remains available to the process owner.
+    """
     transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Deprecated: use top-level transcription.language
 

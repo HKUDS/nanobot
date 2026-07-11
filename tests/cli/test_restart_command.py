@@ -36,6 +36,64 @@ def _make_loop():
 class TestRestartCommand:
 
     @pytest.mark.asyncio
+    async def test_restart_is_denied_to_non_admin_chat_sender(self):
+        from nanobot.command.builtin import cmd_restart
+        from nanobot.command.router import CommandContext
+        from nanobot.config.schema import ChannelsConfig
+
+        loop, _bus = _make_loop()
+        loop.channels_config = ChannelsConfig()
+        msg = InboundMessage(channel="telegram", sender_id="user", chat_id="direct", content="/restart")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
+
+        with patch("nanobot.command.builtin.os.execv") as mock_execv:
+            out = await cmd_restart(ctx)
+
+        assert "not authorized" in out.content
+        mock_execv.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_restart_allows_channel_scoped_admin_sender(self):
+        from nanobot.command.builtin import cmd_restart
+        from nanobot.command.router import CommandContext
+
+        loop, _bus = _make_loop()
+        loop.admin_senders = frozenset({"telegram:user"})
+        msg = InboundMessage(channel="telegram", sender_id="user", chat_id="direct", content="/restart")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
+
+        async def _fast_sleep(_delay: float) -> None:
+            return None
+
+        scheduled: list[asyncio.Task] = []
+        real_create_task = asyncio.create_task
+        with patch("nanobot.command.builtin.asyncio.sleep", _fast_sleep), \
+             patch("nanobot.command.builtin.asyncio.create_task", lambda coro: scheduled.append(real_create_task(coro)) or scheduled[-1]), \
+             patch("nanobot.command.builtin.os.execv") as mock_execv:
+            out = await cmd_restart(ctx)
+            await scheduled[0]
+
+        assert "Restarting" in out.content
+        mock_execv.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_is_denied_to_non_admin_chat_sender(self):
+        from nanobot.command.builtin import cmd_stop
+        from nanobot.command.router import CommandContext
+        from nanobot.config.schema import ChannelsConfig
+
+        loop, _bus = _make_loop()
+        loop.channels_config = ChannelsConfig()
+        msg = InboundMessage(channel="telegram", sender_id="user", chat_id="direct", content="/stop")
+        ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
+
+        with patch.object(loop, "_cancel_active_tasks", new_callable=AsyncMock) as cancel:
+            out = await cmd_stop(ctx)
+
+        assert "not authorized" in out.content
+        cancel.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_restart_sends_message_and_calls_execv(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
@@ -147,6 +205,7 @@ class TestRestartCommand:
         """Verify /restart is handled at the run-loop level, not inside _dispatch."""
         loop, bus = _make_loop()
         loop.restart_mode = "exec"
+        loop.admin_senders = frozenset({"telegram:u1"})
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
         async def _fast_sleep(_delay: float) -> None:
