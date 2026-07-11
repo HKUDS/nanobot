@@ -31,21 +31,16 @@ def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) 
     """Return model-visible runtime annotations for turn-attached capabilities."""
     return [
         *cli_app_utils.runtime_lines(msg, workspace, skip=skip),
-        *mcp_tools.runtime_lines(
-            msg,
-            configured_server_names=set(state._mcp_servers),
-            connected_server_names=set(state._mcp_stacks),
-            skip=skip,
-        ),
+        *state.mcp_provider.runtime_lines(msg, skip=skip),
     ]
 
 
 async def connect_mcp(state: Any, tools: ToolRegistry) -> None:
-    await mcp_tools.connect_missing_servers(state, tools)
+    await state.mcp_provider.connect(tools)
 
 
 async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolRegistry) -> bool:
-    return await mcp_tools.handle_runtime_control(state, msg, tools)
+    return await state.mcp_provider.handle_runtime_control(msg, tools)
 
 
 class ContextBuilder:

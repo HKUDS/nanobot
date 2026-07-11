@@ -131,7 +131,7 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     await loop._connect_mcp()
 
     assert attempts == 2
-    assert loop._mcp_stacks == {}
+    assert loop.mcp_provider._mcp_stacks == {}
 
 
 @pytest.mark.asyncio
@@ -168,7 +168,7 @@ async def test_agent_loop_run_closes_mcp_from_connection_owner_task(
 
     assert owner_tasks
     assert closed_tasks == owner_tasks
-    assert loop._mcp_stacks == {}
+    assert loop.mcp_provider._mcp_stacks == {}
 
 
 @pytest.mark.asyncio
@@ -203,23 +203,23 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
     loop = _make_loop(tmp_path, mcp_servers={})
 
-    added = await mcp_runtime.reload_servers(loop, loop.tools)
+    added = await loop.mcp_provider.reload(loop.tools)
 
     assert added["ok"] is True
     assert added["added"] == ["browserbase"]
     assert loop.tools.has("mcp_browserbase_navigate")
-    assert "browserbase" in loop._mcp_stacks
+    assert "browserbase" in loop.mcp_provider._mcp_stacks
 
     config = load_config()
     del config.tools.mcp_servers["browserbase"]
     save_config(config)
 
-    removed = await mcp_runtime.reload_servers(loop, loop.tools)
+    removed = await loop.mcp_provider.reload(loop.tools)
 
     assert removed["ok"] is True
     assert removed["removed"] == ["browserbase"]
     assert not loop.tools.has("mcp_browserbase_navigate")
-    assert "browserbase" not in loop._mcp_stacks
+    assert "browserbase" not in loop.mcp_provider._mcp_stacks
     assert closed == ["browserbase"]
 
 
@@ -257,7 +257,7 @@ async def test_request_mcp_reload_reaches_runtime_control_without_restart(
 
     async def _handle_one_runtime_control() -> None:
         msg = await loop.bus.consume_inbound()
-        handled = await mcp_runtime.handle_runtime_control(loop, msg, loop.tools)
+        handled = await loop.mcp_provider.handle_runtime_control(msg, loop.tools)
         assert handled is True
 
     consumer = asyncio.create_task(_handle_one_runtime_control())
@@ -310,7 +310,7 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
     loop = _make_loop(tmp_path, mcp_servers={"browserbase": config.tools.mcp_servers["browserbase"]})
 
-    result = await mcp_runtime.reload_servers(loop, loop.tools)
+    result = await loop.mcp_provider.reload(loop.tools)
 
     assert result["ok"] is True
     assert result["added"] == []
@@ -379,7 +379,7 @@ async def test_mcp_tool_reconnects_after_session_terminated(
     assert closed == ["remote"]
     assert sessions[0].call_count == 1
     assert sessions[1].call_count == 1
-    assert "remote" in loop._mcp_stacks
+    assert "remote" in loop.mcp_provider._mcp_stacks
     assert loop.tools.get("mcp_remote_quote") is not old_tool
 
 
