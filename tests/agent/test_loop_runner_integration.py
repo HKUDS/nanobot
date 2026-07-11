@@ -7,15 +7,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.runtime_context import RuntimeContextBlock, public_history_message
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+_GOAL_RUNTIME_GUIDANCE_TAG = "[Goal Runtime Guidance — host instructions]"
 
 
 def _make_loop(tmp_path):
@@ -124,13 +125,115 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
     first_request = provider.chat_with_retry.await_args_list[0].kwargs["messages"]
     assert "staged migration plan" in str(first_request)
     assert "/goal implement the plan above" in str(first_request)
-    assert ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG in str(first_request)
+    assert _GOAL_RUNTIME_GUIDANCE_TAG in str(first_request)
     final_request = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
     assert "create_goal is unavailable for this turn" in str(final_request)
-    assert all(
-        ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG not in str(message.get("content") or "")
-        for message in session.messages
+    assert _GOAL_RUNTIME_GUIDANCE_TAG in str(session.messages[2]["content"])
+    assert _GOAL_RUNTIME_GUIDANCE_TAG not in str(
+        public_history_message(session.messages[2])["content"]
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first answer", usage={}),
+        LLMResponse(content="second answer", usage={}),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+    session = loop.sessions.get_or_create("cli:direct")
+    provider_calls: list[str | None] = []
+
+    async def provide_context(request):
+        provider_calls.append(request.turn_id)
+        return RuntimeContextBlock(source="test", content="stable provider context")
+
+    loop.register_runtime_context_provider(provide_context)
+    loop.register_runtime_context_provider(provide_context)
+
+    await loop._process_message(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="first turn",
+    ))
+    await loop._process_message(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="second turn",
+    ))
+
+    first_request = provider.chat_with_retry.await_args_list[0].kwargs["messages"]
+    second_request = provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+    first_wire = LLMProvider._sanitize_empty_content(first_request)
+    second_wire = LLMProvider._sanitize_empty_content(second_request)
+    assert second_wire[: len(first_wire)] == first_wire
+    assert first_wire[1] == second_wire[1]
+    assert second_wire[2]["role"] == "assistant"
+    assert second_wire[2]["content"] == "first answer"
+    assert second_wire[3]["content"].startswith("second turn")
+    assert "Current Time:" not in str(second_wire)
+    assert "Chat ID:" not in str(second_wire)
+    assert len(provider_calls) == 2
+
+    persisted_first_user = session.messages[0]
+    assert persisted_first_user["content"] == first_wire[1]["content"]
+    assert public_history_message(persisted_first_user)["content"] == "first turn"
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_provider_runs_once_across_tool_iterations(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="reading",
+            tool_calls=[ToolCallRequest(
+                id="call_read",
+                name="read_file",
+                arguments={"path": "note.txt"},
+            )],
+            usage={},
+        ),
+        LLMResponse(content="done", usage={}),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+    provider_calls = 0
+
+    async def provide_context(_request):
+        nonlocal provider_calls
+        provider_calls += 1
+        return RuntimeContextBlock(source="test", content="frozen context")
+
+    loop.register_runtime_context_provider(provide_context)
+
+    await loop._process_message(InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="read the note",
+    ))
+
+    assert provider.chat_with_retry.await_count == 2
+    assert provider_calls == 1
+    for call in provider.chat_with_retry.await_args_list:
+        assert "frozen context" in str(call.kwargs["messages"])
 
 
 @pytest.mark.asyncio

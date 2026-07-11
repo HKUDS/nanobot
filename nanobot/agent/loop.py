@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -27,6 +28,7 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
@@ -52,6 +54,15 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RUNTIME_CONTEXT_MESSAGE_META,
+    RuntimeContextBlock,
+    RuntimeContextProvider,
+    append_runtime_context,
+    resolve_runtime_context,
+    wrap_runtime_context_lines,
+)
 from nanobot.security.workspace_access import (
     WorkspaceScopeResolver,
     bind_workspace_scope,
@@ -60,7 +71,6 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
-    explicit_goal_requested,
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
@@ -123,6 +133,8 @@ class TurnContext:
 
     history: list[dict[str, Any]] = field(default_factory=list)
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
+    request_context: RequestContext | None = None
+    runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
 
     final_content: str | None = None
     tools_used: list[str] = field(default_factory=list)
@@ -365,6 +377,8 @@ class AgentLoop:
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, MCPConnection] = {}
         self._mcp_connecting = False
+        self._runtime_context_providers: list[RuntimeContextProvider] = []
+        self.register_runtime_context_provider(self._provide_mcp_runtime_context)
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -554,6 +568,14 @@ class AgentLoop:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
 
+    def register_runtime_context_provider(
+        self,
+        provider: RuntimeContextProvider,
+    ) -> None:
+        """Register a provider resolved once before each inbound model turn."""
+        if provider not in self._runtime_context_providers:
+            self._runtime_context_providers.append(provider)
+
     @staticmethod
     def _runtime_chat_id(msg: InboundMessage) -> str:
         """Return the chat id shown in runtime metadata for the model."""
@@ -608,6 +630,7 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session: Session,
+        runtime_context_blocks: list[RuntimeContextBlock] | None = None,
         **kwargs: Any,
     ) -> bool:
         """Persist the triggering user message before the turn starts.
@@ -618,7 +641,7 @@ class AgentLoop:
             return False
         media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
         has_text = isinstance(msg.content, str) and msg.content.strip()
-        if has_text or media_paths:
+        if has_text or media_paths or runtime_context_blocks:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
@@ -626,6 +649,12 @@ class AgentLoop:
             if text_override is not None:
                 text = text_override
             extra.update(automation_extra)
+            text, runtime_context_meta = append_runtime_context(
+                text,
+                runtime_context_blocks or (),
+            )
+            if runtime_context_meta is not None:
+                extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
@@ -639,7 +668,7 @@ class AgentLoop:
         history: list[dict[str, Any]],
         pending_summary: str | None,
         include_memory_recent_history: bool = True,
-        goal_start_requested: bool = False,
+        runtime_context_blocks: list[RuntimeContextBlock] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -653,13 +682,52 @@ class AgentLoop:
             session_summary=pending_summary,
             session_metadata=session.metadata,
             workspace=scope.project_path,
-            runtime_state=self,
-            inbound_message=msg,
-            goal_start_requested=goal_start_requested,
+            runtime_context_blocks=runtime_context_blocks,
             include_memory_recent_history=include_memory_recent_history,
             session_key=session.key,
             unified_session=self._unified_session,
         )
+
+    async def _provide_mcp_runtime_context(
+        self,
+        request: RequestContext,
+    ) -> RuntimeContextBlock | None:
+        lines = mcp_tools.runtime_lines(
+            SimpleNamespace(metadata=request.metadata),
+            configured_server_names=set(self._mcp_servers),
+            connected_server_names=set(self._mcp_stacks),
+        )
+        content = wrap_runtime_context_lines(lines)
+        if not content:
+            return None
+        return RuntimeContextBlock(source="mcp", content=content)
+
+    def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
+        scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+        return RequestContext(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            message_id=ctx.msg.metadata.get("message_id"),
+            session_key=ctx.session_key,
+            original_user_text=ctx.original_user_text,
+            runtime=ctx.runtime,
+            metadata=dict(ctx.msg.metadata or {}),
+            sender_id=ctx.msg.sender_id,
+            turn_id=ctx.turn_id,
+            workspace=scope.project_path,
+        )
+
+    async def _resolve_runtime_context_for_turn(
+        self,
+        ctx: TurnContext,
+    ) -> list[RuntimeContextBlock]:
+        tools = ctx.tools or self.tools
+        providers = [
+            *tools.get_runtime_context_providers(),
+            *self._runtime_context_providers,
+        ]
+        assert ctx.request_context is not None
+        return await resolve_runtime_context(providers, ctx.request_context)
 
     async def _dispatch_command_inline(
         self,
@@ -731,6 +799,7 @@ class AgentLoop:
         hook_factories: list[AgentTurnHookFactory] | None = None,
         turn_scopes: list[AbstractContextManager[Any]] | None = None,
         tools: ToolRegistry | None = None,
+        request_context: RequestContext | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -819,7 +888,7 @@ class AgentLoop:
             session_metadata=session.metadata if session is not None else None,
         )
         effective_tools = tools or self.tools
-        request_ctx = RequestContext(
+        request_ctx = request_context or RequestContext(
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
@@ -827,6 +896,7 @@ class AgentLoop:
             original_user_text=original_user_text,
             runtime=runtime,
             metadata=dict(metadata or {}),
+            workspace=effective_scope.project_path,
         )
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
@@ -1259,9 +1329,6 @@ class AgentLoop:
             session_summary=pending,
             session_metadata=session.metadata,
             workspace=workspace_scope.project_path,
-            runtime_state=self,
-            inbound_message=msg,
-            skip_runtime_lines=is_subagent,
             session_key=key,
             unified_session=self._unified_session,
         )
@@ -1561,16 +1628,20 @@ class AgentLoop:
             ctx.runtime,
         )
 
+        ctx.request_context = self._request_context_for_turn(ctx)
+        ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,
             ctx.pending_summary,
             include_memory_recent_history=not ctx.ephemeral,
-            goal_start_requested=explicit_goal_requested(ctx.msg.metadata),
+            runtime_context_blocks=ctx.runtime_context_blocks,
         )
         ctx.user_persisted_early = self._persist_user_message_early(
-            ctx.msg, ctx.session
+            ctx.msg,
+            ctx.session,
+            runtime_context_blocks=ctx.runtime_context_blocks,
         )
 
         if ctx.on_progress is None:
@@ -1610,6 +1681,7 @@ class AgentLoop:
             hook_factories=ctx.hook_factories,
             turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
+            request_context=ctx.request_context,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1684,21 +1756,12 @@ class AgentLoop:
         content: list[dict[str, Any]],
         *,
         should_truncate_text: bool = False,
-        drop_runtime: bool = False,
     ) -> list[dict[str, Any]]:
         """Strip volatile multimodal payloads before writing session history."""
         filtered: list[dict[str, Any]] = []
         for block in content:
             if not isinstance(block, dict):
                 filtered.append(block)
-                continue
-
-            if (
-                drop_runtime
-                and block.get("type") == "text"
-                and isinstance(block.get("_meta"), dict)
-                and block["_meta"].get(ContextBuilder._HOST_BLOCK_META_KEY) is True
-            ):
                 continue
 
             if block.get("type") == "image_url" and block.get("image_url", {}).get(
@@ -1741,8 +1804,8 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = dict(m)
             internal_meta = entry.pop("_meta", None)
-            host_text_suffix = (
-                internal_meta.get(ContextBuilder._HOST_TEXT_SUFFIX_META_KEY)
+            runtime_context_meta = (
+                internal_meta.get(RUNTIME_CONTEXT_MESSAGE_META)
                 if isinstance(internal_meta, dict)
                 else None
             )
@@ -1770,24 +1833,13 @@ class AgentLoop:
                         ]
                     entry["content"] = filtered
             elif role == "user":
-                if (
-                    isinstance(content, str)
-                    and isinstance(host_text_suffix, str)
-                    and host_text_suffix
-                    and content.endswith(host_text_suffix)
-                ):
-                    before = content[: -len(host_text_suffix)]
-                    if before.endswith("\n\n"):
-                        before = before[:-2]
-                    if before:
-                        entry["content"] = before
-                    else:
-                        continue
                 if isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
+                    filtered = self._sanitize_persisted_blocks(content)
                     if not filtered:
                         continue
                     entry["content"] = filtered
+                if isinstance(runtime_context_meta, dict):
+                    entry[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "assistant":

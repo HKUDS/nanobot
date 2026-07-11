@@ -11,17 +11,22 @@ from nanobot.agent.goal_permission import (
     revoke_goal_mutation_permission,
 )
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
+from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     MAX_GOAL_OBJECTIVE_CHARS,
     discard_legacy_goal_state_key,
+    explicit_goal_requested,
     goal_state_raw,
+    goal_state_runtime_lines,
     parse_goal_state,
+    sustained_goal_active,
 )
 from nanobot.session.turn_continuation import reset_goal_continuation_rounds
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -157,6 +162,31 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "that is self-contained, bounded, safe under repetition, and explicit about "
             "completion criteria. Do not retry after a successful creation."
         )
+
+    def runtime_context_provider(self):
+        return self._provide_runtime_context
+
+    async def _provide_runtime_context(
+        self,
+        request: RequestContext,
+    ) -> RuntimeContextBlock | None:
+        if not request.session_key:
+            return None
+        session = self._sessions.get_or_create(request.session_key)
+        goal_start_requested = explicit_goal_requested(request.metadata)
+        goal_active = sustained_goal_active(session.metadata)
+        if not goal_start_requested and not goal_active:
+            return None
+
+        guidance = render_template(
+            "agent/goal_runtime.md",
+            strip=True,
+            goal_start_requested=goal_start_requested,
+            goal_active=goal_active,
+        )
+        state = wrap_runtime_context_lines(goal_state_runtime_lines(session.metadata))
+        content = "\n\n".join(part for part in (guidance, state) if part)
+        return RuntimeContextBlock(source="goal", content=content)
 
     async def execute(
         self,

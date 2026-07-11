@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, TypeAlias
 
+from nanobot.runtime_context import public_history_messages
+
 StreamEventType: TypeAlias = Literal[
     "run.started",
     "text.delta",
@@ -125,7 +127,7 @@ def snapshot_from_session(session: Any) -> SessionSnapshot:
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
         metadata=deepcopy(session.metadata),
-        messages=deepcopy(session.messages),
+        messages=public_history_messages(session.messages),
     )
 
 
@@ -135,7 +137,11 @@ def snapshot_from_payload(payload: Mapping[str, Any]) -> SessionSnapshot:
         created_at=payload.get("created_at"),
         updated_at=payload.get("updated_at"),
         metadata=deepcopy(dict(payload.get("metadata") or {})),
-        messages=deepcopy(list(payload.get("messages") or [])),
+        messages=public_history_messages(
+            message
+            for message in list(payload.get("messages") or [])
+            if isinstance(message, Mapping)
+        ),
     )
 
 

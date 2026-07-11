@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
@@ -785,6 +786,7 @@ def write_session_messages_as_transcript(
     for msg in messages:
         if is_hidden_history_message(msg):
             continue
+        msg = public_history_message(msg)
         role = msg.get("role")
         content = msg.get("content")
         text = content if isinstance(content, str) else ""
@@ -876,6 +878,7 @@ def _session_user_event(
         return None
     if is_hidden_history_message(message):
         return None
+    message = public_history_message(message)
     if _is_legacy_raw_subagent_result(message):
         return None
     content = message.get("content")
