@@ -332,6 +332,7 @@ export interface RuntimeCapabilities {
 export interface ProviderModelInfo {
   id: string;
   label?: string | null;
+  description?: string | null;
   owned_by?: string | null;
   context_window?: number | null;
 }
@@ -345,7 +346,7 @@ export interface ProviderModelsPayload {
     | "not_configured"
     | "missing_api_base"
     | "error";
-  catalog_kind: "official" | "catalog" | "local" | "custom" | "unsupported";
+  catalog_kind: "builtin" | "official" | "catalog" | "local" | "custom" | "unsupported";
   models: ProviderModelInfo[];
   model_count: number;
   message?: string | null;
@@ -399,6 +400,7 @@ export interface SettingsPayload {
     api_base?: string | null;
     default_api_base?: string | null;
     model_selectable?: boolean;
+    model_catalog?: ProviderModelsPayload["catalog_kind"];
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;

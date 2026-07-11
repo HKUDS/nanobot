@@ -367,6 +367,7 @@ def _provider_settings_row(
         "api_base": provider_config.api_base,
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
+        "model_catalog": _model_catalog_kind(spec),
     }
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
@@ -429,20 +430,27 @@ def _model_row_payload(row: Any) -> dict[str, Any] | None:
     if not model_id:
         return None
     label: str | None = None
+    description: str | None = None
     owned_by: str | None = None
     if isinstance(row, dict):
         raw_label = row.get("display_name") or row.get("label") or row.get("name")
         if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
             label = raw_label.strip()
+        raw_description = row.get("description")
+        if isinstance(raw_description, str) and raw_description.strip():
+            description = raw_description.strip()
         raw_owner = row.get("owned_by") or row.get("owner") or row.get("organization")
         if isinstance(raw_owner, str) and raw_owner.strip():
             owned_by = raw_owner.strip()
-    return {
+    payload = {
         "id": model_id,
         "label": label,
         "owned_by": owned_by,
         "context_window": _model_context_window(row),
     }
+    if description:
+        payload["description"] = description
+    return payload
 
 
 def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
@@ -492,6 +500,24 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
             **base_payload,
             "status": "unsupported",
             "message": "Model list is not available for this provider. Type a model ID manually.",
+        }
+
+    if catalog_kind == "builtin":
+        rows = [
+            {
+                "id": model.id,
+                "label": model.label or None,
+                "description": model.description or None,
+                "owned_by": spec.label,
+                "context_window": model.context_window,
+            }
+            for model in spec.builtin_models
+        ]
+        return {
+            **base_payload,
+            "status": "available",
+            "models": rows,
+            "model_count": len(rows),
         }
 
     api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base

@@ -979,6 +979,26 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
+def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
+    payload = provider_models_payload({"provider": ["openai_codex"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "builtin"
+    assert payload["model_count"] == 7
+    assert payload["models"][0] == {
+        "id": "openai-codex/gpt-5.6-sol",
+        "label": "GPT-5.6-Sol",
+        "description": "Latest frontier agentic coding model.",
+        "owned_by": "OpenAI Codex",
+        "context_window": 372000,
+    }
+    assert [model["id"] for model in payload["models"][:3]] == [
+        "openai-codex/gpt-5.6-sol",
+        "openai-codex/gpt-5.6-terra",
+        "openai-codex/gpt-5.6-luna",
+    ]
+
+
 def test_provider_models_payload_fetches_dynamic_custom_provider_models(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1071,6 +1091,7 @@ def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("skywork")) == "official"
     assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
+    assert _model_catalog_kind(find_by_name("openai_codex")) == "builtin"
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(

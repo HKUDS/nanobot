@@ -7137,8 +7137,12 @@ function ModelIdPicker({
   const providerRow = settingsProviderRow(settings, effectiveProvider);
   const providerConfigured = settingsProviderConfigured(settings, effectiveProvider);
   const providerRequiresConfiguration = hasConcreteProvider && !providerConfigured;
+  const providerHasBuiltinModels = providerRow?.model_catalog === "builtin";
   const providerUsesManualModelIds =
-    hasConcreteProvider && providerConfigured && providerRow?.auth_type === "oauth";
+    hasConcreteProvider &&
+    providerConfigured &&
+    providerRow?.auth_type === "oauth" &&
+    !providerHasBuiltinModels;
   const canFetchModels =
     hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;
   const normalizedQuery = query.trim().toLowerCase();
@@ -7146,7 +7150,7 @@ function ModelIdPicker({
   const visibleModels = providerModels
     .filter((model) => {
       if (!normalizedQuery) return true;
-      return [model.id, model.label ?? "", model.owned_by ?? ""]
+      return [model.id, model.label ?? "", model.description ?? "", model.owned_by ?? ""]
         .some((field) => field.toLowerCase().includes(normalizedQuery));
     })
     .slice(0, 80);
@@ -7221,8 +7225,17 @@ function ModelIdPicker({
           showBrandLogos={showProviderLogos}
           unconfigured={!providerConfigured}
         />
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {model.label ?? model.id}
+        <span className="min-w-0">
+          <span className="block truncate font-medium text-foreground">
+            {model.label ?? model.id}
+          </span>
+          {model.description || (model.label && model.label !== model.id) ? (
+            <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">
+              {[model.label && model.label !== model.id ? model.id : null, model.description]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ) : null}
         </span>
       </span>
       <span className="ml-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">

@@ -19,6 +19,16 @@ from pydantic.alias_generators import to_snake
 
 
 @dataclass(frozen=True)
+class ProviderModelSpec:
+    """A curated model exposed by providers without a model-list endpoint."""
+
+    id: str
+    label: str = ""
+    description: str = ""
+    context_window: int | None = None
+
+
+@dataclass(frozen=True)
 class ProviderSpec:
     """One LLM provider's metadata. See PROVIDERS below for real examples.
 
@@ -33,6 +43,7 @@ class ProviderSpec:
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
     display_name: str = ""  # shown in `nanobot status`
     model_catalog: str = "auto"  # WebUI model-list source
+    builtin_models: tuple[ProviderModelSpec, ...] = ()
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
@@ -361,6 +372,47 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("openai-codex",),
         env_key="",
         display_name="OpenAI Codex",
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-sol",
+                label="GPT-5.6-Sol",
+                description="Latest frontier agentic coding model.",
+                context_window=372000,
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-terra",
+                label="GPT-5.6-Terra",
+                description="Balanced agentic coding model for everyday work.",
+                context_window=372000,
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-luna",
+                label="GPT-5.6-Luna",
+                description="Fast and affordable agentic coding model.",
+                context_window=372000,
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.5",
+                label="GPT-5.5",
+                description="Frontier model for complex coding, research, and real-world work.",
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.4",
+                label="GPT-5.4",
+                description="Strong model for everyday coding.",
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.4-mini",
+                label="GPT-5.4-Mini",
+                description="Small, fast, and cost-efficient model for simpler coding tasks.",
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.3-codex-spark",
+                label="GPT-5.3-Codex-Spark",
+                description="Ultra-fast coding model.",
+            ),
+        ),
         backend="openai_codex",
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",

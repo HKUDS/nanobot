@@ -1873,6 +1873,80 @@ describe("SettingsView Apps catalog", () => {
     ).toBe(false);
   });
 
+  it("loads curated models for configured OAuth providers", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "openai-codex/gpt-5.5",
+        provider: "openai_codex",
+        resolved_provider: "openai_codex",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          model: "openai-codex/gpt-5.5",
+          provider: "openai_codex",
+        },
+      ],
+      providers: [
+        {
+          name: "openai_codex",
+          label: "OpenAI Codex",
+          configured: true,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: "https://chatgpt.com/backend-api",
+          model_catalog: "builtin",
+          oauth_account: "acct-test",
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/provider-models?provider=openai_codex") {
+        return jsonResponse({
+          provider: "openai_codex",
+          label: "OpenAI Codex",
+          status: "available",
+          catalog_kind: "builtin",
+          models: [
+            {
+              id: "openai-codex/gpt-5.6-sol",
+              label: "GPT-5.6-Sol",
+              description: "Latest frontier agentic coding model.",
+              owned_by: "OpenAI Codex",
+              context_window: 372000,
+            },
+          ],
+          model_count: 1,
+          fetched_at: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const modelButtons = await screen.findAllByRole("button", {
+      name: /openai-codex\/gpt-5\.5/i,
+    });
+    fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+
+    expect(await screen.findByText("GPT-5.6-Sol")).toBeInTheDocument();
+    expect(screen.getByText(/Latest frontier agentic coding model\./)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider-models?provider=openai_codex",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
   it("can close the new configuration dialog without trapping the settings page", async () => {
     vi.stubGlobal(
       "fetch",
