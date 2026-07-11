@@ -75,6 +75,7 @@
       "providers": "Proveedores",
       "image": "Imagen",
       "voice": "Voz",
+      "files": "Archivos",
       "browser": "Internet",
       "channels": "Canales",
       "runtime": "Sistema",
@@ -459,6 +460,31 @@
       "allTools": "Todas",
       "noTools": "Ninguna",
       "testForTools": "Ejecuta Probar para inspeccionar y elegir herramientas individuales."
+    },
+    "files": {
+      "title": "Lectura de documentos",
+      "description": "Permite que nanobot comprenda documentos subidos y archivos del espacio de trabajo.",
+      "uploadedDocuments": "Documentos subidos",
+      "uploadedDocumentsHelp": "Extrae el texto del documento en la conversación.",
+      "supportMissing": "El soporte de documentos aún no está instalado.",
+      "enable": "Habilitar lectura de documentos",
+      "formats": "Formatos compatibles",
+      "formatsHelp": "Una sola configuración cubre documentos de oficina y PDF.",
+      "restart": "Reinicia nanobot para aplicar la configuración de documentos."
+    },
+    "api": {
+      "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",
+      "description": "Conecta SDK y agentes mediante un endpoint /v1 local.",
+      "start": "Iniciar servidor API", "starting": "Iniciando...", "stop": "Detener", "stopping": "Deteniendo...",
+      "access": "Acceso", "thisDevice": "Este dispositivo", "localNetwork": "Red local",
+      "localHelp": "Solo este dispositivo puede conectarse.", "networkHelp": "Otros dispositivos pueden conectarse; se requiere una clave API.",
+      "port": "Puerto", "portHelp": "La API usa este puerto local.", "apiKey": "Clave API",
+      "apiKeyHelp": "Los clientes la envían como token Bearer.", "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
+      "apiKeyPlaceholder": "Introduce una clave API", "autoInstall": "El soporte API se instalará automáticamente al iniciarlo."
+    },
+    "observability": {
+      "title": "Observabilidad", "configured": "Las credenciales de trazas están disponibles para nanobot.",
+      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "enable": "Habilitar soporte de trazas"
     },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."

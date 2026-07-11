@@ -75,6 +75,7 @@
       "providers": "Providers",
       "image": "Image",
       "voice": "Voice",
+      "files": "Files",
       "browser": "Web",
       "channels": "Channels",
       "cliApps": "CLI Apps",
@@ -462,6 +463,44 @@
       "selectSize": "Select size",
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
+    },
+    "files": {
+      "title": "Document reading",
+      "description": "Let nanobot understand uploaded documents and read files from the workspace.",
+      "uploadedDocuments": "Uploaded documents",
+      "uploadedDocumentsHelp": "Extract document text into the conversation.",
+      "supportMissing": "Document support is not installed yet.",
+      "enable": "Enable document reading",
+      "formats": "Supported formats",
+      "formatsHelp": "One setup covers common office documents and PDFs.",
+      "restart": "Restart nanobot to apply the document ingestion setting."
+    },
+    "api": {
+      "title": "API server",
+      "openaiCompatible": "OpenAI-compatible API",
+      "description": "Connect SDKs and agents through a local /v1 endpoint.",
+      "start": "Start API server",
+      "starting": "Starting...",
+      "stop": "Stop",
+      "stopping": "Stopping...",
+      "access": "Access",
+      "thisDevice": "This device",
+      "localNetwork": "Local network",
+      "localHelp": "Only this device can connect.",
+      "networkHelp": "Other devices can connect; an API key is required.",
+      "port": "Port",
+      "portHelp": "The API uses this local port.",
+      "apiKey": "API key",
+      "apiKeyHelp": "Clients send this as a Bearer token.",
+      "apiKeyRequired": "Required before exposing the API to your network.",
+      "apiKeyPlaceholder": "Enter an API key",
+      "autoInstall": "API support will be installed automatically when you start it."
+    },
+    "observability": {
+      "title": "Observability",
+      "configured": "Tracing credentials are available to nanobot.",
+      "environment": "Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY, then restart nanobot.",
+      "enable": "Enable tracing support"
     },
     "apps": {
       "description": "Add tools to nanobot, then @ them in chat.",

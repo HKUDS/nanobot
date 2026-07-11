@@ -1,4 +1,5 @@
 import type {
+  ApiServicePayload,
   AutomationsPayload,
   AutomationUpdatePayload,
   ChannelConfigurePayload,
@@ -390,6 +391,39 @@ export async function fetchNanobotFeatures(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function updateFileSettings(
+  token: string,
+  extractDocumentText: boolean,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams({
+    extract_document_text: String(extractDocumentText),
+  });
+  return request<SettingsPayload>(`${base}/api/settings/files/update?${query}`, token);
+}
+
+export async function fetchApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
+  return request<ApiServicePayload>(`${base}/api/settings/api-service`, token);
+}
+
+export async function startApiService(
+  token: string,
+  values: { host: string; port: number; timeout: number; apiKey?: string },
+  base: string = "",
+): Promise<ApiServicePayload> {
+  const query = new URLSearchParams({
+    host: values.host,
+    port: String(values.port),
+    timeout: String(values.timeout),
+  });
+  if (values.apiKey !== undefined) query.set("api_key", values.apiKey);
+  return request<ApiServicePayload>(`${base}/api/settings/api-service/start?${query}`, token);
+}
+
+export async function stopApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
+  return request<ApiServicePayload>(`${base}/api/settings/api-service/stop`, token);
 }
 
 export async function enableNanobotFeature(

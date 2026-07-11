@@ -213,7 +213,7 @@ nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK
 Install the optional package in the same Python environment that runs nanobot:
 
 ```bash
-python -m pip install langfuse
+nanobot plugins enable langfuse
 ```
 
 Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or `nanobot serve`:

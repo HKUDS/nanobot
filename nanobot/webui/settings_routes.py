@@ -18,9 +18,14 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.tools.mcp import request_mcp_reload
+from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
-from nanobot.config.loader import load_config, save_config
-from nanobot.optional_features import OptionalFeatureError
+from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.optional_features import (
+    OptionalFeatureError,
+    extra_installed,
+    optional_dependency_groups,
+)
 from nanobot.pairing import approve_code, deny_code, list_pending
 from nanobot.webui.channel_connect import (
     ChannelConnectError,
@@ -44,6 +49,8 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
+    update_api_settings,
+    update_file_settings,
     update_image_generation_settings,
     update_model_configuration,
     update_network_safety_settings,
@@ -123,6 +130,14 @@ class WebUISettingsRouter:
             return await self._handle_settings_provider_oauth(request, "logout")
         if path == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
+        if path == "/api/settings/files/update":
+            return self._handle_settings_files_update(request)
+        if path == "/api/settings/api-service":
+            return self._handle_settings_api_service(request)
+        if path == "/api/settings/api-service/start":
+            return await self._handle_settings_api_service_start(connection, request)
+        if path == "/api/settings/api-service/stop":
+            return await self._handle_settings_api_service_stop(request)
         if path == "/api/settings/image-generation/update":
             return self._handle_settings_image_generation_update(request)
         if path == "/api/settings/transcription/update":
@@ -362,6 +377,110 @@ class WebUISettingsRouter:
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="browser"))
+
+    def _handle_settings_files_update(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = update_file_settings(self._query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload, section="runtime"))
+
+    def _handle_settings_api_service(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        return self._json_response(self._api_service_payload())
+
+    async def _handle_settings_api_service_start(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            await asyncio.to_thread(
+                nanobot_features_action,
+                "enable",
+                {"name": ["api"]},
+                allow_install=self._allow_feature_package_install(connection, request),
+            )
+            update_api_settings(self._query(request))
+            config = load_config()
+            runtime = self._api_runtime()
+            options = ApiStartOptions(
+                host=config.api.host,
+                port=config.api.port,
+                workspace=str(config.workspace_path),
+                config_path=str(get_config_path().expanduser().resolve(strict=False)),
+            )
+            current = runtime.status()
+            result = await asyncio.to_thread(
+                runtime.restart if current.running else runtime.start_background,
+                options,
+            )
+            if not result.ok:
+                return self._error_response(500, self._api_runtime_message(result.message))
+        except (WebUISettingsError, OptionalFeatureError) as e:
+            return self._error_response(getattr(e, "status", 400), getattr(e, "message", str(e)))
+        except Exception as e:
+            self.logger.exception("failed to start managed API service")
+            return self._error_response(500, str(e))
+        return self._json_response(self._api_service_payload(last_action="started"))
+
+    async def _handle_settings_api_service_stop(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            result = await asyncio.to_thread(self._api_runtime().stop)
+        except Exception as e:
+            self.logger.exception("failed to stop managed API service")
+            return self._error_response(500, str(e))
+        if not result.ok and result.message != "gateway_not_running":
+            return self._error_response(500, self._api_runtime_message(result.message))
+        return self._json_response(self._api_service_payload(last_action="stopped"))
+
+    @staticmethod
+    def _api_runtime() -> ApiRuntime:
+        config_path = get_config_path().expanduser().resolve(strict=False)
+        return ApiRuntime(paths=api_runtime_paths(config_path))
+
+    def _api_service_payload(self, *, last_action: str | None = None) -> dict[str, Any]:
+        config = load_config()
+        status = self._api_runtime().status()
+        extras = optional_dependency_groups()
+        connect_host = "127.0.0.1" if config.api.host in {"0.0.0.0", "::"} else config.api.host
+        payload = {
+            "installed": extra_installed("api", extras.get("api")),
+            "running": status.running,
+            "managed": status.running,
+            "host": config.api.host,
+            "port": config.api.port,
+            "timeout": config.api.timeout,
+            "api_key_hint": self._masked_secret(config.api.api_key),
+            "endpoint": f"http://{connect_host}:{config.api.port}/v1",
+            "command": "nanobot serve",
+            "log_path": str(status.log_path),
+        }
+        if last_action:
+            payload["last_action"] = last_action
+        return payload
+
+    @staticmethod
+    def _masked_secret(value: str) -> str | None:
+        value = value.strip()
+        if not value:
+            return None
+        return f"{value[:3]}...{value[-4:]}" if len(value) > 8 else "configured"
+
+    @staticmethod
+    def _api_runtime_message(message: str) -> str:
+        return {
+            "gateway_exited_during_startup": "API server exited during startup. Check its log for details.",
+            "gateway_stop_timeout": "API server did not stop in time.",
+            "gateway_state_stale": "API server state was stale; try starting it again.",
+        }.get(message, message.replace("gateway", "API server").replace("_", " "))
 
     def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):

@@ -75,6 +75,7 @@
       "providers": "プロバイダー",
       "image": "画像",
       "voice": "音声",
+      "files": "ファイル",
       "browser": "ウェブ",
       "channels": "チャンネル",
       "runtime": "システム",
@@ -459,6 +460,26 @@
       "allTools": "すべて",
       "noTools": "なし",
       "testForTools": "テストを実行して個別のツールを確認・選択します。"
+    },
+    "files": {
+      "title": "ドキュメントの読み取り", "description": "アップロードされた文書とワークスペース内のファイルを nanobot が理解できるようにします。",
+      "uploadedDocuments": "アップロード文書", "uploadedDocumentsHelp": "文書のテキストを会話に取り込みます。",
+      "supportMissing": "文書サポートがまだインストールされていません。", "enable": "文書読み取りを有効化",
+      "formats": "対応形式", "formatsHelp": "一度の設定で一般的なオフィス文書と PDF に対応します。",
+      "restart": "文書設定を反映するには nanobot を再起動してください。"
+    },
+    "api": {
+      "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "ローカルの /v1 エンドポイントから SDK やエージェントを接続します。",
+      "start": "API サーバーを起動", "starting": "起動中...", "stop": "停止", "stopping": "停止中...",
+      "access": "アクセス", "thisDevice": "このデバイス", "localNetwork": "ローカルネットワーク",
+      "localHelp": "このデバイスだけが接続できます。", "networkHelp": "他のデバイスも接続できるため API キーが必要です。",
+      "port": "ポート", "portHelp": "API が使用するローカルポートです。", "apiKey": "API キー", "apiKeyHelp": "クライアントは Bearer トークンとして送信します。",
+      "apiKeyRequired": "ネットワークに公開する前に必要です。", "apiKeyPlaceholder": "API キーを入力",
+      "autoInstall": "起動時に API サポートを自動インストールします。"
+    },
+    "observability": {
+      "title": "可観測性", "configured": "nanobot がトレース認証情報を利用できます。",
+      "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "enable": "トレースサポートを有効化"
     },
     "legal": {
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"

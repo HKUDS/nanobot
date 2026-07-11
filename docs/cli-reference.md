@@ -266,6 +266,8 @@ Apps. They cannot be attached to a chat turn with `@`.
 | `pdf` | Page-aware PDF reading through the agent's `read_file` tool |
 | `azure` | Azure identity support for Azure-hosted models |
 | `bedrock` | AWS Bedrock model provider support |
+| `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
+| `olostep` | Olostep web search provider support |
 | A channel name such as `telegram` or `slack` | The connector package and saved channel enablement |
 
 | Command | Description |

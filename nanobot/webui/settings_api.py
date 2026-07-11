@@ -846,6 +846,23 @@ def settings_payload(
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
         },
+        "files": {
+            "extract_document_text": config.channels.extract_document_text,
+        },
+        "api": {
+            "host": config.api.host,
+            "port": config.api.port,
+            "timeout": config.api.timeout,
+            "api_key_hint": _mask_secret_hint(config.api.api_key),
+        },
+        "observability": {
+            "provider": "langfuse",
+            "configured": bool(
+                os.environ.get("LANGFUSE_SECRET_KEY")
+                and os.environ.get("LANGFUSE_PUBLIC_KEY")
+            ),
+            "base_url": os.environ.get("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com",
+        },
         "image_generation": {
             "enabled": image_config.enabled,
             "provider": image_config.provider,
@@ -1367,6 +1384,63 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
     if changed:
         save_config(config)
     return settings_payload(requires_restart=restart_required)
+
+
+def update_file_settings(query: QueryParams) -> dict[str, Any]:
+    """Update document ingestion behavior exposed by the Files settings page."""
+    config = load_config()
+    raw = _query_first_alias(query, "extract_document_text", "extractDocumentText")
+    if raw is None:
+        raise WebUISettingsError("extract_document_text is required")
+    enabled = _parse_bool(raw, "extract_document_text")
+    changed = config.channels.extract_document_text != enabled
+    if changed:
+        config.channels.extract_document_text = enabled
+        save_config(config)
+    return settings_payload(requires_restart=changed)
+
+
+def update_api_settings(query: QueryParams) -> dict[str, Any]:
+    """Update the managed OpenAI-compatible API configuration."""
+    config = load_config()
+    api = config.api
+
+    host = _query_first(query, "host")
+    if host is not None:
+        host = host.strip()
+        if not host:
+            raise WebUISettingsError("host is required")
+        api.host = host
+
+    port = _query_first(query, "port")
+    if port is not None:
+        try:
+            parsed_port = int(port)
+        except ValueError:
+            raise WebUISettingsError("port must be an integer") from None
+        if parsed_port < 1 or parsed_port > 65535:
+            raise WebUISettingsError("port must be between 1 and 65535")
+        api.port = parsed_port
+
+    timeout = _query_first(query, "timeout")
+    if timeout is not None:
+        try:
+            parsed_timeout = float(timeout)
+        except ValueError:
+            raise WebUISettingsError("timeout must be a number") from None
+        if parsed_timeout < 1 or parsed_timeout > 3600:
+            raise WebUISettingsError("timeout must be between 1 and 3600")
+        api.timeout = parsed_timeout
+
+    api_key = _query_first_alias(query, "api_key", "apiKey")
+    if api_key is not None:
+        api.api_key = api_key.strip()
+
+    if api.host in {"0.0.0.0", "::"} and not api.api_key.strip():
+        raise WebUISettingsError("an API key is required when the API is available on the network")
+
+    save_config(config)
+    return settings_payload()
 
 
 def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:

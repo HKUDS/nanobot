@@ -75,6 +75,7 @@
       "providers": "Fournisseurs",
       "image": "Images",
       "voice": "Voix",
+      "files": "Fichiers",
       "browser": "Internet",
       "channels": "Canaux",
       "runtime": "Système",
@@ -459,6 +460,26 @@
       "allTools": "Tous",
       "noTools": "Aucun",
       "testForTools": "Exécutez Tester pour inspecter et choisir des outils individuels."
+    },
+    "files": {
+      "title": "Lecture de documents", "description": "Permet à nanobot de comprendre les documents importés et les fichiers de l’espace de travail.",
+      "uploadedDocuments": "Documents importés", "uploadedDocumentsHelp": "Extrait le texte du document dans la conversation.",
+      "supportMissing": "Le support des documents n’est pas encore installé.", "enable": "Activer la lecture de documents",
+      "formats": "Formats pris en charge", "formatsHelp": "Une seule installation couvre les documents bureautiques et les PDF.",
+      "restart": "Redémarrez nanobot pour appliquer le réglage des documents."
+    },
+    "api": {
+      "title": "Serveur API", "openaiCompatible": "API compatible OpenAI", "description": "Connectez des SDK et agents via un endpoint /v1 local.",
+      "start": "Démarrer le serveur API", "starting": "Démarrage...", "stop": "Arrêter", "stopping": "Arrêt...",
+      "access": "Accès", "thisDevice": "Cet appareil", "localNetwork": "Réseau local",
+      "localHelp": "Seul cet appareil peut se connecter.", "networkHelp": "D’autres appareils peuvent se connecter ; une clé API est requise.",
+      "port": "Port", "portHelp": "L’API utilise ce port local.", "apiKey": "Clé API", "apiKeyHelp": "Les clients l’envoient comme jeton Bearer.",
+      "apiKeyRequired": "Requise avant d’exposer l’API au réseau.", "apiKeyPlaceholder": "Saisissez une clé API",
+      "autoInstall": "Le support API sera installé automatiquement au démarrage."
+    },
+    "observability": {
+      "title": "Observabilité", "configured": "Les identifiants de traçage sont disponibles pour nanobot.",
+      "environment": "Définissez LANGFUSE_SECRET_KEY et LANGFUSE_PUBLIC_KEY, puis redémarrez nanobot.", "enable": "Activer le traçage"
     },
     "legal": {
       "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."

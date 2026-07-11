@@ -47,6 +47,7 @@ class InstallResult:
 
 _INSTALL_TIMEOUT_SECONDS = 300
 _LOG_OUTPUT_LIMIT = 4000
+_HIDDEN_OPTIONAL_FEATURES = {"langsmith"}
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -90,9 +91,13 @@ def optional_dependency_groups() -> dict[str, list[str] | None]:
         return {
             name: list(values)
             for name, values in deps.items()
-            if name != "dev" and isinstance(values, list)
+            if name != "dev" and name not in _HIDDEN_OPTIONAL_FEATURES and isinstance(values, list)
         }
-    return optional_dependency_groups_from_metadata()
+    return {
+        name: values
+        for name, values in optional_dependency_groups_from_metadata().items()
+        if name not in _HIDDEN_OPTIONAL_FEATURES
+    }
 
 
 def _install_requirements_for_extra(extra: str, deps: list[str]) -> list[str]:
@@ -486,7 +491,7 @@ def optional_features_payload(
             "ready": ready,
             "status": status,
             "install_supported": name in extras or is_channel,
-            "requires_restart": is_channel or name in extras,
+            "requires_restart": _feature_requires_restart(name, is_channel=is_channel),
         }
         if is_channel:
             config_values, configured_fields = _channel_config_snapshot(
@@ -548,6 +553,10 @@ def enable_optional_feature(
     )
     from nanobot.config.loader import get_config_path
 
+    # The old extra never powered a runtime integration. Keep the CLI spelling
+    # as a compatibility alias while directing users to the supported tracer.
+    if name == "langsmith":
+        name = "langfuse"
     config_path = config_path or get_config_path()
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
@@ -594,8 +603,19 @@ def enable_optional_feature(
         message = f"Enabled feature '{name}'"
 
     payload = optional_features_payload(last_action={"ok": True, "message": message, "enabled": True})
-    payload["requires_restart"] = bool(name in builtin_channels or name in plugin_channels or name in extras)
+    payload["requires_restart"] = _feature_requires_restart(
+        name,
+        is_channel=name in builtin_channels or name in plugin_channels,
+    )
     return payload
+
+
+def _feature_requires_restart(name: str, *, is_channel: bool) -> bool:
+    """Return whether an installed feature needs the running engine rebuilt."""
+    if is_channel:
+        return True
+    # These libraries are imported lazily or used by a newly spawned service.
+    return name not in {"api", "documents", "pdf", "olostep"}
 
 
 def disable_optional_feature(

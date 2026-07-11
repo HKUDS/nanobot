@@ -971,6 +971,24 @@ def test_enable_optional_feature_skips_install_when_dependency_present(
     assert not config_path.exists()
 
 
+def test_enable_optional_feature_lazy_reader_does_not_require_restart(monkeypatch, tmp_path):
+    from nanobot.optional_features import enable_optional_feature
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"documents": ["pypdf>=5.0.0,<6.0.0"]},
+    )
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
+
+    payload = enable_optional_feature("documents", config_path=config_path)
+
+    assert payload["requires_restart"] is False
+
+
 def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     from nanobot.optional_features import (
         InstallResult,
@@ -1503,6 +1521,7 @@ def test_optional_dependency_metadata_for_enable():
         "python-pptx>=1.0.0,<2.0.0",
     ]
     assert deps["feishu"] == ["lark-oapi>=1.5.0,<2.0.0"]
+    assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
     assert deps["mochat"] == [
         "python-socketio>=5.16.0,<6.0.0",
         "msgpack>=1.1.0,<2.0.0",

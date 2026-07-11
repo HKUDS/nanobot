@@ -98,6 +98,7 @@ import {
   createModelConfiguration,
   disableNanobotFeature,
   enableNanobotFeature,
+  fetchApiService,
   fetchAutomations,
   fetchSettings,
   fetchSettingsUsage,
@@ -112,7 +113,10 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  startApiService,
+  stopApiService,
   updateAutomation,
+  updateFileSettings,
   updateImageGenerationSettings,
   updateMcpServerTools,
   updateModelConfiguration,
@@ -146,6 +150,7 @@ import { cn } from "@/lib/utils";
 import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 import type {
+  ApiServicePayload,
   AutomationsPayload,
   AutomationUpdatePayload,
   CliAppInfo,
@@ -171,6 +176,7 @@ export type SettingsSectionKey =
   | "models"
   | "image"
   | "voice"
+  | "files"
   | "browser"
   | "channels"
   | "apps"
@@ -533,6 +539,7 @@ export function SettingsView({
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
+  const featureCatalog = nanobotFeatures?.features ?? [];
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [loading, setLoading] = useState(() => initialSettings === null);
@@ -557,6 +564,11 @@ export function SettingsView({
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
   const [networkSafetySaving, setNetworkSafetySaving] = useState(false);
+  const [filesSaving, setFilesSaving] = useState(false);
+  const [apiService, setApiService] = useState<ApiServicePayload | null>(null);
+  const [apiServiceLoading, setApiServiceLoading] = useState(false);
+  const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
+  const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [hostEngineApplying, setHostEngineApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
@@ -734,7 +746,7 @@ export function SettingsView({
   }, [activeSection, token]);
 
   useEffect(() => {
-    if (activeSection !== "apps" && activeSection !== "channels") return;
+    if (!["channels", "models", "browser", "files", "runtime"].includes(activeSection)) return;
     let cancelled = false;
     setNanobotFeaturesLoading(true);
     fetchNanobotFeatures(token)
@@ -750,6 +762,28 @@ export function SettingsView({
       })
       .finally(() => {
         if (!cancelled) setNanobotFeaturesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, token]);
+
+  useEffect(() => {
+    if (activeSection !== "runtime") return;
+    let cancelled = false;
+    setApiServiceLoading(true);
+    fetchApiService(token)
+      .then((payload) => {
+        if (!cancelled) {
+          setApiService(payload);
+          setApiServiceError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setApiServiceError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setApiServiceLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1134,6 +1168,73 @@ export function SettingsView({
     }
   };
 
+  const installCapabilities = async (names: string[]): Promise<boolean> => {
+    const missing = names.filter(
+      (name) => !featureCatalog.find((feature) => feature.name === name)?.installed,
+    );
+    if (!missing.length) return true;
+    setNanobotFeatureAction(`enable:${names.join("+")}`);
+    setNanobotFeaturesError(null);
+    try {
+      let latest = nanobotFeatures;
+      for (const name of missing) {
+        latest = await enableNanobotFeature(token, name);
+        if (latest.requires_restart) {
+          setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+        }
+      }
+      if (latest) setNanobotFeatures(latest);
+      return true;
+    } catch (err) {
+      setNanobotFeaturesError((err as Error).message);
+      return false;
+    } finally {
+      setNanobotFeatureAction(null);
+    }
+  };
+
+  const saveFileSettings = async (extractDocumentText: boolean) => {
+    if (!settings || filesSaving) return;
+    setFilesSaving(true);
+    setError(null);
+    try {
+      if (extractDocumentText && !(await installCapabilities(["documents", "pdf"]))) return;
+      const payload = await updateFileSettings(token, extractDocumentText);
+      applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+      await maybeRestartHostEngine(payload);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setFilesSaving(false);
+    }
+  };
+
+  const handleApiServiceAction = async (
+    action: "start" | "stop",
+    values?: { host: string; port: number; timeout: number; apiKey?: string },
+  ) => {
+    if (apiServiceAction) return;
+    setApiServiceAction(action);
+    setApiServiceError(null);
+    try {
+      const payload = action === "start"
+        ? await startApiService(token, values!)
+        : await stopApiService(token);
+      setApiService(payload);
+      const refreshed = await fetchNanobotFeatures(token);
+      setNanobotFeatures(refreshed);
+      const nextSettings = await fetchSettings(token);
+      applyPayload(nextSettings);
+    } catch (err) {
+      setApiServiceError((err as Error).message);
+    } finally {
+      setApiServiceAction(null);
+    }
+  };
+
   const saveProvider = async (providerName: string) => {
     if (providerSaving) return;
     const provider = settings?.providers.find((item) => item.name === providerName);
@@ -1148,6 +1249,12 @@ export function SettingsView({
     }
     setProviderSaving(providerName);
     try {
+      const supportName = providerName === "bedrock"
+        ? "bedrock"
+        : providerName === "azure_openai"
+          ? "azure"
+          : null;
+      if (supportName && !(await installCapabilities([supportName]))) return;
       const payload = await updateProviderSettings(token, {
         provider: providerName,
         apiKey: apiKey || undefined,
@@ -1217,6 +1324,7 @@ export function SettingsView({
 
     setWebSearchSaving(true);
     try {
+      if (provider.name === "olostep" && !(await installCapabilities(["olostep"]))) return;
       const webFetchRestartRequired =
         (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
         settings.web.fetch.use_jina_reader;
@@ -1356,7 +1464,7 @@ export function SettingsView({
     name: string,
     confirmed = false,
   ) => {
-    const feature = nanobotFeatures?.features.find((item) => item.name === name);
+    const feature = featureCatalog.find((item) => item.name === name);
     if (action === "enable" && !confirmed && feature && !feature.installed && feature.install_supported) {
       setNanobotFeaturesError(null);
       setNanobotFeatureConfirm(feature);
@@ -1563,6 +1671,9 @@ export function SettingsView({
             />
             <ProvidersSettings
               settings={settings}
+              nanobotFeatures={nanobotFeatures}
+              featureAction={nanobotFeatureAction}
+              capabilityError={nanobotFeaturesError}
               expandedProvider={expandedProvider}
               providerForms={providerForms}
               visibleProviderKeys={visibleProviderKeys}
@@ -1589,7 +1700,7 @@ export function SettingsView({
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
               onResetProviderDraft={resetProviderDraft}
-              imageProviderRestartPending={pendingRestartSections.image}
+              imageProviderRestartPending={pendingRestartSections.image || pendingRestartSections.runtime}
               onRestart={restartViaSettingsSurface}
               isRestarting={isRestarting || hostEngineApplying}
             />
@@ -1627,6 +1738,20 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.browser}
           />
         );
+      case "files":
+        return (
+          <FilesSettings
+            settings={settings}
+            features={nanobotFeatures}
+            loading={nanobotFeaturesLoading}
+            saving={filesSaving || nanobotFeatureAction === "enable:documents+pdf"}
+            error={nanobotFeaturesError}
+            onChange={(enabled) => void saveFileSettings(enabled)}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
+            requiresRestartPending={pendingRestartSections.runtime}
+          />
+        );
       case "browser":
         return (
           <WebSettings
@@ -1649,6 +1774,9 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.browser}
+            olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
+            olostepInstalling={nanobotFeatureAction === "enable:olostep"}
+            capabilityError={nanobotFeaturesError}
           />
         );
       case "channels":
@@ -1755,6 +1883,16 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.runtime}
+            apiService={apiService}
+            apiServiceLoading={apiServiceLoading}
+            apiServiceAction={apiServiceAction}
+            apiServiceError={apiServiceError}
+            langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
+            capabilitiesLoading={nanobotFeaturesLoading}
+            capabilityAction={nanobotFeatureAction}
+            capabilityError={nanobotFeaturesError}
+            onApiServiceAction={handleApiServiceAction}
+            onInstallCapability={(name) => void installCapabilities([name])}
           />
         );
       case "advanced":
@@ -1907,6 +2045,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "voice", icon: Mic, fallback: "Voice" },
+  { key: "files", icon: HardDrive, fallback: "Files" },
   { key: "browser", icon: Globe2, fallback: "Web" },
   { key: "channels", icon: MessageCircle, fallback: "Channels" },
   { key: "runtime", icon: Server, fallback: "System" },
@@ -2508,6 +2647,30 @@ function NewModelConfigurationDialog({
   );
 }
 
+function CapabilityInstallNotice({
+  title,
+  description,
+  installing = false,
+}: {
+  title: string;
+  description: string;
+  installing?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-[14px] border border-border/55 bg-muted/22 px-3.5 py-3">
+      {installing ? (
+        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+      ) : (
+        <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      )}
+      <div className="min-w-0">
+        <p className="text-[12.5px] font-medium text-foreground">{title}</p>
+        <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 function ModelsSettings({
   token,
   form,
@@ -2700,6 +2863,9 @@ function ModelsSettings({
 
 function ProvidersSettings({
   settings,
+  nanobotFeatures,
+  featureAction,
+  capabilityError,
   expandedProvider,
   providerForms,
   visibleProviderKeys,
@@ -2721,6 +2887,9 @@ function ProvidersSettings({
   isRestarting,
 }: {
   settings: SettingsPayload;
+  nanobotFeatures: NanobotFeaturesPayload | null;
+  featureAction: string | null;
+  capabilityError: string | null;
   expandedProvider: string | null;
   providerForms: Record<string, ProviderForm>;
   visibleProviderKeys: Record<string, boolean>;
@@ -2767,6 +2936,14 @@ function ProvidersSettings({
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const missingOptionalCredential =
       !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
+    const supportName = provider.name === "bedrock"
+      ? "bedrock"
+      : provider.name === "azure_openai"
+        ? "azure"
+        : null;
+    const supportFeature = supportName
+      ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
+      : null;
     return (
       <div key={provider.name} className="divide-y divide-border/45">
         <button
@@ -2801,6 +2978,19 @@ function ProvidersSettings({
 
         {expanded ? (
           <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+            {supportFeature && !supportFeature.installed ? (
+              <CapabilityInstallNotice
+                title={tx("settings.capabilities.providerSupport", "Provider support")}
+                description={tx(
+                  "settings.capabilities.providerInstallOnSave",
+                  "Required support will be installed automatically when you save this provider.",
+                )}
+                installing={featureAction === `enable:${supportName}`}
+              />
+            ) : null}
+            {supportName && capabilityError ? (
+              <p className="text-[12px] text-destructive">{capabilityError}</p>
+            ) : null}
             {isOauthProvider ? (
               <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
@@ -2983,7 +3173,7 @@ function ProvidersSettings({
       {imageProviderRestartPending && onRestart ? (
         <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
           <p className="text-[13px] leading-5 text-muted-foreground">
-            {tx("settings.status.imageProviderRestart", "Image provider changes saved. Restart when ready.")}
+            {tx("settings.status.imageProviderRestart", "Provider support changed. Restart when ready.")}
           </p>
           <div className="shrink-0">
             <Button
@@ -3331,6 +3521,109 @@ function TranscriptionSettings({
   );
 }
 
+function FilesSettings({
+  settings,
+  features,
+  loading,
+  saving,
+  error,
+  onChange,
+  onRestart,
+  isRestarting,
+  requiresRestartPending,
+}: {
+  settings: SettingsPayload;
+  features: NanobotFeaturesPayload | null;
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  onChange: (enabled: boolean) => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+  requiresRestartPending: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const featureCatalog = features?.features ?? [];
+  const documentsReady = !!featureCatalog.find((feature) => feature.name === "documents")?.installed;
+  const pdfReady = !!featureCatalog.find((feature) => feature.name === "pdf")?.installed;
+  const ready = documentsReady && pdfReady;
+  const enabled = settings.files?.extract_document_text ?? true;
+  const formats = ["PDF", "Word", "Excel", "PowerPoint"];
+
+  return (
+    <div className="space-y-7">
+      <section>
+        <SettingsSectionTitle>{tx("settings.files.title", "Document reading")}</SettingsSectionTitle>
+        <p className="mb-4 max-w-[42rem] text-[13px] leading-6 text-muted-foreground">
+          {tx(
+            "settings.files.description",
+            "Let nanobot understand uploaded documents and read files from the workspace.",
+          )}
+        </p>
+        {error ? <p className="mb-3 text-[12px] text-destructive">{error}</p> : null}
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.files.uploadedDocuments", "Uploaded documents")}
+            description={
+              ready
+                ? tx("settings.files.uploadedDocumentsHelp", "Extract document text into the conversation.")
+                : tx("settings.files.supportMissing", "Document support is not installed yet.")
+            }
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+            ) : ready ? (
+              <ToggleButton
+                checked={enabled}
+                onChange={onChange}
+                disabled={saving}
+                ariaLabel={tx("settings.files.uploadedDocuments", "Uploaded documents")}
+                label={enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+              />
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onChange(true)}
+                disabled={saving}
+                className="rounded-full"
+              >
+                {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                {saving
+                  ? tx("settings.capabilities.installing", "Installing support...")
+                  : tx("settings.files.enable", "Enable document reading")}
+              </Button>
+            )}
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.files.formats", "Supported formats")}
+            description={tx("settings.files.formatsHelp", "One setup covers common office documents and PDFs.")}
+          >
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {formats.map((format) => (
+                <span
+                  key={format}
+                  className="rounded-full border border-border/55 bg-muted/28 px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
+                >
+                  {format}
+                </span>
+              ))}
+            </div>
+          </SettingsRow>
+        </SettingsGroup>
+      </section>
+      {requiresRestartPending ? (
+        <RestartRequiredNotice
+          message={tx("settings.files.restart", "Restart nanobot to apply the document ingestion setting.")}
+          onRestart={onRestart}
+          isRestarting={isRestarting}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function WebSettings({
   settings,
   form,
@@ -3347,6 +3640,9 @@ function WebSettings({
   onRestart,
   isRestarting,
   requiresRestartPending,
+  olostepFeature,
+  olostepInstalling,
+  capabilityError,
 }: {
   settings: SettingsPayload;
   form: WebSearchSettingsUpdate;
@@ -3363,6 +3659,9 @@ function WebSettings({
   onRestart?: () => void;
   isRestarting?: boolean;
   requiresRestartPending: boolean;
+  olostepFeature?: NanobotFeatureInfo;
+  olostepInstalling: boolean;
+  capabilityError: string | null;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -3396,6 +3695,21 @@ function WebSettings({
     <div className="space-y-7">
       <section>
         <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle>
+        {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
+          <div className="mb-3">
+            <CapabilityInstallNotice
+              title={tx("settings.capabilities.searchSupport", "Search provider support")}
+              description={tx(
+                "settings.capabilities.searchInstallOnSave",
+                "Olostep support will be installed automatically when you save.",
+              )}
+              installing={olostepInstalling}
+            />
+          </div>
+        ) : null}
+        {capabilityError ? (
+          <p className="mb-3 text-[12px] text-destructive">{capabilityError}</p>
+        ) : null}
         <SettingsGroup>
           <SettingsRow
             title={t("settings.byok.webSearch.provider")}
@@ -6484,6 +6798,16 @@ function RuntimeSettings({
   onRestart,
   isRestarting,
   requiresRestartPending,
+  apiService,
+  apiServiceLoading,
+  apiServiceAction,
+  apiServiceError,
+  langfuseFeature,
+  capabilitiesLoading,
+  capabilityAction,
+  capabilityError,
+  onApiServiceAction,
+  onInstallCapability,
 }: {
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
@@ -6494,6 +6818,19 @@ function RuntimeSettings({
   onRestart?: () => void;
   isRestarting?: boolean;
   requiresRestartPending: boolean;
+  apiService: ApiServicePayload | null;
+  apiServiceLoading: boolean;
+  apiServiceAction: "start" | "stop" | null;
+  apiServiceError: string | null;
+  langfuseFeature?: NanobotFeatureInfo;
+  capabilitiesLoading: boolean;
+  capabilityAction: string | null;
+  capabilityError: string | null;
+  onApiServiceAction: (
+    action: "start" | "stop",
+    values?: { host: string; port: number; timeout: number; apiKey?: string },
+  ) => void;
+  onInstallCapability: (name: string) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -6512,6 +6849,30 @@ function RuntimeSettings({
   const [hostActionBusy, setHostActionBusy] =
     useState<"logs" | "diagnostics" | null>(null);
   const hostApi = getHostApi();
+  const apiDefaults = apiService ?? {
+    installed: false,
+    running: false,
+    managed: false,
+    host: settings.api?.host ?? "127.0.0.1",
+    port: settings.api?.port ?? 8900,
+    timeout: settings.api?.timeout ?? 120,
+    api_key_hint: settings.api?.api_key_hint,
+    endpoint: `http://127.0.0.1:${settings.api?.port ?? 8900}/v1`,
+    command: "nanobot serve",
+  };
+  const [apiHost, setApiHost] = useState(apiDefaults.host);
+  const [apiPort, setApiPort] = useState(apiDefaults.port);
+  const [apiKey, setApiKey] = useState("");
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  useEffect(() => {
+    if (!apiService) return;
+    setApiHost(apiService.host);
+    setApiPort(apiService.port);
+    setApiKey("");
+    setApiKeyVisible(false);
+  }, [apiService]);
+  const apiNetworkAccess = apiHost === "0.0.0.0" || apiHost === "::";
+  const apiMissingNetworkKey = apiNetworkAccess && !apiKey.trim() && !apiDefaults.api_key_hint;
   const engineState = isRestarting
     ? tx("settings.values.restartingEngine", "Restarting")
     : settings.apply_state?.status === "pending"
@@ -6666,6 +7027,171 @@ function RuntimeSettings({
           </SettingsGroup>
         </section>
       ) : null}
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.api.title", "API server")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.api.openaiCompatible", "OpenAI-compatible API")}
+            description={
+              apiServiceError
+                ? apiServiceError
+                : apiDefaults.running
+                  ? apiDefaults.endpoint
+                  : tx("settings.api.description", "Connect SDKs and agents through a local /v1 endpoint.")
+            }
+          >
+            <div className="flex items-center justify-end gap-2">
+              <StatusPill tone={apiDefaults.running ? "success" : "neutral"}>
+                {apiServiceLoading
+                  ? tx("settings.values.checking", "Checking")
+                  : apiDefaults.running
+                    ? tx("settings.values.running", "Running")
+                    : tx("settings.values.off", "Off")}
+              </StatusPill>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={apiServiceLoading || apiServiceAction !== null || apiMissingNetworkKey}
+                onClick={() =>
+                  onApiServiceAction(
+                    apiDefaults.running ? "stop" : "start",
+                    apiDefaults.running
+                      ? undefined
+                      : {
+                          host: apiHost,
+                          port: apiPort,
+                          timeout: apiDefaults.timeout,
+                          apiKey: apiKey.trim() || undefined,
+                        },
+                  )
+                }
+                className="rounded-full"
+              >
+                {apiServiceAction ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : apiDefaults.running ? (
+                  <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                ) : (
+                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                )}
+                {apiServiceAction === "start"
+                  ? tx("settings.api.starting", "Starting...")
+                  : apiServiceAction === "stop"
+                    ? tx("settings.api.stopping", "Stopping...")
+                    : apiDefaults.running
+                      ? tx("settings.api.stop", "Stop")
+                      : tx("settings.api.start", "Start API server")}
+              </Button>
+            </div>
+          </SettingsRow>
+          {!apiDefaults.running ? (
+            <>
+              <SettingsRow
+                title={tx("settings.api.access", "Access")}
+                description={
+                  apiNetworkAccess
+                    ? tx("settings.api.networkHelp", "Other devices can connect; an API key is required.")
+                    : tx("settings.api.localHelp", "Only this device can connect.")
+                }
+              >
+                <SegmentedControl
+                  value={apiNetworkAccess ? "network" : "local"}
+                  options={[
+                    { value: "local", label: tx("settings.api.thisDevice", "This device") },
+                    { value: "network", label: tx("settings.api.localNetwork", "Local network") },
+                  ]}
+                  onChange={(value) => setApiHost(value === "network" ? "0.0.0.0" : "127.0.0.1")}
+                />
+              </SettingsRow>
+              <SettingsRow
+                title={tx("settings.api.port", "Port")}
+                description={tx("settings.api.portHelp", "The API uses this local port.")}
+              >
+                <NumberInput value={apiPort} min={1} max={65535} onChange={setApiPort} />
+              </SettingsRow>
+              {apiNetworkAccess ? (
+                <SettingsRow
+                  title={tx("settings.api.apiKey", "API key")}
+                  description={
+                    apiMissingNetworkKey
+                      ? tx("settings.api.apiKeyRequired", "Required before exposing the API to your network.")
+                      : tx("settings.api.apiKeyHelp", "Clients send this as a Bearer token.")
+                  }
+                >
+                  <div className="relative w-[280px] max-w-full">
+                    <Input
+                      type={apiKeyVisible ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      placeholder={apiDefaults.api_key_hint ?? tx("settings.api.apiKeyPlaceholder", "Enter an API key")}
+                      className="h-9 rounded-full pr-10 text-[13px]"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setApiKeyVisible((visible) => !visible)}
+                      aria-label={apiKeyVisible ? tx("settings.byok.hideApiKey", "Hide API key") : tx("settings.byok.showApiKey", "Show API key")}
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full"
+                    >
+                      {apiKeyVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </SettingsRow>
+              ) : null}
+            </>
+          ) : null}
+        </SettingsGroup>
+        {!apiDefaults.installed && !apiDefaults.running ? (
+          <p className="mt-2 text-[11.5px] text-muted-foreground">
+            {tx("settings.api.autoInstall", "API support will be installed automatically when you start it.")}
+          </p>
+        ) : null}
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.observability.title", "Observability")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title="Langfuse"
+            description={
+              settings.observability?.configured
+                ? tx("settings.observability.configured", "Tracing credentials are available to nanobot.")
+                : tx(
+                    "settings.observability.environment",
+                    "Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY, then restart nanobot.",
+                  )
+            }
+          >
+            {capabilitiesLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+            ) : langfuseFeature?.installed ? (
+              <StatusPill tone={settings.observability?.configured ? "success" : "neutral"}>
+                {settings.observability?.configured
+                  ? tx("settings.values.ready", "Ready")
+                  : tx("settings.values.needsSetup", "Needs setup")}
+              </StatusPill>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={capabilityAction === "enable:langfuse"}
+                onClick={() => onInstallCapability("langfuse")}
+                className="rounded-full"
+              >
+                {capabilityAction === "enable:langfuse" ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : null}
+                {capabilityAction === "enable:langfuse"
+                  ? tx("settings.capabilities.installing", "Installing support...")
+                  : tx("settings.observability.enable", "Enable tracing support")}
+              </Button>
+            )}
+          </SettingsRow>
+        </SettingsGroup>
+        {capabilityError ? <p className="mt-2 text-[12px] text-destructive">{capabilityError}</p> : null}
+      </section>
 
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>

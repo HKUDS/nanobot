@@ -6,6 +6,7 @@ import {
   deleteSession,
   fetchFilePreview,
   fetchAutomations,
+  fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpPresets,
@@ -29,10 +30,13 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  startApiService,
+  stopApiService,
   cancelChannelConnect,
   pollChannelConnect,
   startChannelConnect,
   updateAutomation,
+  updateFileSettings,
   updateSidebarState,
   updateImageGenerationSettings,
   updateModelConfiguration,
@@ -556,6 +560,32 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
+    );
+  });
+
+  it("manages relocated file and API capabilities", async () => {
+    await updateFileSettings("tok", true);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/files/update?extract_document_text=true",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    await fetchApiService("tok");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/api-service",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    await startApiService("tok", { host: "127.0.0.1", port: 8900, timeout: 120 });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/api-service/start?host=127.0.0.1&port=8900&timeout=120",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+
+    await stopApiService("tok");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/api-service/stop",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
   });
 

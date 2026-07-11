@@ -58,6 +58,18 @@ function settingsPayload(): SettingsPayload {
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
     },
+    files: { extract_document_text: true },
+    api: {
+      host: "127.0.0.1",
+      port: 8900,
+      timeout: 120,
+      api_key_hint: null,
+    },
+    observability: {
+      provider: "langfuse",
+      configured: false,
+      base_url: "https://cloud.langfuse.com",
+    },
     image_generation: {
       enabled: false,
       provider: "openrouter",
@@ -176,7 +188,9 @@ function renderSettingsView(
       | "automations"
       | "advanced"
       | "models"
-      | "browser";
+      | "browser"
+      | "files"
+      | "runtime";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
@@ -256,6 +270,94 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+  });
+
+  it("installs document support from the Files page with one action", async () => {
+    const base = settingsPayload();
+    const featurePayload = (documents: boolean, pdf: boolean) => ({
+      features: [
+        { name: "documents", display_name: "Documents", type: "feature", installed: documents, enabled: documents, configured: documents, ready: documents, status: documents ? "enabled" : "missing_dependency", install_supported: true, requires_restart: false },
+        { name: "pdf", display_name: "Pdf", type: "feature", installed: pdf, enabled: pdf, configured: pdf, ready: pdf, status: pdf ? "enabled" : "missing_dependency", install_supported: true, requires_restart: false },
+      ],
+      enabled_count: Number(documents) + Number(pdf),
+      requires_restart: false,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(base);
+      if (url === "/api/settings/nanobot-features") return jsonResponse(featurePayload(false, false));
+      if (url === "/api/settings/nanobot-features/enable?name=documents") {
+        return jsonResponse(featurePayload(true, false));
+      }
+      if (url === "/api/settings/nanobot-features/enable?name=pdf") {
+        return jsonResponse(featurePayload(true, true));
+      }
+      if (url === "/api/settings/files/update?extract_document_text=true") {
+        return jsonResponse(base);
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "files", initialSettings: base, showSidebar: true });
+
+    const enable = await screen.findByRole("button", { name: "Enable document reading" });
+    fireEvent.click(enable);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=documents",
+        expect.any(Object),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=pdf",
+        expect.any(Object),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/files/update?extract_document_text=true",
+        expect.any(Object),
+      );
+    });
+    expect(await screen.findByRole("switch", { name: "Uploaded documents" })).toBeInTheDocument();
+  });
+
+  it("starts the managed API server from System", async () => {
+    const base = settingsPayload();
+    const stopped = {
+      installed: false,
+      running: false,
+      managed: false,
+      host: "127.0.0.1",
+      port: 8900,
+      timeout: 120,
+      api_key_hint: null,
+      endpoint: "http://127.0.0.1:8900/v1",
+      command: "nanobot serve",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(base);
+      if (url === "/api/settings/api-service") return jsonResponse(stopped);
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [], enabled_count: 0 });
+      }
+      if (url === "/api/settings/api-service/start?host=127.0.0.1&port=8900&timeout=120") {
+        return jsonResponse({ ...stopped, installed: true, running: true, managed: true });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start API server" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/api-service/start?host=127.0.0.1&port=8900&timeout=120",
+        expect.any(Object),
+      );
+    });
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {

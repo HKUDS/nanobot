@@ -123,6 +123,9 @@ whatsapp = [
 langsmith = [
     "langsmith>=0.1.0",
 ]
+langfuse = [
+    "langfuse>=3.0.0,<4.0.0",
+]
 pdf = [
     "pymupdf>=1.25.0",
 ]

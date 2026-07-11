@@ -1617,6 +1617,7 @@ describe("App layout", () => {
     expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Files" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
@@ -1624,6 +1625,9 @@ describe("App layout", () => {
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));
     expect(screen.getByText("Brand logos")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Files" }));
+    expect(await screen.findByRole("heading", { name: "Files" })).toBeInTheDocument();
+    expect(screen.getByText("Document reading")).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.getByText("Current configuration")).toBeInTheDocument();

@@ -75,6 +75,7 @@
       "providers": "提供商",
       "image": "图片",
       "voice": "语音",
+      "files": "文件",
       "browser": "网页",
       "channels": "渠道",
       "cliApps": "CLI 应用",
@@ -462,6 +463,44 @@
       "selectSize": "选择尺寸",
       "configureProvider": "配置提供商",
       "missingCredential": "启用图片生成前请先配置此提供商。"
+    },
+    "files": {
+      "title": "文档读取",
+      "description": "让 nanobot 理解上传的文档，并读取工作区中的文件。",
+      "uploadedDocuments": "上传的文档",
+      "uploadedDocumentsHelp": "自动提取文档内容并加入当前对话。",
+      "supportMissing": "尚未安装文档读取支持。",
+      "enable": "启用文档读取",
+      "formats": "支持的格式",
+      "formatsHelp": "一次启用即可支持常见办公文档和 PDF。",
+      "restart": "重启 nanobot 以应用文档读取设置。"
+    },
+    "api": {
+      "title": "API 服务",
+      "openaiCompatible": "OpenAI 兼容 API",
+      "description": "让 SDK 和其他 Agent 通过本地 /v1 接口连接 nanobot。",
+      "start": "启动 API 服务",
+      "starting": "正在启动...",
+      "stop": "停止",
+      "stopping": "正在停止...",
+      "access": "访问范围",
+      "thisDevice": "仅此设备",
+      "localNetwork": "局域网",
+      "localHelp": "只有当前设备可以连接。",
+      "networkHelp": "局域网内其他设备可以连接，因此必须设置 API Key。",
+      "port": "端口",
+      "portHelp": "API 服务使用的本地端口。",
+      "apiKey": "API Key",
+      "apiKeyHelp": "客户端使用 Bearer Token 发送此密钥。",
+      "apiKeyRequired": "向局域网开放 API 前必须设置密钥。",
+      "apiKeyPlaceholder": "输入 API Key",
+      "autoInstall": "启动时会自动安装 API 支持。"
+    },
+    "observability": {
+      "title": "可观测性",
+      "configured": "nanobot 已检测到追踪凭证。",
+      "environment": "设置 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 后重启 nanobot。",
+      "enable": "启用追踪支持"
     },
     "apps": {
       "description": "把工具连接到 nanobot，然后在对话中 @ 使用。",

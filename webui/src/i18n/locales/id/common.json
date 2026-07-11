@@ -75,6 +75,7 @@
       "providers": "Penyedia",
       "image": "Gambar",
       "voice": "Suara",
+      "files": "File",
       "browser": "Internet",
       "channels": "Kanal",
       "runtime": "Sistem",
@@ -459,6 +460,26 @@
       "allTools": "Semua",
       "noTools": "Tidak ada",
       "testForTools": "Jalankan Uji untuk memeriksa dan memilih alat individual."
+    },
+    "files": {
+      "title": "Pembacaan dokumen", "description": "Izinkan nanobot memahami dokumen unggahan dan file di workspace.",
+      "uploadedDocuments": "Dokumen unggahan", "uploadedDocumentsHelp": "Ekstrak teks dokumen ke percakapan.",
+      "supportMissing": "Dukungan dokumen belum terpasang.", "enable": "Aktifkan pembacaan dokumen",
+      "formats": "Format yang didukung", "formatsHelp": "Satu pemasangan mencakup dokumen kantor dan PDF.",
+      "restart": "Mulai ulang nanobot untuk menerapkan pengaturan dokumen."
+    },
+    "api": {
+      "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan SDK dan agen melalui endpoint /v1 lokal.",
+      "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",
+      "access": "Akses", "thisDevice": "Perangkat ini", "localNetwork": "Jaringan lokal",
+      "localHelp": "Hanya perangkat ini yang dapat terhubung.", "networkHelp": "Perangkat lain dapat terhubung; kunci API diperlukan.",
+      "port": "Port", "portHelp": "API menggunakan port lokal ini.", "apiKey": "Kunci API", "apiKeyHelp": "Klien mengirimkannya sebagai token Bearer.",
+      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.", "apiKeyPlaceholder": "Masukkan kunci API",
+      "autoInstall": "Dukungan API akan dipasang otomatis saat dimulai."
+    },
+    "observability": {
+      "title": "Observabilitas", "configured": "Kredensial tracing tersedia untuk nanobot.",
+      "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.", "enable": "Aktifkan dukungan tracing"
     },
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
