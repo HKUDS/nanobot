@@ -747,7 +747,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
             )
 
     session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
-    history = session.get_history(max_messages=0)
+    history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
     recent = visible[-count:]

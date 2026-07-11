@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META
 from nanobot.sdk.types import (
     SessionInfo,
     SessionSnapshot,
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 class SessionClient:
     """Session management helpers exposed through ``bot.sessions``."""
 
-    _RESERVED_MESSAGE_KEYS = {"role", "content"}
+    _RESERVED_MESSAGE_KEYS = {"role", "content", RUNTIME_CONTEXT_HISTORY_META}
     _VALID_ROLES = {"user", "assistant", "tool", "system"}
 
     def __init__(self, loop: AgentLoop) -> None:

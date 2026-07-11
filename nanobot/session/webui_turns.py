@@ -31,6 +31,7 @@ from nanobot.bus.runtime_events import (
     TurnRunStatusChanged,
 )
 from nanobot.providers.base import LLMProvider
+from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -79,6 +80,7 @@ def _title_inputs(session: Session) -> tuple[str, str]:
             continue
         if is_hidden_history_message(message):
             continue
+        message = public_history_message(message)
         role = message.get("role")
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
