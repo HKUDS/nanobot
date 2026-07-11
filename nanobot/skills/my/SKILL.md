@@ -1,6 +1,6 @@
 ---
 name: my
-description: Check and set the agent's own runtime state, or inspect current request routing metadata such as channel, chat ID, and sender ID. Use for runtime diagnostics, model and resource settings, token usage, session preferences, and questions about where the current message came from.
+description: Inspect and optionally adjust the agent's runtime state. Use to check the current model or preset, context window, iteration progress and limits, token usage, workspace and tool configuration, subagent status, and request routing metadata such as channel, chat ID, and sender ID; diagnose unavailable capabilities; change allowed runtime settings; or store temporary session scratchpad values.
 ---
 
 # Self-Awareness
