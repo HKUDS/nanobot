@@ -86,7 +86,8 @@ class _GoalToolsMixin:
             "Sustained objective for this chat thread. First read the built-in **long-goal** skill, "
             "especially its Start fast section, then call this promptly once the user's intent is clear. "
             "The goal must still be idempotent, self-contained, bounded, and explicit about done-ness; "
-            "do not delay this tool call to over-plan, research, or decide execution details.",
+            "do not delay this tool call to over-plan, research, or decide execution details. "
+            "Do not use this for a single current-turn answer, including one that uses spawn subagents.",
             max_length=12_000,
         ),
         ui_summary=StringSchema(
@@ -128,6 +129,8 @@ class LongTaskTool(Tool, _GoalToolsMixin):
     def description(self) -> str:
         return (
             "Mark this thread as a sustained long-running task. "
+            "Use only when the user wants work to persist across future turns or background check-ins; "
+            "do not use for a single current-turn answer, including one that uses spawn subagents. "
             "First read the built-in **long-goal** skill, especially its Start fast section; then call this "
             "as soon as the user's intent is clear. Write a good idempotent goal, but do not delay the tool "
             "call with long planning, research, or execution-detail thinking. "

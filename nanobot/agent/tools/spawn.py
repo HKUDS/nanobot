@@ -48,6 +48,9 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
+            "For MapReduce-style work, spawn only independent map slices with clear "
+            "boundaries; keep reduction, conflict resolution, and final user-facing "
+            "synthesis in the main agent. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
