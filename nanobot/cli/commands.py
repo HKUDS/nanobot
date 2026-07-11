@@ -5,6 +5,7 @@ import os
 import select
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
@@ -1184,6 +1185,35 @@ def _open_webui_browser(url: str, *, wait: bool = True) -> None:
         console.print(f"[yellow]Could not open browser ({exc}); visit {url}[/yellow]")
 
 
+def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
+    """Explain how the browser and gateway lifecycles differ."""
+    console.print()
+    if attached:
+        console.print("[green]nanobot is attached to the existing gateway.[/green]")
+    else:
+        console.print("[green]nanobot is running in this terminal.[/green]")
+    console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
+    console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
+
+
+def _attach_to_background_gateway(runtime: Any) -> None:
+    """Keep a foreground WebUI command attached to a managed gateway."""
+    _print_webui_foreground_lifecycle(attached=True)
+    try:
+        while runtime.status().running:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopping nanobot...[/yellow]")
+        result = runtime.stop()
+        if result.ok or result.message == "gateway_not_running":
+            console.print("[green]Gateway stopped.[/green]")
+            return
+        console.print(f"[red]Gateway could not be stopped: {result.message}[/red]")
+        raise typer.Exit(1)
+
+    console.print("[yellow]Gateway stopped.[/yellow]")
+
+
 def _gateway_instance_command(
     subcommand: str,
     *,
@@ -1370,7 +1400,11 @@ def webui(
     ),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    background: bool = typer.Option(False, "--background", help="Start gateway in the background"),
+    background: bool = typer.Option(
+        False,
+        "--background",
+        help="Keep the gateway running after this command exits",
+    ),
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser"),
     yes: bool = typer.Option(
         False,
@@ -1439,22 +1473,23 @@ def webui(
 
     webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
 
-    if background:
-        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
-        config_arg = str(config_path)
-        workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        runtime = GatewayRuntime(
-            paths=GatewayRuntimePaths.for_instance(
-                data_dir=config_path.parent,
-                workspace=workspace_arg,
-                config_path=config_arg,
-            )
-        )
-        start_options = GatewayStartOptions(
-            port=effective_gateway_port,
+    config_arg = str(config_path)
+    workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
+    runtime = GatewayRuntime(
+        paths=GatewayRuntimePaths.for_instance(
+            data_dir=config_path.parent,
             workspace=workspace_arg,
             config_path=config_arg,
         )
+    )
+    start_options = GatewayStartOptions(
+        port=effective_gateway_port,
+        workspace=workspace_arg,
+        config_path=config_arg,
+    )
+
+    if background:
+        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
         result = runtime.start_background(start_options)
         restarted = False
         restart_attempted = False
@@ -1482,6 +1517,11 @@ def webui(
             "View logs: "
             f"[cyan]{_gateway_instance_command('logs', config_path=config_path, workspace=workspace)}[/cyan]"
         )
+        console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
+        console.print(
+            "Stop nanobot: "
+            f"[cyan]{_gateway_instance_command('stop', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
         if not no_open:
             _open_webui_browser(webui_url)
         return
@@ -1489,13 +1529,20 @@ def webui(
     gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
     webui_ready = _webui_endpoint_reachable(webui_url)
     if gateway_ready and webui_ready:
-        console.print("[yellow]Gateway is already running; opening the existing WebUI.[/yellow]")
+        console.print("[yellow]Gateway is already running; attaching to the existing WebUI.[/yellow]")
         console.print(
             "Restart the gateway if you need it to pick up local source changes: "
             f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
         )
         if not no_open:
             _open_webui_browser(webui_url, wait=False)
+        if runtime.status().running:
+            _attach_to_background_gateway(runtime)
+        else:
+            console.print(
+                "[yellow]This gateway is controlled by another foreground command. "
+                "Stop it from that terminal.[/yellow]"
+            )
         return
 
     gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
@@ -1511,6 +1558,7 @@ def webui(
         )
         raise typer.Exit(1)
 
+    _print_webui_foreground_lifecycle(attached=False)
     _run_gateway(
         runtime_config,
         port=effective_gateway_port,
