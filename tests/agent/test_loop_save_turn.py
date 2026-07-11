@@ -1316,6 +1316,9 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
         runtime=runtime,
     )
 
+    if background_tasks := list(loop._background_tasks):
+        await asyncio.gather(*background_tasks)
+
     assert seen["runtime"] is runtime
     record_runtime.assert_called_once_with("cli:test", runtime)
     assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
