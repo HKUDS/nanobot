@@ -294,7 +294,7 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByRole("heading", { name: "Apps" })).toBeInTheDocument();
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
-    const uninstall = screen.getByRole("button", { name: "Uninstall CLI" });
+    const uninstall = screen.getByRole("button", { name: "Uninstall app" });
 
     fireEvent.click(uninstall);
 
@@ -311,6 +311,48 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
+  });
+
+  it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [
+            {
+              name: "api",
+              display_name: "Api",
+              type: "feature",
+              enabled: true,
+              installed: true,
+              ready: true,
+              status: "enabled",
+              install_supported: true,
+              requires_restart: true,
+            },
+          ],
+          enabled_count: 1,
+        });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByText("Add tools to nanobot, then @ them in chat.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ready" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Api")).not.toBeInTheDocument();
+    expect(screen.getByText("0 ready")).toBeInTheDocument();
   });
 
   it("shows nanobot optional features and enables one", async () => {
@@ -1370,7 +1412,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView();
 
-    expect(await screen.findByText("No apps match this filter.")).toBeInTheDocument();
+    expect(await screen.findByText("No tools match this view.")).toBeInTheDocument();
     expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
   });
 

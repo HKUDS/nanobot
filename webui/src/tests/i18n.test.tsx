@@ -65,7 +65,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.capabilities",
   "settings.sections.apps",
   "settings.apps.description",
-  "settings.apps.filterPlugins",
   "settings.apps.caption",
   "settings.apps.restartRequired",
   "settings.nanobotFeatures.disable",

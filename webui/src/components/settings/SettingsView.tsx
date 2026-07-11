@@ -179,12 +179,11 @@ export type SettingsSectionKey =
   | "runtime"
   | "advanced";
 
-type AppsKindFilter = "all" | "nanobot" | "cli" | "mcp";
+type AppsKindFilter = "ready" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
 type AutomationSort = "next" | "last" | "updated" | "name";
 type AutomationAction = "enable" | "disable" | "delete" | "run";
 type AppsCatalogItem =
-  | { id: string; kind: "nanobot"; feature: NanobotFeatureInfo }
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
 
@@ -570,10 +569,9 @@ export function SettingsView({
   const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
-  const [nanobotFeaturesMessage, setNanobotFeaturesMessage] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
+  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("ready");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
@@ -1360,7 +1358,6 @@ export function SettingsView({
   ) => {
     const feature = nanobotFeatures?.features.find((item) => item.name === name);
     if (action === "enable" && !confirmed && feature && !feature.installed && feature.install_supported) {
-      setNanobotFeaturesMessage(null);
       setNanobotFeaturesError(null);
       setNanobotFeatureConfirm(feature);
       return;
@@ -1368,14 +1365,12 @@ export function SettingsView({
     const key = `${action}:${name}`;
     setNanobotFeatureAction(key);
     setNanobotFeatureConfirm(null);
-    setNanobotFeaturesMessage(null);
     setNanobotFeaturesError(null);
     try {
       const payload = action === "enable"
         ? await enableNanobotFeature(token, name)
         : await disableNanobotFeature(token, name);
       setNanobotFeatures(payload);
-      setNanobotFeaturesMessage(payload.last_action?.message ?? null);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
@@ -1672,7 +1667,6 @@ export function SettingsView({
             onAction={handleNanobotFeatureAction}
             onFeaturesUpdate={setNanobotFeatures}
             onDismissStatus={() => {
-              setNanobotFeaturesMessage(null);
               setNanobotFeaturesError(null);
             }}
             onRestart={restartViaSettingsSurface}
@@ -1683,20 +1677,15 @@ export function SettingsView({
         return (
           <AppsCatalogSettings
             cliApps={cliApps}
-            nanobotFeatures={nanobotFeatures}
             mcpPresets={mcpPresets}
             cliAppsLoading={cliAppsLoading}
-            nanobotFeaturesLoading={nanobotFeaturesLoading}
             mcpPresetsLoading={mcpPresetsLoading}
             query={appsQuery}
             filter={appsKindFilter}
             cliActionKey={cliAppsAction}
-            nanobotActionKey={nanobotFeatureAction}
             mcpActionKey={mcpPresetAction}
             cliMessage={cliAppsMessage}
             cliError={cliAppsError}
-            nanobotMessage={nanobotFeaturesMessage}
-            nanobotError={nanobotFeaturesError}
             cliFocusName={cliAppsFocusName}
             mcpMessage={mcpMessage}
             mcpError={mcpError}
@@ -1708,13 +1697,10 @@ export function SettingsView({
             onQueryChange={setAppsQuery}
             onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
-            onNanobotAction={handleNanobotFeatureAction}
             onMcpAction={handleMcpPresetAction}
             onDismissStatus={() => {
               setCliAppsMessage(null);
               setCliAppsError(null);
-              setNanobotFeaturesMessage(null);
-              setNanobotFeaturesError(null);
               setMcpMessage(null);
               setMcpError(null);
             }}
@@ -5420,20 +5406,15 @@ function ChannelsSettings({
 
 function AppsCatalogSettings({
   cliApps,
-  nanobotFeatures,
   mcpPresets,
   cliAppsLoading,
-  nanobotFeaturesLoading,
   mcpPresetsLoading,
   query,
   filter,
   cliActionKey,
-  nanobotActionKey,
   mcpActionKey,
   cliMessage,
   cliError,
-  nanobotMessage,
-  nanobotError,
   cliFocusName,
   mcpMessage,
   mcpError,
@@ -5445,7 +5426,6 @@ function AppsCatalogSettings({
   onQueryChange,
   onFilterChange,
   onCliAction,
-  onNanobotAction,
   onMcpAction,
   onDismissStatus,
   onBackToChat,
@@ -5459,20 +5439,15 @@ function AppsCatalogSettings({
   isRestarting,
 }: {
   cliApps: CliAppsPayload | null;
-  nanobotFeatures: NanobotFeaturesPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
-  nanobotFeaturesLoading: boolean;
   mcpPresetsLoading: boolean;
   query: string;
   filter: AppsKindFilter;
   cliActionKey: string | null;
-  nanobotActionKey: string | null;
   mcpActionKey: string | null;
   cliMessage: string | null;
   cliError: string | null;
-  nanobotMessage: string | null;
-  nanobotError: string | null;
   cliFocusName: string | null;
   mcpMessage: string | null;
   mcpError: string | null;
@@ -5484,7 +5459,6 @@ function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-  onNanobotAction: (action: "enable" | "disable", name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onDismissStatus: () => void;
   onBackToChat: () => void;
@@ -5500,21 +5474,12 @@ function AppsCatalogSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
-    { value: "all", label: tx("settings.apps.filterAll", "All") },
-    { value: "nanobot", label: tx("settings.apps.filterPlugins", "Plugins") },
-    { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
-    { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
+    { value: "ready", label: tx("settings.apps.filterAll", "Ready") },
+    { value: "cli", label: tx("settings.apps.filterCli", "Apps") },
+    { value: "mcp", label: tx("settings.apps.filterMcp", "Integrations") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
-  const appFeatures = (nanobotFeatures?.features ?? []).filter(
-    (feature) => feature.type !== "channel",
-  );
   const items: AppsCatalogItem[] = [
-    ...appFeatures.map((feature) => ({
-      id: `nanobot:${feature.name}`,
-      kind: "nanobot" as const,
-      feature,
-    })),
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
     ...(mcpPresets?.presets ?? []).map((preset) => ({
       id: `mcp:${preset.name}`,
@@ -5522,8 +5487,10 @@ function AppsCatalogSettings({
       preset,
     })),
   ]
-    .filter((item) => filter === "all" || item.kind === filter)
-    .filter((item) => !normalizedQuery || appsSearchText(item).includes(normalizedQuery))
+    .filter((item) => {
+      if (normalizedQuery) return appsSearchText(item).includes(normalizedQuery);
+      return filter === "ready" ? appsReady(item) : item.kind === filter;
+    })
     .sort((left, right) => {
       const rank = Number(!appsReady(left)) - Number(!appsReady(right));
       return rank || appsTitle(left).localeCompare(appsTitle(right));
@@ -5532,21 +5499,18 @@ function AppsCatalogSettings({
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
   const loading =
-    (cliAppsLoading || nanobotFeaturesLoading || mcpPresetsLoading) &&
+    (cliAppsLoading || mcpPresetsLoading) &&
     !cliApps &&
-    !nanobotFeatures &&
     !mcpPresets;
   const statusMessage =
     cliError ||
-    nanobotError ||
     mcpError ||
-    (!focusedApp ? cliMessage || nanobotMessage || mcpMessage : null);
-  const statusIsError = Boolean(cliError || nanobotError || mcpError);
-  const caption = t("settings.apps.caption", {
-    plugins: appFeatures.filter((feature) => feature.enabled).length,
-    cli: cliApps?.installed_count ?? 0,
-    mcp: mcpPresets?.installed_count ?? 0,
-    defaultValue: "{{plugins}} Plugin · {{cli}} CLI · {{mcp}} MCP",
+    (!focusedApp ? cliMessage || mcpMessage : null);
+  const statusIsError = Boolean(cliError || mcpError);
+  const readyCount = (cliApps?.installed_count ?? 0) + (mcpPresets?.installed_count ?? 0);
+  const caption = t("settings.apps.enabledSummary", {
+    count: readyCount,
+    defaultValue: "{{count}} ready",
   });
 
   return (
@@ -5556,7 +5520,7 @@ function AppsCatalogSettings({
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
               "settings.apps.description",
-              "Enable plugins, local app adapters, and connected tool servers.",
+              "Add tools to nanobot, then @ them in chat.",
             )}
           </p>
           <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
@@ -5601,7 +5565,7 @@ function AppsCatalogSettings({
 
       <section>
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>{tx("settings.apps.featured", "Catalog")}</SettingsSectionTitle>
+          <SettingsSectionTitle>{tx("settings.apps.featured", "Tools")}</SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
             {items.length}
           </span>
@@ -5614,14 +5578,7 @@ function AppsCatalogSettings({
         ) : items.length ? (
           <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
             {items.map((item) =>
-              item.kind === "nanobot" ? (
-                <NanobotFeatureCatalogRow
-                  key={item.id}
-                  feature={item.feature}
-                  actionKey={nanobotActionKey}
-                  onAction={onNanobotAction}
-                />
-              ) : item.kind === "cli" ? (
+              item.kind === "cli" ? (
                 <CliAppsCatalogRow
                   key={item.id}
                   app={item.app}
@@ -5645,12 +5602,12 @@ function AppsCatalogSettings({
           </div>
         ) : (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-            {tx("settings.apps.empty", "No apps match this filter.")}
+            {tx("settings.apps.empty", "No tools match this view.")}
           </div>
         )}
       </section>
 
-      {filter === "all" || filter === "mcp" ? (
+      {filter === "mcp" ? (
         <McpCustomServerPanel
           form={customMcpForm}
           configImport={mcpConfigImport}
@@ -5664,92 +5621,6 @@ function AppsCatalogSettings({
 
       <ThirdPartyBrandNotice />
     </div>
-  );
-}
-
-function NanobotFeatureCatalogRow({
-  feature,
-  actionKey,
-  onAction,
-}: {
-  feature: NanobotFeatureInfo;
-  actionKey: string | null;
-  onAction: (action: "enable" | "disable", name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const enableBusy = actionKey === `enable:${feature.name}`;
-  const disableBusy = actionKey === `disable:${feature.name}`;
-  const description = nanobotFeatureStatusLabel(feature, tx);
-  const missingSupport = feature.enabled && !feature.installed;
-  const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
-  const enabledLabel =
-    feature.type === "channel" && feature.name === "websocket"
-      ? tx("settings.nanobotFeatures.websocketRequired", "Required for WebUI")
-      : tx("settings.nanobotFeatures.enabled", "Enabled");
-  const enableLabel = feature.installed
-    ? tx("settings.nanobotFeatures.enable", "Enable")
-    : installSupportLabel;
-
-  return (
-    <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border/55 bg-card text-muted-foreground shadow-sm">
-        <Bot className="h-4 w-4" aria-hidden />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
-            {feature.display_name}
-          </h3>
-          <AppsTypeBadge>
-            {feature.type === "channel"
-              ? tx("settings.apps.channelLabel", "Channel")
-              : tx("settings.apps.featureLabel", "Feature")}
-          </AppsTypeBadge>
-        </div>
-        <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {missingSupport && feature.install_supported ? (
-          <AppsActionButton
-            ariaLabel={installSupportLabel}
-            busy={enableBusy}
-            onClick={() => onAction("enable", feature.name)}
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-          </AppsActionButton>
-        ) : feature.enabled && feature.type === "channel" && feature.name !== "websocket" ? (
-          <AppsActionButton
-            ariaLabel={tx("settings.nanobotFeatures.disable", "Disable")}
-            busy={disableBusy}
-            tone="danger"
-            onClick={() => onAction("disable", feature.name)}
-          >
-            <X className="h-4 w-4" aria-hidden />
-          </AppsActionButton>
-        ) : feature.enabled ? (
-          <AppsActionButton
-            ariaLabel={enabledLabel}
-            disabled
-            tone="installed"
-          >
-            <Check className="h-4 w-4" aria-hidden />
-          </AppsActionButton>
-        ) : feature.install_supported ? (
-          <AppsActionButton
-            ariaLabel={enableLabel}
-            busy={enableBusy}
-            onClick={() => onAction("enable", feature.name)}
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-          </AppsActionButton>
-        ) : (
-          <AppsActionButton ariaLabel={tx("settings.cliApps.unavailable", "Unavailable")} disabled>
-            <Plus className="h-4 w-4" aria-hidden />
-          </AppsActionButton>
-        )}
-      </div>
-    </article>
   );
 }
 
@@ -5779,7 +5650,7 @@ function CliAppsCatalogRow({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{app.display_name}</h3>
-          <AppsTypeBadge>{tx("settings.apps.cliLabel", "CLI")}</AppsTypeBadge>
+          <AppsTypeBadge>{tx("settings.apps.cliLabel", "App")}</AppsTypeBadge>
         </div>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
       </div>
@@ -5911,7 +5782,7 @@ function McpAppsCatalogRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
-            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "MCP")}</AppsTypeBadge>
+            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "Integration")}</AppsTypeBadge>
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
@@ -6112,7 +5983,7 @@ function McpAppsCatalogRow({
 
 function AppsTypeBadge({ children }: { children: ReactNode }) {
   return (
-    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-[0.06em] text-muted-foreground">
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
       {children}
     </span>
   );
@@ -6156,27 +6027,14 @@ const AppsActionButton = forwardRef<HTMLButtonElement, {
 });
 
 function appsTitle(item: AppsCatalogItem): string {
-  if (item.kind === "nanobot") return item.feature.display_name;
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
 }
 
 function appsReady(item: AppsCatalogItem): boolean {
-  if (item.kind === "nanobot") return item.feature.enabled;
   return item.kind === "cli" ? item.app.installed : item.preset.installed && item.preset.configured;
 }
 
 function appsSearchText(item: AppsCatalogItem): string {
-  if (item.kind === "nanobot") {
-    const feature = item.feature;
-    return [
-      feature.display_name,
-      feature.name,
-      feature.type,
-      feature.status,
-    ]
-      .join(" ")
-      .toLowerCase();
-  }
   if (item.kind === "cli") {
     const app = item.app;
     return [
@@ -6204,19 +6062,6 @@ function appsSearchText(item: AppsCatalogItem): string {
   ]
     .join(" ")
       .toLowerCase();
-}
-
-function nanobotFeatureStatusLabel(
-  feature: NanobotFeatureInfo,
-  tx: (key: string, fallback: string) => string,
-): string {
-  if (feature.ready && feature.type === "channel" && feature.name === "websocket") {
-    return tx("settings.nanobotFeatures.websocketRequired", "Required for WebUI");
-  }
-  if (feature.ready) return tx("settings.nanobotFeatures.ready", "Ready");
-  if (!feature.installed) return tx("settings.nanobotFeatures.missingDependency", "Support missing");
-  if (feature.type === "channel") return tx("settings.nanobotFeatures.channelDisabled", "Channel is disabled");
-  return tx("settings.nanobotFeatures.notEnabled", "Not enabled");
 }
 
 function McpCustomServerPanel({
@@ -6262,10 +6107,13 @@ function McpCustomServerPanel({
           </span>
           <div className="min-w-0">
             <h3 className="text-[13px] font-semibold leading-5 text-foreground">
-              {tx("settings.mcp.moreOptions", "More MCP options")}
+              {tx("settings.mcp.moreOptions", "Add integration")}
             </h3>
             <p className="truncate text-[12px] text-muted-foreground">
-              {tx("settings.mcp.moreOptionsSubtitle", "Add a custom server or import mcp.json.")}
+              {tx(
+                "settings.mcp.moreOptionsSubtitle",
+                "Connect a custom tool server or import an existing configuration.",
+              )}
             </p>
           </div>
         </div>
