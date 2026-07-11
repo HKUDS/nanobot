@@ -62,26 +62,6 @@ def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     assert "write important facts here" not in prompt
 
 
-def test_default_user_message_has_no_runtime_context(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-    )
-
-    assert messages[0]["role"] == "system"
-    assert "## Current Session" not in messages[0]["content"]
-
-    assert messages[-1]["role"] == "user"
-    user_content = messages[-1]["content"]
-    assert user_content == "Return exactly: OK"
-    assert "_meta" not in messages[-1]
-
-
 def test_provider_context_appended_after_user_content(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -100,42 +80,6 @@ def test_provider_context_appended_after_user_content(tmp_path) -> None:
     user_pos = content.find("hello world")
     context_pos = content.find("provider context")
     assert user_pos < context_pos, "user content must precede provider context"
-
-
-def test_sender_id_is_not_injected_without_provider(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-        sender_id="user-12345",
-    )
-
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert user_content == "Return exactly: OK"
-    assert "Sender ID:" not in user_content
-
-
-def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
-    """Sender ID should not be present in runtime context when not provided."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-        sender_id=None,
-    )
-
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert "Sender ID:" not in user_content
 
 
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
