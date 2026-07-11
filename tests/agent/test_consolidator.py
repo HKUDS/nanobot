@@ -168,6 +168,33 @@ class TestConsolidatorSummarize:
             "Current long-term memory excerpt"
         )
 
+    async def test_archive_truncation_keeps_new_conversation_before_memory(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        store.write_memory("# Memory\n" + "- old context\n" * 1_000)
+        constrained = replace(
+            runtime,
+            context_window_tokens=1_100,
+            generation=replace(runtime.generation, max_tokens=16),
+        )
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="(nothing)",
+            finish_reason="stop",
+        )
+
+        await consolidator.archive(
+            [{"role": "user", "content": "new critical fact that must survive"}],
+            runtime=constrained,
+        )
+
+        archive_input = mock_provider.chat_with_retry.await_args.kwargs["messages"][1]["content"]
+        assert "new critical fact that must survive" in archive_input
+        assert archive_input.count("old context") < 1_000
+
     async def test_archive_omits_default_memory_template(
         self,
         consolidator,
