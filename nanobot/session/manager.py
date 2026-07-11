@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.session.turn_history import PENDING_USER_TURN_KEY, RUNTIME_CHECKPOINT_KEY
 from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
@@ -37,8 +38,8 @@ _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
-    "pending_user_turn",
-    "runtime_checkpoint",
+    PENDING_USER_TURN_KEY,
+    RUNTIME_CHECKPOINT_KEY,
     "thread_goal",
     "title",
     "title_user_edited",

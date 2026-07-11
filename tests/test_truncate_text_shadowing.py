@@ -1,5 +1,4 @@
 import inspect
-from types import SimpleNamespace
 
 
 def test_sanitize_persisted_blocks_truncate_text_shadowing_regression() -> None:
@@ -14,16 +13,20 @@ def test_sanitize_persisted_blocks_truncate_text_shadowing_regression() -> None:
     This test asserts the fixed API exists and truncation works without raising.
     """
 
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.session.turn_history import sanitize_persisted_blocks
 
-    sig = inspect.signature(AgentLoop._sanitize_persisted_blocks)
+    sig = inspect.signature(sanitize_persisted_blocks)
     assert "should_truncate_text" in sig.parameters
     assert "truncate_text" not in sig.parameters
 
-    dummy = SimpleNamespace(max_tool_result_chars=5)
     content = [{"type": "text", "text": "0123456789"}]
 
-    out = AgentLoop._sanitize_persisted_blocks(dummy, content, should_truncate_text=True)
+    out = sanitize_persisted_blocks(
+        content,
+        max_tool_result_chars=5,
+        runtime_context_tag="[runtime]",
+        should_truncate_text=True,
+    )
     assert isinstance(out, list)
     assert out and out[0]["type"] == "text"
     assert isinstance(out[0]["text"], str)
