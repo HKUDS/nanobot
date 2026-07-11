@@ -116,6 +116,29 @@ async def test_mcp_read_filter_drops_progress_notifications_without_progress_tok
 
 
 @pytest.mark.asyncio
+async def test_owned_mcp_connection_closes_from_its_owner_task():
+    close_requested = asyncio.Event()
+    ready = asyncio.Event()
+    tasks: dict[str, asyncio.Task] = {}
+
+    async def own_connection() -> None:
+        tasks["open"] = asyncio.current_task()  # type: ignore[assignment]
+        ready.set()
+        await close_requested.wait()
+        tasks["close"] = asyncio.current_task()  # type: ignore[assignment]
+
+    owner = asyncio.create_task(own_connection())
+    connection = mcp_runtime._OwnedMCPConnection(owner, close_requested)
+    await ready.wait()
+
+    await connection.aclose()
+
+    assert tasks["open"] is owner
+    assert tasks["close"] is owner
+    assert tasks["close"] is not asyncio.current_task()
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch: pytest.MonkeyPatch):
     loop = _make_loop(tmp_path)
     attempts = 0

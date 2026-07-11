@@ -7,7 +7,7 @@ import dataclasses
 import os
 import time
 from collections.abc import Mapping
-from contextlib import AsyncExitStack, nullcontext, suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
@@ -82,6 +82,7 @@ from nanobot.utils.runtime import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.mcp import MCPConnection
     from nanobot.config.schema import (
         ChannelsConfig,
         ProviderConfig,
@@ -360,7 +361,7 @@ class AgentLoop:
         self._unified_session = unified_session
         self._running = False
         self._mcp_servers = mcp_servers or {}
-        self._mcp_stacks: dict[str, AsyncExitStack] = {}
+        self._mcp_stacks: dict[str, MCPConnection] = {}
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
@@ -1177,12 +1178,7 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        for name, stack in self._mcp_stacks.items():
-            try:
-                await stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
-        self._mcp_stacks.clear()
+        await agent_context.close_mcp(self)
 
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""

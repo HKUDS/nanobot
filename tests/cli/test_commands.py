@@ -156,6 +156,36 @@ def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
     assert store.get_last_dream_cursor() == 10
 
 
+def test_commit_dream_changes_skips_noop_run(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.write_soul("# Soul")
+    store.write_memory("# Memory")
+    store.git.init()
+    store.git.auto_commit("initial")
+    store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
+
+    assert cli_commands._commit_dream_changes(store) is None
+    store.git.auto_commit.assert_not_called()
+
+
+def test_commit_dream_changes_commits_real_edits(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.write_soul("# Soul")
+    store.write_memory("# Memory")
+    store.git.init()
+    store.git.auto_commit("initial")
+    store.write_memory("# Memory\n- Research notes")
+    store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
+
+    sha = cli_commands._commit_dream_changes(store)
+
+    assert sha is not None
+    store.git.auto_commit.assert_called_once()
+    message = store.git.auto_commit.call_args.args[0]
+    assert message.startswith("dream: periodic memory consolidation\n\n")
+    assert "Research notes" in message
+
+
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""

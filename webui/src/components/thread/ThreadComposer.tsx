@@ -853,6 +853,8 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
+  // Only the prompt queued by the immediately preceding Enter can use the second-Enter shortcut.
+  const secondEnterPromptIdRef = useRef<string | null>(null);
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const wasStreamingRef = useRef(isStreaming);
@@ -872,6 +874,7 @@ export function ThreadComposer({
     && workspaceControls?.can_change_project !== false;
 
   useEffect(() => {
+    secondEnterPromptIdRef.current = null;
     skipQueuedPromptPersistRef.current = true;
     setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
   }, [queuedPromptStorageKey]);
@@ -903,6 +906,7 @@ export function ThreadComposer({
   const addFiles = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
+      secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         setInlineError(formatRejection(rejected[0].reason));
@@ -1252,6 +1256,7 @@ export function ThreadComposer({
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
+    secondEnterPromptIdRef.current = null;
     setValue("");
     setInlineError(null);
     setSlashMenuDismissed(false);
@@ -1269,6 +1274,7 @@ export function ThreadComposer({
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
+    secondEnterPromptIdRef.current = null;
     setValue((current) => {
       if (!current.trim()) return transcript;
       const separator = /[\s\n]$/.test(current) ? "" : " ";
@@ -1299,6 +1305,7 @@ export function ThreadComposer({
     function onKeyDown(event: KeyboardEvent): void {
       if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
       event.preventDefault();
+      secondEnterPromptIdRef.current = null;
       voiceShortcutDownRef.current = true;
       voiceRecorder.beginShortcutHold();
     }
@@ -1406,10 +1413,12 @@ export function ThreadComposer({
     if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
     const queuedImages = readyImagesToQueuedImages(readyImages);
     queuedPromptCounterRef.current += 1;
+    const id = `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`;
+    secondEnterPromptIdRef.current = id;
     setQueuedPrompts((items) => [
       ...items,
       {
-        id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
+        id,
         text,
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
       },
@@ -1419,11 +1428,13 @@ export function ThreadComposer({
   }, [canQueueGuidance, clear, clearComposerText, readyImages, value]);
 
   const removeQueuedPrompt = useCallback((id: string) => {
+    secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== id));
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
   const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
+    secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
     setValue(prompt.text);
     setInlineError(null);
@@ -1446,6 +1457,7 @@ export function ThreadComposer({
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
+    secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => {
       const from = items.findIndex((item) => item.id === dragId);
       const to = items.findIndex((item) => item.id === targetId);
@@ -1459,6 +1471,7 @@ export function ThreadComposer({
 
   const sendQueuedPrompt = useCallback(
     (prompt: QueuedPrompt) => {
+      secondEnterPromptIdRef.current = null;
       const text = prompt.text.trim();
       const queuedImages = queuedImagesToSendImages(prompt.images);
       setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
@@ -1488,6 +1501,7 @@ export function ThreadComposer({
   useEffect(() => {
     const wasStreaming = wasStreamingRef.current;
     wasStreamingRef.current = isStreaming;
+    if (!isStreaming) secondEnterPromptIdRef.current = null;
     if (!wasStreaming || isStreaming || queuedPrompts.length === 0) return;
     if (skipNextQueuedFlushRef.current) {
       skipNextQueuedFlushRef.current = false;
@@ -1497,6 +1511,7 @@ export function ThreadComposer({
   }, [sendNextQueuedPrompt, isStreaming, queuedPrompts.length]);
 
   const handleStop = useCallback(() => {
+    secondEnterPromptIdRef.current = null;
     if (queuedPrompts.length > 0) {
       skipNextQueuedFlushRef.current = true;
     }
@@ -1640,9 +1655,25 @@ export function ThreadComposer({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
-        queueGuidancePrompt();
+        if (!e.repeat) queueGuidancePrompt();
         return;
       }
+      const secondEnterPrompt = queuedPrompts.find(
+        (prompt) => prompt.id === secondEnterPromptIdRef.current,
+      );
+      if (
+        isStreaming
+        && value.length === 0
+        && images.length === 0
+        && !e.altKey
+        && !e.ctrlKey
+        && !e.metaKey
+        && secondEnterPrompt
+      ) {
+        if (!e.repeat) sendQueuedPrompt(secondEnterPrompt);
+        return;
+      }
+      secondEnterPromptIdRef.current = null;
       submit();
     }
   };
@@ -1780,6 +1811,7 @@ export function ThreadComposer({
             onDelete={removeQueuedPrompt}
             onEdit={editQueuedPrompt}
             onDragStart={(id) => {
+              secondEnterPromptIdRef.current = null;
               draggedQueuedPromptIdRef.current = id;
             }}
             onDragEnd={() => {
@@ -1832,10 +1864,14 @@ export function ThreadComposer({
             ref={textareaRef}
             value={value}
             onChange={(e) => {
+              secondEnterPromptIdRef.current = null;
               setValue(e.target.value);
               setSlashMenuDismissed(false);
               setCliAppMenuDismissed(false);
               setCursorPosition(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onBlur={() => {
+              secondEnterPromptIdRef.current = null;
             }}
             onInput={onInput}
             onKeyDown={onKeyDown}

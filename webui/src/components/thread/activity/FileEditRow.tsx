@@ -16,14 +16,15 @@ import {
   parseRenderableFileDiff,
   type RenderableFileDiff,
   type RenderableFileDiffHunk,
-  type RenderableFileDiffLine,
 } from "@/lib/file-diff";
+import { codeLanguageFromPath } from "@/lib/code-language";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import type { UIFileDiff, UIFileEdit } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ActivityStep } from "./ActivityStep";
 import { DiffPair } from "./DiffPair";
+import { DiffSyntaxHighlight } from "./DiffSyntaxHighlight";
 
 const INITIAL_VISIBLE_DIFF_LINES = 160;
 const AUTO_COLLAPSE_DIFF_LINES = INITIAL_VISIBLE_DIFF_LINES;
@@ -266,6 +267,7 @@ function FileUnifiedDiff({
   const [open, setOpen] = useState(false);
   const [expandedLines, setExpandedLines] = useState(false);
   const renderableDiff = useMemo(() => parseRenderableFileDiff(diff), [diff]);
+  const language = useMemo(() => codeLanguageFromPath(previewPath), [previewPath]);
   const totalLineCount = useMemo(() => countDiffLines(renderableDiff), [renderableDiff]);
   const shouldAutoCollapse = totalLineCount > AUTO_COLLAPSE_DIFF_LINES || !!diff.truncated;
   const startsCollapsed = collapsed || shouldAutoCollapse;
@@ -312,16 +314,7 @@ function FileUnifiedDiff({
         >
           {skippedBefore > 0 ? <DiffHunkGap lineCount={skippedBefore} /> : null}
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse font-mono text-[11px] leading-5">
-              <tbody>
-                {hunk.lines.map((line, lineIndex) => (
-                  <DiffLineRow
-                    key={`${line.old_lineno ?? ""}:${line.new_lineno ?? ""}:${lineIndex}`}
-                    line={line}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <DiffSyntaxHighlight language={language} lines={hunk.lines} />
           </div>
         </div>
       ))}
@@ -483,39 +476,5 @@ function DiffHunkGap({ lineCount }: { lineCount: number }) {
         })}
       </span>
     </div>
-  );
-}
-
-function DiffLineRow({ line }: { line: RenderableFileDiffLine }) {
-  const kind = line.kind === "add" || line.kind === "delete" ? line.kind : "context";
-  const marker = kind === "add" ? "+" : kind === "delete" ? "-" : " ";
-  return (
-    <tr
-      className={cn(
-        "border-0",
-        kind === "add" && "bg-emerald-500/[0.09] dark:bg-emerald-300/[0.11]",
-        kind === "delete" && "bg-rose-500/[0.09] dark:bg-rose-300/[0.11]",
-      )}
-    >
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground/55">
-        {line.old_lineno ?? ""}
-      </td>
-      <td className="w-10 select-none border-r border-border/35 px-1.5 text-right text-muted-foreground/55">
-        {line.new_lineno ?? ""}
-      </td>
-      <td
-        className={cn(
-          "w-5 select-none px-1 text-center",
-          kind === "add" && "text-emerald-600/80 dark:text-emerald-300/85",
-          kind === "delete" && "text-rose-600/80 dark:text-rose-300/85",
-          kind === "context" && "text-muted-foreground/45",
-        )}
-      >
-        {marker}
-      </td>
-      <td className="min-w-[16rem] px-1.5 text-foreground/86">
-        <span className="whitespace-pre">{line.content || " "}</span>
-      </td>
-    </tr>
   );
 }
