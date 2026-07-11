@@ -77,7 +77,10 @@ class MyTool(Tool):
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
         "workspace_sandbox",  # read-only view of workspace enforcement level
+        "request",  # current message routing metadata
     })
+
+    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id")
 
     _DENIED_ATTRS = frozenset({
         "__class__", "__dict__", "__bases__", "__subclasses__", "__mro__",
@@ -141,6 +144,8 @@ class MyTool(Tool):
             "Scratchpad keys persist across turns but not restarts.\n"
             "Key values: _current_iteration (current progress), "
             "max_iterations - _current_iteration = remaining iterations.\n"
+            "Current routing metadata is available read-only via request.channel, "
+            "request.chat_id, and request.sender_id.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
             "\n"
             "When to use:\n"
@@ -173,6 +178,7 @@ class MyTool(Tool):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
+                    "Use 'request.channel', 'request.chat_id', or 'request.sender_id' for current routing metadata. "
                     "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
                 "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
@@ -340,6 +346,19 @@ class MyTool(Tool):
     def _inspect(self, key: str | None) -> str:
         if not key:
             return self._inspect_all()
+        if key == "request" or key.startswith("request."):
+            request_ctx = current_request_context()
+            if request_ctx is None:
+                return ToolResult.error("Error: current request context is unavailable")
+            if key == "request":
+                return self._format_value(
+                    {field: getattr(request_ctx, field) for field in self._REQUEST_FIELDS},
+                    key,
+                )
+            field = key.removeprefix("request.")
+            if field not in self._REQUEST_FIELDS:
+                return ToolResult.error(f"Error: '{key}' not found")
+            return self._format_value(getattr(request_ctx, field), key)
         if "." not in key:
             found, value = self._current_runtime_value(key)
             if found:
