@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import ToolResult, tool_parameters
-from nanobot.agent.tools.filesystem import _FsTool
+from nanobot.agent.tools.filesystem import _FsTool, _workspace_lock_decorator
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -121,6 +121,7 @@ def _format_summary(summary: _PatchSummary) -> str:
 )
 class ApplyPatchTool(_FsTool):
     """Apply file edits by providing structured edit instructions."""
+
     _scopes = {"core", "subagent"}
 
     @property
@@ -138,6 +139,7 @@ class ApplyPatchTool(_FsTool):
             "Use edit_file only for small exact replacements on a single file."
         )
 
+    @_workspace_lock_decorator
     async def execute(
         self,
         edits: list[dict] | None = None,
@@ -201,9 +203,7 @@ class ApplyPatchTool(_FsTool):
                         action_name = "add"
 
                     summaries.append(
-                        _PatchSummary(
-                            action=action_name, path=path, added=added, deleted=deleted
-                        )
+                        _PatchSummary(action=action_name, path=path, added=added, deleted=deleted)
                     )
 
                 elif action == "replace":
@@ -252,9 +252,7 @@ class ApplyPatchTool(_FsTool):
                     writes[source] = new_norm
                     added, deleted = _line_diff_stats(content, new_norm)
                     summaries.append(
-                        _PatchSummary(
-                            action="update", path=path, added=added, deleted=deleted
-                        )
+                        _PatchSummary(action="update", path=path, added=added, deleted=deleted)
                     )
 
                 else:
@@ -285,9 +283,7 @@ class ApplyPatchTool(_FsTool):
 
             for path in writes:
                 self._file_states.record_write(path)
-            return "Patch applied:\n" + "\n".join(
-                _format_summary(summary) for summary in summaries
-            )
+            return "Patch applied:\n" + "\n".join(_format_summary(summary) for summary in summaries)
         except PermissionError as exc:
             return ToolResult.error(f"Error: {exc}")
         except _PatchError as exc:
