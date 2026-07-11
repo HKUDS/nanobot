@@ -15,7 +15,6 @@ import asyncio
 import multiprocessing
 import socket
 import time
-from contextlib import suppress
 from unittest.mock import MagicMock
 
 import httpx
@@ -70,7 +69,7 @@ async def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
                 response = await client.get(
                     url,
                     headers={"Accept": "text/event-stream"},
@@ -170,26 +169,30 @@ async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
     )
     loop = _make_loop(tmp_path, mcp_servers={"repro": cfg})
 
-    await loop._connect_mcp()
+    await asyncio.create_task(loop._connect_mcp())
     assert "repro" in loop._mcp_stacks
 
     tool = loop.tools.get("mcp_repro_greet")
     assert isinstance(tool, MCPToolWrapper)
 
-    output = await tool.execute(name="first")
+    output = await asyncio.create_task(tool.execute(name="first"))
     assert "Hello, first" in output
 
     # Wait for the server-side idle timeout to terminate the session.
     await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + 1)
 
-    output = await tool.execute(name="second")
+    output = await asyncio.create_task(tool.execute(name="second"))
     assert "Hello, second" in output
 
-    await loop.close_mcp()
+    await asyncio.create_task(loop.close_mcp())
 
 
 @pytest.mark.asyncio
-async def test_mcp_reconnect_during_shutdown_does_not_crash(tmp_path, mcp_server_url):
+async def test_mcp_reconnect_during_shutdown_does_not_crash(
+    tmp_path,
+    mcp_server_url,
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Simulate the production crash: shutdown while reconnect is in flight."""
     cfg = MCPServerConfig(
         type="streamableHttp",
@@ -199,15 +202,28 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(tmp_path, mcp_server
     )
     loop = _make_loop(tmp_path, mcp_servers={"repro": cfg})
 
-    await loop._connect_mcp()
+    await asyncio.create_task(loop._connect_mcp())
     tool = loop.tools.get("mcp_repro_greet")
     assert isinstance(tool, MCPToolWrapper)
 
-    await tool.execute(name="first")
+    await asyncio.create_task(tool.execute(name="first"))
     await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + 1)
 
+    reconnect_started = asyncio.Event()
+    finish_reconnect = asyncio.Event()
+    real_connect = mcp_module.connect_mcp_servers
+
+    async def gated_connect(*args, **kwargs):
+        reconnect_started.set()
+        await finish_reconnect.wait()
+        return await real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_module, "connect_mcp_servers", gated_connect)
     call_task = asyncio.create_task(tool.execute(name="second"))
-    loop.stop()
+    await asyncio.wait_for(reconnect_started.wait(), timeout=5)
+    close_task = asyncio.create_task(loop.close_mcp())
+    await asyncio.sleep(0)
+    finish_reconnect.set()
 
     unhandled: list[BaseException] = []
 
@@ -219,13 +235,11 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(tmp_path, mcp_server
     asyncio.get_running_loop().set_exception_handler(capture_unhandled)
 
     try:
-        await asyncio.wait_for(asyncio.shield(call_task), timeout=15)
+        await asyncio.wait_for(asyncio.gather(call_task, close_task), timeout=15)
     except asyncio.CancelledError:
         unhandled.append(asyncio.CancelledError("main task cancelled by leaked MCP cancel scope"))
     except Exception as exc:
         unhandled.append(exc)
 
-    with suppress(Exception):
-        await loop.close_mcp()
-
     assert not unhandled, f"Unhandled exception leaked during reconnect/shutdown: {unhandled[0]}"
+    assert loop._mcp_stacks == {}

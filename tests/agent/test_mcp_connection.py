@@ -74,15 +74,6 @@ class _FakeMcpTool(Tool):
         return "ok"
 
 
-class _CancelScopeStack:
-    def __init__(self) -> None:
-        self.closed = False
-
-    async def aclose(self) -> None:
-        self.closed = True
-        raise asyncio.CancelledError("Cancelled via cancel scope test")
-
-
 def _make_loop(tmp_path, *, mcp_servers: dict | None = None) -> AgentLoop:
     bus = MessageBus()
     provider = MagicMock()
@@ -125,15 +116,26 @@ async def test_mcp_read_filter_drops_progress_notifications_without_progress_tok
 
 
 @pytest.mark.asyncio
-async def test_close_mcp_swallows_sdk_cancel_scope_cleanup(tmp_path):
-    loop = _make_loop(tmp_path)
-    stack = _CancelScopeStack()
-    loop._mcp_stacks["remote"] = stack  # type: ignore[assignment]
+async def test_owned_mcp_connection_closes_from_its_owner_task():
+    close_requested = asyncio.Event()
+    ready = asyncio.Event()
+    tasks: dict[str, asyncio.Task] = {}
 
-    await loop.close_mcp()
+    async def own_connection() -> None:
+        tasks["open"] = asyncio.current_task()  # type: ignore[assignment]
+        ready.set()
+        await close_requested.wait()
+        tasks["close"] = asyncio.current_task()  # type: ignore[assignment]
 
-    assert stack.closed is True
-    assert loop._mcp_stacks == {}
+    owner = asyncio.create_task(own_connection())
+    connection = mcp_runtime._OwnedMCPConnection(owner, close_requested)
+    await ready.wait()
+
+    await connection.aclose()
+
+    assert tasks["open"] is owner
+    assert tasks["close"] is owner
+    assert tasks["close"] is not asyncio.current_task()
 
 
 @pytest.mark.asyncio
@@ -241,9 +243,6 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     assert removed["removed"] == ["browserbase"]
     assert not loop.tools.has("mcp_browserbase_navigate")
     assert "browserbase" not in loop._mcp_stacks
-
-    assert closed == []
-    await loop.close_mcp()
     assert closed == ["browserbase"]
 
 
@@ -305,9 +304,6 @@ async def test_request_mcp_reload_reaches_runtime_control_without_restart(
     assert result["removed"] == ["browserbase"]
     assert result["requires_restart"] is False
     assert not loop.tools.has("mcp_browserbase_navigate")
-
-    assert closed == []
-    await loop.close_mcp()
     assert closed == ["browserbase"]
 
 
@@ -403,14 +399,11 @@ async def test_mcp_tool_reconnects_after_session_terminated(
 
     assert output == "recovered"
     assert connect_count == 2
-    assert closed == []
+    assert closed == ["remote"]
     assert sessions[0].call_count == 1
     assert sessions[1].call_count == 1
     assert "remote" in loop._mcp_stacks
     assert loop.tools.get("mcp_remote_quote") is not old_tool
-
-    await loop.close_mcp()
-    assert closed == ["remote", "remote"]
 
 
 @pytest.mark.asyncio
@@ -521,7 +514,4 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
 
     assert outputs == ["fresh:alpha", "fresh:beta"]
     assert connect_count == 2
-    assert closed == []
-
-    await loop.close_mcp()
-    assert closed == ["remote", "remote"]
+    assert closed == ["remote"]
