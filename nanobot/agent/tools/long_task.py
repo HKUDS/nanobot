@@ -1,37 +1,41 @@
-"""Sustained goal tools on the main agent (Codex-style).
-
-Follow the built-in **long-goal** skill for lifecycle rules and how to phrase
-objectives (especially **idempotent**, compaction-safe goals). Load that skill
-from the skills listing (path shown there) before composing ``long_task.goal`` text.
-
-``long_task`` registers an objective on the session (JSON-serializable metadata).
-Active objectives are mirrored each turn into the Runtime Context block (see
-``nanobot.session.goal_state.goal_state_runtime_lines``) so compaction cannot hide them.
-Work proceeds in ordinary agent turns (same runner, compaction as configured).
-Call ``complete_goal`` when the sustained objective should stop being tracked:
-finished successfully, or cancelled / superseded / redirected—in every case the recap should match reality.
-
-There is **no** sub-agent orchestrator and **no** special WebSocket ``agent_ui`` stream.
-"""
+"""Sustained-goal tools with explicit user opt-in at the execution boundary."""
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.goal_permission import (
+    goal_mutation_allowed,
+    revoke_goal_mutation_permission,
+)
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
+    MAX_GOAL_OBJECTIVE_CHARS,
     discard_legacy_goal_state_key,
     goal_state_raw,
     parse_goal_state,
 )
+from nanobot.session.turn_continuation import reset_goal_continuation_rounds
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
+
+
+_GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
+_CREATE_UNAVAILABLE_ERROR = (
+    "Error: create_goal is unavailable for this turn. Ask the user to submit the complete "
+    "objective as `/goal <task>`."
+)
+_REPLACE_UNAVAILABLE_ERROR = (
+    "Error: replacing the goal is unavailable for this turn. Ask the user to submit the "
+    "replacement objective as `/goal <task>`."
+)
 
 
 def _iso_now() -> str:
@@ -39,7 +43,7 @@ def _iso_now() -> str:
 
 
 class _GoalToolsMixin:
-    """Shared routing context + Session lookup."""
+    """Shared routing context and session lookup."""
 
     def __init__(
         self,
@@ -58,8 +62,29 @@ class _GoalToolsMixin:
             return None
         return self._sessions.get_or_create(key)
 
+    def _goal_mutation_allowed(self) -> bool:
+        return current_request_context() is not None and goal_mutation_allowed()
+
+    def _save_goal_state(
+        self,
+        sess: Any,
+        blob: dict[str, Any],
+        *,
+        reset_continuation: bool = False,
+    ) -> None:
+        previous_metadata = deepcopy(sess.metadata)
+        sess.metadata[GOAL_STATE_KEY] = blob
+        discard_legacy_goal_state_key(sess.metadata)
+        if reset_continuation:
+            reset_goal_continuation_rounds(sess.metadata)
+        try:
+            self._sessions.save(sess)
+        except BaseException:
+            sess.metadata.clear()
+            sess.metadata.update(previous_metadata)
+            raise
+
     async def _publish_goal_state_changed(self, metadata: dict[str, Any]) -> None:
-        """Publish authoritative goal metadata as a runtime event."""
         runtime_events = self._runtime_events
         rc = current_request_context()
         if runtime_events is None or rc is None:
@@ -82,105 +107,23 @@ class _GoalToolsMixin:
 
 @tool_parameters(
     tool_parameters_schema(
-        goal=StringSchema(
-            "Sustained objective for this chat thread. First read the built-in **long-goal** skill, "
-            "especially its Start fast section, then call this promptly once the user's intent is clear. "
-            "The goal must still be idempotent, self-contained, bounded, and explicit about done-ness; "
-            "do not delay this tool call to over-plan, research, or decide execution details.",
-            max_length=12_000,
+        objective=StringSchema(
+            "The sustained objective for this session. It may consolidate a plan from earlier "
+            "discussion, but must be self-contained, bounded, safe under repetition, and "
+            "explicit about done-ness.",
+            min_length=1,
+            max_length=MAX_GOAL_OBJECTIVE_CHARS,
         ),
         ui_summary=StringSchema(
-            "Optional one-line label for session lists / logs (≤120 chars).",
+            "Optional one-line display label for session lists and logs. It is not load-bearing.",
             max_length=120,
             nullable=True,
         ),
-        required=["goal"],
+        required=["objective"],
     )
 )
-class LongTaskTool(Tool, _GoalToolsMixin):
-    """Begin or replace focus on a long-running objective stored on the session."""
-
-    def __init__(
-        self,
-        sessions: Any,
-        runtime_events: RuntimeEventBus | None = None,
-    ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
-
-    @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        sess = getattr(ctx, "sessions", None)
-        assert sess is not None  # guarded by enabled()
-        return cls(
-            sessions=sess,
-            runtime_events=getattr(ctx, "runtime_events", None),
-        )
-
-    @classmethod
-    def enabled(cls, ctx: Any) -> bool:
-        return getattr(ctx, "sessions", None) is not None
-
-    @property
-    def name(self) -> str:
-        return "long_task"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Mark this thread as a sustained long-running task. "
-            "First read the built-in **long-goal** skill, especially its Start fast section; then call this "
-            "as soon as the user's intent is clear. Write a good idempotent goal, but do not delay the tool "
-            "call with long planning, research, or execution-detail thinking. "
-            "The active goal is mirrored in Runtime Context each turn. Use normal tools until done, then call "
-            "complete_goal when the objective is satisfied, cancelled, or replaced. "
-            "If a goal is already active, finish it or call complete_goal before registering another."
-        )
-
-    async def execute(self, goal: str, ui_summary: str | None = None, **kwargs: Any) -> str:
-        sess = self._session()
-        if sess is None:
-            return ToolResult.error(
-                "Error: long_task requires an active chat session (missing routing context)."
-            )
-        prior = parse_goal_state(goal_state_raw(sess.metadata))
-        if isinstance(prior, dict) and prior.get("status") == "active":
-            return ToolResult.error(
-                "Error: a sustained goal is already active. "
-                "Use complete_goal when finished, or ask the user before replacing it."
-            )
-
-        summary = (ui_summary or "").strip()[:120]
-        blob = {
-            "status": "active",
-            "objective": goal.strip(),
-            "ui_summary": summary,
-            "started_at": _iso_now(),
-        }
-        sess.metadata[GOAL_STATE_KEY] = blob
-        discard_legacy_goal_state_key(sess.metadata)
-        self._sessions.save(sess)
-        await self._publish_goal_state_changed(sess.metadata)
-        extra = f"\nSummary line: {summary}" if summary else ""
-        return (
-            "Goal recorded. Keep working toward the objective using ordinary tools. "
-            "When fully done (verified against what was asked), call complete_goal with a "
-            f"short recap.{extra}"
-        )
-
-
-@tool_parameters(
-    tool_parameters_schema(
-        recap=StringSchema(
-            "Brief recap for the user (plain text). When the goal succeeded, confirm outcomes; "
-            "if the user cancelled, pivoted, or replaced the objective, say so honestly.",
-            max_length=8000,
-            nullable=True,
-        ),
-        required=[],
-    )
-)
-class CompleteGoalTool(Tool, _GoalToolsMixin):
-    """Mark the active sustained goal finished after all required work is verified."""
+class CreateGoalTool(Tool, _GoalToolsMixin):
+    """Create one explicit sustained objective for the current session."""
 
     def __init__(
         self,
@@ -204,37 +147,194 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
 
     @property
     def name(self) -> str:
-        return "complete_goal"
+        return "create_goal"
 
     @property
     def description(self) -> str:
         return (
-            "End bookkeeping for the active sustained goal. "
-            "Use when the objective is fully achieved and verified—recap what was delivered. "
-            "Also call when the user cancels, redirects, or replaces the goal: recap must reflect "
-            "what actually happened (not necessarily success). "
-            "If no goal is active, the tool reports that and leaves metadata unchanged."
+            "Create one sustained goal for the current session when Goal Runtime Guidance asks "
+            "you to record it. Consolidate relevant prior discussion into a durable objective "
+            "that is self-contained, bounded, safe under repetition, and explicit about "
+            "completion criteria. Do not retry after a successful creation."
         )
 
-    async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        objective: str,
+        ui_summary: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         sess = self._session()
         if sess is None:
-            return ToolResult.error("Error: complete_goal requires an active chat session.")
+            return ToolResult.error(
+                "Error: create_goal requires an active chat session (missing routing context)."
+            )
+        if not self._goal_mutation_allowed():
+            return ToolResult.error(_CREATE_UNAVAILABLE_ERROR)
+        prior = parse_goal_state(goal_state_raw(sess.metadata))
+        if isinstance(prior, dict) and prior.get("status") == "active":
+            return ToolResult.error(
+                "Error: a sustained goal is already active. Use update_goal with "
+                "action='replace' only if the user explicitly changes the objective."
+            )
+
+        objective_text = objective.strip()
+        if not objective_text:
+            return ToolResult.error("Error: objective must not be empty.")
+        if len(objective_text) > MAX_GOAL_OBJECTIVE_CHARS:
+            return ToolResult.error(
+                f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
+            )
+        summary = (ui_summary or "").strip()[:120]
+        blob = {
+            "status": "active",
+            "objective": objective_text,
+            "ui_summary": summary,
+            "started_at": _iso_now(),
+        }
+        self._save_goal_state(sess, blob, reset_continuation=True)
+        await self._publish_goal_state_changed(sess.metadata)
+        extra = f"\nSummary line: {summary}" if summary else ""
+        return (
+            "Goal recorded. Keep working toward the objective using ordinary tools. "
+            "When fully done and verified, call update_goal with action='complete'."
+            f"{extra}"
+        )
+
+
+@tool_parameters(
+    tool_parameters_schema(
+        action=StringSchema(
+            "How to update the active goal.",
+            enum=_GOAL_ACTIONS,
+        ),
+        recap=StringSchema(
+            "Brief honest recap for the user. Required in practice for complete, cancel, and block.",
+            max_length=8000,
+            nullable=True,
+        ),
+        objective=StringSchema(
+            "Replacement objective. Required only when action is 'replace'; make it durable, "
+            "self-contained, bounded, and explicit about done-ness.",
+            max_length=MAX_GOAL_OBJECTIVE_CHARS,
+            nullable=True,
+        ),
+        ui_summary=StringSchema(
+            "Optional one-line display label for a replacement goal.",
+            max_length=120,
+            nullable=True,
+        ),
+        required=["action"],
+    )
+)
+class UpdateGoalTool(Tool, _GoalToolsMixin):
+    """Complete, cancel, block, or replace the active sustained goal."""
+
+    def __init__(
+        self,
+        sessions: Any,
+        runtime_events: RuntimeEventBus | None = None,
+    ) -> None:
+        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        sess = getattr(ctx, "sessions", None)
+        assert sess is not None
+        return cls(
+            sessions=sess,
+            runtime_events=getattr(ctx, "runtime_events", None),
+        )
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return getattr(ctx, "sessions", None) is not None
+
+    @property
+    def name(self) -> str:
+        return "update_goal"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Update the active sustained goal. Use action='complete' only after the objective "
+            "is actually achieved and verified. Use action='cancel' when the user cancels, "
+            "action='block' when progress is genuinely blocked, and action='replace' only when "
+            "the requested objective changes."
+        )
+
+    async def execute(
+        self,
+        action: str,
+        recap: str | None = None,
+        objective: str | None = None,
+        ui_summary: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        sess = self._session()
+        if sess is None:
+            return ToolResult.error("Error: update_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if not isinstance(prior, dict) or prior.get("status") != "active":
-            return "No active goal to complete."
+            return "No active goal to update."
+
+        normalized = (action or "").strip().lower()
+        if normalized not in _GOAL_ACTIONS:
+            return ToolResult.error(
+                "Error: action must be one of complete, cancel, block, or replace."
+            )
+
+        if normalized == "replace":
+            if not self._goal_mutation_allowed():
+                return ToolResult.error(_REPLACE_UNAVAILABLE_ERROR)
+            objective_text = (objective or "").strip()
+            if not objective_text:
+                return ToolResult.error(
+                    "Error: update_goal action='replace' requires a replacement objective."
+                )
+            if len(objective_text) > MAX_GOAL_OBJECTIVE_CHARS:
+                return ToolResult.error(
+                    f"Error: objective must not exceed {MAX_GOAL_OBJECTIVE_CHARS} characters."
+                )
+            summary = (ui_summary or "").strip()[:120]
+            blob = {
+                "status": "active",
+                "objective": objective_text,
+                "ui_summary": summary,
+                "started_at": _iso_now(),
+                "replaced_at": _iso_now(),
+                "previous_objective": str(prior.get("objective") or ""),
+                "recap": (recap or "").strip(),
+            }
+            self._save_goal_state(sess, blob, reset_continuation=True)
+            await self._publish_goal_state_changed(sess.metadata)
+            extra = f"\nSummary line: {summary}" if summary else ""
+            return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
 
         ended = _iso_now()
-        sess.metadata[GOAL_STATE_KEY] = {
+        status = {
+            "complete": "completed",
+            "cancel": "cancelled",
+            "block": "blocked",
+        }[normalized]
+        blob = {
             **prior,
-            "status": "completed",
-            "completed_at": ended,
+            "status": status,
+            "ended_at": ended,
             "recap": (recap or "").strip(),
         }
-        discard_legacy_goal_state_key(sess.metadata)
-        self._sessions.save(sess)
+        if normalized == "complete":
+            blob["completed_at"] = ended
+        self._save_goal_state(sess, blob)
+        revoke_goal_mutation_permission()
         await self._publish_goal_state_changed(sess.metadata)
+
         tail = (recap or "").strip()
+        label = {
+            "complete": "complete",
+            "cancel": "cancelled",
+            "block": "blocked",
+        }[normalized]
         if tail:
-            return f"Goal marked complete ({ended}). Recap:\n{tail}"
-        return f"Goal marked complete ({ended})."
+            return f"Goal marked {label} ({ended}). Recap:\n{tail}"
+        return f"Goal marked {label} ({ended})."

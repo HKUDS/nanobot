@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from nanobot import __version__
+from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
@@ -766,17 +767,8 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-_GOAL_PROMPT_TEMPLATE = """The user declared a sustained objective for this thread.
-
-Inspect or clarify if needed, then call `long_task` with the refined objective (and optional short ui_summary). Work proceeds as normal assistant turns using your usual tools. When the objective is fully done and verified, call `complete_goal` with a brief recap. If the user later cancels or changes direction, still call `complete_goal` with an honest recap (then `long_task` again only after there is no active goal). Do not use `long_task` / `complete_goal` for trivial one-shot answers.
-
-Goal:
-{goal}
-"""
-
-
 async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
-    """Rewrite /goal into a normal agent turn that nudges long_task use."""
+    """Mark this turn as an explicit sustained-goal request."""
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
@@ -795,14 +787,23 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             ),
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
+    if not ctx.is_user_turn:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Goal mode can only be started by a user `/goal <task>` command.",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
 
+    ctx.turn_scopes.append(goal_mutation_permission(True))
     ctx.msg.metadata = {
         **dict(ctx.msg.metadata or {}),
         "original_command": "/goal",
         "original_content": ctx.raw,
+        "goal_requested": True,
         "goal_started_at": time.time(),
     }
-    ctx.msg.content = _GOAL_PROMPT_TEMPLATE.format(goal=goal)
+    ctx.msg.content = ctx.raw
     return None
 
 

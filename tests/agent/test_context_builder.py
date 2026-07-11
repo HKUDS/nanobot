@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
@@ -334,8 +335,58 @@ class TestBuildMessages:
             session_metadata=meta,
         )
         user_msg = str(messages[-1]["content"])
+        assert ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG in user_msg
+        assert "Execute sustained work" in user_msg
+        assert "Start or replace the sustained goal" not in user_msg
         assert "Goal (active):" in user_msg
         assert "Finish docs migration." in user_msg
+
+    def test_goal_start_turn_injects_objective_guidance_after_user_text(self, tmp_path):
+        builder = _builder(tmp_path)
+        normal_messages = builder.build_messages([], "hi", channel="cli", chat_id="direct")
+        messages = builder.build_messages(
+            [],
+            "/goal audit the repo",
+            channel="cli",
+            chat_id="direct",
+            goal_start_requested=True,
+        )
+        stale_messages = builder.build_messages(
+            [],
+            "/goal stale request",
+            channel="cli",
+            chat_id="direct",
+            inbound_message=InboundMessage(
+                channel="cli",
+                sender_id="system",
+                chat_id="direct",
+                content="/goal stale request",
+                metadata={"original_command": "/goal", "goal_requested": True},
+            ),
+        )
+
+        user_msg = str(messages[-1]["content"])
+        assert "Write a durable objective" in user_msg
+        assert "complete `/goal <task>` command" in user_msg
+        guidance = user_msg[
+            user_msg.index(ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG) :
+            user_msg.index(ContextBuilder._GOAL_RUNTIME_GUIDANCE_END)
+        ].lower()
+        assert "authorization" not in guidance
+        assert "host-issued" not in guidance
+        assert user_msg.index("/goal audit the repo") < user_msg.index(
+            ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG
+        )
+        assert user_msg.index(ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG) < user_msg.index(
+            ContextBuilder._RUNTIME_CONTEXT_TAG
+        )
+        assert normal_messages[0]["content"] == messages[0]["content"]
+        assert ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG not in str(
+            normal_messages[-1]["content"]
+        )
+        assert ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG not in str(
+            stale_messages[-1]["content"]
+        )
 
     def test_goal_state_does_not_leak_without_session_metadata(self, tmp_path):
         builder = _builder(tmp_path)

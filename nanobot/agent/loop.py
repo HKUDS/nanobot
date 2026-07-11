@@ -7,7 +7,7 @@ import dataclasses
 import os
 import time
 from collections.abc import Mapping
-from contextlib import nullcontext, suppress
+from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
@@ -60,6 +60,7 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
+    explicit_goal_requested,
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
@@ -147,6 +148,7 @@ class TurnContext:
     run_extra_hooks_for_ephemeral: bool = False
     hooks: list[AgentHook] = field(default_factory=list)
     hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
+    turn_scopes: list[AbstractContextManager[Any]] = field(default_factory=list)
     tools: ToolRegistry | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
@@ -637,6 +639,7 @@ class AgentLoop:
         history: list[dict[str, Any]],
         pending_summary: str | None,
         include_memory_recent_history: bool = True,
+        goal_start_requested: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -652,6 +655,7 @@ class AgentLoop:
             workspace=scope.project_path,
             runtime_state=self,
             inbound_message=msg,
+            goal_start_requested=goal_start_requested,
             include_memory_recent_history=include_memory_recent_history,
             session_key=session.key,
             unified_session=self._unified_session,
@@ -725,6 +729,7 @@ class AgentLoop:
         run_extra_hooks_for_ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
         hook_factories: list[AgentTurnHookFactory] | None = None,
+        turn_scopes: list[AbstractContextManager[Any]] | None = None,
         tools: ToolRegistry | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
@@ -826,7 +831,8 @@ class AgentLoop:
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
-        # Compute lazily because long_task may create goal metadata during this run.
+        turn_scope_stack = ExitStack()
+        # Compute lazily because create_goal may create goal metadata during this run.
         def _goal_continue() -> str | None:
             _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
             if not _goal_lines:
@@ -835,11 +841,13 @@ class AgentLoop:
                 "You have an active sustained goal:\n\n"
                 + "\n".join(_goal_lines)
                 + "\n\nPlease continue working toward the objective using your tools, "
-                "or call complete_goal if the work is truly finished."
+                "or call update_goal with action='complete' if the work is truly finished."
             )
 
         session_metadata = session.metadata if session is not None else None
         try:
+            for scope in turn_scopes or ():
+                turn_scope_stack.enter_context(scope)
             hook = build_agent_turn_hook(AgentTurnHookSpec(
                 on_progress=on_progress,
                 on_stream=on_stream,
@@ -894,6 +902,7 @@ class AgentLoop:
                 ),
             ))
         finally:
+            turn_scope_stack.close()
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
             reset_file_states(file_state_token)
@@ -1490,6 +1499,13 @@ class AgentLoop:
 
     async def _state_command(self, ctx: TurnContext) -> str:
         raw = ctx.msg.content.strip()
+        _, automation_metadata = automation_history_overrides(ctx.msg.metadata)
+        is_user_turn = (
+            ctx.original_user_text is not None
+            and not automation_metadata
+            and ctx.msg.channel != "system"
+            and ctx.msg.sender_id != "subagent"
+        )
         cmd_ctx = CommandContext(
             msg=ctx.msg,
             session=ctx.session,
@@ -1497,6 +1513,8 @@ class AgentLoop:
             raw=raw,
             loop=self,
             runtime=ctx.runtime,
+            is_user_turn=is_user_turn,
+            turn_scopes=ctx.turn_scopes,
         )
         result = await self.commands.dispatch(cmd_ctx)
         if result is not None:
@@ -1549,6 +1567,7 @@ class AgentLoop:
             ctx.history,
             ctx.pending_summary,
             include_memory_recent_history=not ctx.ephemeral,
+            goal_start_requested=explicit_goal_requested(ctx.msg.metadata),
         )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
@@ -1589,6 +1608,7 @@ class AgentLoop:
             run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
             hooks=ctx.hooks,
             hook_factories=ctx.hook_factories,
+            turn_scopes=ctx.turn_scopes,
             tools=ctx.tools,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
@@ -1676,8 +1696,8 @@ class AgentLoop:
             if (
                 drop_runtime
                 and block.get("type") == "text"
-                and isinstance(block.get("text"), str)
-                and block["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)
+                and isinstance(block.get("_meta"), dict)
+                and block["_meta"].get(ContextBuilder._HOST_BLOCK_META_KEY) is True
             ):
                 continue
 
@@ -1720,6 +1740,12 @@ class AgentLoop:
         last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
+            internal_meta = entry.pop("_meta", None)
+            host_text_suffix = (
+                internal_meta.get(ContextBuilder._HOST_TEXT_SUFFIX_META_KEY)
+                if isinstance(internal_meta, dict)
+                else None
+            )
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
@@ -1744,10 +1770,15 @@ class AgentLoop:
                         ]
                     entry["content"] = filtered
             elif role == "user":
-                if isinstance(content, str) and ContextBuilder._RUNTIME_CONTEXT_TAG in content:
-                    # Strip the runtime-context block appended at the end.
-                    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
-                    before = content[:tag_pos].rstrip("\n ")
+                if (
+                    isinstance(content, str)
+                    and isinstance(host_text_suffix, str)
+                    and host_text_suffix
+                    and content.endswith(host_text_suffix)
+                ):
+                    before = content[: -len(host_text_suffix)]
+                    if before.endswith("\n\n"):
+                        before = before[:-2]
                     if before:
                         entry["content"] = before
                     else:

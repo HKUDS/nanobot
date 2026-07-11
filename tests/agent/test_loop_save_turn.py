@@ -18,7 +18,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
@@ -46,6 +46,22 @@ def _mk_loop() -> AgentLoop:
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
     return loop
+
+
+def _host_text_message(content: str, suffix: str) -> dict:
+    return {
+        "role": "user",
+        "content": content,
+        "_meta": {ContextBuilder._HOST_TEXT_SUFFIX_META_KEY: suffix},
+    }
+
+
+def _host_text_block(text: str) -> dict:
+    return {
+        "type": "text",
+        "text": text,
+        "_meta": {ContextBuilder._HOST_BLOCK_META_KEY: True},
+    }
 
 
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
@@ -348,7 +364,7 @@ def test_save_turn_skips_multimodal_user_when_only_runtime_context() -> None:
 
     loop._save_turn(
         session,
-        [{"role": "user", "content": [{"type": "text", "text": runtime}]}],
+        [{"role": "user", "content": [_host_text_block(runtime)]}],
         skip=0,
     )
     assert session.messages == []
@@ -365,7 +381,7 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/feishu/photo.jpg"}},
-                {"type": "text", "text": runtime},
+                _host_text_block(runtime),
             ],
         }],
         skip=0,
@@ -384,7 +400,7 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-                {"type": "text", "text": runtime},
+                _host_text_block(runtime),
             ],
         }],
         skip=0,
@@ -392,21 +408,71 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
 
 
-def test_save_turn_strips_runtime_context_suffix_from_string() -> None:
+def test_save_turn_strips_host_guidance_suffix_from_string() -> None:
     loop = _mk_loop()
     session = Session(key="test:suffix-strip")
+    guidance = ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG + "\ninternal guidance"
     runtime = (
         ContextBuilder._RUNTIME_CONTEXT_TAG
         + "\nCurrent Time: now\n"
         + ContextBuilder._RUNTIME_CONTEXT_END
     )
+    suffix = f"{guidance}\n\n{runtime}"
 
     loop._save_turn(
         session,
-        [{"role": "user", "content": f"hello world\n\n{runtime}"}],
+        [_host_text_message(f"hello world\n\n{suffix}", suffix)],
         skip=0,
     )
     assert session.messages[0]["content"] == "hello world"
+
+
+def test_build_and_save_preserves_user_text_containing_goal_guidance_tag(tmp_path: Path) -> None:
+    loop = _mk_loop()
+    session = Session(key="test:user-guidance-literal")
+    user_text = (
+        "Keep this prefix\n"
+        f"{ContextBuilder._GOAL_RUNTIME_GUIDANCE_TAG}\n"
+        "This label and everything after it are user-authored."
+    )
+    messages = ContextBuilder(tmp_path).build_messages(
+        [],
+        user_text,
+        channel="cli",
+        chat_id="direct",
+        goal_start_requested=True,
+    )
+    assert "_meta" in messages[-1]
+    assert "_meta" not in LLMProvider._sanitize_empty_content(messages)[-1]
+
+    loop._save_turn(session, messages, skip=1)
+
+    assert session.messages[0]["content"] == user_text
+
+
+def test_build_and_save_preserves_multimodal_user_block_starting_with_runtime_tag(
+    tmp_path: Path,
+) -> None:
+    loop = _mk_loop()
+    session = Session(key="test:user-runtime-literal-block")
+    image = tmp_path / "user-tag.png"
+    image.write_bytes(_PNG_1X1)
+    user_text = (
+        f"{ContextBuilder._RUNTIME_CONTEXT_TAG}\n"
+        "This entire block is user-authored and must remain in history."
+    )
+    messages = ContextBuilder(tmp_path).build_messages(
+        [],
+        user_text,
+        media=[str(image)],
+        channel="cli",
+        chat_id="direct",
+        goal_start_requested=True,
+    )
+
+    loop._save_turn(session, messages, skip=1)
+
+    assert {"type": "text", "text": user_text} in session.messages[0]["content"]
 
 
 def test_save_turn_skips_string_user_when_only_runtime_context_suffix() -> None:
@@ -420,7 +486,7 @@ def test_save_turn_skips_string_user_when_only_runtime_context_suffix() -> None:
 
     loop._save_turn(
         session,
-        [{"role": "user", "content": runtime}],
+        [_host_text_message(runtime, runtime)],
         skip=0,
     )
     assert session.messages == []

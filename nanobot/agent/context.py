@@ -12,7 +12,7 @@ from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
-from nanobot.session.goal_state import goal_state_runtime_lines
+from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.utils.helpers import (
     current_time_str,
     detect_image_mime,
@@ -56,7 +56,11 @@ class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
+    _GOAL_RUNTIME_GUIDANCE_TAG = "[Goal Runtime Guidance — host instructions]"
+    _GOAL_RUNTIME_GUIDANCE_END = "[/Goal Runtime Guidance]"
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _HOST_TEXT_SUFFIX_META_KEY = "host_text_suffix"
+    _HOST_BLOCK_META_KEY = "nanobot_host_content"
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
@@ -154,6 +158,23 @@ class ContextBuilder:
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
 
     @staticmethod
+    def _build_goal_runtime_guidance(
+        session_metadata: Mapping[str, Any] | None,
+        *,
+        goal_start_requested: bool,
+    ) -> str:
+        """Return turn-scoped goal guidance without changing the system prompt."""
+        goal_active = sustained_goal_active(session_metadata)
+        if not goal_start_requested and not goal_active:
+            return ""
+        return render_template(
+            "agent/goal_runtime.md",
+            strip=True,
+            goal_start_requested=goal_start_requested,
+            goal_active=goal_active,
+        )
+
+    @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
         if isinstance(left, str) and isinstance(right, str):
             return f"{left}\n\n{right}" if left else right
@@ -208,6 +229,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        goal_start_requested: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -226,15 +248,38 @@ class ContextBuilder:
             supplemental_lines=extra or None,
         )
         user_content = self._build_user_content(current_message, media)
+        goal_guidance = (
+            self._build_goal_runtime_guidance(
+                session_metadata,
+                goal_start_requested=goal_start_requested,
+            )
+            if current_role == "user"
+            else ""
+        )
 
-        # Merge runtime context and user content into a single user message
+        # Merge runtime guidance, context, and user content into a single user message
         # to avoid consecutive same-role messages that some providers reject.
-        # Runtime context is appended to keep the user-content prefix stable
-        # for prompt-cache hits (the context changes every turn due to time).
+        # Volatile content is appended to keep the user-content prefix stable for
+        # prompt-cache hits. Goal guidance precedes the metadata-only runtime block.
+        host_parts = [part for part in (goal_guidance, runtime_ctx) if part]
+        host_text_suffix = "\n\n".join(host_parts)
         if isinstance(user_content, str):
-            merged = f"{user_content}\n\n{runtime_ctx}"
+            merged = "\n\n".join(
+                part for part in (user_content, host_text_suffix) if part
+            )
         else:
-            merged = user_content + [{"type": "text", "text": runtime_ctx}]
+            merged = list(user_content)
+            if goal_guidance:
+                merged.append({
+                    "type": "text",
+                    "text": goal_guidance,
+                    "_meta": {self._HOST_BLOCK_META_KEY: True},
+                })
+            merged.append({
+                "type": "text",
+                "text": runtime_ctx,
+                "_meta": {self._HOST_BLOCK_META_KEY: True},
+            })
         messages = [
             {
                 "role": "system",
@@ -253,9 +298,16 @@ class ContextBuilder:
         if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
             last["content"] = self._merge_message_content(last.get("content"), merged)
+            if current_role == "user" and isinstance(user_content, str):
+                internal_meta = dict(last.get("_meta") or {})
+                internal_meta[self._HOST_TEXT_SUFFIX_META_KEY] = host_text_suffix
+                last["_meta"] = internal_meta
             messages[-1] = last
             return messages
-        messages.append({"role": current_role, "content": merged})
+        current = {"role": current_role, "content": merged}
+        if current_role == "user" and isinstance(user_content, str):
+            current["_meta"] = {self._HOST_TEXT_SUFFIX_META_KEY: host_text_suffix}
+        messages.append(current)
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
