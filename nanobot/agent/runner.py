@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from contextlib import suppress
+
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1160,10 +1160,12 @@ class AgentRunner:
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
-            with suppress(Exception):
+            try:
                 prepared = prepare_call(tool_call.name, tool_call.arguments)
                 if isinstance(prepared, tuple) and len(prepared) == 3:
                     tool, params, prep_error = prepared
+            except Exception:
+                logger.exception("prepare_call failed for tool {}", tool_call.name)
         if prep_error:
             event = {
                 "name": tool_call.name,
