@@ -507,6 +507,40 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
 
 
+def test_fork_session_drops_source_runtime_context(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    content, marker = append_runtime_context(
+        "round1",
+        [
+            RuntimeContextBlock(source="goal", content="host-only goal guidance"),
+            RuntimeContextBlock(source="cli_apps", content="attached CLI App context"),
+        ],
+    )
+    source.add_message(
+        "user",
+        content,
+        cli_apps=[{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    source.add_message("assistant", "answer1")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert forked.messages[0]["content"] == "round1"
+    assert RUNTIME_CONTEXT_HISTORY_META not in forked.messages[0]
+    model_content = forked.get_history()[0]["content"]
+    assert model_content.startswith("round1")
+    assert "CLI App Attachment: @drawio" in model_content
+    assert "host-only goal guidance" not in model_content
+
+
 def test_fork_session_rejects_negative_missing_and_out_of_range(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")

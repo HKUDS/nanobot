@@ -746,7 +746,7 @@ class SessionManager:
                     found_target = True
                     break
                 user_index += 1
-            copied.append(deepcopy(message))
+            copied.append(public_history_message(message))
         if user_index == before_user_index:
             found_target = True
         if not found_target:

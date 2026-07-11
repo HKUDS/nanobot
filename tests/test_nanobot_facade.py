@@ -1296,6 +1296,27 @@ async def test_session_ingest_cannot_restore_runtime_context_marker(tmp_path):
     assert RUNTIME_CONTEXT_HISTORY_META not in stored
 
 
+@pytest.mark.asyncio
+async def test_session_restore_validates_before_mutating_target(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    snapshot = SessionSnapshot(
+        key="sdk:broken",
+        messages=[
+            {"role": "user", "content": "valid first message"},
+            {"role": "invalid", "content": "bad second message"},
+        ],
+        metadata={"title": "must not leak"},
+    )
+
+    with pytest.raises(ValueError, match="unsupported message role"):
+        await bot.sessions.restore(snapshot)
+
+    target = bot._loop.sessions.get_or_create("sdk:broken")
+    assert target.messages == []
+    assert "title" not in target.metadata
+
+
 def test_memory_helpers_read_write_append_and_filter_history(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
