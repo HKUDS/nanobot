@@ -112,8 +112,8 @@ class SessionClient:
         session = self._loop.sessions.get_or_create(key)
         if session.messages:
             raise ValueError(f"restore target session is not empty: {key}")
-        session.metadata.update(deepcopy(snapshot.metadata))
 
+        prepared: list[tuple[str, Any, dict[str, Any]]] = []
         for raw in snapshot.messages:
             if "role" not in raw or "content" not in raw:
                 raise ValueError("restored messages must include role and content")
@@ -125,7 +125,11 @@ class SessionClient:
                 for field, value in raw.items()
                 if field not in {"role", "content"}
             }
-            session.add_message(role, deepcopy(raw["content"]), **extra)
+            prepared.append((role, deepcopy(raw["content"]), extra))
+
+        session.metadata.update(deepcopy(snapshot.metadata))
+        for role, content, extra in prepared:
+            session.add_message(role, content, **extra)
 
         if save:
             self._loop.sessions.save(session)
