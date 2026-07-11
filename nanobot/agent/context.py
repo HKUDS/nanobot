@@ -21,6 +21,12 @@ from nanobot.utils.helpers import (
 )
 from nanobot.utils.prompt_templates import render_template
 
+# Heading that introduces the per-turn-mutating "Recent History" block inside the
+# system prompt. Providers split the system text on this boundary so the stable
+# prefix (identity / bootstrap / tool_contract / memory / skills) can be cached
+# independently of this growing tail.
+RECENT_HISTORY_HEADING = "# Recent History"
+
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return persisted kwargs for turn-attached capabilities."""
@@ -109,7 +115,7 @@ class ContextBuilder:
                     f"- [{e['timestamp']}] {e['content']}" for e in capped
                 )
                 history_text = truncate_text_to_tokens(history_text, self._MAX_HISTORY_TOKENS)
-                parts.append("# Recent History\n\n" + history_text)
+                parts.append(f"{RECENT_HISTORY_HEADING}\n\n" + history_text)
 
         if session_summary:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")

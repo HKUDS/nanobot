@@ -9,6 +9,7 @@ from importlib.resources import files as pkg_files
 from pathlib import Path
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.providers.anthropic_provider import AnthropicProvider
 
 
 class _FakeDatetime(real_datetime):
@@ -424,6 +425,72 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     # "## Long-term Memory".
     assert "# Memory\n\n## Long-term Memory" not in prompt
     assert "This file is automatically updated by nanobot" not in prompt
+
+
+def _cache_breakpoint_count(blocks: list) -> int:
+    """Count cache_control markers across a list of system text blocks."""
+    return sum(1 for b in blocks if isinstance(b, dict) and "cache_control" in b)
+
+
+def test_stable_prefix_caches_independently_of_recent_history(tmp_path) -> None:
+    """The stable system prefix must get its own cache breakpoint, separate from
+    the per-turn-mutating Recent History tail.
+
+    Recent History grows every turn inside the single system text block. With the
+    only breakpoint at the very end of that block, the large stable prefix
+    (identity / tool_contract / memory / skills) is re-cached on every turn. The
+    provider must split the system at the Recent History boundary and place the
+    breakpoint at the end of the stable prefix instead.
+    """
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("User asked about weather in Tokyo")
+
+    system = builder.build_system_prompt()
+    assert "# Recent History" in system
+
+    system_blocks, _msgs, _tools = AnthropicProvider._apply_cache_control(
+        system, messages=[], tools=None,
+    )
+
+    # System is split into a stable prefix block + a Recent History tail block.
+    assert isinstance(system_blocks, list)
+    assert len(system_blocks) == 2
+
+    stable_block, history_block = system_blocks
+    assert "# Recent History" not in stable_block["text"]
+    assert history_block["text"].startswith("# Recent History")
+
+    # The breakpoint is on the stable prefix, NOT on the mutating tail.
+    assert "cache_control" in stable_block
+    assert "cache_control" not in history_block
+
+    # Exactly one system breakpoint (relocated, not added) keeps the request
+    # within Anthropic's 4-breakpoint cap.
+    assert _cache_breakpoint_count(system_blocks) == 1
+
+
+def test_system_without_recent_history_keeps_single_cached_block(tmp_path) -> None:
+    """When there is no Recent History, the system stays a single cached block
+    (behavior unchanged from before the split)."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    cursor = builder.memory.append_history("already processed entry")
+    builder.memory.set_last_dream_cursor(cursor)
+
+    system = builder.build_system_prompt()
+    assert "# Recent History" not in system
+
+    system_blocks, _msgs, _tools = AnthropicProvider._apply_cache_control(
+        system, messages=[], tools=None,
+    )
+
+    assert isinstance(system_blocks, list)
+    assert len(system_blocks) == 1
+    assert "cache_control" in system_blocks[0]
+    assert _cache_breakpoint_count(system_blocks) == 1
 
 
 def test_customized_memory_md_is_injected(tmp_path) -> None:
