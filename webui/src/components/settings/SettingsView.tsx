@@ -7906,6 +7906,7 @@ function ModelPresetPicker({
               settings={settings}
               draftModel={draftModel}
               draftProvider={draftProvider}
+              useDraft={selectedPreset.is_default}
               forceUnconfigured={selectedPreset?.is_default ? !providerConfigured : undefined}
               showProviderLogos={showProviderLogos}
               compact
@@ -7939,6 +7940,7 @@ function ModelPresetPicker({
                 settings={settings}
                 draftModel={draftModel}
                 draftProvider={draftProvider}
+                useDraft={selected && preset.is_default}
                 showProviderLogos={showProviderLogos}
               />
               {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
@@ -7971,6 +7973,7 @@ function ModelPresetOptionContent({
   settings,
   draftModel,
   draftProvider,
+  useDraft = false,
   forceUnconfigured,
   showProviderLogos,
   compact = false,
@@ -7979,6 +7982,7 @@ function ModelPresetOptionContent({
   settings: SettingsPayload;
   draftModel: string;
   draftProvider: string;
+  useDraft?: boolean;
   forceUnconfigured?: boolean;
   showProviderLogos: boolean;
   compact?: boolean;
@@ -7986,9 +7990,9 @@ function ModelPresetOptionContent({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const provider = modelPresetProviderKey(preset, settings, {
-    draftProvider: preset.is_default ? draftProvider : undefined,
+    draftProvider: preset.is_default && useDraft ? draftProvider : undefined,
   });
-  const model = preset.is_default ? draftModel : preset.model;
+  const model = preset.is_default && useDraft ? draftModel : preset.model;
   const providerName = providerDisplayLabel(settings.providers, provider);
   const providerConfigured =
     forceUnconfigured === undefined

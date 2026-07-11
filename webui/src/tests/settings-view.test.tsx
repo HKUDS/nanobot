@@ -1486,6 +1486,78 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
   });
 
+  it("keeps the default model distinct from the active named configuration", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "MiniMax-M3",
+        provider: "minimax_anthropic",
+        resolved_provider: "minimax_anthropic",
+        model_preset: "fast",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          active: false,
+          model: "openai-codex/gpt-5.5",
+          provider: "openai_codex",
+        },
+        {
+          ...base.model_presets[0],
+          name: "fast",
+          label: "fast",
+          active: true,
+          is_default: false,
+          model: "MiniMax-M3",
+          provider: "minimax_anthropic",
+        },
+      ],
+      providers: [
+        {
+          name: "openai_codex",
+          label: "OpenAI Codex",
+          configured: true,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: null,
+          oauth_account: "acct-test",
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+        {
+          name: "minimax_anthropic",
+          label: "MiniMax (Anthropic)",
+          configured: true,
+          auth_type: "api_key",
+          api_key_required: true,
+          api_key_hint: "sk-...",
+          api_base: "https://api.minimax.io/anthropic",
+          default_api_base: "https://api.minimax.io/anthropic",
+        },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const picker = await screen.findByRole("button", { name: "Current configuration" });
+    expect(picker).toHaveTextContent("MiniMax-M3");
+    expect(picker).toHaveTextContent("fast");
+    fireEvent.pointerDown(picker);
+
+    const defaultOption = (await screen.findAllByRole("menuitem")).find((item) =>
+      item.textContent?.includes("Default"),
+    );
+    if (!defaultOption) throw new Error("default configuration was not found");
+    expect(defaultOption).toHaveTextContent("openai-codex/gpt-5.5");
+    expect(defaultOption).toHaveTextContent("OpenAI Codex · Default");
+    expect(defaultOption).not.toHaveTextContent("MiniMax-M3");
+  });
+
   it("uses the resolved provider row for auto dynamic providers without api keys", async () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
 
