@@ -465,6 +465,26 @@ def test_get_history_does_not_duplicate_persisted_capability_runtime_context():
     assert public_history == [{"role": "user", "content": "please use @drawio"}]
 
 
+def test_public_history_does_not_synthesize_legacy_capability_context():
+    session = Session(key="test:legacy-capabilities")
+    session.messages.append({
+        "role": "user",
+        "content": "please use the attachments",
+        "cli_apps": [{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+        "mcp_presets": [{"name": "linear", "transport": "stdio"}],
+    })
+
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert public_history == [{
+        "role": "user",
+        "content": "please use the attachments",
+    }]
+
+
 def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")

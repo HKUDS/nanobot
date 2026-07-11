@@ -65,7 +65,7 @@ class SessionClient:
         return snapshot_from_session(session)
 
     def get(self, session_key: str) -> SessionSnapshot | None:
-        """Return a session snapshot without creating a new session on disk."""
+        """Return a display-safe snapshot without creating a new session on disk."""
         cached = self._loop.sessions._cache.get(session_key)
         if cached is not None:
             return snapshot_from_session(cached)
@@ -89,8 +89,47 @@ class SessionClient:
         ]
 
     def export(self, session_key: str) -> SessionSnapshot | None:
-        """Return a full session snapshot suitable for JSON serialization."""
-        return self.get(session_key)
+        """Return a trusted full snapshot, including model-only runtime context."""
+        cached = self._loop.sessions._cache.get(session_key)
+        if cached is not None:
+            return snapshot_from_session(cached, include_runtime_context=True)
+        payload = self._loop.sessions.read_session_file(session_key)
+        if payload is None:
+            return None
+        return snapshot_from_payload(payload, include_runtime_context=True)
+
+    async def restore(
+        self,
+        snapshot: SessionSnapshot,
+        *,
+        session_key: str | None = None,
+        save: bool = True,
+    ) -> SessionSnapshot:
+        """Restore a trusted snapshot into an empty session."""
+        key = session_key or snapshot.key
+        if not key:
+            raise ValueError("restored snapshots must include a session key")
+        session = self._loop.sessions.get_or_create(key)
+        if session.messages:
+            raise ValueError(f"restore target session is not empty: {key}")
+        session.metadata.update(deepcopy(snapshot.metadata))
+
+        for raw in snapshot.messages:
+            if "role" not in raw or "content" not in raw:
+                raise ValueError("restored messages must include role and content")
+            role = str(raw["role"]).strip()
+            if role not in self._VALID_ROLES:
+                raise ValueError(f"unsupported message role: {role!r}")
+            extra = {
+                field: deepcopy(value)
+                for field, value in raw.items()
+                if field not in {"role", "content"}
+            }
+            session.add_message(role, deepcopy(raw["content"]), **extra)
+
+        if save:
+            self._loop.sessions.save(session)
+        return snapshot_from_session(session)
 
     def clear(self, session_key: str) -> SessionSnapshot:
         """Clear one session and persist the empty session."""
