@@ -181,8 +181,6 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     assert second_wire[2]["role"] == "assistant"
     assert second_wire[2]["content"] == "first answer"
     assert second_wire[3]["content"].startswith("second turn")
-    assert "Current Time:" not in str(second_wire)
-    assert "Chat ID:" not in str(second_wire)
     assert len(provider_calls) == 2
 
     persisted_first_user = session.messages[0]

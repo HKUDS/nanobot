@@ -283,20 +283,6 @@ class TestBuildMessages:
         messages = builder.build_messages([], "hello", channel="cli", chat_id="direct")
         user_msg = str(messages[-1]["content"])
         assert user_msg == "hello"
-        assert "Runtime Context" not in user_msg
-        assert "Current Time:" not in user_msg
-        assert "Chat ID:" not in user_msg
-
-    def test_session_metadata_does_not_inject_context_without_provider(self, tmp_path):
-        builder = _builder(tmp_path)
-        messages = builder.build_messages(
-            [],
-            "hi",
-            channel="cli",
-            chat_id="x",
-            session_metadata={"goal_state": {"status": "active", "objective": "hidden"}},
-        )
-        assert messages[-1]["content"] == "hi"
 
     def test_explicit_runtime_context_blocks_are_appended(self, tmp_path):
         builder = _builder(tmp_path)

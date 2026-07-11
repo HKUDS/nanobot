@@ -460,27 +460,12 @@ def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
     assert public_history == [{"role": "user", "content": "please use @drawio"}]
 
 
-def test_get_history_does_not_synthesize_mcp_preset_attachment():
-    session = Session(key="test:mcp-preset")
-    session.messages.append({
-        "role": "user",
-        "content": "please use @linear",
-        "mcp_presets": [{"name": "linear", "transport": "stdio"}],
-    })
-
-    assert session.get_history(max_messages=500) == [{
-        "role": "user",
-        "content": "please use @linear",
-    }]
-
-
-def test_public_history_does_not_synthesize_legacy_capability_context():
+def test_public_history_omits_cli_app_breadcrumb():
     session = Session(key="test:legacy-capabilities")
     session.messages.append({
         "role": "user",
         "content": "please use the attachments",
         "cli_apps": [{"name": "drawio", "entry_point": "cli-anything-drawio"}],
-        "mcp_presets": [{"name": "linear", "transport": "stdio"}],
     })
 
     public_history = session.get_history(

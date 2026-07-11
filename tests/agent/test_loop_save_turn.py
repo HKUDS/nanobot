@@ -1401,7 +1401,6 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["content"].count("subagent result") == 1
-    assert "Current Time:" not in non_system[2]["content"]
     assert non_system[2]["content"] == "subagent result"
 
     loop.sessions.invalidate("cli:test")
