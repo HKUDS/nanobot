@@ -932,11 +932,6 @@ export interface OutboundMedia {
   name?: string;
 }
 
-export interface OutboundImageGeneration {
-  enabled: true;
-  aspect_ratio?: string | null;
-}
-
 export interface OutboundCliAppMention {
   name: string;
   display_name?: string;
@@ -998,7 +993,6 @@ export type Outbound =
       chat_id: string;
       content: string;
       media?: OutboundMedia[];
-      image_generation?: OutboundImageGeneration;
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       workspace_scope?: WorkspaceScopePayload;

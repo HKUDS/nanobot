@@ -11,9 +11,8 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import set_config_path
 from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.image_generation import GeneratedImageResponse
-from nanobot.runtime_context import public_history_message
 
 PNG_DATA_URL = (
     "data:image/png;base64,"
@@ -86,56 +85,3 @@ async def test_outbound_no_longer_carries_generated_media(
     # OutboundMessage no longer carries generated media —
     # the LLM sends images via the message tool instead.
     assert result.media == []
-
-
-@pytest.mark.asyncio
-async def test_image_mode_instruction_is_persisted_as_next_turn_prefix(tmp_path: Path) -> None:
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation.max_tokens = 4096
-    provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="first answer"),
-        LLMResponse(content="second answer"),
-    ])
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-        tools_config=ToolsConfig(
-            image_generation=ImageGenerationToolConfig(enabled=True),
-        ),
-    )
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)
-
-    await loop._process_message(InboundMessage(
-        channel="websocket",
-        sender_id="user",
-        chat_id="chat-image-prefix",
-        content="draw a fox",
-        metadata={
-            "image_generation": {
-                "enabled": True,
-                "aspect_ratio": "16:9",
-            },
-        },
-    ))
-    await loop._process_message(InboundMessage(
-        channel="websocket",
-        sender_id="user",
-        chat_id="chat-image-prefix",
-        content="thanks",
-    ))
-
-    first_wire = LLMProvider._sanitize_empty_content(
-        provider.chat_with_retry.await_args_list[0].kwargs["messages"]
-    )
-    second_wire = LLMProvider._sanitize_empty_content(
-        provider.chat_with_retry.await_args_list[1].kwargs["messages"]
-    )
-    assert second_wire[: len(first_wire)] == first_wire
-    assert "aspect_ratio='16:9'" in first_wire[1]["content"]
-
-    persisted = loop.sessions.get_or_create("websocket:chat-image-prefix").messages[0]
-    assert persisted["content"] == first_wire[1]["content"]
-    assert public_history_message(persisted)["content"] == "draw a fox"
