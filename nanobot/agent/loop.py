@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -28,7 +27,6 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
@@ -61,7 +59,6 @@ from nanobot.runtime_context import (
     RuntimeContextProvider,
     append_runtime_context,
     resolve_runtime_context,
-    wrap_runtime_context_lines,
 )
 from nanobot.security.workspace_access import (
     WorkspaceScopeResolver,
@@ -377,7 +374,6 @@ class AgentLoop:
         self._mcp_stacks: dict[str, MCPConnection] = {}
         self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
-        self.register_runtime_context_provider(self._provide_mcp_runtime_context)
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -686,20 +682,6 @@ class AgentLoop:
             session_key=session.key,
             unified_session=self._unified_session,
         )
-
-    async def _provide_mcp_runtime_context(
-        self,
-        request: RequestContext,
-    ) -> RuntimeContextBlock | None:
-        lines = mcp_tools.runtime_lines(
-            SimpleNamespace(metadata=request.metadata),
-            configured_server_names=set(self._mcp_servers),
-            connected_server_names=set(self._mcp_stacks),
-        )
-        content = wrap_runtime_context_lines(lines)
-        if not content:
-            return None
-        return RuntimeContextBlock(source="mcp", content=content)
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
