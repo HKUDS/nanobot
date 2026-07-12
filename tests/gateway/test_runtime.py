@@ -252,13 +252,17 @@ def test_terminate_posix_tolerates_process_group_disappearing_before_sigkill(
         sleep=lambda _seconds: None,
     )
     waits = iter([False, True])
-    monkeypatch.setattr("nanobot.process_runtime.os.getpgid", lambda _pid: 1234)
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.getpgid",
+        lambda _pid: 1234,
+        raising=False,
+    )
 
     def fake_killpg(_pgid, sent_signal):
         if sent_signal == signal.SIGKILL:
             raise PermissionError(1, "Operation not permitted")
 
-    monkeypatch.setattr("nanobot.process_runtime.os.killpg", fake_killpg)
+    monkeypatch.setattr("nanobot.process_runtime.os.killpg", fake_killpg, raising=False)
     monkeypatch.setattr(runtime, "_wait_for_exit", lambda *_args: next(waits))
 
     assert runtime._terminate_posix(1234, timeout_s=1) is True

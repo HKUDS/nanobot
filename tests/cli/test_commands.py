@@ -3223,7 +3223,8 @@ def test_serve_rejects_specific_network_interface_without_api_key(
     )
 
     assert result.exit_code == 1
-    assert "api_key is not set" in result.stdout
+    assert "api_key" in result.stdout
+    assert "prevent unauthenticated access" in result.stdout
     assert "api_app" not in seen
 
 
