@@ -1807,6 +1807,19 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
     assert "nanobot gateway stop --config" in compact_output
 
 
+def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> None:
+    opened: list[str] = []
+    url = "http://127.0.0.1:8765/#/?bootstrapSecret=super-secret"
+    monkeypatch.setattr("webbrowser.open", lambda value: opened.append(value))
+
+    cli_commands._open_webui_browser(url, wait=False)
+
+    assert opened == [url]
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "bootstrapSecret=<redacted>" in output
+    assert "super-secret" not in output
+
+
 def test_webui_background_restarts_when_config_changes_and_gateway_is_running(
     monkeypatch,
     tmp_path: Path,

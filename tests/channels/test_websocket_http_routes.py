@@ -725,6 +725,51 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     assert json.loads(denied_action.body.decode())["last_action"]["action"] == "deny"
     assert denied == ["ABCD-EFGH"]
 
+    missing_code = await channel.gateway.http.settings_routes.dispatch(
+        _LOCAL,
+        _FakeReq(auth, path="/api/settings/pairing/approve"),
+        "/api/settings/pairing/approve",
+    )
+    assert missing_code is not None
+    assert missing_code.status_code == 400
+    assert "Missing pairing code" in missing_code.body.decode()
+
+
+def test_api_service_settings_read_api_key_from_private_header(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    request = _FakeReq(
+        {"X-Nanobot-API-Service-Values": json.dumps({"api_key": "secret-token"})},
+        path="/api/settings/api-service/start?host=0.0.0.0&port=8900&timeout=120",
+    )
+
+    query = channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
+
+    assert query == {
+        "host": ["0.0.0.0"],
+        "port": ["8900"],
+        "timeout": ["120"],
+        "api_key": ["secret-token"],
+    }
+
+
+def test_api_service_settings_reject_invalid_private_header(bus: MagicMock) -> None:
+    from nanobot.webui.settings_api import WebUISettingsError
+
+    channel = _ch(bus)
+    request = _FakeReq(
+        {"X-Nanobot-API-Service-Values": json.dumps({"api_key": 123})},
+        path="/api/settings/api-service/start?host=127.0.0.1",
+    )
+
+    with pytest.raises(WebUISettingsError, match="API key must be a string"):
+        channel.gateway.http.settings_routes._parse_api_service_settings_query(request)
+
+    query_secret = _FakeReq(
+        path="/api/settings/api-service/start?host=127.0.0.1&api_key=secret-token",
+    )
+    with pytest.raises(WebUISettingsError, match="private header"):
+        channel.gateway.http.settings_routes._parse_api_service_settings_query(query_secret)
+
 
 @pytest.mark.asyncio
 async def test_nanobot_feature_remote_install_requires_opt_in(

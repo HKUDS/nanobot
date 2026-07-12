@@ -66,6 +66,8 @@ _MCP_VALUES_HEADER = "X-Nanobot-MCP-Values"
 _MCP_VALUES_HEADER_MAX_BYTES = 64 * 1024
 _CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values"
 _CHANNEL_VALUES_HEADER_MAX_BYTES = 64 * 1024
+_API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values"
+_API_SERVICE_VALUES_HEADER_MAX_BYTES = 8 * 1024
 
 _SKIP_FIELD = object()
 
@@ -273,7 +275,7 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         query = self._query(request)
-        code = _query_first(query, "code").strip()
+        code = (_query_first(query, "code") or "").strip()
         if not code:
             return self._error_response(400, "Missing pairing code")
 
@@ -406,7 +408,7 @@ class WebUISettingsRouter:
                 {"name": ["api"]},
                 allow_install=self._allow_feature_package_install(connection, request),
             )
-            update_api_settings(self._query(request))
+            update_api_settings(self._parse_api_service_settings_query(request))
             config = load_config()
             runtime = self._api_runtime()
             options = ApiStartOptions(
@@ -428,6 +430,34 @@ class WebUISettingsRouter:
             self.logger.exception("failed to start managed API service")
             return self._error_response(500, str(e))
         return self._json_response(self._api_service_payload(last_action="started"))
+
+    def _parse_api_service_settings_query(self, request: WsRequest) -> QueryParams:
+        query = self._query(request)
+        if "api_key" in query or "apiKey" in query:
+            raise WebUISettingsError("API service API key must be provided in the private header")
+        raw = request.headers.get(_API_SERVICE_VALUES_HEADER)
+        if not raw:
+            return query
+        if len(raw.encode("utf-8")) > _API_SERVICE_VALUES_HEADER_MAX_BYTES:
+            raise WebUISettingsError("API service settings payload is too large")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise WebUISettingsError("invalid API service settings payload") from exc
+        if not isinstance(payload, dict):
+            raise WebUISettingsError("API service settings payload must be a JSON object")
+
+        unknown = set(payload) - {"api_key"}
+        if unknown:
+            raise WebUISettingsError("API service settings payload contains an invalid key")
+        api_key = payload.get("api_key")
+        if api_key is not None and not isinstance(api_key, str):
+            raise WebUISettingsError("API service API key must be a string")
+
+        merged = {key: list(values) for key, values in query.items() if key != "api_key"}
+        if api_key is not None:
+            merged["api_key"] = [api_key]
+        return merged
 
     async def _handle_settings_api_service_stop(self, request: WsRequest) -> Response:
         if not self._authorized(request):

@@ -51,6 +51,7 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
   );
 }
 const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
+const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -407,8 +408,14 @@ export async function startApiService(
     port: String(values.port),
     timeout: String(values.timeout),
   });
-  if (values.apiKey !== undefined) query.set("api_key", values.apiKey);
-  return request<ApiServicePayload>(`${base}/api/settings/api-service/start?${query}`, token);
+  const headers = values.apiKey === undefined
+    ? undefined
+    : { [API_SERVICE_VALUES_HEADER]: JSON.stringify({ api_key: values.apiKey }) };
+  return request<ApiServicePayload>(
+    `${base}/api/settings/api-service/start?${query}`,
+    token,
+    { headers },
+  );
 }
 
 export async function stopApiService(token: string, base: string = ""): Promise<ApiServicePayload> {

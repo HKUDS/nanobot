@@ -226,7 +226,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Create a bot with BotFather and copy the bot token.",
         "Add the token under channels.telegram.token; optionally restrict allowFrom and groupPolicy.",
-        "Restart nanobot, then send the bot a direct message or mention it in a group.",
+        "Save and enable Telegram, then send the bot a direct message or mention it in a group.",
       ],
       fields: [
         {
@@ -338,7 +338,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Create a Slack app, enable Socket Mode, and install it into the workspace.",
         "Add the app token and bot token under channels.slack.",
-        "Restart nanobot, then mention the app or send it a direct message in Slack.",
+        "Save and enable Slack, then mention the app or send it a direct message.",
       ],
       fields: [
         {
@@ -384,7 +384,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create an application and bot in the Discord Developer Portal, then copy the bot token.",
         "Invite the bot to your server with message read/send and slash command permissions.",
         "Add the token under channels.discord.token; optionally restrict allowFrom and allowChannels.",
-        "Restart nanobot, then mention the bot or use its slash command in Discord.",
+        "Save and enable Discord, then mention the bot or use its slash command.",
       ],
       fields: [
         {
@@ -432,7 +432,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create or choose the mailbox nanobot will own, enable IMAP, and create an app password when the provider requires one.",
         "Fill IMAP settings for receiving unread mail, then SMTP settings for sending replies.",
         "Set consentGranted to true only after confirming this mailbox may be processed by nanobot.",
-        "Restart nanobot, then send a test email to the mailbox.",
+        "Save and enable Email, then send a test message to the mailbox.",
       ],
       fields: [
         {
@@ -611,7 +611,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create or choose a Mattermost bot account and copy its token.",
         "Add the Mattermost server URL and bot token.",
         "Invite the bot to the channels it should read.",
-        "Restart nanobot, then mention the bot or send a direct message.",
+        "Save and enable Mattermost, then mention the bot or send a direct message.",
       ],
       fields: [
         {
@@ -661,7 +661,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Start the WhatsApp login flow.",
         "Scan the QR code with WhatsApp on your phone.",
-        "Restart nanobot after the account state is saved, then send a direct test message.",
+        "Return here after login, enable WhatsApp, then send a direct test message.",
       ],
       manualFields: [
         {
@@ -698,7 +698,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Create or choose a DingTalk app with Stream mode enabled.",
         "Add Client ID and Client Secret.",
-        "Restart nanobot, then send a test message from DingTalk.",
+        "Save and enable DingTalk, then send a test message.",
       ],
       fields: [
         {
@@ -741,7 +741,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Create or choose a WeCom AI Bot.",
         "Add Bot ID and Secret.",
-        "Restart nanobot, then send a test message from WeCom.",
+        "Save and enable WeCom, then send a test message.",
       ],
       fields: [
         {
@@ -821,7 +821,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Create or choose a QQ bot application and copy its App ID and Secret.",
         "Add appId and secret under channels.qq.",
-        "Restart nanobot, then send a direct or group test message from QQ.",
+        "Save and enable QQ, then send a direct or group test message.",
       ],
       fields: [
         {
@@ -873,7 +873,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Register or link the Signal account in signal-cli.",
         "Start signal-cli in HTTP daemon mode for the same phone number.",
         "Set phoneNumber plus daemon host and port under channels.signal.",
-        "Restart nanobot, then send a direct test message from Signal.",
+        "Save and enable Signal, then send a direct test message.",
       ],
       fields: [
         {
@@ -930,7 +930,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
         "Create an Azure Bot / Teams app and copy the Microsoft App ID and client secret.",
         "Set the bot messaging endpoint to the nanobot Teams callback path.",
         "Add appId and appPassword under channels.msteams.",
-        "Restart nanobot, then install the app in Teams and send a test message.",
+        "Save and enable Teams, then install the app and send a test message.",
       ],
       fields: [
         {
@@ -985,7 +985,7 @@ export const CHANNEL_PRESENTATION: Record<string, ChannelPresentation> = {
       steps: [
         "Start NapCat and enable its OneBot WebSocket server.",
         "Set wsUrl to the NapCat WebSocket endpoint; add accessToken if NapCat requires one.",
-        "Restart nanobot, then send a QQ test message through NapCat.",
+        "Save and enable NapCat, then send a QQ test message.",
       ],
       fields: [
         {

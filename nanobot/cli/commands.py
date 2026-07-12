@@ -1179,11 +1179,12 @@ def _open_webui_browser(url: str, *, wait: bool = True) -> None:
 
     if wait:
         _wait_for_webui(url)
+    display_url = _webui_display_url(url)
     try:
         webbrowser.open(url)
-        console.print(f"[green]✓[/green] Opened WebUI: [cyan]{url}[/cyan]")
+        console.print(f"[green]✓[/green] Opened WebUI: [cyan]{display_url}[/cyan]")
     except Exception as exc:
-        console.print(f"[yellow]Could not open browser ({exc}); visit {url}[/yellow]")
+        console.print(f"[yellow]Could not open browser ({exc}); visit {display_url}[/yellow]")
 
 
 def _print_webui_foreground_lifecycle(*, attached: bool) -> None:

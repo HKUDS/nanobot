@@ -575,6 +575,24 @@ describe("webui API helpers", () => {
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
 
+    await startApiService(
+      "tok",
+      { host: "0.0.0.0", port: 8900, timeout: 120, apiKey: "secret-token" },
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/api-service/start?host=0.0.0.0&port=8900&timeout=120",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-API-Service-Values": JSON.stringify({ api_key: "secret-token" }),
+        },
+      }),
+    );
+    expect(fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("secret-token"),
+      expect.anything(),
+    );
+
     await stopApiService("tok");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/api-service/stop",
