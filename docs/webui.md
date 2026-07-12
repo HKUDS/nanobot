@@ -98,6 +98,10 @@ chat. It does not bypass your gateway, provider, shell sandbox, or operating
 system configuration; it only selects among the capabilities that are already
 available to this WebUI session.
 
+Remote WebUI sessions may reduce access for the current workspace. Selecting a
+different workspace or enabling Full Access remains limited to local and native
+clients.
+
 ## Composer
 
 The composer supports plain messages, image attachments, voice input when

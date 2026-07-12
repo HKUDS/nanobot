@@ -754,6 +754,11 @@ class WebSocketChannel(BaseChannel):
             if not content.strip() and not media_paths:
                 await self._send_event(connection, "error", detail="missing content")
                 return
+            # Auto-attach on first use so clients can one-shot without a separate attach.
+            self._attach(connection, cid)
+            await self._hydrate_after_subscribe(cid)
+
+            # Resolve after hydration so a concurrent downgrade cannot be overwritten.
             scope = await self._workspace_scope_or_error(
                 connection,
                 lambda: self._workspaces.scope_for_message(
@@ -767,9 +772,6 @@ class WebSocketChannel(BaseChannel):
             if scope is None:
                 return
 
-            # Auto-attach on first use so clients can one-shot without a separate attach.
-            self._attach(connection, cid)
-            await self._hydrate_after_subscribe(cid)
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True
