@@ -343,7 +343,6 @@ function feishuFeatureInstances(feature: NanobotFeatureInfo): NanobotChannelInst
   if (feature.instances?.length) return feature.instances;
   return [{
     id: "default",
-    runtime_name: "feishu",
     name: "nanobot",
     domain: "feishu",
     enabled: feature.enabled,

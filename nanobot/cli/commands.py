@@ -731,25 +731,12 @@ def onboard(
     )
 
 
-def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
-    """Recursively fill in missing values from defaults without overwriting user config."""
-    if not isinstance(existing, dict) or not isinstance(defaults, dict):
-        return existing
-
-    merged = dict(existing)
-    for key, value in defaults.items():
-        if key not in merged:
-            merged[key] = value
-        else:
-            merged[key] = _merge_missing_defaults(merged[key], value)
-    return merged
-
-
 def _onboard_plugins(config_path: Path) -> None:
     """Inject default config for all discovered channels (built-in + plugins)."""
     import json
 
     from nanobot.channels.registry import discover_all
+    from nanobot.config.loader import merge_missing_defaults
 
     all_channels = discover_all()
     if not all_channels:
@@ -763,7 +750,7 @@ def _onboard_plugins(config_path: Path) -> None:
         if name not in channels:
             channels[name] = cls.default_config()
         else:
-            channels[name] = _merge_missing_defaults(channels[name], cls.default_config())
+            channels[name] = merge_missing_defaults(channels[name], cls.default_config())
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

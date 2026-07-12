@@ -20,13 +20,14 @@ from nanobot.channels._feishu_instances import (
     set_feishu_instance_enabled,
 )
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
-from nanobot.config.schema import Config
-from nanobot.webui.channel_setup import (
+from nanobot.channels.setup import (
     channel_field_value,
     channel_setup_spec,
     channel_value_present,
     stringify_channel_value,
 )
+from nanobot.config.loader import merge_missing_defaults
+from nanobot.config.schema import Config
 
 
 class OptionalFeatureError(Exception):
@@ -278,16 +279,6 @@ def write_config_data(path: Path, data: dict[str, Any]) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def merge_missing_defaults(existing: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(defaults)
-    for key, value in existing.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_missing_defaults(value, merged[key])
-        else:
-            merged[key] = value
-    return merged
-
-
 def enable_channel_config(config_path: Path, channel_name: str, defaults: dict[str, Any]) -> None:
     data = read_config_data(config_path)
     channels = data.setdefault("channels", {})
@@ -424,14 +415,6 @@ def _feishu_instance_display_name(config: dict[str, Any]) -> str:
     return local_name or "nanobot"
 
 
-def _feishu_instance_identity_source(config: dict[str, Any]) -> str:
-    if str(config.get("displayName") or "").strip() or str(config.get("avatarUrl") or "").strip():
-        return "feishu"
-    if str(config.get("name") or "").strip():
-        return "local"
-    return "fallback"
-
-
 def channel_configured(config: Config, name: str) -> bool:
     """Return whether a channel has enough saved setup to be enabled directly."""
     section = getattr(config.channels, name, None)
@@ -513,17 +496,14 @@ def optional_features_payload(
             feature["instances"] = [
                 {
                     "id": spec.instance_id,
-                    "runtime_name": spec.runtime_name,
                     "name": spec.config.get("name") or "nanobot",
                     "display_name": _feishu_instance_display_name(spec.config),
                     "avatar_url": spec.config.get("avatarUrl") or "",
-                    "identity_source": _feishu_instance_identity_source(spec.config),
                     "domain": spec.config.get("domain") or "feishu",
                     "enabled": bool(spec.config.get("enabled", False)),
                     "configured": _channel_has_required_setup(spec.config, "feishu"),
                     "app_id": spec.config.get("appId") or spec.config.get("app_id") or "",
                     "group_policy": spec.config.get("groupPolicy") or "mention",
-                    "topic_isolation": bool(spec.config.get("topicIsolation", True)),
                     "allow_from": list(spec.config.get("allowFrom") or []),
                 }
                 for spec in specs

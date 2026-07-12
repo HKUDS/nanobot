@@ -1,4 +1,4 @@
-"""Single source of truth for WebUI channel setup metadata."""
+"""Shared channel setup contract for configuration, display, and validation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ RouteFieldType = str | tuple[str, set[str]]
 
 @dataclass(frozen=True)
 class ChannelFieldSpec:
-    """One channel config field exposed to the WebUI settings API."""
+    """One channel field exposed through the settings contract."""
 
     kind: FieldKind = "string"
     choices: frozenset[str] = frozenset()
@@ -46,7 +46,7 @@ class SetupRequirement:
 
 @dataclass(frozen=True)
 class ChannelSetupSpec:
-    """WebUI save, display, and validation contract for one channel."""
+    """Save, display, and validation contract for one channel."""
 
     fields: dict[str, ChannelFieldSpec]
     required: tuple[SetupRequirement, ...] = ()

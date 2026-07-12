@@ -1306,32 +1306,26 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
     assert feishu["instances"] == [
         {
             "id": "default",
-            "runtime_name": "feishu",
             "name": "nanobot",
             "display_name": "Voraflare Bot",
             "avatar_url": "https://example.com/bot.png",
-            "identity_source": "feishu",
             "domain": "feishu",
             "enabled": True,
             "configured": True,
             "app_id": "cli_default",
             "group_policy": "mention",
-            "topic_isolation": True,
             "allow_from": [],
         },
         {
             "id": "product",
-            "runtime_name": "feishu.product",
             "name": "Product bot",
             "display_name": "Product bot",
             "avatar_url": "",
-            "identity_source": "local",
             "domain": "feishu",
             "enabled": False,
             "configured": True,
             "app_id": "cli_product",
             "group_policy": "mention",
-            "topic_isolation": True,
             "allow_from": [],
         },
     ]
@@ -1379,7 +1373,6 @@ def test_optional_features_payload_backfills_saved_feishu_identity(monkeypatch, 
     instance = payload["features"][0]["instances"][0]
     assert instance["display_name"] == "Xubin Ren的智能助手"
     assert instance["avatar_url"] == "https://example.com/assistant.png"
-    assert instance["identity_source"] == "feishu"
 
     data = json.loads(config_path.read_text(encoding="utf-8"))
     saved = data["channels"]["feishu"]["instances"][0]
@@ -1426,7 +1419,6 @@ def test_optional_features_payload_records_feishu_identity_attempt_on_empty_resu
     instance = payload["features"][0]["instances"][0]
     assert instance["display_name"] == "nanobot"
     assert instance["avatar_url"] == ""
-    assert instance["identity_source"] == "local"
 
     data = json.loads(config_path.read_text(encoding="utf-8"))
     saved = data["channels"]["feishu"]["instances"][0]
@@ -2425,6 +2417,7 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
 
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
+    mgr._channel_tasks = {}
 
     # Create a real cancelled task
     async def dummy_task():
@@ -2502,6 +2495,7 @@ async def test_stop_all_handles_channel_exception():
     mgr.config = fake_config
     mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
+    mgr._channel_tasks = {}
     mgr._dispatch_task = None
 
     # Should not raise even if channel.stop() raises
@@ -2540,6 +2534,7 @@ async def test_stop_all_handles_channel_stop_cancelled_task():
         "stopcancelled": _StopCancelledChannel(fake_config, mgr.bus),
         "next": next_channel,
     }
+    mgr._channel_tasks = {}
     mgr._dispatch_task = None
 
     await mgr.stop_all()
@@ -2581,6 +2576,7 @@ async def test_start_all_creates_dispatch_task():
 
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
+    mgr._channel_tasks = {}
     mgr._dispatch_task = None
 
     # Cancel immediately after start to avoid running forever

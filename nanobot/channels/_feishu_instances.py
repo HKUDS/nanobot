@@ -13,6 +13,8 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.config.loader import merge_missing_defaults
+
 DEFAULT_INSTANCE_ID = "default"
 _INSTANCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -38,17 +40,6 @@ def validate_instance_id(value: str) -> str:
 def runtime_channel_name(base_name: str, instance_id: str) -> str:
     """Return the channel key used for routing messages at runtime."""
     return base_name if instance_id == DEFAULT_INSTANCE_ID else f"{base_name}.{instance_id}"
-
-
-def merge_missing_defaults(existing: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
-    """Merge defaults into a config dict without overwriting existing values."""
-    merged = dict(defaults)
-    for key, value in existing.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_missing_defaults(value, merged[key])
-        else:
-            merged[key] = value
-    return merged
 
 
 def _base_feishu_instance_config(defaults: dict[str, Any]) -> dict[str, Any]:

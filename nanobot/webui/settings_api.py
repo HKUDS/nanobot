@@ -874,9 +874,6 @@ def settings_payload(
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
         },
-        "files": {
-            "extract_document_text": config.channels.extract_document_text,
-        },
         "api": {
             "host": config.api.host,
             "port": config.api.port,
@@ -1412,20 +1409,6 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
     if changed:
         save_config(config)
     return settings_payload(requires_restart=restart_required)
-
-
-def update_file_settings(query: QueryParams) -> dict[str, Any]:
-    """Update document ingestion behavior exposed by the Files settings page."""
-    config = load_config()
-    raw = _query_first_alias(query, "extract_document_text", "extractDocumentText")
-    if raw is None:
-        raise WebUISettingsError("extract_document_text is required")
-    enabled = _parse_bool(raw, "extract_document_text")
-    changed = config.channels.extract_document_text != enabled
-    if changed:
-        config.channels.extract_document_text = enabled
-        save_config(config)
-    return settings_payload(requires_restart=changed)
 
 
 def update_api_settings(query: QueryParams) -> dict[str, Any]:

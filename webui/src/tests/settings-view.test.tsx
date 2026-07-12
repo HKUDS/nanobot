@@ -58,7 +58,6 @@ function settingsPayload(): SettingsPayload {
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
     },
-    files: { extract_document_text: true },
     api: {
       host: "127.0.0.1",
       port: 8900,
@@ -729,7 +728,6 @@ describe("SettingsView Apps catalog", () => {
             configured: true,
             instances: [{
               id: "default",
-              runtime_name: "feishu",
               name: "nanobot",
               domain: "feishu",
               enabled: true,
@@ -800,11 +798,9 @@ describe("SettingsView Apps catalog", () => {
               instances: [
                 {
                   id: "default",
-                  runtime_name: "feishu",
                   name: "nanobot",
                   display_name: "Support Bot",
                   avatar_url: "https://example.com/support.png",
-                  identity_source: "feishu",
                   domain: "feishu",
                   enabled: true,
                   configured: true,
@@ -812,11 +808,9 @@ describe("SettingsView Apps catalog", () => {
                 },
                 {
                   id: "product",
-                  runtime_name: "feishu.product",
                   name: "Product bot",
                   display_name: "Product Helper",
                   avatar_url: "https://example.com/product.png",
-                  identity_source: "feishu",
                   domain: "feishu",
                   enabled: false,
                   configured: true,
@@ -881,11 +875,9 @@ describe("SettingsView Apps catalog", () => {
         requires_restart: true,
         instances: [{
           id: "default",
-          runtime_name: "feishu",
           name: "nanobot",
           display_name: "Support Bot",
           avatar_url: "https://example.com/support.png",
-          identity_source: "feishu",
           domain: "feishu",
           enabled: true,
           configured: true,

@@ -1,4 +1,4 @@
-from nanobot.webui.channel_setup import channel_setup_spec
+from nanobot.channels.setup import channel_setup_spec
 
 
 def test_channel_setup_spec_derives_route_and_secret_metadata() -> None:

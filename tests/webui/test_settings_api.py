@@ -22,7 +22,6 @@ from nanobot.webui.settings_api import (
     settings_usage_payload,
     update_agent_settings,
     update_api_settings,
-    update_file_settings,
     update_model_configuration,
     update_network_safety_settings,
     update_provider_settings,
@@ -66,7 +65,6 @@ def test_settings_payload_includes_relocated_capabilities(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.channels.extract_document_text = False
     config.api.port = 9910
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
@@ -75,26 +73,10 @@ def test_settings_payload_includes_relocated_capabilities(
 
     payload = settings_payload()
 
-    assert payload["files"] == {"extract_document_text": False}
     assert payload["api"]["port"] == 9910
     assert payload["api"]["api_key_hint"] is None
     assert payload["observability"]["provider"] == "langfuse"
     assert payload["observability"]["configured"] is True
-
-
-def test_update_file_settings_persists_document_ingestion(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    payload = update_file_settings({"extract_document_text": ["false"]})
-
-    assert load_config(config_path).channels.extract_document_text is False
-    assert payload["files"]["extract_document_text"] is False
-    assert payload["requires_restart"] is True
 
 
 def test_update_api_settings_requires_key_for_network_access(

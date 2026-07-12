@@ -7,7 +7,6 @@ import type {
   ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
-  FeishuConnectPayload,
   FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
@@ -476,32 +475,6 @@ export async function runPairingAction(
     `${base}/api/settings/pairing/${action}?${query}`,
     token,
   );
-}
-
-export async function startFeishuConnect(
-  token: string,
-  domain: "feishu" | "lark" = "feishu",
-  instanceId: string = "default",
-  mode: "replace" | "create" = "replace",
-  base: string = "",
-): Promise<FeishuConnectPayload> {
-  return startChannelConnect(token, "feishu", { domain, instanceId, mode }, base);
-}
-
-export async function pollFeishuConnect(
-  token: string,
-  sessionId: string,
-  base: string = "",
-): Promise<FeishuConnectPayload> {
-  return pollChannelConnect(token, "feishu", sessionId, base);
-}
-
-export async function cancelFeishuConnect(
-  token: string,
-  sessionId: string,
-  base: string = "",
-): Promise<FeishuConnectPayload> {
-  return cancelChannelConnect(token, "feishu", sessionId, base);
 }
 
 export async function startChannelConnect(

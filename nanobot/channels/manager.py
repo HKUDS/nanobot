@@ -306,14 +306,10 @@ class ChannelManager:
     def _start_channel_task(self, name: str, channel: BaseChannel) -> asyncio.Task:
         logger.info("Starting {} channel...", name)
         task = asyncio.create_task(self._start_channel(name, channel))
-        if not hasattr(self, "_channel_tasks"):
-            self._channel_tasks = {}
         self._channel_tasks[name] = task
         return task
 
     async def _stop_channel(self, name: str) -> bool:
-        if not hasattr(self, "_channel_tasks"):
-            self._channel_tasks = {}
         channel = self.channels.get(name)
         if channel is None:
             self._channel_tasks.pop(name, None)

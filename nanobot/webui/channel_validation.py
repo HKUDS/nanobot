@@ -15,9 +15,9 @@ from typing import Any
 
 import httpx
 
+from nanobot.channels.setup import channel_setup_spec
 from nanobot.config.loader import load_config
 from nanobot.security.network import resolve_url_target
-from nanobot.webui.channel_setup import channel_setup_spec
 
 CheckStatus = str
 SetupStatus = str

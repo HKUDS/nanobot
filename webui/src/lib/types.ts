@@ -430,9 +430,6 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
-  files?: {
-    extract_document_text: boolean;
-  };
   api?: {
     host: string;
     port: number;
@@ -687,17 +684,14 @@ export interface NanobotFeatureInfo {
 
 export interface NanobotChannelInstanceInfo {
   id: string;
-  runtime_name: string;
   name: string;
   display_name?: string;
   avatar_url?: string;
-  identity_source?: "feishu" | "local" | "fallback" | string;
   domain?: "feishu" | "lark" | string;
   enabled: boolean;
   configured: boolean;
   app_id?: string;
   group_policy?: string;
-  topic_isolation?: boolean;
   allow_from?: string[];
 }
 
@@ -854,9 +848,6 @@ export interface ChannelConnectPayload {
   account?: string;
   nanobot_features?: NanobotFeaturesPayload;
 }
-
-export type FeishuConnectStatus = ChannelConnectStatus;
-export type FeishuConnectPayload = ChannelConnectPayload;
 
 export interface ChannelConfigurePayload {
   name: string;

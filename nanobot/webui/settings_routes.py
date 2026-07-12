@@ -20,6 +20,7 @@ from websockets.http11 import Response
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.setup import channel_setup_spec
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.optional_features import (
     OptionalFeatureError,
@@ -32,7 +33,6 @@ from nanobot.webui.channel_connect import (
     FeishuConnectStore,
     WeixinConnectStore,
 )
-from nanobot.webui.channel_setup import channel_setup_spec
 from nanobot.webui.channel_validation import validate_channel_config
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
@@ -50,7 +50,6 @@ from nanobot.webui.settings_api import (
     settings_usage_payload,
     update_agent_settings,
     update_api_settings,
-    update_file_settings,
     update_image_generation_settings,
     update_model_configuration,
     update_network_safety_settings,
@@ -132,8 +131,6 @@ class WebUISettingsRouter:
             return await self._handle_settings_provider_oauth(request, "logout")
         if path == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
-        if path == "/api/settings/files/update":
-            return self._handle_settings_files_update(request)
         if path == "/api/settings/api-service":
             return self._handle_settings_api_service(request)
         if path == "/api/settings/api-service/start":
@@ -379,15 +376,6 @@ class WebUISettingsRouter:
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="browser"))
-
-    def _handle_settings_files_update(self, request: WsRequest) -> Response:
-        if not self._authorized(request):
-            return self._unauthorized()
-        try:
-            payload = update_file_settings(self._query(request))
-        except WebUISettingsError as e:
-            return self._error_response(e.status, e.message)
-        return self._json_response(self._with_restart_state(payload, section="runtime"))
 
     def _handle_settings_api_service(self, request: WsRequest) -> Response:
         if not self._authorized(request):

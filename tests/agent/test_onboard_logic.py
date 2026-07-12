@@ -11,7 +11,6 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
-from nanobot.cli.commands import _merge_missing_defaults
 from nanobot.cli.onboard import (
     _BACK_PRESSED,
     _configure_pydantic_model,
@@ -22,18 +21,19 @@ from nanobot.cli.onboard import (
     _input_text,
     run_onboard,
 )
+from nanobot.config.loader import merge_missing_defaults
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.utils.helpers import sync_workspace_templates
 
 
 class TestMergeMissingDefaults:
-    """Tests for _merge_missing_defaults recursive config merging."""
+    """Tests for recursive config default merging."""
 
     def test_adds_missing_top_level_keys(self):
         existing = {"a": 1}
         defaults = {"a": 1, "b": 2, "c": 3}
 
-        result = _merge_missing_defaults(existing, defaults)
+        result = merge_missing_defaults(existing, defaults)
 
         assert result == {"a": 1, "b": 2, "c": 3}
 
@@ -41,7 +41,7 @@ class TestMergeMissingDefaults:
         existing = {"a": "custom_value"}
         defaults = {"a": "default_value"}
 
-        result = _merge_missing_defaults(existing, defaults)
+        result = merge_missing_defaults(existing, defaults)
 
         assert result == {"a": "custom_value"}
 
@@ -63,7 +63,7 @@ class TestMergeMissingDefaults:
             }
         }
 
-        result = _merge_missing_defaults(existing, defaults)
+        result = merge_missing_defaults(existing, defaults)
 
         assert result == {
             "level1": {
@@ -76,19 +76,19 @@ class TestMergeMissingDefaults:
         }
 
     def test_returns_existing_if_not_dict(self):
-        assert _merge_missing_defaults("string", {"a": 1}) == "string"
-        assert _merge_missing_defaults([1, 2, 3], {"a": 1}) == [1, 2, 3]
-        assert _merge_missing_defaults(None, {"a": 1}) is None
-        assert _merge_missing_defaults(42, {"a": 1}) == 42
+        assert merge_missing_defaults("string", {"a": 1}) == "string"
+        assert merge_missing_defaults([1, 2, 3], {"a": 1}) == [1, 2, 3]
+        assert merge_missing_defaults(None, {"a": 1}) is None
+        assert merge_missing_defaults(42, {"a": 1}) == 42
 
     def test_returns_existing_if_defaults_not_dict(self):
-        assert _merge_missing_defaults({"a": 1}, "string") == {"a": 1}
-        assert _merge_missing_defaults({"a": 1}, None) == {"a": 1}
+        assert merge_missing_defaults({"a": 1}, "string") == {"a": 1}
+        assert merge_missing_defaults({"a": 1}, None) == {"a": 1}
 
     def test_handles_empty_dicts(self):
-        assert _merge_missing_defaults({}, {"a": 1}) == {"a": 1}
-        assert _merge_missing_defaults({"a": 1}, {}) == {"a": 1}
-        assert _merge_missing_defaults({}, {}) == {}
+        assert merge_missing_defaults({}, {"a": 1}) == {"a": 1}
+        assert merge_missing_defaults({"a": 1}, {}) == {"a": 1}
+        assert merge_missing_defaults({}, {}) == {}
 
     def test_backfills_channel_config(self):
         """Real-world scenario: backfill missing channel fields."""
@@ -105,7 +105,7 @@ class TestMergeMissingDefaults:
             "allowFrom": [],
         }
 
-        result = _merge_missing_defaults(existing_channel, default_channel)
+        result = merge_missing_defaults(existing_channel, default_channel)
 
         assert result["msgFormat"] == "plain"
         assert result["allowFrom"] == []
