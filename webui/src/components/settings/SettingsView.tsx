@@ -93,6 +93,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { isLoopbackHost } from "@/lib/network";
 import {
   checkVersion,
   createModelConfiguration,
@@ -6871,7 +6872,7 @@ function RuntimeSettings({
     setApiKey("");
     setApiKeyVisible(false);
   }, [apiService]);
-  const apiNetworkAccess = apiHost === "0.0.0.0" || apiHost === "::";
+  const apiNetworkAccess = !isLoopbackHost(apiHost);
   const apiMissingNetworkKey = apiNetworkAccess && !apiKey.trim() && !apiDefaults.api_key_hint;
   const engineState = isRestarting
     ? tx("settings.values.restartingEngine", "Restarting")

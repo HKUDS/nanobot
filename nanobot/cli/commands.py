@@ -76,6 +76,7 @@ from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
+from nanobot.security.network import is_loopback_host  # noqa: E402
 from nanobot.utils.evaluator import evaluate_response  # noqa: E402
 from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
 from nanobot.utils.restart import (  # noqa: E402
@@ -1335,9 +1336,9 @@ def serve(
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
     api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
-    if host in {"0.0.0.0", "::"} and not api_key:
+    if not is_loopback_host(host) and not api_key:
         console.print(
-            "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+            f"[red]Error: host {host} is available beyond this device but api_key is not set. "
             "Set api.api_key in config to prevent unauthenticated access.[/red]"
         )
         raise typer.Exit(1)
@@ -1361,9 +1362,9 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
-    if host in {"0.0.0.0", "::"}:
+    if not is_loopback_host(host):
         console.print(
-            "[yellow]API is bound to all interfaces "
+            "[yellow]API is available beyond this device "
             "(authentication required).[/yellow]"
         )
     console.print()

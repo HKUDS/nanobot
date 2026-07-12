@@ -437,7 +437,7 @@ class WebUISettingsRouter:
         except Exception as e:
             self.logger.exception("failed to stop managed API service")
             return self._error_response(500, str(e))
-        if not result.ok and result.message != "gateway_not_running":
+        if not result.ok and result.message != "api_not_running":
             return self._error_response(500, self._api_runtime_message(result.message))
         return self._json_response(self._api_service_payload(last_action="stopped"))
 
@@ -476,11 +476,16 @@ class WebUISettingsRouter:
 
     @staticmethod
     def _api_runtime_message(message: str) -> str:
-        return {
-            "gateway_exited_during_startup": "API server exited during startup. Check its log for details.",
-            "gateway_stop_timeout": "API server did not stop in time.",
-            "gateway_state_stale": "API server state was stale; try starting it again.",
-        }.get(message, message.replace("gateway", "API server").replace("_", " "))
+        known = {
+            "api_exited_during_startup": "API server exited during startup. Check its log for details.",
+            "api_stop_timeout": "API server did not stop in time.",
+            "api_state_stale": "API server state was stale; try starting it again.",
+        }
+        if message in known:
+            return known[message]
+        if message.startswith("api_"):
+            return f"API server {message.removeprefix('api_').replace('_', ' ')}"
+        return message.replace("_", " ")
 
     def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):

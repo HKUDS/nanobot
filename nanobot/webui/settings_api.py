@@ -29,6 +29,7 @@ from nanobot.providers.image_generation import (
     image_gen_provider_names,
 )
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
+from nanobot.security.network import is_loopback_host
 from nanobot.security.workspace_access import workspace_sandbox_status
 from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.workspaces import (
@@ -1436,7 +1437,7 @@ def update_api_settings(query: QueryParams) -> dict[str, Any]:
     if api_key is not None:
         api.api_key = api_key.strip()
 
-    if api.host in {"0.0.0.0", "::"} and not api.api_key.strip():
+    if not is_loopback_host(api.host) and not api.api_key.strip():
         raise WebUISettingsError("an API key is required when the API is available on the network")
 
     save_config(config)

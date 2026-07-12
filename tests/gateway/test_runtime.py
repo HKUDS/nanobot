@@ -3,7 +3,7 @@ import signal
 import subprocess
 from pathlib import Path
 
-from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions, GatewayStatus
 
 
 class FakeProcess:
@@ -172,6 +172,34 @@ def test_stop_keeps_state_when_process_survives_timeout(tmp_path, monkeypatch):
     assert runtime.paths.state_path.exists()
 
 
+def test_stop_succeeds_when_process_exits_at_timeout_boundary(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    running = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=runtime.paths.state_path,
+        log_path=runtime.paths.log_path,
+    )
+    stopped = GatewayStatus(
+        running=False,
+        pid=None,
+        state_path=runtime.paths.state_path,
+        log_path=runtime.paths.log_path,
+        reason="stop_timeout",
+    )
+    statuses = iter([running, stopped])
+    monkeypatch.setattr(runtime, "status", lambda **_kwargs: next(statuses))
+    monkeypatch.setattr(runtime, "_read_state", lambda: {"pid": 12345, "identity": 12345})
+    monkeypatch.setattr(runtime, "_record_matches_process", lambda *_args: True)
+    monkeypatch.setattr(runtime, "_terminate", lambda *_args, **_kwargs: False)
+
+    result = runtime.stop(timeout_s=0)
+
+    assert result.ok is True
+    assert result.message == "gateway_stopped"
+    assert result.status.running is False
+
+
 def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monkeypatch):
     taskkill_calls: list[dict] = []
     wait_timeouts: list[int | float] = []
@@ -191,7 +219,7 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
     def fake_kill(_pid, _signal):
         raise OSError(87, "The parameter is incorrect")
 
-    monkeypatch.setattr("nanobot.gateway.runtime.os.kill", fake_kill)
+    monkeypatch.setattr("nanobot.process_runtime.os.kill", fake_kill)
 
     def fake_wait_for_exit(_pid, _timeout_s):
         wait_timeouts.append(_timeout_s)
@@ -212,3 +240,25 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
             },
         }
     ]
+
+
+def test_terminate_posix_tolerates_process_group_disappearing_before_sigkill(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Darwin",
+        sleep=lambda _seconds: None,
+    )
+    waits = iter([False, True])
+    monkeypatch.setattr("nanobot.process_runtime.os.getpgid", lambda _pid: 1234)
+
+    def fake_killpg(_pgid, sent_signal):
+        if sent_signal == signal.SIGKILL:
+            raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("nanobot.process_runtime.os.killpg", fake_killpg)
+    monkeypatch.setattr(runtime, "_wait_for_exit", lambda *_args: next(waits))
+
+    assert runtime._terminate_posix(1234, timeout_s=1) is True

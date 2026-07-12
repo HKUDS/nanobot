@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from nanobot.config.loader import load_config
+from nanobot.security.network import resolve_url_target
 from nanobot.webui.channel_setup import channel_setup_spec
 
 CheckStatus = str
@@ -47,7 +48,14 @@ def validate_channel_config(
     values = _merge_form_values(channel, values, raw_values or {})
 
     validator = _VALIDATORS.get(channel, _validate_generic)
-    payload = validator(channel, values)
+    if channel == "email":
+        payload = _validate_email(
+            channel,
+            values,
+            allow_loopback=config.tools.webui_allow_local_service_access,
+        )
+    else:
+        payload = validator(channel, values)
     payload["name"] = channel
     return payload
 
@@ -170,7 +178,12 @@ def _validate_slack(name: str, values: dict[str, Any]) -> dict[str, Any]:
     return _status_from_checks(name, checks, missing)
 
 
-def _validate_email(name: str, values: dict[str, Any]) -> dict[str, Any]:
+def _validate_email(
+    name: str,
+    values: dict[str, Any],
+    *,
+    allow_loopback: bool = False,
+) -> dict[str, Any]:
     checks, missing = _required_checks(name, values)
     if _truthy(values.get("consentGranted")):
         checks.append(_check("consent", "Mailbox consent", "pass", "Consent is enabled for this mailbox."))
@@ -187,7 +200,7 @@ def _validate_email(name: str, values: dict[str, Any]) -> dict[str, Any]:
             continue
         checks.append(_check(f"{prefix}_settings", f"{prefix.upper()} settings", "pass", f"{host}:{port} is set."))
         try:
-            _probe_tcp(host, port)
+            _probe_tcp(host, port, allow_loopback=allow_loopback)
             checks.append(_check(f"{prefix}_reachability", f"{prefix.upper()} reachability", "pass", "The server accepted a TCP connection."))
         except Exception as exc:
             checks.append(_check(f"{prefix}_reachability", f"{prefix.upper()} reachability", "warn", f"Could not verify network reachability now: {exc}"))
@@ -487,9 +500,26 @@ def _http_post(url: str, *, headers: dict[str, str] | None = None) -> dict[str, 
     return data if isinstance(data, dict) else {}
 
 
-def _probe_tcp(host: str, port: int) -> None:
+def _probe_tcp(host: str, port: int, *, allow_loopback: bool = False) -> None:
+    url_host = host if ":" not in host or host.startswith("[") else f"[{host}]"
+    ok, error, resolved_ips = resolve_url_target(
+        f"http://{url_host}:{port}/",
+        allow_loopback=allow_loopback,
+    )
+    if not ok:
+        raise ValueError(error)
+
     context = ssl.create_default_context()
-    with socket.create_connection((host, port), timeout=_TIMEOUT_SECONDS) as sock:
-        if port in {465, 993, 995}:
-            with context.wrap_socket(sock, server_hostname=host):
+    last_error: OSError | None = None
+    for target_ip in resolved_ips:
+        try:
+            with socket.create_connection((target_ip, port), timeout=_TIMEOUT_SECONDS) as sock:
+                if port in {465, 993, 995}:
+                    with context.wrap_socket(sock, server_hostname=host.strip("[]")):
+                        return
                 return
+        except OSError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"Could not resolve {host}")

@@ -29,6 +29,18 @@ _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
 
+def is_loopback_host(host: str) -> bool:
+    """Return whether a bind target is explicitly limited to loopback."""
+    normalized = host.strip().rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    with suppress(ValueError):
+        return ipaddress.ip_address(normalized).is_loopback
+    return False
+
+
 def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     """Allow specific CIDR ranges to bypass SSRF blocking (e.g. Tailscale's 100.64.0.0/10)."""
     global _allowed_networks

@@ -3207,6 +3207,26 @@ def test_serve_rejects_wildcard_host_without_api_key(monkeypatch, tmp_path: Path
     assert "api_app" not in seen
 
 
+def test_serve_rejects_specific_network_interface_without_api_key(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(
+        app,
+        ["serve", "--config", str(config_file), "--host", "192.168.1.10"],
+    )
+
+    assert result.exit_code == 1
+    assert "api_key is not set" in result.stdout
+    assert "api_app" not in seen
+
+
 def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 

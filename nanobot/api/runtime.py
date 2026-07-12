@@ -7,27 +7,27 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.gateway.runtime import (
-    GatewayRuntime,
-    GatewayRuntimePaths,
-    GatewayStartOptions,
+from nanobot.process_runtime import (
+    ManagedProcessRuntime,
+    ProcessRuntimePaths,
+    ProcessStartOptions,
 )
 
 
 @dataclass(frozen=True)
-class ApiStartOptions(GatewayStartOptions):
+class ApiStartOptions(ProcessStartOptions):
     """Options needed to start a managed ``nanobot serve`` process."""
 
     host: str = "127.0.0.1"
 
 
-def api_runtime_paths(config_path: Path) -> GatewayRuntimePaths:
+def api_runtime_paths(config_path: Path) -> ProcessRuntimePaths:
     """Return isolated state and log paths for one API process."""
     resolved = config_path.expanduser().resolve(strict=False)
     suffix = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
     run_dir = resolved.parent / "run"
     logs_dir = resolved.parent / "logs"
-    return GatewayRuntimePaths(
+    return ProcessRuntimePaths(
         run_dir=run_dir,
         logs_dir=logs_dir,
         state_path=run_dir / f"api.{suffix}.json",
@@ -35,8 +35,10 @@ def api_runtime_paths(config_path: Path) -> GatewayRuntimePaths:
     )
 
 
-class ApiRuntime(GatewayRuntime):
-    """Manage the API process without duplicating platform process handling."""
+class ApiRuntime(ManagedProcessRuntime):
+    """Manage a WebUI-controlled OpenAI-compatible API process."""
+
+    service_name = "api"
 
     def _build_child_command(self, options: ApiStartOptions) -> list[str]:
         command = [
@@ -56,4 +58,3 @@ class ApiRuntime(GatewayRuntime):
         if options.config_path:
             command.extend(["--config", options.config_path])
         return command
-

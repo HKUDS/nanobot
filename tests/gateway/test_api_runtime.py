@@ -40,6 +40,7 @@ def test_api_runtime_builds_detached_serve_command(tmp_path: Path, monkeypatch) 
     ))
 
     assert result.ok is True
+    assert result.message == "api_started_background"
     assert calls == [[
         "/python",
         "-m",

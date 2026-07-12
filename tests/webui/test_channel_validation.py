@@ -78,6 +78,65 @@ def test_validate_email_presets_are_checked_without_saving(
     assert not hasattr(load_config(config_path).channels, "email")
 
 
+def test_validate_email_blocks_private_targets_when_local_access_is_disabled(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.webui_allow_local_service_access = False
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        channel_validation.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: pytest.fail("blocked target must not be connected"),
+    )
+
+    payload = validate_channel_config(
+        "email",
+        {
+            "channels.email.consentGranted": "true",
+            "channels.email.imapHost": "127.0.0.1",
+            "channels.email.imapUsername": "bot@example.com",
+            "channels.email.imapPassword": "imap-secret",
+            "channels.email.smtpHost": "192.168.1.10",
+            "channels.email.smtpUsername": "bot@example.com",
+            "channels.email.smtpPassword": "smtp-secret",
+        },
+    )
+
+    warnings = [check["message"] for check in payload["checks"] if check["status"] == "warn"]
+    assert len(warnings) == 2
+    assert all("private/internal" in message for message in warnings)
+
+
+def test_probe_tcp_connects_to_the_validated_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    connected: list[tuple[str, int]] = []
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(
+        channel_validation,
+        "resolve_url_target",
+        lambda *_args, **_kwargs: (True, "", ("203.0.113.10",)),
+    )
+    monkeypatch.setattr(
+        channel_validation.socket,
+        "create_connection",
+        lambda target, **_kwargs: connected.append(target) or FakeSocket(),
+    )
+
+    channel_validation._probe_tcp("mail.example.com", 2525)
+
+    assert connected == [("203.0.113.10", 2525)]
+
+
 def test_validate_manual_channel_returns_configured(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.json"
     save_config(

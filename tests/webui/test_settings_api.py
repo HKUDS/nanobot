@@ -120,6 +120,31 @@ def test_update_api_settings_requires_key_for_network_access(
     assert payload["api"]["api_key_hint"]
 
 
+def test_update_api_settings_requires_key_for_specific_network_interface(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="API key"):
+        update_api_settings({"host": ["192.168.1.10"], "port": ["8900"]})
+
+
+def test_update_api_settings_allows_alternate_loopback_without_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    update_api_settings({"host": ["127.0.0.2"], "port": ["8900"]})
+
+    assert load_config(config_path).api.host == "127.0.0.2"
+
+
 def _dynamic_provider_config(
     *,
     api_base: str = DYNAMIC_PROVIDER_API_BASE,
