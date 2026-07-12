@@ -21,6 +21,11 @@ from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.optional_features import InstallResult
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -2360,6 +2365,42 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
         assert not path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_messages_hide_persisted_runtime_context(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = SessionManager(tmp_path)
+    session = sm.get_or_create("websocket:runtime-context")
+    content, marker = append_runtime_context(
+        "visible user text",
+        [RuntimeContextBlock(source="goal", content="private goal context")],
+    )
+    session.add_message(
+        "user",
+        content,
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    sm.save(session)
+    channel = _ch(bus, session_manager=sm, port=29919)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        response = await _http_get(
+            "http://127.0.0.1:29919/api/sessions/websocket:runtime-context/messages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        message = response.json()["messages"][0]
+        assert message["content"] == "visible user text"
+        assert RUNTIME_CONTEXT_HISTORY_META not in message
+        assert "private goal context" not in response.text
     finally:
         await channel.stop()
         await server_task

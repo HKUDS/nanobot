@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
+    MAX_GOAL_OBJECTIVE_CHARS,
     discard_legacy_goal_state_key,
+    explicit_goal_requested,
     goal_state_runtime_lines,
     goal_state_ws_blob,
     parse_goal_state,
@@ -38,6 +40,16 @@ def test_runtime_lines_include_objective_when_active():
     assert "Goal (active):" in lines
     assert "Ship the fix." in lines
     assert any("Summary: fix" in ln for ln in lines)
+
+
+def test_runtime_lines_preserve_maximum_accepted_objective():
+    objective = "x" * MAX_GOAL_OBJECTIVE_CHARS
+
+    lines = goal_state_runtime_lines(
+        {GOAL_STATE_KEY: {"status": "active", "objective": objective}}
+    )
+
+    assert lines == ["Goal (active):", objective]
 
 
 def test_runtime_lines_read_legacy_thread_goal_key():
@@ -107,6 +119,12 @@ def test_sustained_goal_active_true_when_active():
 def test_sustained_goal_active_respects_legacy_thread_goal_key():
     meta = {"thread_goal": {"status": "active", "objective": "Legacy."}}
     assert sustained_goal_active(meta) is True
+
+
+def test_explicit_goal_requested_only_reads_command_metadata():
+    assert explicit_goal_requested({}) is False
+    message_meta = {"original_command": "/goal", "goal_requested": True}
+    assert explicit_goal_requested(message_meta) is True
 
 
 def test_runner_wall_llm_timeout_uses_metadata_override(tmp_path):

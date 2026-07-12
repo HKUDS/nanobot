@@ -1133,6 +1133,42 @@ class TestLastUsageInSummary:
 
 class TestRequestContext:
 
+    @pytest.mark.asyncio
+    async def test_check_exposes_current_routing_metadata_on_demand(self):
+        tool = _make_tool()
+        ctx = RequestContext(
+            channel="feishu",
+            chat_id="oc_abc123",
+            sender_id="ou_user456",
+        )
+
+        with request_context(ctx):
+            assert await tool.execute(action="check", key="request.channel") == (
+                "request.channel: 'feishu'"
+            )
+            assert await tool.execute(action="check", key="request.chat_id") == (
+                "request.chat_id: 'oc_abc123'"
+            )
+            assert await tool.execute(action="check", key="request.sender_id") == (
+                "request.sender_id: 'ou_user456'"
+            )
+            summary = await tool.execute(action="check")
+
+        assert "oc_abc123" not in summary
+        assert "ou_user456" not in summary
+
+    @pytest.mark.asyncio
+    async def test_request_routing_metadata_is_read_only(self):
+        tool = _make_tool()
+
+        result = await tool.execute(
+            action="set",
+            key="request.chat_id",
+            value="replacement",
+        )
+
+        assert "read-only" in result
+
     def test_audit_reads_bound_session(self):
         tool = _make_tool()
         ctx = RequestContext(

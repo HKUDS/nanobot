@@ -26,6 +26,7 @@ from websockets.http11 import Response
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
@@ -428,6 +429,9 @@ class GatewayHTTPHandler:
         messages = data.get("messages")
         if isinstance(messages, list):
             scrub_subagent_messages_for_channel(messages)
+            data["messages"] = public_history_messages(
+                message for message in messages if isinstance(message, dict)
+            )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
 

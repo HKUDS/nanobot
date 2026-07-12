@@ -1121,63 +1121,6 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mcp_presets": mcp_presets} if isinstance(mcp_presets, list) and mcp_presets else {}
 
 
-def runtime_lines(
-    message: Any,
-    *,
-    available_server_names: set[str] | None = None,
-    configured_server_names: set[str] | None = None,
-    connected_server_names: set[str] | None = None,
-    skip: bool = False,
-) -> list[str]:
-    """Return model-visible MCP preset annotations for the current turn."""
-    if skip:
-        return []
-    if configured_server_names is None:
-        configured_server_names = available_server_names
-    if connected_server_names is None:
-        connected_server_names = available_server_names
-    metadata = message.metadata if isinstance(getattr(message, "metadata", None), Mapping) else None
-    structured = metadata.get("mcp_presets") if isinstance(metadata, Mapping) else None
-    if not isinstance(structured, list):
-        return []
-
-    lines: list[str] = []
-    for item in structured[:8]:
-        if not isinstance(item, Mapping):
-            continue
-        raw_name = str(item.get("name") or "").strip().lower()
-        if not raw_name:
-            continue
-        display = str(item.get("display_name") or raw_name).strip() or raw_name
-        transport = str(item.get("transport") or "mcp").strip() or "mcp"
-        prefix = f"mcp_{raw_name}_"
-        if configured_server_names is not None and raw_name not in configured_server_names:
-            lines.append(
-                "MCP Preset Attachment: "
-                f"@{raw_name} ({display}; transport={transport}) is configured in WebUI Settings, "
-                "but this gateway has not loaded the latest MCP settings yet. "
-                f"Tools with prefix `{prefix}` may not be available yet; if they are missing, "
-                "tell the user to restart nanobot."
-            )
-            continue
-        if connected_server_names is not None and raw_name not in connected_server_names:
-            lines.append(
-                "MCP Preset Attachment: "
-                f"@{raw_name} ({display}; transport={transport}) is configured, "
-                "but its MCP connection is not currently live. "
-                f"Tools with prefix `{prefix}` may be unavailable; tell the user to open Settings, "
-                "run the preset test, and restart nanobot only if hot reload is unavailable."
-            )
-            continue
-        lines.append(
-            "MCP Preset Attachment: "
-            f"@{raw_name} ({display}; transport={transport}; tool_prefix={prefix}). "
-            f"Prefer available tools whose names start with `{prefix}` for this request; "
-            "do not substitute shell commands for this MCP integration unless the user asks."
-        )
-    return lines
-
-
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
     async with _reload_lock(state):

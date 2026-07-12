@@ -30,6 +30,8 @@ _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
 _STRIPPED_INBOUND_META_KEYS = {
     INTERNAL_CONTINUATION_PENDING_META,
+    "goal_requested",
+    "original_command",
 }
 
 
@@ -168,7 +170,12 @@ def _continuation_available(
 def clear_internal_continuation_state(metadata: MutableMapping[str, Any]) -> None:
     """Reset policy bookkeeping once its owning runtime mode is inactive."""
     if not sustained_goal_active(metadata):
-        metadata.pop(_GOAL_CONTINUATION_ROUNDS_KEY, None)
+        reset_goal_continuation_rounds(metadata)
+
+
+def reset_goal_continuation_rounds(metadata: MutableMapping[str, Any]) -> None:
+    """Start a newly created or replaced goal with a fresh continuation budget."""
+    metadata.pop(_GOAL_CONTINUATION_ROUNDS_KEY, None)
 
 
 def _save_skip_for_turn(
@@ -240,14 +247,14 @@ def _goal_continuation_prompt(metadata: Mapping[str, Any] | None) -> str:
             "its tool-call budget.\n\n"
             f"{goal}\n\n"
             "Continue from the saved context. Do not mention the continuation "
-            "boundary to the user. Use tools as needed, and call complete_goal "
-            "when the objective is truly finished."
+            "boundary to the user. Use tools as needed, and call update_goal "
+            "with action='complete' when the objective is truly finished."
         )
     return (
         "Continue the active sustained goal after the previous turn reached "
         "its tool-call budget. Continue from the saved context. Do not mention "
         "the continuation boundary to the user. Use tools as needed, and call "
-        "complete_goal when the objective is truly finished."
+        "update_goal with action='complete' when the objective is truly finished."
     )
 
 
