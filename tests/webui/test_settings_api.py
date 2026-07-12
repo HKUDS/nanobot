@@ -462,6 +462,42 @@ def test_settings_payload_includes_dynamic_custom_provider(
     assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == DYNAMIC_PROVIDER_API_BASE
 
 
+def test_settings_payload_groups_opencode_compatibility_alias(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    opencode_rows = [row for row in payload["providers"] if row["label"].startswith("OpenCode")]
+
+    assert [(row["name"], row["label"]) for row in opencode_rows] == [
+        ("opencode", "OpenCode Zen"),
+        ("opencode_go", "OpenCode Go"),
+    ]
+
+
+def test_settings_payload_keeps_configured_opencode_legacy_alias(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "providers": {"opencodeZen": {"apiKey": "legacy-key"}},
+        "agents": {
+            "defaults": {
+                "provider": "opencode_zen",
+                "model": "opencode/deepseek-v4-pro",
+            }
+        },
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    zen_rows = [row for row in payload["providers"] if row["label"] == "OpenCode Zen"]
+
+    assert len(zen_rows) == 1
+    assert zen_rows[0]["name"] == "opencode_zen"
+    assert zen_rows[0]["configured"] is True
+
+
 def test_settings_payload_marks_dynamic_custom_provider_without_api_base_unconfigured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

@@ -379,6 +379,38 @@ def _provider_settings_row(
     return row
 
 
+def _provider_settings_rows(config: Any, selected_provider: str | None) -> list[dict[str, Any]]:
+    """Return one Settings row per provider family while preserving legacy configs."""
+    aliases: dict[str, list[Any]] = {}
+    for spec in PROVIDERS:
+        if spec.settings_alias_for:
+            aliases.setdefault(spec.settings_alias_for, []).append(spec)
+
+    rows: list[dict[str, Any]] = []
+    for canonical in PROVIDERS:
+        if canonical.settings_alias_for:
+            continue
+        candidates = [canonical, *aliases.get(canonical.name, [])]
+        chosen = next((spec for spec in candidates if spec.name == selected_provider), None)
+        if chosen is None:
+            chosen = next(
+                (
+                    spec
+                    for spec in candidates
+                    if (provider_config := getattr(config.providers, spec.name, None)) is not None
+                    and _provider_configured_for_settings(spec, provider_config)
+                ),
+                canonical,
+            )
+        provider_config = getattr(config.providers, chosen.name, None)
+        if provider_config is None:
+            continue
+        row = _provider_settings_row(chosen.name, chosen, provider_config)
+        row["label"] = canonical.label
+        rows.append(row)
+    return rows
+
+
 def _model_catalog_kind(spec: Any) -> str:
     catalog = getattr(spec, "model_catalog", "auto")
     if catalog != "auto":
@@ -736,12 +768,7 @@ def settings_payload(
         spec = find_by_name(effective_preset.provider)
         selected_provider = spec.name if spec else provider_name
 
-    providers = []
-    for spec in PROVIDERS:
-        provider_config = getattr(config.providers, spec.name, None)
-        if provider_config is None:
-            continue
-        providers.append(_provider_settings_row(spec.name, spec, provider_config))
+    providers = _provider_settings_rows(config, selected_provider)
     for provider_key, provider_config in _dynamic_provider_items(config):
         providers.append(
             _provider_settings_row(

@@ -44,6 +44,7 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
     model_catalog: str = "auto"  # WebUI model-list source
     builtin_models: tuple[ProviderModelSpec, ...] = ()
+    settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
@@ -209,6 +210,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("opencode/", "opencode_zen", "opencode-zen"),
         env_key="OPENCODE_API_KEY",
         display_name="OpenCode Zen",
+        settings_alias_for="opencode",
         backend="openai_compat",
         is_gateway=True,
         detect_by_base_keyword="opencode.ai/zen",
