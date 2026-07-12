@@ -369,15 +369,18 @@ function ChannelSetupSurface({
   return (
     <div className="mt-5 overflow-hidden rounded-[16px] border border-border/70 bg-background shadow-none">
       <section className="px-4 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-semibold text-foreground">
-              {tx("settings.channels.requiredSetup", "Required setup")}
-            </div>
-            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{requirements}</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[13px] font-semibold text-foreground">
+            {tx("settings.channels.requiredSetup", "Required setup")}
           </div>
-          <div className="flex shrink-0 flex-wrap justify-end gap-2">
-            <ChannelValidationBadge validation={validation} validating={validating} feature={feature} />
+          <div className="flex max-w-full flex-wrap justify-end gap-2">
+            {mode !== "webui" ? (
+              <ChannelValidationBadge
+                validation={validation}
+                validating={validating}
+                feature={feature}
+              />
+            ) : null}
             {mode === "webui" ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
                 <Check className="h-3.5 w-3.5" aria-hidden />
@@ -386,6 +389,7 @@ function ChannelSetupSurface({
             ) : null}
           </div>
         </div>
+        <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{requirements}</p>
 
         <p className="mt-3 text-[12.5px] leading-5 text-muted-foreground">{summary}</p>
         <ChannelValidationDetails validation={validation} />

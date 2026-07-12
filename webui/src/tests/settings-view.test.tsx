@@ -1408,6 +1408,8 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getAllByText("WebSocket")).toHaveLength(2);
     expect(screen.queryByText("Required for WebUI")).not.toBeInTheDocument();
     expect(screen.getAllByText("On").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Managed by WebUI")).toBeInTheDocument();
+    expect(screen.queryByText("Configured manually")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disable channel" })).not.toBeInTheDocument();
     const websocketSwitch = screen.getByRole("switch", { name: "WebSocket channel" });
     expect(websocketSwitch).toBeDisabled();
