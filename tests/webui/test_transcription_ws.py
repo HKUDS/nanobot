@@ -42,6 +42,33 @@ async def test_webui_transcribe_audio_rejects_unconfigured_provider(
 
 
 @pytest.mark.asyncio
+async def test_webui_transcribe_audio_rejects_missing_api_key_placeholder(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "${MISSING_GROQ_TRANSCRIPTION_KEY}"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.delenv("MISSING_GROQ_TRANSCRIPTION_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-fallback")
+
+    event, payload = await webui_transcription_event({
+        "request_id": "voice-1",
+        "data_url": _audio_data_url(),
+    })
+
+    assert event == "transcription_error"
+    assert payload == {
+        "request_id": "voice-1",
+        "detail": "not_configured",
+        "provider": "groq",
+    }
+
+
+@pytest.mark.asyncio
 async def test_webui_transcribe_audio_rejects_unsupported_mime(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

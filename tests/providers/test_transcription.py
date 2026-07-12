@@ -132,6 +132,73 @@ def test_resolver_supports_siliconflow_transcription_provider() -> None:
     assert resolved.api_base == "https://api.siliconflow.cn/v1"
 
 
+def test_resolver_expands_selected_api_key_placeholder() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "${GROQ_TRANSCRIPTION_KEY}"
+
+    with patch.dict(
+        os.environ,
+        {"GROQ_TRANSCRIPTION_KEY": "gsk-from-env"},
+        clear=True,
+    ):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_key == "gsk-from-env"
+    assert resolved.configured is True
+    assert config.providers.groq.api_key == "${GROQ_TRANSCRIPTION_KEY}"
+
+
+def test_resolver_missing_explicit_placeholder_does_not_use_fallback() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "${MISSING_GROQ_TRANSCRIPTION_KEY}"
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk-fallback"}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_key == ""
+    assert resolved.configured is False
+
+
+def test_resolver_missing_placeholder_empties_composite_key() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "prefix-${PRESENT_KEY}-${MISSING_KEY}"
+
+    with patch.dict(
+        os.environ,
+        {"PRESENT_KEY": "present", "GROQ_API_KEY": "gsk-fallback"},
+        clear=True,
+    ):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_key == ""
+
+
+def test_resolver_ignores_unrelated_missing_placeholder() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "gsk-test"
+    config.providers.openai.api_key = "${MISSING_OPENAI_TRANSCRIPTION_KEY}"
+
+    with patch.dict(os.environ, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_key == "gsk-test"
+    assert config.providers.openai.api_key == "${MISSING_OPENAI_TRANSCRIPTION_KEY}"
+
+
+def test_resolver_uses_registry_api_key_fallback_for_empty_key() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk-fallback"}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_key == "gsk-fallback"
+
+
 def test_resolver_defaults_siliconflow_transcription_api_base() -> None:
     config = Config()
     config.transcription.provider = "siliconflow"

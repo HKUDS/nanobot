@@ -9,6 +9,7 @@ HTTP details; those live in ``nanobot.providers.transcription``.
 from __future__ import annotations
 
 import os
+import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,10 +82,28 @@ def _provider_default_api_base(provider: str) -> str | None:
     return spec.default_api_base if spec else None
 
 
+_ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _resolve_env_placeholders(value: str) -> str:
+    missing = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal missing
+        resolved = os.environ.get(match.group(1))
+        if resolved is None:
+            missing = True
+            return ""
+        return resolved
+
+    resolved = _ENV_REF_PATTERN.sub(replace, value)
+    return "" if missing else resolved
+
+
 def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
     api_key = getattr(provider_cfg, "api_key", None) if provider_cfg else None
     if api_key:
-        return api_key
+        return _resolve_env_placeholders(api_key)
 
     spec = find_by_name(provider)
     if provider == "siliconflow":
@@ -93,7 +112,7 @@ def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
             return env_key
 
     env_key = spec.env_key if spec else ""
-    return os.environ.get(env_key) if env_key else ""
+    return (os.environ.get(env_key) or "") if env_key else ""
 
 
 def _resolve_transcription_api_base(provider: str, provider_cfg: Any) -> str:
