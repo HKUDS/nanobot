@@ -8,6 +8,7 @@ Use this page when you know what you want to run and need the command shape. For
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
+| Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
 | Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
 | Check config without calling a model | `nanobot status` | Summarizes the selected config, workspace, active model, and providers |
@@ -58,6 +59,7 @@ with `--background`, use `nanobot gateway stop`.
 | Command | Description |
 |---|---|
 | `nanobot onboard` | Initialize or refresh the default config and workspace |
+| `nanobot onboard --refresh` | Refresh an existing config without prompting, preserving existing values |
 | `nanobot onboard --wizard` | Use the interactive setup wizard |
 | `nanobot onboard --config <path> --workspace <path>` | Initialize or refresh a specific instance |
 
@@ -79,6 +81,8 @@ Default paths:
 | `nanobot agent --config <path>` | Use a specific config file |
 | `nanobot agent --no-markdown` | Print plain text instead of Rich-rendered Markdown |
 | `nanobot agent --logs` | Show runtime logs while chatting |
+
+In interactive mode, `Enter` sends the current message. Press `Alt+Enter` to add a newline before sending.
 
 Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
@@ -184,6 +188,9 @@ rename, delete, search, and copy the command for each trigger.
 For webhooks or other external systems, run your own small service and have it
 call this CLI after it decides what message nanobot should receive.
 
+See [Automations](./automations.md) for the broader automation model, WebUI
+management, and delivery behavior.
+
 ## OpenAI-Compatible API
 
 | Command | Description |
@@ -201,6 +208,8 @@ Default API endpoint:
 ```text
 http://127.0.0.1:8900
 ```
+
+Public binds (`0.0.0.0` or `::`) require `api.apiKey`; send it as a Bearer token on API routes.
 
 See [`openai-api.md`](./openai-api.md) for request examples.
 

@@ -121,6 +121,7 @@
       "presetModel": "Model preset",
       "density": "Kerapatan",
       "activityMode": "Detail aktivitas",
+      "fileEditDisplay": "Tampilan edit file",
       "codeWrap": "Bungkus kode",
       "maxResults": "Hasil maksimum",
       "timeout": "Batas waktu",
@@ -165,6 +166,7 @@
       "presetModel": "Beralih ke Default untuk mengedit model dan penyedia dari WebUI.",
       "density": "Hanya disimpan di browser ini.",
       "activityMode": "Pilih seberapa banyak detail aktivitas agen yang ditampilkan secara default.",
+      "fileEditDisplay": "Pilih aktivitas edit file dibuka sebagai jumlah baris atau diff.",
       "codeWrap": "Menjaga baris kode panjang tetap terbaca di layar kecil.",
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
@@ -214,6 +216,9 @@
       "compact": "Ringkas",
       "auto": "Otomatis",
       "expanded": "Diperluas",
+      "summary": "Ringkasan",
+      "diff": "Diff",
+      "collapsedDiff": "Diff diciutkan",
       "on": "Aktif",
       "off": "Nonaktif",
       "defaultPermission": "Izin default",
@@ -895,7 +900,7 @@
         "commands": {
           "new": {
             "title": "Obrolan baru",
-            "description": "Hentikan tugas saat ini dan mulai percakapan baru."
+            "description": "Reset chat ini dan mulai percakapan baru."
           },
           "stop": {
             "title": "Hentikan tugas saat ini",
@@ -1022,6 +1027,14 @@
     "copyReply": "Salin",
     "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
+    "fileEditViewDiff": "Lihat diff",
+    "fileEditViewLargeDiff": "Lihat diff besar",
+    "fileEditDiffLineCount": "{{count}} baris",
+    "fileEditUnchangedLinesHidden": "{{count}} baris tidak berubah disembunyikan",
+    "fileEditShowMoreLines": "Tampilkan {{count}} baris lagi",
+    "fileEditShowFewerLines": "Tampilkan lebih sedikit baris",
+    "fileEditOpenFile": "Buka file",
+    "fileEditDiffTruncated": "Diff dipotong. Buka file untuk melihat perubahan lengkap.",
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",
     "activityThoughtFor": "Selesai berpikir dalam {{duration}}",

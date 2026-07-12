@@ -87,7 +87,7 @@ export function FileReferenceChip({
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
-                  "min-w-0 max-w-full truncate",
+                  "min-w-0 max-w-full [overflow-wrap:anywhere] sm:truncate",
                   active && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}

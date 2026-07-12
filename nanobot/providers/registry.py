@@ -179,7 +179,20 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         gateway_reasoning_style="reasoning_effort",
     ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
-    # OpenCode's own config uses "opencode/<model>"; send the bare model upstream.
+    # models.dev/OpenCode use provider id "opencode" and model ids like
+    # "opencode/<model>"; send the bare model upstream.
+    ProviderSpec(
+        name="opencode",
+        keywords=("opencode/", "opencode", "opencode-zen", "opencode_zen"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode.ai/zen",
+        default_api_base="https://opencode.ai/zen/v1",
+        strip_model_prefixes=("opencode", "opencode_zen", "opencode-zen"),
+    ),
+    # Compatibility alias for configs that already used providers.opencodeZen.
     ProviderSpec(
         name="opencode_zen",
         keywords=("opencode/", "opencode_zen", "opencode-zen"),

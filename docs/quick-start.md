@@ -115,7 +115,7 @@ Initialization creates:
 | `~/.nanobot/config.json` | Main settings file for providers, models, channels, tools, gateway, and API |
 | `~/.nanobot/workspace/` | Agent workspace for memory, sessions, heartbeat tasks, skills, and artifacts |
 
-If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values.
+If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values. Use `nanobot onboard --refresh` to do the same refresh without an interactive prompt.
 
 ## 3. Configure a Provider
 
@@ -241,7 +241,7 @@ Start the browser workbench:
 nanobot webui
 ```
 
-`nanobot webui` prepares the local WebSocket channel if needed, starts the gateway, and opens `http://127.0.0.1:8765`. First-run WebUI setup binds to `127.0.0.1` by default, so it is not exposed to your LAN. Use `nanobot webui --background` when you want the gateway to keep running without an open terminal.
+`nanobot webui` prepares the local WebSocket channel and WebUI bootstrap secret if needed, starts the gateway, and opens `http://127.0.0.1:8765`. First-run WebUI setup binds to `127.0.0.1` by default, so it is not exposed to your LAN. Use `nanobot webui --background` when you want the gateway to keep running without an open terminal.
 
 ## 6. Test One CLI Message
 
@@ -278,6 +278,8 @@ Then update ~/.nanobot/config.json to add a model preset named "primary" for my 
 Tell me exactly what changed and whether I need to run /restart.
 ```
 
+In interactive mode, `Enter` sends the current message. Press `Alt+Enter` to add a newline before sending.
+
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ## 7. Choose Your Next Step
@@ -288,7 +290,7 @@ Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
 | Understand provider/model matching | [`providers.md`](./providers.md) |
 | Open the bundled browser UI | [`webui.md`](./webui.md) |
-| Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
+| Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [`chat-apps.md`](./chat-apps.md) |
 | Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
 | Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
 | Debug a failure | [`troubleshooting.md`](./troubleshooting.md) |

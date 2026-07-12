@@ -20,6 +20,7 @@ import type {
   SkillDetail,
   SkillsPayload,
   SlashCommand,
+  SlashCommandLifecycle,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
@@ -29,6 +30,20 @@ import type {
 import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
+const SLASH_COMMAND_LIFECYCLES = new Set<SlashCommandLifecycle>([
+  "side_channel",
+  "finalize_active_turn",
+  "stop_active_turn",
+  "agent_turn",
+  "agent_turn_with_args",
+]);
+
+function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle {
+  return (
+    typeof value === "string"
+    && SLASH_COMMAND_LIFECYCLES.has(value as SlashCommandLifecycle)
+  );
+}
 
 export class ApiError extends Error {
   status: number;
@@ -498,6 +513,8 @@ export async function listSlashCommands(
     description: string;
     icon: string;
     arg_hint?: string;
+    lifecycle?: unknown;
+    accepts_args?: unknown;
   };
   const body = await request<{ commands: Row[] }>(
     `${base}/api/commands`,
@@ -506,14 +523,18 @@ export async function listSlashCommands(
     API_READ_TIMEOUT_MS,
   );
   return body.commands
-    .filter((command) => !["/stop", "/restart"].includes(command.command))
-    .map((command) => ({
-      command: command.command,
-      title: command.title,
-      description: command.description,
-      icon: command.icon,
-      argHint: command.arg_hint ?? "",
-    }));
+    .flatMap((command) => {
+      if (!isSlashCommandLifecycle(command.lifecycle)) return [];
+      return [{
+        command: command.command,
+        title: command.title,
+        description: command.description,
+        icon: command.icon,
+        argHint: command.arg_hint ?? "",
+        lifecycle: command.lifecycle,
+        acceptsArgs: command.accepts_args === true,
+      }];
+    });
 }
 
 export async function fetchSidebarState(

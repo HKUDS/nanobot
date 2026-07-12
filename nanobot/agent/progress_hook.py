@@ -28,26 +28,16 @@ class AgentProgressHook(AgentHook):
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         *,
-        channel: str = "cli",
-        chat_id: str = "direct",
-        message_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         tool_hint_max_length: int = 40,
-        set_tool_context: Callable[..., None] | None = None,
         on_iteration: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._on_progress = on_progress
         self._on_stream = on_stream
         self._on_stream_end = on_stream_end
-        self._channel = channel
-        self._chat_id = chat_id
-        self._message_id = message_id
-        self._metadata = metadata or {}
         self._session_key = session_key
         self._tool_hint_max_length = tool_hint_max_length
-        self._set_tool_context = set_tool_context
         self._on_iteration = on_iteration
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
@@ -124,15 +114,6 @@ class AgentProgressHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        if self._set_tool_context:
-            self._set_tool_context(
-                self._channel,
-                self._chat_id,
-                self._message_id,
-                self._metadata,
-                session_key=self._session_key,
-            )
-
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         """Publish a reasoning chunk; channel plugins decide whether to render."""
         if (

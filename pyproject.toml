@@ -85,6 +85,7 @@ qq = [
     "qq-botpy>=1.2.0,<2.0.0",
 ]
 slack = [
+    "aiohttp>=3.9.0,<4.0.0",
     "slack-sdk>=3.39.0,<4.0.0",
     "slackify-markdown>=0.2.0,<1.0.0",
 ]

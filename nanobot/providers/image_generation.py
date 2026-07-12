@@ -1395,25 +1395,6 @@ async def _openai_images_from_payload(
     return images
 
 
-def _codex_responses_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract images from Codex Responses API ``image_generation_call`` output."""
-    images: list[str] = []
-    for item in payload.get("output") or []:
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") != "image_generation_call":
-            continue
-        result = item.get("result")
-        if isinstance(result, str):
-            images.append(result if result.startswith("data:image/") else _b64_image_data_url(result))
-            continue
-        if isinstance(result, dict):
-            image_url = result.get("image_url") or result.get("image") or ""
-            if isinstance(image_url, str):
-                images.append(image_url if image_url.startswith("data:image/") else _b64_image_data_url(image_url))
-    return images
-
-
 async def _parse_codex_sse_images(
     response: httpx.Response,
 ) -> tuple[list[str], str]:

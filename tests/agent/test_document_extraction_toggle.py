@@ -53,6 +53,7 @@ async def test_state_restore_extracts_documents_by_default(
         session_key="cli:c",
         state=TurnState.RESTORE,
         turn_id="turn-1",
+        runtime=loop.llm_runtime(),
     )
 
     assert await loop._state_restore(ctx) == "ok"
@@ -87,6 +88,7 @@ async def test_state_restore_references_documents_when_extraction_disabled(
         session_key="cli:c",
         state=TurnState.RESTORE,
         turn_id="turn-1",
+        runtime=loop.llm_runtime(),
     )
 
     assert await loop._state_restore(ctx) == "ok"
@@ -133,6 +135,7 @@ async def test_pending_followup_references_documents_when_extraction_disabled(
 
     final_content, _, _, _, had_injections = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
+        runtime=loop.llm_runtime(),
         channel="cli",
         chat_id="c",
         pending_queue=pending_queue,

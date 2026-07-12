@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
@@ -785,6 +786,7 @@ def write_session_messages_as_transcript(
     for msg in messages:
         if is_hidden_history_message(msg):
             continue
+        msg = public_history_message(msg)
         role = msg.get("role")
         content = msg.get("content")
         text = content if isinstance(content, str) else ""
@@ -876,6 +878,7 @@ def _session_user_event(
         return None
     if is_hidden_history_message(message):
         return None
+    message = public_history_message(message)
     if _is_legacy_raw_subagent_result(message):
         return None
     content = message.get("content")
@@ -1525,15 +1528,49 @@ def replay_transcript_to_ui_messages(
                         )
                     ):
                         return i
-            existing_tool_events = candidate.get("toolEvents")
-            if isinstance(existing_tool_events, list):
-                for event in existing_tool_events:
-                    if not isinstance(event, dict):
-                        continue
-                    key = _tool_event_file_edit_key(event)
-                    if key and key in incoming_tool_event_keys:
-                        return i
         return None
+
+    def trace_message_is_empty(message: dict[str, Any]) -> bool:
+        traces = message.get("traces")
+        if isinstance(traces, list):
+            has_trace = any(isinstance(trace, str) and trace.strip() for trace in traces)
+        else:
+            has_trace = bool(str(message.get("content") or "").strip())
+        return (
+            message.get("kind") == "trace"
+            and not has_trace
+            and not message.get("toolEvents")
+            and not message.get("fileEdits")
+            and not message.get("media")
+        )
+
+    def strip_covered_file_edit_tool_hints_from_recent_messages(
+        edits: list[dict[str, Any]],
+        turn_fields: dict[str, Any],
+    ) -> None:
+        nonlocal messages
+        if not edits:
+            return
+        next_messages = list(messages)
+        changed = False
+        for i in range(len(next_messages) - 1, -1, -1):
+            candidate = next_messages[i]
+            if candidate.get("role") == "user":
+                break
+            if candidate.get("kind") != "trace":
+                continue
+            if not _same_turn(candidate, turn_fields):
+                continue
+            cleaned = _strip_covered_file_edit_tool_hints(candidate, edits)
+            if cleaned is candidate:
+                continue
+            changed = True
+            if trace_message_is_empty(cleaned):
+                next_messages.pop(i)
+            else:
+                next_messages[i] = cleaned
+        if changed:
+            messages = next_messages
 
     def upsert_file_edits(
         edits: list[dict[str, Any]],
@@ -1549,12 +1586,12 @@ def replay_transcript_to_ui_messages(
             segment = _new_activity_segment(activate=False)
             active_file_edit_segment_id = segment
         demote_interrupted_assistant(segment)
+        strip_covered_file_edit_tool_hints_from_recent_messages(edits, turn_fields)
         target_index = find_file_edit_trace_index(segment, edits)
         if target_index is not None:
             last = messages[target_index]
             segment = str(last.get("activitySegmentId") or segment or _new_activity_segment(activate=False))
             active_file_edit_segment_id = segment
-            last = _strip_covered_file_edit_tool_hints(last, edits)
         else:
             if not segment:
                 segment = _new_activity_segment(activate=False)

@@ -121,6 +121,7 @@
       "presetModel": "預設模型",
       "density": "密度",
       "activityMode": "活動細節",
+      "fileEditDisplay": "檔案編輯顯示",
       "codeWrap": "程式碼換行",
       "maxResults": "最大結果數",
       "timeout": "逾時",
@@ -165,6 +166,7 @@
       "presetModel": "切回 Default 後可在 WebUI 中編輯模型與供應商。",
       "density": "只儲存在此瀏覽器中。",
       "activityMode": "選擇預設顯示多少 agent 活動細節。",
+      "fileEditDisplay": "選擇檔案編輯活動預設顯示行數或差異。",
       "codeWrap": "讓長程式碼行在小螢幕上也易讀。",
       "maxResults": "每次 web_search 呼叫返回的結果數。",
       "timeout": "搜尋供應商請求逾時前的秒數。",
@@ -214,6 +216,9 @@
       "compact": "緊湊",
       "auto": "自動",
       "expanded": "展開",
+      "summary": "摘要",
+      "diff": "差異",
+      "collapsedDiff": "摺疊差異",
       "on": "開啟",
       "off": "關閉",
       "defaultPermission": "預設權限",
@@ -895,7 +900,7 @@
         "commands": {
           "new": {
             "title": "新增對話",
-            "description": "停止目前任務，並開始新的對話。"
+            "description": "重置目前對話，並開始新的對話。"
           },
           "stop": {
             "title": "停止目前任務",
@@ -1022,6 +1027,14 @@
     "copyReply": "複製",
     "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",
+    "fileEditViewDiff": "查看差異",
+    "fileEditViewLargeDiff": "查看大型差異",
+    "fileEditDiffLineCount": "{{count}} 行",
+    "fileEditUnchangedLinesHidden": "已隱藏 {{count}} 行未修改內容",
+    "fileEditShowMoreLines": "顯示其餘 {{count}} 行",
+    "fileEditShowFewerLines": "收起部分行",
+    "fileEditOpenFile": "開啟檔案",
+    "fileEditDiffTruncated": "差異內容已截斷。開啟檔案可查看完整更改。",
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",

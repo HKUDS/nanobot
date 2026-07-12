@@ -127,6 +127,25 @@ class GatewayRuntime:
         self._subprocess_run = subprocess_run
         self._sleep = sleep
 
+    @classmethod
+    def refresh_state_pid(cls, *, paths: GatewayRuntimePaths) -> None:
+        """Update the PID in an existing state file to ``os.getpid()``.
+
+        Called early in gateway server startup so the state file self-heals
+        after any restart, regardless of platform or restart mechanism.
+        """
+        if not paths.state_path.exists():
+            return
+        try:
+            state = json.loads(paths.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        state["pid"] = os.getpid()
+        rt = cls(paths=paths)
+        state["identity"] = rt._process_identity(os.getpid())
+        state["started_at"] = _utc_now()
+        rt._write_state(state)
+
     def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
         """Start gateway as a detached background process."""
         current = self.status()

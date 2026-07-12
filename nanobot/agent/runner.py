@@ -21,16 +21,6 @@ from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.session.history_visibility import is_hidden_history_message
-from nanobot.utils.file_edit_events import (
-    StreamingFileEditTracker,
-    build_file_edit_end_event,
-    build_file_edit_error_event,
-    build_file_edit_start_event,
-    prepare_file_edit_trackers,
-)
-from nanobot.utils.file_edit_events import (
-    prepare_file_edit_tracker as _prepare_file_edit_tracker,
-)
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
@@ -40,10 +30,7 @@ from nanobot.utils.helpers import (
     strip_reasoning_tags,
     strip_think,
 )
-from nanobot.utils.progress_events import (
-    invoke_file_edit_progress,
-    on_progress_accepts_file_edit_events,
-)
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
@@ -68,10 +55,6 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
-# Backward-compatible module attribute for tests/extensions that monkeypatch
-# the former single-file tracker hook. Runtime uses prepare_file_edit_trackers.
-prepare_file_edit_tracker = _prepare_file_edit_tracker
-
 
 @dataclass(slots=True)
 class AgentRunSpec:
@@ -79,12 +62,9 @@ class AgentRunSpec:
 
     initial_messages: list[dict[str, Any]]
     tools: ToolRegistry
-    model: str
+    runtime: LLMRuntime
     max_iterations: int
     max_tool_result_chars: int
-    temperature: float | None = None
-    max_tokens: int | None = None
-    reasoning_effort: str | None = None
     hook: AgentHook | None = None
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
@@ -92,7 +72,6 @@ class AgentRunSpec:
     fail_on_tool_error: bool = False
     workspace: Path | None = None
     session_key: str | None = None
-    context_window_tokens: int | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
@@ -123,8 +102,7 @@ class AgentRunResult:
 class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
-    def __init__(self, provider: LLMProvider):
-        self.provider = provider
+    def __init__(self) -> None:
         self.context_governor = ContextGovernor()
 
     @staticmethod
@@ -207,7 +185,7 @@ class AgentRunner:
                     {
                         "phase": "final_response",
                         "iteration": iteration,
-                        "model": spec.model,
+                        "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
                         "pending_tool_calls": [],
@@ -362,15 +340,15 @@ class AgentRunner:
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
         governance_config = ContextGovernanceConfig(
-            provider=self.provider,
-            model=spec.model,
+            provider=spec.runtime.provider,
+            model=spec.runtime.model,
             tools=spec.tools,
             workspace=spec.workspace,
             session_key=spec.session_key,
             max_tool_result_chars=spec.max_tool_result_chars,
-            context_window_tokens=spec.context_window_tokens,
+            context_window_tokens=spec.runtime.context_window_tokens,
             context_block_limit=spec.context_block_limit,
-            max_tokens=spec.max_tokens,
+            max_tokens=spec.runtime.generation.max_tokens,
             inflight_start_index=len(spec.initial_messages),
         )
 
@@ -447,7 +425,7 @@ class AgentRunner:
                     {
                         "phase": "awaiting_tools",
                         "iteration": iteration,
-                        "model": spec.model,
+                        "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
                         "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
@@ -461,6 +439,8 @@ class AgentRunner:
                     response.tool_calls,
                     external_lookup_counts,
                     workspace_violation_counts,
+                    hook,
+                    context,
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(
@@ -507,7 +487,7 @@ class AgentRunner:
                     {
                         "phase": "tools_completed",
                         "iteration": iteration,
-                        "model": spec.model,
+                        "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": completed_tool_results,
                         "pending_tool_calls": [],
@@ -661,7 +641,7 @@ class AgentRunner:
                 {
                     "phase": "final_response",
                     "iteration": iteration,
-                    "model": spec.model,
+                    "model": spec.runtime.model,
                     "assistant_message": messages[-1],
                     "completed_tool_results": [],
                     "pending_tool_calls": [],
@@ -718,16 +698,14 @@ class AgentRunner:
         kwargs: dict[str, Any] = {
             "messages": messages,
             "tools": tools,
-            "model": spec.model,
+            "model": spec.runtime.model,
             "retry_mode": spec.provider_retry_mode,
             "on_retry_wait": spec.retry_wait_callback,
         }
-        if spec.temperature is not None:
-            kwargs["temperature"] = spec.temperature
-        if spec.max_tokens is not None:
-            kwargs["max_tokens"] = spec.max_tokens
-        if spec.reasoning_effort is not None:
-            kwargs["reasoning_effort"] = spec.reasoning_effort
+        generation = spec.runtime.generation
+        kwargs["temperature"] = generation.temperature
+        kwargs["max_tokens"] = generation.max_tokens
+        kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
 
     async def _request_model(
@@ -762,28 +740,10 @@ class AgentRunner:
             not wants_streaming
             and spec.stream_progress_deltas
             and spec.progress_callback is not None
-            and getattr(self.provider, "supports_progress_deltas", False) is True
+            and getattr(spec.runtime.provider, "supports_progress_deltas", False) is True
         )
 
         progress_state: dict[str, bool] | None = None
-        live_file_edits: StreamingFileEditTracker | None = None
-
-        if (
-            spec.progress_callback is not None
-            and on_progress_accepts_file_edit_events(spec.progress_callback)
-        ):
-            async def _emit_live_file_edits(events: list[dict[str, Any]]) -> None:
-                await invoke_file_edit_progress(spec.progress_callback, events)
-
-            live_file_edits = StreamingFileEditTracker(
-                workspace=spec.workspace,
-                tools=spec.tools,
-                emit=_emit_live_file_edits,
-            )
-
-        async def _tool_call_delta(delta: dict[str, Any]) -> None:
-            if live_file_edits is not None:
-                await live_file_edits.update(delta)
 
         if wants_streaming:
             thinking_buf = ""
@@ -808,11 +768,10 @@ class AgentRunner:
             async def _stream_recover() -> None:
                 await hook.on_stream_end(context, resuming=True)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
-                on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
                 on_stream_recover=_stream_recover,
             )
         elif wants_progress_streaming:
@@ -840,13 +799,12 @@ class AgentRunner:
                     context.streamed_content = True
                     await spec.progress_callback(incremental)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
-                on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
             )
         else:
-            coro = self.provider.chat_with_retry(**kwargs)
+            coro = spec.runtime.provider.chat_with_retry(**kwargs)
 
         # Streaming requests already have provider-level idle timeouts
         # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
@@ -858,14 +816,6 @@ class AgentRunner:
                 await coro if outer_timeout_s is None
                 else await asyncio.wait_for(coro, timeout=outer_timeout_s)
             )
-            if live_file_edits is not None:
-                await live_file_edits.flush()
-                if response.should_execute_tools:
-                    live_file_edits.apply_final_call_ids(response.tool_calls)
-                await live_file_edits.error_unmatched(
-                    response.tool_calls if response.should_execute_tools else [],
-                    "Tool call did not complete.",
-                )
         except asyncio.TimeoutError:
             if outer_timeout_s is None:
                 return LLMResponse(
@@ -1029,7 +979,7 @@ class AgentRunner:
         messages: list[dict[str, Any]],
     ) -> LLMResponse:
         kwargs = self._build_request_kwargs(spec, messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        return await spec.runtime.provider.chat_with_retry(**kwargs)
 
     @staticmethod
     def _budget_exhausted_finalization_messages(
@@ -1077,7 +1027,12 @@ class AgentRunner:
             tools = spec.tools.get_definitions()
         except Exception:
             tools = None
-        prompt_tokens, _ = estimate_prompt_tokens_chain(self.provider, spec.model, messages, tools)
+        prompt_tokens, _ = estimate_prompt_tokens_chain(
+            spec.runtime.provider,
+            spec.runtime.model,
+            messages,
+            tools,
+        )
         assistant_message = build_assistant_message(
             response.content or "",
             tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
@@ -1131,14 +1086,23 @@ class AgentRunner:
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
+        hook: AgentHook | None = None,
+        context: AgentHookContext | None = None,
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+        hook = hook or AgentHook()
+        context = context or AgentHookContext(iteration=0, messages=[])
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
                     self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        spec,
+                        tool_call,
+                        external_lookup_counts,
+                        workspace_violation_counts,
+                        hook,
+                        context,
                     )
                     for tool_call in batch
                 ))
@@ -1147,7 +1111,12 @@ class AgentRunner:
                 batch_results = []
                 for tool_call in batch:
                     result = await self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        spec,
+                        tool_call,
+                        external_lookup_counts,
+                        workspace_violation_counts,
+                        hook,
+                        context,
                     )
                     tool_results.append(result)
                     batch_results.append(result)
@@ -1168,7 +1137,11 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
+        hook: AgentHook | None = None,
+        context: AgentHookContext | None = None,
     ) -> tuple[Any, dict[str, str], BaseException | None]:
+        hook = hook or AgentHook()
+        context = context or AgentHookContext(iteration=0, messages=[])
         hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
@@ -1209,30 +1182,7 @@ class AgentRunner:
             return prep_error + hint, event, (
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None
             )
-        emit_file_edit_events = (
-            spec.progress_callback is not None
-            and on_progress_accepts_file_edit_events(spec.progress_callback)
-        )
-        progress_callback = spec.progress_callback if emit_file_edit_events else None
-        file_edit_trackers = (
-            prepare_file_edit_trackers(
-                call_id=tool_call.id,
-                tool_name=tool_call.name,
-                tool=tool,
-                workspace=spec.workspace,
-                params=params if isinstance(params, dict) else None,
-            )
-            if progress_callback is not None
-            else None
-        )
-        if file_edit_trackers and progress_callback is not None:
-            await invoke_file_edit_progress(
-                progress_callback,
-                [build_file_edit_start_event(
-                    file_edit_tracker,
-                    params if isinstance(params, dict) else None,
-                ) for file_edit_tracker in file_edit_trackers],
-            )
+        await hook.before_execute_tool(context, tool_call, tool, params)
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -1241,14 +1191,7 @@ class AgentRunner:
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
-            if file_edit_trackers and progress_callback is not None:
-                await invoke_file_edit_progress(
-                    progress_callback,
-                    [
-                        build_file_edit_error_event(file_edit_tracker, str(exc))
-                        for file_edit_tracker in file_edit_trackers
-                    ],
-                )
+            await hook.on_execute_tool_error(context, tool_call, tool, params, exc)
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -1270,14 +1213,7 @@ class AgentRunner:
             return payload, event, None
 
         if is_tool_error_result(tool_call.name, result):
-            if file_edit_trackers and progress_callback is not None:
-                await invoke_file_edit_progress(
-                    progress_callback,
-                    [
-                        build_file_edit_error_event(file_edit_tracker, result)
-                        for file_edit_tracker in file_edit_trackers
-                    ],
-                )
+            await hook.on_execute_tool_error(context, tool_call, tool, params, result)
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -1296,14 +1232,7 @@ class AgentRunner:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
 
-        if file_edit_trackers and progress_callback is not None:
-            await invoke_file_edit_progress(
-                progress_callback,
-                [build_file_edit_end_event(
-                    file_edit_tracker,
-                    params if isinstance(params, dict) else None,
-                ) for file_edit_tracker in file_edit_trackers],
-            )
+        await hook.after_execute_tool(context, tool_call, tool, params, result)
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()

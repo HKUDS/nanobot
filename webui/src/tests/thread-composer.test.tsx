@@ -19,6 +19,8 @@ const COMMANDS: SlashCommand[] = [
     title: "Stop current task",
     description: "Cancel the active agent turn.",
     icon: "square",
+    lifecycle: "stop_active_turn",
+    acceptsArgs: false,
   },
   {
     command: "/history",
@@ -26,6 +28,8 @@ const COMMANDS: SlashCommand[] = [
     description: "Print the last N persisted messages.",
     icon: "history",
     argHint: "[n]",
+    lifecycle: "side_channel",
+    acceptsArgs: true,
   },
 ];
 
@@ -850,6 +854,29 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
+  it("offers stop autocomplete once the user starts typing it", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/sto" } });
+
+    expect(screen.getByRole("option", { name: /\/stop/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("/stop");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("renders slash commands as direct actions with current status", () => {
     render(
       <ThreadComposer
@@ -863,6 +890,8 @@ describe("ThreadComposer", () => {
             description: "Show or switch the active model preset.",
             icon: "brain",
             argHint: "[preset]",
+            lifecycle: "side_channel",
+            acceptsArgs: true,
           },
           COMMANDS[1],
         ]}
@@ -886,7 +915,7 @@ describe("ThreadComposer", () => {
         onStop={onStop}
         isStreaming
         placeholder="Type your message..."
-        slashCommands={[COMMANDS[1]]}
+        slashCommands={COMMANDS}
       />,
     );
 
@@ -940,6 +969,8 @@ describe("ThreadComposer", () => {
             title: `Command ${index}`,
             description: `Description ${index}`,
             icon: "activity",
+            lifecycle: "side_channel",
+            acceptsArgs: false,
           }))}
         />,
       );
@@ -1312,6 +1343,175 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
   });
 
+  it("marks known slash commands as side-channel sends", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/history" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
+  });
+
+  it("does not infer side-channel behavior before command metadata loads", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/status", undefined, undefined);
+  });
+
+  it("marks new chat commands as side-channel sends that finalize the active turn", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/new",
+            title: "New chat",
+            description: "Reset this chat and start a fresh conversation.",
+            icon: "square-pen",
+            lifecycle: "finalize_active_turn",
+            acceptsArgs: false,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "/new",
+      undefined,
+      { sideChannel: true, finalizeActiveTurn: true },
+    );
+  });
+
+  it("does not classify exact-only slash commands with arguments", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/new",
+            title: "New chat",
+            description: "Reset this chat and start a fresh conversation.",
+            icon: "square-pen",
+            lifecycle: "finalize_active_turn",
+            acceptsArgs: false,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/new with a title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
+  });
+
+  it("routes a manually submitted stop command through the stop handler", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/stop" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps goal task commands on the normal agent turn path", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/goal",
+            title: "Start long-running goal",
+            description: "Tell the agent to treat the request as a long-running goal.",
+            icon: "activity",
+            argHint: "<goal>",
+            lifecycle: "agent_turn_with_args",
+            acceptsArgs: true,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/goal fix the release blocker" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "/goal fix the release blocker",
+      undefined,
+      undefined,
+    );
+  });
+
+  it("keeps goal usage commands on the side-channel path", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/goal",
+            title: "Start long-running goal",
+            description: "Tell the agent to treat the request as a long-running goal.",
+            icon: "activity",
+            argHint: "<goal>",
+            lifecycle: "agent_turn_with_args",
+            acceptsArgs: true,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/goal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/goal", undefined, { sideChannel: true });
+  });
+
   it("shows a stop button while streaming", () => {
     const onStop = vi.fn();
     render(
@@ -1352,6 +1552,158 @@ describe("ThreadComposer", () => {
 
     expect(onSend).toHaveBeenCalledWith("keep the UI minimal");
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
+  });
+
+  it("guides queued guidance when Enter is pressed again", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "send this guidance now" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("");
+    expect(screen.getByText("send this guidance now")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("send this guidance now")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("send this guidance now");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("send this guidance now")).not.toBeInTheDocument();
+  });
+
+  it("disarms the second Enter shortcut when keyboard voice recording starts", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => "voice guidance");
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+
+    await waitForVoiceCapture();
+    fireEvent.keyUp(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalled());
+  });
+
+  it("disarms the second Enter shortcut after stopping the active response", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+  });
+
+  it("disarms the second Enter shortcut when the composer loses focus", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "leave this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("leave this queued")).toBeInTheDocument();
+  });
+
+  it("guides the newly queued prompt when older guidance is still waiting", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "older guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "guide this one now" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("guide this one now");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("older guidance")).toBeInTheDocument();
+    expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
   });
 
   it("keeps queued guidance attached to the composer and sends it one item at a time", async () => {
@@ -1702,6 +2054,19 @@ describe("ThreadComposer", () => {
       expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
     });
 
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="chat-a"
+        placeholder="Type your message..."
+      />,
+    );
+    expect(await screen.findByText("remember this edited follow-up")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+
     unmount();
     const remount = render(
       <ThreadComposer
@@ -1714,6 +2079,8 @@ describe("ThreadComposer", () => {
     );
 
     expect(await screen.findByText("remember this edited follow-up")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
     expect(onSend).toHaveBeenCalledWith("remember this edited follow-up");
 

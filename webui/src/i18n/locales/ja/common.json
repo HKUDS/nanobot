@@ -121,6 +121,7 @@
       "presetModel": "プリセットモデル",
       "density": "表示密度",
       "activityMode": "アクティビティ詳細",
+      "fileEditDisplay": "ファイル編集表示",
       "codeWrap": "コードの折り返し",
       "maxResults": "最大結果数",
       "timeout": "タイムアウト",
@@ -165,6 +166,7 @@
       "presetModel": "Default に切り替えると、WebUI からモデルとプロバイダーを編集できます。",
       "density": "このブラウザーにのみ保存されます。",
       "activityMode": "既定で表示する agent アクティビティの詳細量を選択します。",
+      "fileEditDisplay": "ファイル編集アクティビティを行数または差分で表示します。",
       "codeWrap": "小さな画面でも長いコード行を読みやすくします。",
       "maxResults": "各 web_search 呼び出しで返す結果数です。",
       "timeout": "検索プロバイダーのリクエストがタイムアウトするまでの秒数です。",
@@ -214,6 +216,9 @@
       "compact": "コンパクト",
       "auto": "自動",
       "expanded": "展開",
+      "summary": "概要",
+      "diff": "差分",
+      "collapsedDiff": "折りたたみ差分",
       "on": "オン",
       "off": "オフ",
       "defaultPermission": "既定の権限",
@@ -895,7 +900,7 @@
         "commands": {
           "new": {
             "title": "新しいチャット",
-            "description": "現在のタスクを停止して、新しい会話を開始します。"
+            "description": "このチャットをリセットして、新しい会話を開始します。"
           },
           "stop": {
             "title": "現在のタスクを停止",
@@ -1022,6 +1027,14 @@
     "copyReply": "コピー",
     "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",
+    "fileEditViewDiff": "差分を表示",
+    "fileEditViewLargeDiff": "大きな差分を表示",
+    "fileEditDiffLineCount": "{{count}} 行",
+    "fileEditUnchangedLinesHidden": "未変更の {{count}} 行を非表示",
+    "fileEditShowMoreLines": "さらに {{count}} 行を表示",
+    "fileEditShowFewerLines": "表示行数を減らす",
+    "fileEditOpenFile": "ファイルを開く",
+    "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",
     "activityThoughtFor": "{{duration}}考えました",

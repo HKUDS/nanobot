@@ -194,6 +194,23 @@ def _is_blocked_device(path: str | Path) -> bool:
     return False
 
 
+def _builtin_skill_read_path(path: str) -> Path | None:
+    """Map workspace-relative skills/<name>/... reads onto bundled skills."""
+    from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+    requested = Path(path)
+    if requested.is_absolute():
+        return None
+    parts = requested.parts
+    if len(parts) < 2 or parts[0] != "skills":
+        return None
+    root = BUILTIN_SKILLS_DIR.resolve()
+    candidate = (root / Path(*parts[1:])).resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
     """Parse a page range like '2-5' into 0-based (start, end) inclusive."""
     parts = pages.strip().split("-")
@@ -275,6 +292,8 @@ class ReadFileTool(_FsTool):
                 return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
 
             fp = self._resolve_read(path)
+            if not fp.exists():
+                fp = _builtin_skill_read_path(path) or fp
             if _is_blocked_device(fp):
                 return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
             if not fp.exists():
@@ -602,6 +621,15 @@ class _MatchSpan:
     line: int
 
 
+def _match_end_line(match: _MatchSpan) -> int:
+    comparable = match.text[:-1] if match.text.endswith("\n") else match.text
+    return match.line + comparable.count("\n")
+
+
+def _match_covers_line(match: _MatchSpan, line: int) -> bool:
+    return match.line <= line <= _match_end_line(match)
+
+
 def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
     matches: list[_MatchSpan] = []
     start = 0
@@ -775,7 +803,10 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         ),
         line_hint=IntegerSchema(
             1,
-            description="Optional 1-based line hint used to choose the nearest match.",
+            description=(
+                "Optional exact 1-based target line copied from read_file. "
+                "The selected old_text match must cover this line."
+            ),
             minimum=1,
             nullable=True,
         ),
@@ -807,8 +838,9 @@ class EditFileTool(_FsTool):
             "with old_text copied from read_file. For multi-file, structural, "
             "or generated code edits, prefer apply_patch. If old_text matches "
             "multiple times, provide more context or set occurrence, line_hint, "
-            "replace_all, and expected_replacements. Shows closest-match "
-            "diagnostics on failure."
+            "replace_all, and expected_replacements. When editing from numbered "
+            "read_file output, set line_hint to the exact target line. "
+            "Shows closest-match diagnostics on failure."
         )
 
     @staticmethod
@@ -883,36 +915,21 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: line_hint cannot be used with replace_all=true.")
             if occurrence is not None and line_hint is not None:
                 return ToolResult.error("Error: line_hint cannot be used with occurrence.")
-            if count > 1 and not replace_all:
-                if occurrence is not None:
-                    if occurrence > count:
-                        return ToolResult.error(
-                            f"Error: occurrence {occurrence} is out of range; "
-                            f"old_text appears {count} times."
-                        )
-                elif line_hint is not None:
-                    nearest = min(matches, key=lambda match: abs(match.line - line_hint))
-                    distance = abs(nearest.line - line_hint)
-                    if sum(1 for match in matches if abs(match.line - line_hint) == distance) > 1:
-                        return ToolResult.error(
-                            f"Error: line_hint {line_hint} is ambiguous; "
-                            f"old_text appears {count} times."
-                        )
-                else:
-                    line_numbers = [match.line for match in matches]
-                    preview = ", ".join(f"line {n}" for n in line_numbers[:3])
-                    if len(line_numbers) > 3:
-                        preview += ", ..."
-                    location_hint = f" at {preview}" if preview else ""
-                    return (
-                        f"Warning: old_text appears {count} times{location_hint}. "
-                        "Provide more context, set occurrence to choose one match, "
-                        "or set replace_all=true."
-                    )
-            elif occurrence is not None and occurrence > count:
+            if occurrence is not None and occurrence > count:
                 return ToolResult.error(
                     f"Error: occurrence {occurrence} is out of range; "
-                    f"old_text appears {count} time."
+                    f"old_text appears {count} time(s)."
+                )
+            if count > 1 and not replace_all and occurrence is None and line_hint is None:
+                line_numbers = [match.line for match in matches]
+                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+                if len(line_numbers) > 3:
+                    preview += ", ..."
+                location_hint = f" at {preview}" if preview else ""
+                return (
+                    f"Warning: old_text appears {count} times{location_hint}. "
+                    "Provide more context, set occurrence to choose one match, "
+                    "or set replace_all=true."
                 )
 
             norm_new = new_text.replace("\r\n", "\n")
@@ -923,10 +940,27 @@ class EditFileTool(_FsTool):
 
             if replace_all:
                 selected = matches
+            elif occurrence is not None:
+                selected = [matches[occurrence - 1]]
             elif line_hint is not None:
-                selected = [min(matches, key=lambda match: abs(match.line - line_hint))]
+                candidates = [match for match in matches if _match_covers_line(match, line_hint)]
+                if not candidates:
+                    locations = ", ".join(f"line {match.line}" for match in matches[:3])
+                    if len(matches) > 3:
+                        locations += ", ..."
+                    return ToolResult.error(
+                        f"Error: line_hint {line_hint} does not match the old_text location. "
+                        f"old_text appears at {locations}. Re-read the intended region and "
+                        "copy old_text that covers the target line."
+                    )
+                if len(candidates) > 1:
+                    return ToolResult.error(
+                        f"Error: line_hint {line_hint} is ambiguous; "
+                        f"old_text appears {len(candidates)} times on that line."
+                    )
+                selected = candidates
             else:
-                selected = [matches[occurrence - 1 if occurrence else 0]]
+                selected = [matches[0]]
             if expected_replacements is not None and len(selected) != expected_replacements:
                 return ToolResult.error(
                     f"Error: expected {expected_replacements} replacements but "

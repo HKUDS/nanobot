@@ -1119,7 +1119,9 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         try:
             from oauth_cli_kit import get_token, login_oauth_interactive
         except ImportError:
-            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
 
         try:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
@@ -1146,7 +1148,9 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 login_github_copilot,
             )
         except ImportError:
-            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
 
         token = get_github_copilot_login_status()
         if not token:
@@ -1171,13 +1175,17 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
             from oauth_cli_kit.storage import FileTokenStorage
         except ImportError:
-            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
-            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
         token_path = get_storage().get_token_path()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
