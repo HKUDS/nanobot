@@ -746,6 +746,47 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
 
 
 @pytest.mark.asyncio
+async def test_remote_webui_scope_allows_access_reduction(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default_workspace = tmp_path / "default"
+    default_workspace.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("203.0.113.8", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-remote",
+            "workspace_scope": {
+                "project_path": str(default_workspace),
+                "access_mode": "restricted",
+            },
+        },
+    )
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "session_updated"
+    assert payload["workspace_scope"]["access_mode"] == "restricted"
+    saved = sessions.read_session_file("websocket:chat-remote")
+    assert saved["metadata"]["workspace_scope"] == {
+        "project_path": str(default_workspace.resolve()),
+        "access_mode": "restricted",
+    }
+
+
+@pytest.mark.asyncio
 async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp_path) -> None:
     default_workspace = tmp_path / "default"
     project = tmp_path / "project"
