@@ -1,7 +1,10 @@
 import json
 import signal
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions, GatewayStatus
 
@@ -242,6 +245,7 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
     ]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups are unavailable")
 def test_terminate_posix_tolerates_process_group_disappearing_before_sigkill(
     tmp_path,
     monkeypatch,
