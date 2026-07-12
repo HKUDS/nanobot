@@ -466,11 +466,11 @@
     },
     "files": {
       "title": "文档读取",
-      "description": "让 nanobot 理解上传的文档，并读取工作区中的文件。",
-      "uploadedDocuments": "上传的文档",
-      "uploadedDocumentsHelp": "自动提取文档内容并加入当前对话。",
+      "description": "设置 nanobot 如何读取对话和工作区中的文件。",
+      "uploadedDocuments": "读取文档",
+      "uploadedDocumentsHelp": "提取 PDF、Word、Excel 和 PowerPoint 文件中的文本。",
       "supportMissing": "尚未安装文档读取支持。",
-      "enable": "启用文档读取",
+      "enable": "安装支持",
       "formats": "支持的格式",
       "formatsHelp": "一次启用即可支持常见办公文档和 PDF。",
       "restart": "重启 nanobot 以应用文档读取设置。"

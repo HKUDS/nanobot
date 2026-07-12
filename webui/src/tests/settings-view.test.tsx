@@ -301,7 +301,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "files", initialSettings: base, showSidebar: true });
 
-    const enable = await screen.findByRole("button", { name: "Enable document reading" });
+    const enable = await screen.findByRole("button", { name: "Install support" });
     fireEvent.click(enable);
 
     await waitFor(() => {
@@ -318,7 +318,7 @@ describe("SettingsView Apps catalog", () => {
         expect.any(Object),
       );
     });
-    expect(await screen.findByRole("switch", { name: "Uploaded documents" })).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Read documents" })).toBeInTheDocument();
   });
 
   it("starts the managed API server from System", async () => {

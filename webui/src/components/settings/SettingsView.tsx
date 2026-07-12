@@ -3550,27 +3550,24 @@ function FilesSettings({
   const pdfReady = !!featureCatalog.find((feature) => feature.name === "pdf")?.installed;
   const ready = documentsReady && pdfReady;
   const enabled = settings.files?.extract_document_text ?? true;
-  const formats = ["PDF", "Word", "Excel", "PowerPoint"];
 
   return (
-    <div className="space-y-7">
+    <div className="max-w-[58rem] space-y-5">
+      <p className="max-w-[42rem] text-[13px] leading-6 text-muted-foreground">
+        {tx(
+          "settings.files.description",
+          "Choose how nanobot reads files in chats and your workspace.",
+        )}
+      </p>
       <section>
-        <SettingsSectionTitle>{tx("settings.files.title", "Document reading")}</SettingsSectionTitle>
-        <p className="mb-4 max-w-[42rem] text-[13px] leading-6 text-muted-foreground">
-          {tx(
-            "settings.files.description",
-            "Let nanobot understand uploaded documents and read files from the workspace.",
-          )}
-        </p>
         {error ? <p className="mb-3 text-[12px] text-destructive">{error}</p> : null}
         <SettingsGroup>
           <SettingsRow
-            title={tx("settings.files.uploadedDocuments", "Uploaded documents")}
-            description={
-              ready
-                ? tx("settings.files.uploadedDocumentsHelp", "Extract document text into the conversation.")
-                : tx("settings.files.supportMissing", "Document support is not installed yet.")
-            }
+            title={tx("settings.files.uploadedDocuments", "Read documents")}
+            description={tx(
+              "settings.files.uploadedDocumentsHelp",
+              "Extract text from PDF, Word, Excel, and PowerPoint files.",
+            )}
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
@@ -3579,7 +3576,7 @@ function FilesSettings({
                 checked={enabled}
                 onChange={onChange}
                 disabled={saving}
-                ariaLabel={tx("settings.files.uploadedDocuments", "Uploaded documents")}
+                ariaLabel={tx("settings.files.uploadedDocuments", "Read documents")}
                 label={enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
               />
             ) : (
@@ -3593,24 +3590,9 @@ function FilesSettings({
                 {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 {saving
                   ? tx("settings.capabilities.installing", "Installing support...")
-                  : tx("settings.files.enable", "Enable document reading")}
+                  : tx("settings.files.enable", "Install support")}
               </Button>
             )}
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.files.formats", "Supported formats")}
-            description={tx("settings.files.formatsHelp", "One setup covers common office documents and PDFs.")}
-          >
-            <div className="flex flex-wrap justify-end gap-1.5">
-              {formats.map((format) => (
-                <span
-                  key={format}
-                  className="rounded-full border border-border/55 bg-muted/28 px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
-                >
-                  {format}
-                </span>
-              ))}
-            </div>
           </SettingsRow>
         </SettingsGroup>
       </section>

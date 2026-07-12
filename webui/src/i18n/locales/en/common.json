@@ -466,11 +466,11 @@
     },
     "files": {
       "title": "Document reading",
-      "description": "Let nanobot understand uploaded documents and read files from the workspace.",
-      "uploadedDocuments": "Uploaded documents",
-      "uploadedDocumentsHelp": "Extract document text into the conversation.",
+      "description": "Choose how nanobot reads files in chats and your workspace.",
+      "uploadedDocuments": "Read documents",
+      "uploadedDocumentsHelp": "Extract text from PDF, Word, Excel, and PowerPoint files.",
       "supportMissing": "Document support is not installed yet.",
-      "enable": "Enable document reading",
+      "enable": "Install support",
       "formats": "Supported formats",
       "formatsHelp": "One setup covers common office documents and PDFs.",
       "restart": "Restart nanobot to apply the document ingestion setting."
