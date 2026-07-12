@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
+
 
 @dataclass(frozen=True)
 class ProcessStartOptions:
@@ -100,6 +102,10 @@ class ManagedProcessRuntime:
 
     def start_background(self, options: ProcessStartOptions) -> ProcessResult:
         """Start the configured command as a detached process."""
+        with self._lifecycle_lock():
+            return self._start_background(options)
+
+    def _start_background(self, options: ProcessStartOptions) -> ProcessResult:
         current = self.status()
         if current.running:
             return ProcessResult(False, self._message("already_running"), current)
@@ -139,6 +145,10 @@ class ManagedProcessRuntime:
 
     def stop(self, *, timeout_s: int = 20) -> ProcessResult:
         """Stop the process recorded in this runtime's state file."""
+        with self._lifecycle_lock():
+            return self._stop(timeout_s=timeout_s)
+
+    def _stop(self, *, timeout_s: int) -> ProcessResult:
         status = self.status()
         if not status.pid:
             return ProcessResult(False, self._message("not_running"), status)
@@ -166,11 +176,12 @@ class ManagedProcessRuntime:
 
     def restart(self, options: ProcessStartOptions, *, timeout_s: int = 20) -> ProcessResult:
         """Restart the managed process."""
-        stop_result = self.stop(timeout_s=timeout_s)
-        recoverable = {self._message("not_running"), self._message("state_stale")}
-        if not stop_result.ok and stop_result.message not in recoverable:
-            return stop_result
-        return self.start_background(options)
+        with self._lifecycle_lock():
+            stop_result = self._stop(timeout_s=timeout_s)
+            recoverable = {self._message("not_running"), self._message("state_stale")}
+            if not stop_result.ok and stop_result.message not in recoverable:
+                return stop_result
+            return self._start_background(options)
 
     def status(self, *, reason: str | None = None) -> ProcessStatus:
         """Return live status, clearing stale state when needed."""
@@ -237,6 +248,10 @@ class ManagedProcessRuntime:
 
     def _message(self, event: str) -> str:
         return f"{self.service_name}_{event}"
+
+    def _lifecycle_lock(self) -> FileLock:
+        lock_path = self.paths.state_path.with_name(f"{self.paths.state_path.name}.lock")
+        return FileLock(str(lock_path))
 
     def _build_child_command(self, options: ProcessStartOptions) -> list[str]:
         raise NotImplementedError

@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from nanobot.channels.setup import channel_setup_spec
+from nanobot.channels._setup import channel_setup_spec
 from nanobot.config.loader import load_config
 from nanobot.security.network import resolve_url_target
 

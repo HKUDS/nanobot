@@ -2,6 +2,7 @@ import json
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,57 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     assert state["pid"] == 12345
     assert state["identity"] == 12345
     assert state["port"] == 18790
+
+
+def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypatch):
+    first_spawned = threading.Event()
+    release_first = threading.Event()
+    calls: list[list[str]] = []
+
+    def fake_popen(command, **_kwargs):
+        calls.append(command)
+        first_spawned.set()
+        return FakeProcess()
+
+    def first_sleep(_seconds):
+        assert release_first.wait(timeout=2)
+
+    first = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Linux",
+        popen=fake_popen,
+        sleep=first_sleep,
+    )
+    second = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Linux",
+        popen=fake_popen,
+        sleep=lambda _seconds: None,
+    )
+    for runtime in (first, second):
+        monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+        monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
+
+    results = []
+    first_thread = threading.Thread(
+        target=lambda: results.append(first.start_background(GatewayStartOptions(port=18790)))
+    )
+    second_thread = threading.Thread(
+        target=lambda: results.append(second.start_background(GatewayStartOptions(port=18790)))
+    )
+
+    first_thread.start()
+    assert first_spawned.wait(timeout=2)
+    second_thread.start()
+    release_first.set()
+    first_thread.join(timeout=2)
+    second_thread.join(timeout=2)
+
+    assert len(calls) == 1
+    assert sorted((result.ok, result.message) for result in results) == [
+        (False, "gateway_already_running"),
+        (True, "gateway_started_background"),
+    ]
 
 
 def test_start_background_uses_windows_process_group_flags(tmp_path, monkeypatch):

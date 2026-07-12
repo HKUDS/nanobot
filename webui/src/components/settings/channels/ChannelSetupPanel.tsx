@@ -145,8 +145,16 @@ export function ChannelSetupPanel({
   const requiredWebui = feature.name === "websocket";
   const channelChecked = requiredWebui || feature.enabled;
   const channelBusy = enableBusy || disableBusy;
+  const setup = channelSetup(feature);
+  const needsSetupBeforeEnable =
+    !channelChecked
+    && feature.configured === false
+    && !(feature.name === "weixin" && setup.mode === "connect");
   const channelToggleDisabled =
-    requiredWebui || channelBusy || (!feature.install_supported && !feature.installed && !feature.enabled);
+    requiredWebui
+    || channelBusy
+    || needsSetupBeforeEnable
+    || (!feature.install_supported && !feature.installed && !feature.enabled);
   const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
   const toggleAriaLabel = t("settings.channels.toggleChannel", {
     name: channelDisplayName(feature),
@@ -213,7 +221,7 @@ export function ChannelSetupPanel({
       <ChannelSetupSurface
         token={token}
         feature={feature}
-        setup={channelSetup(feature)}
+        setup={setup}
         chatAppsDocsUrl={chatAppsDocsUrl}
         connectRequestId={connectRequestId}
         onFeaturesUpdate={onFeaturesUpdate}

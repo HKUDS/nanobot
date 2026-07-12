@@ -55,10 +55,9 @@ class FeishuWsRunner:
             self._ready.clear()
             self._thread = threading.Thread(target=self._run_loop, name="feishu-ws", daemon=True)
             self._thread.start()
-        self._ready.wait(timeout=10)
-        if self._loop is None:
-            raise RuntimeError("Feishu WebSocket runner did not start")
-        return self._loop
+            if not self._ready.wait(timeout=10) or self._loop is None:
+                raise RuntimeError("Feishu WebSocket runner did not start")
+            return self._loop
 
     def _run_loop(self) -> None:
         loop = asyncio.new_event_loop()

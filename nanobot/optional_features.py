@@ -19,13 +19,13 @@ from nanobot.channels._feishu_instances import (
     feishu_instance_specs,
     set_feishu_instance_enabled,
 )
-from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
-from nanobot.channels.setup import (
+from nanobot.channels._setup import (
     channel_field_value,
     channel_setup_spec,
     channel_value_present,
     stringify_channel_value,
 )
+from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.loader import merge_missing_defaults
 from nanobot.config.schema import Config
 

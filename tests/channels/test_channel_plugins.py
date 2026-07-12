@@ -278,6 +278,8 @@ def test_discover_channel_names_excludes_internal_helpers():
     names = discover_channel_names()
 
     assert "_feishu_ws" not in names
+    assert "_setup" not in names
+    assert "setup" not in names
     assert "_feishu_instances" not in names
 
 

@@ -20,7 +20,7 @@ from websockets.http11 import Response
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.setup import channel_setup_spec
+from nanobot.channels._setup import channel_setup_spec
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.optional_features import (
     OptionalFeatureError,

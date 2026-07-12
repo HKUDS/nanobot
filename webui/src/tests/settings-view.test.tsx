@@ -1041,6 +1041,7 @@ describe("SettingsView Apps catalog", () => {
             display_name: "Discord",
             type: "channel",
             enabled: false,
+            configured: false,
             installed: true,
             ready: false,
             status: "not_enabled",
@@ -1065,6 +1066,7 @@ describe("SettingsView Apps catalog", () => {
               display_name: "Discord",
               type: "channel",
               enabled: true,
+              configured: true,
               installed: true,
               ready: true,
               status: "enabled",
@@ -1099,6 +1101,7 @@ describe("SettingsView Apps catalog", () => {
       "href",
       "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#discord",
     );
+    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
       target: { value: "discord-token" },
     });
@@ -1168,6 +1171,24 @@ describe("SettingsView Apps catalog", () => {
           enabled_count: 0,
         });
       }
+      if (url === "/api/settings/nanobot-features/enable?name=discord") {
+        return jsonResponse({
+          features: [{
+            name: "discord",
+            display_name: "Discord",
+            type: "channel",
+            enabled: true,
+            configured: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: true,
+          }],
+          enabled_count: 1,
+          requires_restart: false,
+        });
+      }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1179,6 +1200,7 @@ describe("SettingsView Apps catalog", () => {
       "aria-checked",
       "false",
     );
+    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeEnabled();
     expect(screen.getByText("Configured manually")).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Saved secret")).toHaveValue("");
@@ -1190,6 +1212,14 @@ describe("SettingsView Apps catalog", () => {
       "radio",
       { name: "All messages" },
     )).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Discord channel" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=discord",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
   });
 
   it("shows an actionable credential guide for Telegram", async () => {
