@@ -47,7 +47,8 @@ class InstallResult:
 
 _INSTALL_TIMEOUT_SECONDS = 300
 _LOG_OUTPUT_LIMIT = 4000
-_HIDDEN_OPTIONAL_FEATURES = {"langsmith"}
+_HIDDEN_OPTIONAL_FEATURES = {"documents", "langsmith", "pdf"}
+_BUNDLED_FEATURE_ALIASES = {"documents", "pdf"}
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
@@ -557,6 +558,16 @@ def enable_optional_feature(
     # as a compatibility alias while directing users to the supported tracer.
     if name == "langsmith":
         name = "langfuse"
+    if name in _BUNDLED_FEATURE_ALIASES:
+        payload = optional_features_payload(
+            last_action={
+                "ok": True,
+                "message": f"Feature '{name}' is included with nanobot",
+                "enabled": True,
+            }
+        )
+        payload["requires_restart"] = False
+        return payload
     config_path = config_path or get_config_path()
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())

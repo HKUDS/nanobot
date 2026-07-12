@@ -200,7 +200,6 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "models",
   "image",
   "voice",
-  "files",
   "browser",
   "channels",
   "apps",

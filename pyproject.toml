@@ -49,6 +49,11 @@ dependencies = [
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
     "packaging>=24.0",
+    "defusedxml>=0.7.1,<1.0.0",
+    "pypdf>=5.0.0,<6.0.0",
+    "python-docx>=1.1.0,<2.0.0",
+    "openpyxl>=3.1.0,<4.0.0",
+    "python-pptx>=1.0.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +70,8 @@ dingtalk = [
     "dingtalk-stream>=0.24.0,<1.0.0",
 ]
 documents = [
+    # Compatibility extra: document readers are bundled since v0.2.3.
+    "defusedxml>=0.7.1,<1.0.0",
     "pypdf>=5.0.0,<6.0.0",
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
@@ -127,7 +134,8 @@ langfuse = [
     "langfuse>=3.0.0,<4.0.0",
 ]
 pdf = [
-    "pymupdf>=1.25.0",
+    # Compatibility extra: PDF reading is bundled since v0.2.3.
+    "pypdf>=5.0.0,<6.0.0",
 ]
 olostep = [
     "olostep>=0.1.0",

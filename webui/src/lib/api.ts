@@ -393,17 +393,6 @@ export async function fetchNanobotFeatures(
   );
 }
 
-export async function updateFileSettings(
-  token: string,
-  extractDocumentText: boolean,
-  base: string = "",
-): Promise<SettingsPayload> {
-  const query = new URLSearchParams({
-    extract_document_text: String(extractDocumentText),
-  });
-  return request<SettingsPayload>(`${base}/api/settings/files/update?${query}`, token);
-}
-
 export async function fetchApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
   return request<ApiServicePayload>(`${base}/api/settings/api-service`, token);
 }

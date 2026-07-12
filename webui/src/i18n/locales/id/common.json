@@ -75,7 +75,6 @@
       "providers": "Penyedia",
       "image": "Gambar",
       "voice": "Suara",
-      "files": "File",
       "browser": "Internet",
       "channels": "Kanal",
       "runtime": "Sistem",
@@ -460,13 +459,6 @@
       "allTools": "Semua",
       "noTools": "Tidak ada",
       "testForTools": "Jalankan Uji untuk memeriksa dan memilih alat individual."
-    },
-    "files": {
-      "title": "Pembacaan dokumen", "description": "Izinkan nanobot memahami dokumen unggahan dan file di workspace.",
-      "uploadedDocuments": "Dokumen unggahan", "uploadedDocumentsHelp": "Ekstrak teks dokumen ke percakapan.",
-      "supportMissing": "Dukungan dokumen belum terpasang.", "enable": "Aktifkan pembacaan dokumen",
-      "formats": "Format yang didukung", "formatsHelp": "Satu pemasangan mencakup dokumen kantor dan PDF.",
-      "restart": "Mulai ulang nanobot untuk menerapkan pengaturan dokumen."
     },
     "api": {
       "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan SDK dan agen melalui endpoint /v1 lokal.",

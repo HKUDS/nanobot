@@ -189,7 +189,6 @@ function renderSettingsView(
       | "advanced"
       | "models"
       | "browser"
-      | "files"
       | "runtime";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
@@ -270,55 +269,6 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
-  });
-
-  it("installs document support from the Files page with one action", async () => {
-    const base = settingsPayload();
-    const featurePayload = (documents: boolean, pdf: boolean) => ({
-      features: [
-        { name: "documents", display_name: "Documents", type: "feature", installed: documents, enabled: documents, configured: documents, ready: documents, status: documents ? "enabled" : "missing_dependency", install_supported: true, requires_restart: false },
-        { name: "pdf", display_name: "Pdf", type: "feature", installed: pdf, enabled: pdf, configured: pdf, ready: pdf, status: pdf ? "enabled" : "missing_dependency", install_supported: true, requires_restart: false },
-      ],
-      enabled_count: Number(documents) + Number(pdf),
-      requires_restart: false,
-    });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/settings") return jsonResponse(base);
-      if (url === "/api/settings/nanobot-features") return jsonResponse(featurePayload(false, false));
-      if (url === "/api/settings/nanobot-features/enable?name=documents") {
-        return jsonResponse(featurePayload(true, false));
-      }
-      if (url === "/api/settings/nanobot-features/enable?name=pdf") {
-        return jsonResponse(featurePayload(true, true));
-      }
-      if (url === "/api/settings/files/update?extract_document_text=true") {
-        return jsonResponse(base);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderSettingsView({ initialSection: "files", initialSettings: base, showSidebar: true });
-
-    const enable = await screen.findByRole("button", { name: "Install support" });
-    fireEvent.click(enable);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/enable?name=documents",
-        expect.any(Object),
-      );
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/nanobot-features/enable?name=pdf",
-        expect.any(Object),
-      );
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/files/update?extract_document_text=true",
-        expect.any(Object),
-      );
-    });
-    expect(await screen.findByRole("switch", { name: "Read documents" })).toBeInTheDocument();
   });
 
   it("starts the managed API server from System", async () => {

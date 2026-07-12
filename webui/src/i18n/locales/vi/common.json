@@ -75,7 +75,6 @@
       "providers": "Nhà cung cấp",
       "image": "Hình ảnh",
       "voice": "Giọng nói",
-      "files": "Tệp",
       "browser": "Trang web",
       "channels": "Kênh",
       "runtime": "Hệ thống",
@@ -460,13 +459,6 @@
       "allTools": "Tất cả",
       "noTools": "Không có",
       "testForTools": "Chạy Kiểm tra để xem và chọn từng công cụ."
-    },
-    "files": {
-      "title": "Đọc tài liệu", "description": "Cho phép nanobot hiểu tài liệu tải lên và tệp trong workspace.",
-      "uploadedDocuments": "Tài liệu tải lên", "uploadedDocumentsHelp": "Trích xuất văn bản tài liệu vào cuộc trò chuyện.",
-      "supportMissing": "Chưa cài đặt hỗ trợ tài liệu.", "enable": "Bật đọc tài liệu",
-      "formats": "Định dạng hỗ trợ", "formatsHelp": "Một lần thiết lập hỗ trợ tài liệu văn phòng và PDF.",
-      "restart": "Khởi động lại nanobot để áp dụng cài đặt tài liệu."
     },
     "api": {
       "title": "Máy chủ API", "openaiCompatible": "API tương thích OpenAI", "description": "Kết nối SDK và agent qua endpoint /v1 cục bộ.",

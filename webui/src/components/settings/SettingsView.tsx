@@ -117,7 +117,6 @@ import {
   startApiService,
   stopApiService,
   updateAutomation,
-  updateFileSettings,
   updateImageGenerationSettings,
   updateMcpServerTools,
   updateModelConfiguration,
@@ -177,7 +176,6 @@ export type SettingsSectionKey =
   | "models"
   | "image"
   | "voice"
-  | "files"
   | "browser"
   | "channels"
   | "apps"
@@ -565,7 +563,6 @@ export function SettingsView({
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
   const [networkSafetySaving, setNetworkSafetySaving] = useState(false);
-  const [filesSaving, setFilesSaving] = useState(false);
   const [apiService, setApiService] = useState<ApiServicePayload | null>(null);
   const [apiServiceLoading, setApiServiceLoading] = useState(false);
   const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
@@ -747,7 +744,7 @@ export function SettingsView({
   }, [activeSection, token]);
 
   useEffect(() => {
-    if (!["channels", "models", "browser", "files", "runtime"].includes(activeSection)) return;
+    if (!["channels", "models", "browser", "runtime"].includes(activeSection)) return;
     let cancelled = false;
     setNanobotFeaturesLoading(true);
     fetchNanobotFeatures(token)
@@ -1191,25 +1188,6 @@ export function SettingsView({
       return false;
     } finally {
       setNanobotFeatureAction(null);
-    }
-  };
-
-  const saveFileSettings = async (extractDocumentText: boolean) => {
-    if (!settings || filesSaving) return;
-    setFilesSaving(true);
-    setError(null);
-    try {
-      if (extractDocumentText && !(await installCapabilities(["documents", "pdf"]))) return;
-      const payload = await updateFileSettings(token, extractDocumentText);
-      applyPayload(payload);
-      if (payload.requires_restart) {
-        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
-      }
-      await maybeRestartHostEngine(payload);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setFilesSaving(false);
     }
   };
 
@@ -1739,20 +1717,6 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.browser}
           />
         );
-      case "files":
-        return (
-          <FilesSettings
-            settings={settings}
-            features={nanobotFeatures}
-            loading={nanobotFeaturesLoading}
-            saving={filesSaving || nanobotFeatureAction === "enable:documents+pdf"}
-            error={nanobotFeaturesError}
-            onChange={(enabled) => void saveFileSettings(enabled)}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
-            requiresRestartPending={pendingRestartSections.runtime}
-          />
-        );
       case "browser":
         return (
           <WebSettings
@@ -2046,7 +2010,6 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "voice", icon: Mic, fallback: "Voice" },
-  { key: "files", icon: HardDrive, fallback: "Files" },
   { key: "browser", icon: Globe2, fallback: "Web" },
   { key: "channels", icon: MessageCircle, fallback: "Channels" },
   { key: "runtime", icon: Server, fallback: "System" },
@@ -3519,91 +3482,6 @@ function TranscriptionSettings({
         />
       </SettingsGroup>
     </section>
-  );
-}
-
-function FilesSettings({
-  settings,
-  features,
-  loading,
-  saving,
-  error,
-  onChange,
-  onRestart,
-  isRestarting,
-  requiresRestartPending,
-}: {
-  settings: SettingsPayload;
-  features: NanobotFeaturesPayload | null;
-  loading: boolean;
-  saving: boolean;
-  error: string | null;
-  onChange: (enabled: boolean) => void;
-  onRestart?: () => void;
-  isRestarting?: boolean;
-  requiresRestartPending: boolean;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const featureCatalog = features?.features ?? [];
-  const documentsReady = !!featureCatalog.find((feature) => feature.name === "documents")?.installed;
-  const pdfReady = !!featureCatalog.find((feature) => feature.name === "pdf")?.installed;
-  const ready = documentsReady && pdfReady;
-  const enabled = settings.files?.extract_document_text ?? true;
-
-  return (
-    <div className="max-w-[58rem] space-y-5">
-      <p className="max-w-[42rem] text-[13px] leading-6 text-muted-foreground">
-        {tx(
-          "settings.files.description",
-          "Choose how nanobot reads files in chats and your workspace.",
-        )}
-      </p>
-      <section>
-        {error ? <p className="mb-3 text-[12px] text-destructive">{error}</p> : null}
-        <SettingsGroup>
-          <SettingsRow
-            title={tx("settings.files.uploadedDocuments", "Read documents")}
-            description={tx(
-              "settings.files.uploadedDocumentsHelp",
-              "Extract text from PDF, Word, Excel, and PowerPoint files.",
-            )}
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
-            ) : ready ? (
-              <ToggleButton
-                checked={enabled}
-                onChange={onChange}
-                disabled={saving}
-                ariaLabel={tx("settings.files.uploadedDocuments", "Read documents")}
-                label={enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-              />
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onChange(true)}
-                disabled={saving}
-                className="rounded-full"
-              >
-                {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                {saving
-                  ? tx("settings.capabilities.installing", "Installing support...")
-                  : tx("settings.files.enable", "Install support")}
-              </Button>
-            )}
-          </SettingsRow>
-        </SettingsGroup>
-      </section>
-      {requiresRestartPending ? (
-        <RestartRequiredNotice
-          message={tx("settings.files.restart", "Restart nanobot to apply the document ingestion setting.")}
-          onRestart={onRestart}
-          isRestarting={isRestarting}
-        />
-      ) : null}
-    </div>
   );
 }
 

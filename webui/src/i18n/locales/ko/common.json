@@ -75,7 +75,6 @@
       "providers": "제공자",
       "image": "이미지",
       "voice": "음성",
-      "files": "파일",
       "browser": "웹",
       "channels": "채널",
       "runtime": "시스템",
@@ -460,13 +459,6 @@
       "allTools": "전체",
       "noTools": "없음",
       "testForTools": "테스트를 실행해 개별 도구를 확인하고 선택하세요."
-    },
-    "files": {
-      "title": "문서 읽기", "description": "nanobot이 업로드한 문서와 워크스페이스 파일을 이해하도록 합니다.",
-      "uploadedDocuments": "업로드한 문서", "uploadedDocumentsHelp": "문서 텍스트를 대화에 포함합니다.",
-      "supportMissing": "문서 지원이 아직 설치되지 않았습니다.", "enable": "문서 읽기 활성화",
-      "formats": "지원 형식", "formatsHelp": "한 번의 설정으로 일반 문서와 PDF를 지원합니다.",
-      "restart": "문서 설정을 적용하려면 nanobot을 다시 시작하세요."
     },
     "api": {
       "title": "API 서버", "openaiCompatible": "OpenAI 호환 API", "description": "로컬 /v1 엔드포인트로 SDK와 에이전트를 연결합니다.",

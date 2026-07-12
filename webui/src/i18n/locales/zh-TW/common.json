@@ -75,7 +75,6 @@
       "providers": "提供商",
       "image": "圖片",
       "voice": "語音",
-      "files": "檔案",
       "browser": "網頁",
       "channels": "渠道",
       "runtime": "系統",
@@ -460,13 +459,6 @@
       "allTools": "全部",
       "noTools": "無",
       "testForTools": "執行測試以檢查並選擇個別工具。"
-    },
-    "files": {
-      "title": "文件讀取", "description": "讓 nanobot 理解上傳的文件，並讀取工作區中的檔案。",
-      "uploadedDocuments": "上傳的文件", "uploadedDocumentsHelp": "自動擷取文件內容並加入目前對話。",
-      "supportMissing": "尚未安裝文件讀取支援。", "enable": "啟用文件讀取",
-      "formats": "支援的格式", "formatsHelp": "一次啟用即可支援常見辦公文件和 PDF。",
-      "restart": "重新啟動 nanobot 以套用文件讀取設定。"
     },
     "api": {
       "title": "API 服務", "openaiCompatible": "OpenAI 相容 API", "description": "讓 SDK 和其他 Agent 透過本機 /v1 介面連接 nanobot。",

@@ -2492,7 +2492,7 @@ def plugins_list(
 
 @plugins_app.command("enable")
 def plugins_enable(
-    name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, pdf)"),
+    name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, bedrock)"),
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show optional package install logs"),
 ):

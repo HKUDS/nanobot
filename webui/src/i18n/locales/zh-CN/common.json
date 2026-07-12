@@ -75,7 +75,6 @@
       "providers": "提供商",
       "image": "图片",
       "voice": "语音",
-      "files": "文件",
       "browser": "网页",
       "channels": "渠道",
       "cliApps": "CLI 应用",
@@ -463,17 +462,6 @@
       "selectSize": "选择尺寸",
       "configureProvider": "配置提供商",
       "missingCredential": "启用图片生成前请先配置此提供商。"
-    },
-    "files": {
-      "title": "文档读取",
-      "description": "设置 nanobot 如何读取对话和工作区中的文件。",
-      "uploadedDocuments": "读取文档",
-      "uploadedDocumentsHelp": "提取 PDF、Word、Excel 和 PowerPoint 文件中的文本。",
-      "supportMissing": "尚未安装文档读取支持。",
-      "enable": "安装支持",
-      "formats": "支持的格式",
-      "formatsHelp": "一次启用即可支持常见办公文档和 PDF。",
-      "restart": "重启 nanobot 以应用文档读取设置。"
     },
     "api": {
       "title": "API 服务",

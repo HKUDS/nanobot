@@ -262,8 +262,6 @@ Apps. They cannot be attached to a chat turn with `@`.
 | Feature name | What it enables |
 |---|---|
 | `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
-| `documents` | Automatic text extraction from PDF, DOCX, XLSX, and PPTX attachments |
-| `pdf` | Page-aware PDF reading through the agent's `read_file` tool |
 | `azure` | Azure identity support for Azure-hosted models |
 | `bedrock` | AWS Bedrock model provider support |
 | `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
@@ -279,6 +277,10 @@ Apps. They cannot be attached to a chat turn with `@`.
 | `nanobot plugins list --config <path>` | Read a specific config file |
 | `nanobot plugins enable <name> --config <path>` | Update a specific config file |
 | `nanobot plugins disable <channel> --config <path>` | Turn off a channel in a specific config file |
+
+Document and PDF reading are included in the standard installation. The old
+`nanobot plugins enable documents` and `nanobot plugins enable pdf` commands
+remain accepted as no-op compatibility aliases.
 
 ## Provider OAuth
 

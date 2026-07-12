@@ -211,17 +211,6 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
-    """Parse a page range like '2-5' into 0-based (start, end) inclusive."""
-    parts = pages.strip().split("-")
-    if len(parts) == 1:
-        p = int(parts[0])
-        return max(0, p - 1), min(p - 1, total - 1)
-    start = int(parts[0])
-    end = int(parts[1])
-    return max(0, start - 1), min(end - 1, total - 1)
-
-
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
@@ -405,49 +394,33 @@ class ReadFileTool(_FsTool):
             return ToolResult.error(f"Error reading file: {e}")
 
     def _read_pdf(self, fp: Path, pages: str | None) -> str:
-        try:
-            import fitz  # pymupdf
-        except ImportError:
-            return ToolResult.error("Error: PDF reading requires pymupdf. Install with: pip install pymupdf")
+        from nanobot.utils.document import PdfPageRangeError, PdfSafetyError, extract_pdf_pages
 
         try:
-            doc = fitz.open(str(fp))
+            extraction = extract_pdf_pages(
+                fp,
+                pages=pages,
+                max_pages=self._MAX_PDF_PAGES,
+                max_chars=self._MAX_CHARS,
+            )
+        except PdfPageRangeError:
+            return ToolResult.error(f"Error: Invalid page range '{pages}'. Use format like '1-5'.")
+        except PdfSafetyError as e:
+            return ToolResult.error(f"Error reading PDF: {e}")
         except Exception as e:
             return ToolResult.error(f"Error reading PDF: {e}")
 
-        total_pages = len(doc)
-        if pages:
-            try:
-                start, end = _parse_page_range(pages, total_pages)
-            except (ValueError, IndexError):
-                doc.close()
-                return ToolResult.error(f"Error: Invalid page range '{pages}'. Use format like '1-5'.")
-            if start > end or start >= total_pages:
-                doc.close()
-                return ToolResult.error(f"Error: Page range '{pages}' is out of bounds (document has {total_pages} pages).")
-        else:
-            start = 0
-            end = min(total_pages - 1, self._MAX_PDF_PAGES - 1)
-
-        if end - start + 1 > self._MAX_PDF_PAGES:
-            end = start + self._MAX_PDF_PAGES - 1
-
-        parts: list[str] = []
-        for i in range(start, end + 1):
-            page = doc[i]
-            text = page.get_text().strip()
-            if text:
-                parts.append(f"--- Page {i + 1} ---\n{text}")
-        doc.close()
-
-        if not parts:
+        if not extraction.text:
             return f"(PDF has no extractable text: {fp})"
 
-        result = "\n\n".join(parts)
-        if end < total_pages - 1:
-            result += f"\n\n(Showing pages {start + 1}-{end + 1} of {total_pages}. Use pages='{end + 2}-{min(end + 1 + self._MAX_PDF_PAGES, total_pages)}' to continue.)"
-        if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
+        result = extraction.text
+        if extraction.end_page < extraction.total_pages - 1:
+            next_start = extraction.end_page + 2
+            next_end = min(extraction.end_page + 1 + self._MAX_PDF_PAGES, extraction.total_pages)
+            result += (
+                f"\n\n(Showing pages {extraction.start_page + 1}-{extraction.end_page + 1} "
+                f"of {extraction.total_pages}. Use pages='{next_start}-{next_end}' to continue.)"
+            )
         return result
 
     def _read_office_doc(self, fp: Path) -> str:

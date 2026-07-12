@@ -987,6 +987,7 @@ def test_enable_optional_feature_lazy_reader_does_not_require_restart(monkeypatc
     payload = enable_optional_feature("documents", config_path=config_path)
 
     assert payload["requires_restart"] is False
+    assert payload["last_action"]["message"] == "Feature 'documents' is included with nanobot"
 
 
 def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
@@ -1491,6 +1492,8 @@ def test_run_install_command_returns_failure_on_timeout(monkeypatch):
 
 
 def test_optional_dependency_metadata_for_enable():
+    from nanobot import optional_features
+
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     deps = data["project"]["optional-dependencies"]
     required = data["project"]["dependencies"]
@@ -1502,24 +1505,30 @@ def test_optional_dependency_metadata_for_enable():
         "dingtalk-stream",
         "lark-oapi",
         "msgpack",
-        "openpyxl",
-        "pypdf",
         "python-telegram-bot",
-        "python-docx",
-        "python-pptx",
         "python-socketio",
         "qq-botpy",
         "slack-sdk",
         "slackify-markdown",
     ):
         assert not any(dep.startswith(dep_name) for dep in required)
+    for dependency in (
+        "defusedxml>=0.7.1,<1.0.0",
+        "pypdf>=5.0.0,<6.0.0",
+        "python-docx>=1.1.0,<2.0.0",
+        "openpyxl>=3.1.0,<4.0.0",
+        "python-pptx>=1.0.0,<2.0.0",
+    ):
+        assert dependency in required
     assert deps["dingtalk"] == ["dingtalk-stream>=0.24.0,<1.0.0"]
     assert deps["documents"] == [
+        "defusedxml>=0.7.1,<1.0.0",
         "pypdf>=5.0.0,<6.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",
         "python-pptx>=1.0.0,<2.0.0",
     ]
+    assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
     assert deps["feishu"] == ["lark-oapi>=1.5.0,<2.0.0"]
     assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
     assert deps["mochat"] == [
@@ -1533,6 +1542,10 @@ def test_optional_dependency_metadata_for_enable():
         "slack-sdk>=3.39.0,<4.0.0",
         "slackify-markdown>=0.2.0,<1.0.0",
     ]
+
+    visible = optional_features.optional_dependency_groups()
+    assert "documents" not in visible
+    assert "pdf" not in visible
     assert any(dep.startswith("python-telegram-bot") for dep in deps["telegram"])
     assert any(
         dep.startswith("matrix-nio>=0.25.2") and "sys_platform == 'win32'" in dep

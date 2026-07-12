@@ -1617,7 +1617,7 @@ describe("App layout", () => {
     expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Files" })).toBeInTheDocument();
+    expect(within(settingsNav).queryByRole("button", { name: "Files" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
@@ -1625,9 +1625,6 @@ describe("App layout", () => {
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));
     expect(screen.getByText("Brand logos")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Files" }));
-    expect(await screen.findByRole("heading", { name: "Files" })).toBeInTheDocument();
-    expect(screen.getByText("Document reading")).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.getByText("Current configuration")).toBeInTheDocument();
@@ -1741,6 +1738,16 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
+  });
+
+  it("falls back to Overview for the retired Files settings URL", async () => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    window.history.replaceState(null, "", "/#/settings?section=files");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   });
 
   it("updates the URL hash when switching settings sections", async () => {

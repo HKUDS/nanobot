@@ -121,12 +121,11 @@ turn. The default **Ready** view shows only tools that can be used immediately:
   the custom integration panel accepts stdio, HTTP, and SSE servers.
 
 Apps intentionally does not list nanobot runtime support packages such as
-`api`, `bedrock`, `documents`, or `pdf`. Those packages enable providers,
-document readers, servers, or channels; they are not tools that can be attached
-to a turn with `@`. Manage them from **System**, **Files**, **Models**, or
-**Web**. When support is missing, the local WebUI installs it after an explicit
-user action; opening a settings page never installs packages silently. The
-equivalent CLI remains `nanobot plugins`. See
+`api` or `bedrock`. Those packages enable providers, servers, or channels; they
+are not tools that can be attached to a turn with `@`. Manage them from
+**System**, **Models**, or **Web**. PDF and common Office document readers are
+included in nanobot and activate automatically when a file is attached. The
+equivalent CLI for optional integrations remains `nanobot plugins`. See
 [`cli-reference.md`](./cli-reference.md#optional-features).
 
 Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl

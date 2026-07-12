@@ -75,7 +75,6 @@
       "providers": "Proveedores",
       "image": "Imagen",
       "voice": "Voz",
-      "files": "Archivos",
       "browser": "Internet",
       "channels": "Canales",
       "runtime": "Sistema",
@@ -460,17 +459,6 @@
       "allTools": "Todas",
       "noTools": "Ninguna",
       "testForTools": "Ejecuta Probar para inspeccionar y elegir herramientas individuales."
-    },
-    "files": {
-      "title": "Lectura de documentos",
-      "description": "Permite que nanobot comprenda documentos subidos y archivos del espacio de trabajo.",
-      "uploadedDocuments": "Documentos subidos",
-      "uploadedDocumentsHelp": "Extrae el texto del documento en la conversación.",
-      "supportMissing": "El soporte de documentos aún no está instalado.",
-      "enable": "Habilitar lectura de documentos",
-      "formats": "Formatos compatibles",
-      "formatsHelp": "Una sola configuración cubre documentos de oficina y PDF.",
-      "restart": "Reinicia nanobot para aplicar la configuración de documentos."
     },
     "api": {
       "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",

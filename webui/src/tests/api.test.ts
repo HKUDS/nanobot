@@ -36,7 +36,6 @@ import {
   pollChannelConnect,
   startChannelConnect,
   updateAutomation,
-  updateFileSettings,
   updateSidebarState,
   updateImageGenerationSettings,
   updateModelConfiguration,
@@ -563,13 +562,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("manages relocated file and API capabilities", async () => {
-    await updateFileSettings("tok", true);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/files/update?extract_document_text=true",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
-    );
-
+  it("manages the API service capability", async () => {
     await fetchApiService("tok");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/api-service",

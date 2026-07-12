@@ -31,7 +31,6 @@ const SETTINGS_NAV_KEYS = [
   "appearance",
   "models",
   "image",
-  "files",
   "browser",
   "apps",
   "automations",

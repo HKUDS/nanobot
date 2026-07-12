@@ -75,7 +75,6 @@
       "providers": "Providers",
       "image": "Image",
       "voice": "Voice",
-      "files": "Files",
       "browser": "Web",
       "channels": "Channels",
       "cliApps": "CLI Apps",
@@ -463,17 +462,6 @@
       "selectSize": "Select size",
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
-    },
-    "files": {
-      "title": "Document reading",
-      "description": "Choose how nanobot reads files in chats and your workspace.",
-      "uploadedDocuments": "Read documents",
-      "uploadedDocumentsHelp": "Extract text from PDF, Word, Excel, and PowerPoint files.",
-      "supportMissing": "Document support is not installed yet.",
-      "enable": "Install support",
-      "formats": "Supported formats",
-      "formatsHelp": "One setup covers common office documents and PDFs.",
-      "restart": "Restart nanobot to apply the document ingestion setting."
     },
     "api": {
       "title": "API server",
