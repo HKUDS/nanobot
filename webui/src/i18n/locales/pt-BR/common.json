@@ -165,7 +165,7 @@
       "webuiDefaultAccess": "Acesso padrão",
       "cliAppsCatalog": "Catálogo",
       "cliAppsFilter": "Filtro",
-      "engine": "Engine",
+      "engine": "Motor",
       "logs": "Logs",
       "diagnostics": "Diagnóstico",
       "contextWindow": "Janela de contexto",
@@ -588,7 +588,7 @@
       "editTitle": "Editar automação",
       "save": "Salvar",
       "deleteTitle": "Excluir automação",
-      "deleteDescription": "Isso remove {{name}} do store de cron. As mensagens anteriores da conversa permanecem na sessão.",
+      "deleteDescription": "Isso remove {{name}} do armazenamento do cron. As mensagens anteriores da conversa permanecem na sessão.",
       "cancel": "Cancelar",
       "status": {
         "system": "Sistema",
