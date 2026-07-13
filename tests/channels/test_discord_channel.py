@@ -363,6 +363,26 @@ async def test_on_message_accepts_allowlisted_dm() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_message_unauthorized_dm_sends_pairing_code(monkeypatch) -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=[]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    message = _make_message(author_id=123, channel_id=456)
+    client.channels[456] = message.channel
+    channel._client = client
+    channel._running = True
+    monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: False)
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
+
+    await channel._on_message(message)
+
+    assert len(message.channel.sent_payloads) == 1
+    assert "ABCD-EFGH" in message.channel.sent_payloads[0]["content"]
+    assert channel._typing_tasks == {}
+
+
+@pytest.mark.asyncio
 async def test_on_message_accepts_when_channel_in_allow_channels() -> None:
     # When allow_channels is set, messages from listed channels should be forwarded.
     channel = DiscordChannel(
