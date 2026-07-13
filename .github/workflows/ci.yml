@@ -18,6 +18,27 @@ permissions:
   contents: read
 
 jobs:
+  dev-extra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install development dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests without optional integrations
+        run: uv run python -m pytest tests/
+
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20

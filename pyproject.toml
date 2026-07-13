@@ -127,9 +127,6 @@ whatsapp = [
     "neonize>=0.3.18.post0,<0.4.0",
     "segno>=1.6.1,<2.0.0",
 ]
-langsmith = [
-    "langsmith>=0.1.0",
-]
 langfuse = [
     "langfuse>=3.0.0,<4.0.0",
 ]

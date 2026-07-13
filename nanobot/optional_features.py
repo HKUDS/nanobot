@@ -48,7 +48,7 @@ class InstallResult:
 
 _INSTALL_TIMEOUT_SECONDS = 300
 _LOG_OUTPUT_LIMIT = 4000
-_HIDDEN_OPTIONAL_FEATURES = {"documents", "langsmith", "pdf"}
+_HIDDEN_OPTIONAL_FEATURES = {"documents", "pdf"}
 _BUNDLED_FEATURE_ALIASES = {"documents", "pdf"}
 
 
@@ -534,10 +534,6 @@ def enable_optional_feature(
     )
     from nanobot.config.loader import get_config_path
 
-    # The old extra never powered a runtime integration. Keep the CLI spelling
-    # as a compatibility alias while directing users to the supported tracer.
-    if name == "langsmith":
-        name = "langfuse"
     if name in _BUNDLED_FEATURE_ALIASES:
         payload = optional_features_payload(
             last_action={

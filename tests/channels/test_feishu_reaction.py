@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytest.importorskip("lark_oapi")
+
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig, _FeishuStreamBuf
 

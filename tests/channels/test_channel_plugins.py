@@ -333,12 +333,12 @@ def test_discover_enabled_warns_for_enabled_builtin_import_errors():
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
-    ep = _make_entry_point("telegram", _FakeTelegram)
+    ep = _make_entry_point("websocket", _FakeTelegram)
     with patch(_EP_TARGET, return_value=[ep]):
         result = discover_all()
 
-    assert "telegram" in result
-    assert result["telegram"] is not _FakeTelegram
+    assert "websocket" in result
+    assert result["websocket"] is not _FakeTelegram
 
 
 def test_discover_all_builtin_name_shadows_plugin_when_dependency_missing():
@@ -798,6 +798,52 @@ def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_pat
     assert log_flags == [False]
     assert commands == [[sys.executable, "-m", "pip", "install", "boto3>=1.43.0"]]
     assert "Installing optional feature" not in result.output
+    assert not config_path.exists()
+
+
+def test_plugins_enable_langfuse_installs_supported_tracer(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+    runner = CliRunner()
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"langfuse": ["langfuse>=3.0.0,<4.0.0"]},
+        installed=False,
+        commands=commands,
+    )
+
+    result = runner.invoke(app, ["plugins", "enable", "langfuse", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert commands == [[sys.executable, "-m", "pip", "install", "langfuse<4.0.0,>=3.0.0"]]
+    assert "Enabled feature 'langfuse'" in result.output
+    assert not config_path.exists()
+
+
+def test_plugins_enable_rejects_removed_langsmith_feature(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+    runner = CliRunner()
+    _stub_optional_feature_cli(
+        monkeypatch,
+        extras={"langfuse": ["langfuse>=3.0.0,<4.0.0"]},
+        installed=False,
+        commands=commands,
+    )
+
+    result = runner.invoke(app, ["plugins", "enable", "langsmith", "--config", str(config_path)])
+
+    assert result.exit_code == 1
+    assert "Unknown feature: langsmith" in result.output
+    assert commands == []
     assert not config_path.exists()
 
 
@@ -1570,6 +1616,7 @@ def test_optional_dependency_metadata_for_enable():
     assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
     assert deps["feishu"] == ["lark-oapi>=1.5.0,<2.0.0"]
     assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
+    assert "langsmith" not in deps
     assert deps["mochat"] == [
         "python-socketio>=5.16.0,<6.0.0",
         "msgpack>=1.1.0,<2.0.0",
@@ -1584,6 +1631,8 @@ def test_optional_dependency_metadata_for_enable():
 
     visible = optional_features.optional_dependency_groups()
     assert "documents" not in visible
+    assert "langfuse" in visible
+    assert "langsmith" not in visible
     assert "pdf" not in visible
     assert any(dep.startswith("python-telegram-bot") for dep in deps["telegram"])
     assert any(
