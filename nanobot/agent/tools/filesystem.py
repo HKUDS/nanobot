@@ -1,11 +1,15 @@
 """File system tools: read, write, edit, list."""
 
 import difflib
+import functools
+import hashlib
 import mimetypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from filelock import AsyncFileLock, Timeout
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
@@ -16,9 +20,12 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.config.paths import get_runtime_subdir
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+
+_WORKSPACE_LOCK_TIMEOUT = 30.0
 
 
 class FileToolsConfig(Base):
@@ -78,10 +85,7 @@ class _FsTool(Tool):
     def create(cls, ctx: Any) -> Tool:
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
-        restrict = (
-            ctx.config.restrict_to_workspace
-            or ctx.config.exec.sandbox
-        )
+        restrict = ctx.config.restrict_to_workspace or ctx.config.exec.sandbox
         sandbox_restricts = bool(ctx.config.exec.sandbox)
         allowed_dir = Path(ctx.workspace) if restrict else None
         extra_read = [BUILTIN_SKILLS_DIR]
@@ -162,17 +166,28 @@ class _FsTool(Tool):
 # ---------------------------------------------------------------------------
 
 
-_BLOCKED_DEVICE_PATHS = frozenset({
-    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
-    "/dev/stdin", "/dev/stdout", "/dev/stderr",
-    "/dev/tty", "/dev/console",
-    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
-})
+_BLOCKED_DEVICE_PATHS = frozenset(
+    {
+        "/dev/zero",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/full",
+        "/dev/stdin",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/tty",
+        "/dev/console",
+        "/dev/fd/0",
+        "/dev/fd/1",
+        "/dev/fd/2",
+    }
+)
 
 
 def _is_blocked_device(path: str | Path) -> bool:
     """Check if path is a blocked device that could hang or produce infinite output."""
     import re
+
     raw = str(path)
 
     # Resolve symlinks to check the actual target
@@ -245,6 +260,7 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
 )
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
+
     _scopes = {"core", "subagent", "memory"}
 
     _MAX_CHARS = 128_000
@@ -289,13 +305,17 @@ class ReadFileTool(_FsTool):
 
             # Device path blacklist
             if _is_blocked_device(path):
-                return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
+                return ToolResult.error(
+                    f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
+                )
 
             fp = self._resolve_read(path)
             if not fp.exists():
                 fp = _builtin_skill_read_path(path) or fp
             if _is_blocked_device(fp):
-                return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
+                return ToolResult.error(
+                    f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
+                )
             if not fp.exists():
                 return ToolResult.error(f"Error: File not found: {path}")
             if not fp.is_file():
@@ -334,7 +354,9 @@ class ReadFileTool(_FsTool):
                 if current_mtime != entry.mtime:
                     # File was modified externally - force full read and mark as not dedupable
                     entry.can_dedup = False
-                    self._file_states.record_read(fp, offset=offset, limit=limit)  # Update state with new mtime
+                    self._file_states.record_read(
+                        fp, offset=offset, limit=limit
+                    )  # Update state with new mtime
                     # Continue to read full content (don't return dedup message)
                 else:
                     # File unchanged - return dedup message
@@ -362,7 +384,9 @@ class ReadFileTool(_FsTool):
                 mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
                 if mime and mime.startswith("image/"):
                     return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
-                return ToolResult.error(f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported.")
+                return ToolResult.error(
+                    f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported."
+                )
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but
@@ -376,7 +400,9 @@ class ReadFileTool(_FsTool):
             if offset < 1:
                 offset = 1
             if offset > total:
-                return ToolResult.error(f"Error: offset {offset} is beyond end of file ({total} lines)")
+                return ToolResult.error(
+                    f"Error: offset {offset} is beyond end of file ({total} lines)"
+                )
 
             start = offset - 1
             end = min(start + (limit or self._DEFAULT_LIMIT), total)
@@ -408,7 +434,9 @@ class ReadFileTool(_FsTool):
         try:
             import fitz  # pymupdf
         except ImportError:
-            return ToolResult.error("Error: PDF reading requires pymupdf. Install with: pip install pymupdf")
+            return ToolResult.error(
+                "Error: PDF reading requires pymupdf. Install with: pip install pymupdf"
+            )
 
         try:
             doc = fitz.open(str(fp))
@@ -421,10 +449,14 @@ class ReadFileTool(_FsTool):
                 start, end = _parse_page_range(pages, total_pages)
             except (ValueError, IndexError):
                 doc.close()
-                return ToolResult.error(f"Error: Invalid page range '{pages}'. Use format like '1-5'.")
+                return ToolResult.error(
+                    f"Error: Invalid page range '{pages}'. Use format like '1-5'."
+                )
             if start > end or start >= total_pages:
                 doc.close()
-                return ToolResult.error(f"Error: Page range '{pages}' is out of bounds (document has {total_pages} pages).")
+                return ToolResult.error(
+                    f"Error: Page range '{pages}' is out of bounds (document has {total_pages} pages)."
+                )
         else:
             start = 0
             end = min(total_pages - 1, self._MAX_PDF_PAGES - 1)
@@ -447,7 +479,7 @@ class ReadFileTool(_FsTool):
         if end < total_pages - 1:
             result += f"\n\n(Showing pages {start + 1}-{end + 1} of {total_pages}. Use pages='{end + 2}-{min(end + 1 + self._MAX_PDF_PAGES, total_pages)}' to continue.)"
         if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
+            result = result[: self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
         return result
 
     def _read_office_doc(self, fp: Path) -> str:
@@ -465,7 +497,7 @@ class ReadFileTool(_FsTool):
             return f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
 
         if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(Document text truncated at ~128K chars)"
+            result = result[: self._MAX_CHARS] + "\n\n(Document text truncated at ~128K chars)"
 
         return result
 
@@ -473,6 +505,31 @@ class ReadFileTool(_FsTool):
 # ---------------------------------------------------------------------------
 # write_file
 # ---------------------------------------------------------------------------
+
+
+def _workspace_lock_decorator(func):
+    @functools.wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            workspace = self._display_workspace() or Path.cwd()
+            workspace = workspace.expanduser().resolve(strict=False)
+            workspace_key = hashlib.sha256(
+                os.path.normcase(str(workspace)).encode("utf-8")
+            ).hexdigest()
+            lock_path = get_runtime_subdir("locks") / f"workspace-{workspace_key}.lock"
+            lock = AsyncFileLock(str(lock_path), timeout=_WORKSPACE_LOCK_TIMEOUT)
+            await lock.acquire()
+        except Timeout:
+            return ToolResult.error("Workspace is busy: another session is modifying files.")
+        except OSError as exc:
+            return ToolResult.error(f"Could not acquire workspace lock: {exc}")
+
+        try:
+            return await func(self, *args, **kwargs)
+        finally:
+            await lock.release()
+
+    return wrapper
 
 
 @tool_parameters(
@@ -484,6 +541,7 @@ class ReadFileTool(_FsTool):
 )
 class WriteFileTool(_FsTool):
     """Write content to a file."""
+
     _scopes = {"core", "subagent", "memory"}
 
     @property
@@ -499,7 +557,10 @@ class WriteFileTool(_FsTool):
             "apply_patch; use edit_file only for small exact replacements."
         )
 
-    async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
+    @_workspace_lock_decorator
+    async def execute(
+        self, path: str | None = None, content: str | None = None, **kwargs: Any
+    ) -> str:
         try:
             if not path:
                 raise ValueError("Unknown path")
@@ -520,11 +581,16 @@ class WriteFileTool(_FsTool):
 # edit_file
 # ---------------------------------------------------------------------------
 
-_QUOTE_TABLE = str.maketrans({
-    "\u2018": "'", "\u2019": "'",  # curly single → straight
-    "\u201c": '"', "\u201d": '"',  # curly double → straight
-    "'": "'", '"': '"',            # identity (kept for completeness)
-})
+_QUOTE_TABLE = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",  # curly single → straight
+        "\u201c": '"',
+        "\u201d": '"',  # curly double → straight
+        "'": "'",
+        '"': '"',  # identity (kept for completeness)
+    }
+)
 
 
 def _normalize_quotes(s: str) -> str:
@@ -562,7 +628,10 @@ def _curly_single_quotes(text: str) -> str:
 
 def _preserve_quote_style(old_text: str, actual_text: str, new_text: str) -> str:
     """Preserve curly quote style when a quote-normalized fallback matched."""
-    if _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip()) or old_text == actual_text:
+    if (
+        _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip())
+        or old_text == actual_text
+    ):
         return new_text
 
     styled = new_text
@@ -603,7 +672,7 @@ def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
     if old_ws:
         if not actual_ws.startswith(old_ws):
             return new_text
-        delta = actual_ws[len(old_ws):]
+        delta = actual_ws[len(old_ws) :]
     else:
         delta = actual_ws
 
@@ -649,7 +718,9 @@ def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
     return matches
 
 
-def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = False) -> list[_MatchSpan]:
+def _find_trim_matches(
+    content: str, old_text: str, *, normalize_quotes: bool = False
+) -> list[_MatchSpan]:
     old_lines = old_text.splitlines()
     if not old_lines:
         return []
@@ -742,7 +813,10 @@ def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
 
     if old_text.lower() == actual_text.lower() and old_text != actual_text:
         hints.append("letter case differs")
-    if _collapse_internal_whitespace(old_text) == _collapse_internal_whitespace(actual_text) and old_text != actual_text:
+    if (
+        _collapse_internal_whitespace(old_text) == _collapse_internal_whitespace(actual_text)
+        and old_text != actual_text
+    ):
         hints.append("whitespace differs")
     if old_text.rstrip("\n") == actual_text.rstrip("\n") and old_text != actual_text:
         hints.append("trailing newline differs")
@@ -821,6 +895,7 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
 )
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
+
     _scopes = {"core", "subagent", "memory"}
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
@@ -848,11 +923,17 @@ class EditFileTool(_FsTool):
         """Strip trailing whitespace from each line."""
         return "\n".join(line.rstrip() for line in text.split("\n"))
 
+    @_workspace_lock_decorator
     async def execute(
-        self, path: str | None = None, old_text: str | None = None,
+        self,
+        path: str | None = None,
+        old_text: str | None = None,
         new_text: str | None = None,
-        replace_all: bool = False, occurrence: int | None = None,
-        line_hint: int | None = None, expected_replacements: int | None = None, **kwargs: Any,
+        replace_all: bool = False,
+        occurrence: int | None = None,
+        line_hint: int | None = None,
+        expected_replacements: int | None = None,
+        **kwargs: Any,
     ) -> str:
         try:
             if not path:
@@ -885,14 +966,18 @@ class EditFileTool(_FsTool):
             except OSError:
                 fsize = 0
             if fsize > self._MAX_EDIT_FILE_SIZE:
-                return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
+                return ToolResult.error(
+                    f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB."
+                )
 
             # Create-file: old_text='' but file exists and not empty → reject
             if old_text == "":
                 raw = fp.read_bytes()
                 content = raw.decode("utf-8")
                 if content.strip():
-                    return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
+                    return ToolResult.error(
+                        f"Error: Cannot create file — {path} already exists and is not empty."
+                    )
                 fp.write_text(new_text, encoding="utf-8")
                 self._file_states.record_write(fp)
                 return f"Successfully edited {fp}"
@@ -974,7 +1059,11 @@ class EditFileTool(_FsTool):
                 # Delete-line cleanup: when deleting text (new_text=''), consume trailing
                 # newline to avoid leaving a blank line
                 end = match.end
-                if replacement == "" and not match.text.endswith("\n") and content[end:end + 1] == "\n":
+                if (
+                    replacement == ""
+                    and not match.text.endswith("\n")
+                    and content[end : end + 1] == "\n"
+                ):
                     end += 1
 
                 new_content = new_content[: match.start] + replacement + new_content[end:]
@@ -1009,13 +1098,15 @@ class EditFileTool(_FsTool):
     def _not_found_msg(old_text: str, content: str, path: str) -> str:
         best_ratio, best_start, best_window_lines, hints = _best_window(old_text, content)
         if best_ratio > 0.5:
-            diff = "\n".join(difflib.unified_diff(
-                old_text.splitlines(keepends=True),
-                best_window_lines,
-                fromfile="old_text (provided)",
-                tofile=f"{path} (actual, line {best_start + 1})",
-                lineterm="",
-            ))
+            diff = "\n".join(
+                difflib.unified_diff(
+                    old_text.splitlines(keepends=True),
+                    best_window_lines,
+                    fromfile="old_text (provided)",
+                    tofile=f"{path} (actual, line {best_start + 1})",
+                    lineterm="",
+                )
+            )
             hint_text = ""
             if hints:
                 hint_text = "\nPossible cause: " + ", ".join(hints) + "."
@@ -1030,12 +1121,15 @@ class EditFileTool(_FsTool):
                 f"Possible cause: {', '.join(hints)}. "
                 "Copy the exact text from read_file and try again."
             )
-        return ToolResult.error(f"Error: old_text not found in {path}. No similar text found. Verify the file content.")
+        return ToolResult.error(
+            f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        )
 
 
 # ---------------------------------------------------------------------------
 # list_dir
 # ---------------------------------------------------------------------------
+
 
 @tool_parameters(
     tool_parameters_schema(
@@ -1051,13 +1145,24 @@ class EditFileTool(_FsTool):
 )
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
+
     _scopes = {"core", "subagent"}
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {
-        ".git", "node_modules", "__pycache__", ".venv", "venv",
-        "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
-        ".ruff_cache", ".coverage", "htmlcov",
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".coverage",
+        "htmlcov",
     }
 
     @property
@@ -1077,8 +1182,11 @@ class ListDirTool(_FsTool):
         return True
 
     async def execute(
-        self, path: str | None = None, recursive: bool = False,
-        max_entries: int | None = None, **kwargs: Any,
+        self,
+        path: str | None = None,
+        recursive: bool = False,
+        max_entries: int | None = None,
+        **kwargs: Any,
     ) -> str:
         try:
             if path is None:
