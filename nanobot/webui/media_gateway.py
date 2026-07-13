@@ -11,6 +11,10 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.config.paths import get_media_dir
+from nanobot.webui.attachment_ingress import (
+    AttachmentIngressResult,
+    store_inbound_attachments,
+)
 from nanobot.webui.media_api import (
     attach_signed_media_urls,
     serve_signed_media,
@@ -36,6 +40,14 @@ class WebUIMediaGateway:
         self.logger = logger
         self._media_dir = media_dir or (lambda channel=None: get_media_dir(channel))
         self.secret = secret or secrets.token_bytes(32)
+
+    def store_inbound_attachments(self, media: list[Any]) -> AttachmentIngressResult:
+        """Validate and persist attachments from an inbound WebUI message."""
+        return store_inbound_attachments(
+            media,
+            media_dir=self._media_dir("websocket"),
+            logger=self.logger,
+        )
 
     def serve_signed_media(
         self,

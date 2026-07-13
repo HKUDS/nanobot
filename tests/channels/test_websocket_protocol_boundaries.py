@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from nanobot.channels.websocket import (
-    _extract_data_url_mime,
     _is_valid_chat_id,
     _parse_envelope,
 )
@@ -56,22 +55,3 @@ def test_parse_envelope_only_accepts_typed_json_objects(
     else:
         assert parsed is not None
         assert parsed["type"] == expected_type
-
-
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        ("data:image/png;base64,AAAA", "image/png"),
-        ("data:IMAGE/JPEG;charset=utf-8;base64,AAAA", "image/jpeg"),
-        ("data:video/webm;codecs=vp9;base64,AAAA", "video/webm"),
-        ("data:image/svg+xml;base64,AAAA", "image/svg+xml"),
-        ("data:image/png,AAAA", None),
-        ("data:;base64,AAAA", None),
-        ("https://example.invalid/image.png", None),
-    ],
-)
-def test_extract_data_url_mime_normalizes_only_base64_data_urls(
-    url: str,
-    expected: str | None,
-) -> None:
-    assert _extract_data_url_mime(url) == expected

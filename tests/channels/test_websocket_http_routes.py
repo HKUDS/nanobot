@@ -2422,7 +2422,7 @@ async def test_webui_thread_resigns_assistant_media_urls(
     def fake_media_dir(channel: str | None = None) -> Path:
         return websocket_media if channel == "websocket" else media_root
 
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
 
     append_transcript_object(
         "websocket:video-replay",
