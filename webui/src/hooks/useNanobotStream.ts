@@ -520,6 +520,8 @@ export function useNanobotStream(
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
+  /** One-time runtime warning surfaced outside the persisted transcript. */
+  runtimeWarning: string | null;
   send: (content: string, images?: SendAttachment[], options?: SendOptions) => void;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
@@ -530,6 +532,7 @@ export function useNanobotStream(
   /** Clear the current ``streamError`` (e.g. after the user dismisses the
    * notification or starts a fresh action). */
   dismissStreamError: () => void;
+  dismissRuntimeWarning: () => void;
 } {
   const { client } = useClient();
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
@@ -540,6 +543,7 @@ export function useNanobotStream(
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
+  const [runtimeWarning, setRuntimeWarning] = useState<string | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
   const closedAssistantStreamIdsRef = useRef<Set<string>>(new Set());
@@ -564,6 +568,7 @@ export function useNanobotStream(
   }, [client]);
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
+  const dismissRuntimeWarning = useCallback(() => setRuntimeWarning(null), []);
 
   const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
@@ -797,6 +802,7 @@ export function useNanobotStream(
       hasPendingAgentActivity(initialMessages) || hasPendingToolCalls,
     );
     setStreamError(null);
+    setRuntimeWarning(null);
     setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     buffer.current = null;
@@ -818,6 +824,11 @@ export function useNanobotStream(
     if (!chatId) return;
 
     const handle = (ev: InboundEvent) => {
+      if (ev.event === "runtime_warning") {
+        const warning = ev.message.trim();
+        if (warning) setRuntimeWarning(warning);
+        return;
+      }
       const sideChannelEvent = isSideChannelEvent(ev);
       if (
         streamEndTimerRef.current !== null
@@ -1213,11 +1224,13 @@ export function useNanobotStream(
     isStreaming,
     runStartedAt,
     goalState,
+    runtimeWarning,
     send,
     transcribeAudio,
     stop,
     setMessages,
     streamError,
     dismissStreamError,
+    dismissRuntimeWarning,
   };
 }

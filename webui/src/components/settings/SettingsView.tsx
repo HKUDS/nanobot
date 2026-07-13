@@ -2951,15 +2951,20 @@ function ProvidersSettings({
               </span>
             </span>
           </span>
-          <StatusPill tone={provider.configured ? "success" : "neutral"}>
-            {isOauthProvider
-              ? provider.configured
-                ? tx("settings.oauth.signedIn", "Signed in")
-                : tx("settings.oauth.notSignedIn", "Not signed in")
-              : provider.configured
-                ? t("settings.byok.configured")
-                : t("settings.byok.notConfigured")}
-          </StatusPill>
+          <span className="flex shrink-0 items-center gap-2">
+            {isOauthProvider && provider.oauth_expires_soon ? (
+              <StatusPill tone="warning">{tx("settings.oauth.expiresSoon", "Expires soon")}</StatusPill>
+            ) : null}
+            <StatusPill tone={provider.configured ? "success" : "neutral"}>
+              {isOauthProvider
+                ? provider.configured
+                  ? tx("settings.oauth.signedIn", "Signed in")
+                  : tx("settings.oauth.notSignedIn", "Not signed in")
+                : provider.configured
+                  ? t("settings.byok.configured")
+                  : t("settings.byok.notConfigured")}
+            </StatusPill>
+          </span>
         </button>
 
         {expanded ? (
@@ -2978,46 +2983,54 @@ function ProvidersSettings({
               <p className="text-[12px] text-destructive">{capabilityError}</p>
             ) : null}
             {isOauthProvider ? (
-              <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[13px] font-semibold text-foreground">
-                    {tx("settings.oauth.authentication", "OAuth authentication")}
-                  </p>
-                  <p className="mt-1 truncate text-[12px] text-muted-foreground">
-                    {provider.configured
-                      ? t("settings.oauth.signedInAs", {
-                          account: provider.oauth_account || provider.label,
-                          defaultValue: "Signed in as {{account}}",
-                        })
-                      : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
-                  </p>
-                </div>
-                <div className="flex shrink-0 justify-end gap-2">
-                  {provider.configured ? (
+              <div className="space-y-3">
+                {provider.oauth_expires_soon && provider.oauth_expiry_warning ? (
+                  <div className="flex items-start gap-2 rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span>{provider.oauth_expiry_warning}</span>
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-foreground">
+                      {tx("settings.oauth.authentication", "OAuth authentication")}
+                    </p>
+                    <p className="mt-1 truncate text-[12px] text-muted-foreground">
+                      {provider.configured
+                        ? t("settings.oauth.signedInAs", {
+                            account: provider.oauth_account || provider.label,
+                            defaultValue: "Signed in as {{account}}",
+                          })
+                        : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 justify-end gap-2">
+                    {provider.configured ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onProviderOAuthLogout(provider.name)}
+                        disabled={saving}
+                        className="rounded-full"
+                      >
+                        {tx("settings.oauth.signOut", "Sign out")}
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
-                      variant="ghost"
-                      onClick={() => onProviderOAuthLogout(provider.name)}
-                      disabled={saving}
+                      variant="outline"
+                      onClick={() => onProviderOAuthLogin(provider.name)}
+                      disabled={saving || !provider.oauth_login_supported}
                       className="rounded-full"
                     >
-                      {tx("settings.oauth.signOut", "Sign out")}
+                      {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                      {saving
+                        ? tx("settings.oauth.signingIn", "Signing in...")
+                        : provider.configured
+                          ? tx("settings.oauth.signInAgain", "Sign in again")
+                          : tx("settings.oauth.signIn", "Sign in")}
                     </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onProviderOAuthLogin(provider.name)}
-                    disabled={saving || !provider.oauth_login_supported}
-                    className="rounded-full"
-                  >
-                    {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                    {saving
-                      ? tx("settings.oauth.signingIn", "Signing in...")
-                      : provider.configured
-                        ? tx("settings.oauth.signInAgain", "Sign in again")
-                        : tx("settings.oauth.signIn", "Sign in")}
-                  </Button>
+                  </div>
                 </div>
               </div>
             ) : (

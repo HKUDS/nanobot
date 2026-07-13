@@ -315,6 +315,22 @@ class WebSocketChannel(BaseChannel):
         await self._maybe_push_active_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
 
+    async def _maybe_send_runtime_warning(self, connection: Any, chat_id: str) -> None:
+        warning_callback = self.gateway.runtime_warning
+        if warning_callback is None:
+            return
+        try:
+            warning = warning_callback()
+            if warning:
+                await self._send_event(
+                    connection,
+                    "runtime_warning",
+                    chat_id=chat_id,
+                    message=warning,
+                )
+        except Exception:
+            self.logger.exception("failed to send websocket runtime warning")
+
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
         payload: dict[str, Any] = {"event": event}
@@ -696,6 +712,7 @@ class WebSocketChannel(BaseChannel):
                     cli_apps=cli_apps or None,
                     mcp_presets=mcp_presets or None,
                 )
+                await self._maybe_send_runtime_warning(connection, cid)
             await self._handle_message(
                 sender_id=client_id,
                 chat_id=cid,

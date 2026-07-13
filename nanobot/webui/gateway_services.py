@@ -31,6 +31,7 @@ class GatewayServices:
     local_trigger_store: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    runtime_warning: Callable[[], str | None] | None
 
 
 def build_gateway_services(
@@ -51,6 +52,7 @@ def build_gateway_services(
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+    runtime_warning: Callable[[], str | None] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -108,4 +110,5 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        runtime_warning=runtime_warning,
     )

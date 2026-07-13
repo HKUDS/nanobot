@@ -791,6 +791,18 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
+def _active_provider_name(config: Config) -> str | None:
+    try:
+        resolved = config.resolve_preset()
+        provider_name = config.get_provider_name(resolved.model, preset=resolved)
+    except Exception:
+        return None
+    if not isinstance(provider_name, str):
+        return None
+    provider_name = provider_name.strip()
+    return provider_name or None
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
@@ -1621,6 +1633,7 @@ def _run_gateway(
     from nanobot.cron.types import CronJob
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
+    from nanobot.providers.oauth_status import OAuthRuntimeWarningTracker
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
     from nanobot.triggers.local_runner import run_local_trigger_queue
@@ -1908,6 +1921,20 @@ def _run_gateway(
             return stripped or None
         return None
 
+    oauth_runtime_warnings = OAuthRuntimeWarningTracker()
+
+    def _webui_runtime_provider_name() -> str | None:
+        try:
+            from nanobot.config.loader import load_config
+
+            current_config = load_config()
+        except Exception:
+            current_config = config
+        return _active_provider_name(current_config)
+
+    def _webui_runtime_warning() -> str | None:
+        return oauth_runtime_warnings.warn_for_provider(_webui_runtime_provider_name())
+
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
     channels = ChannelManager(
@@ -1917,6 +1944,7 @@ def _run_gateway(
         cron_service=cron,
         local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_runtime_warning=_webui_runtime_warning,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
         webui_local_trigger_pending_ids=getattr(
             agent,
@@ -2183,6 +2211,7 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.providers.image_generation import image_gen_provider_configs
+    from nanobot.providers.oauth_status import OAuthRuntimeWarningTracker
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
@@ -2215,6 +2244,10 @@ def agent(
             format_restart_completed_message(restart_notice.started_at_raw),
             render_markdown=False,
         )
+    oauth_runtime_warnings = OAuthRuntimeWarningTracker()
+
+    def _log_oauth_runtime_warning() -> None:
+        oauth_runtime_warnings.warn_for_provider(_active_provider_name(config))
 
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
@@ -2255,6 +2288,7 @@ def agent(
                 bot_name=config.agents.defaults.bot_name,
                 bot_icon=config.agents.defaults.bot_icon,
             )
+            _log_oauth_runtime_warning()
             response = await agent_loop.process_direct(
                 message, session_id,
                 on_progress=_make_progress(renderer),
@@ -2395,6 +2429,7 @@ def agent(
                             bot_name=config.agents.defaults.bot_name,
                             bot_icon=config.agents.defaults.bot_icon,
                         )
+                        _log_oauth_runtime_warning()
 
                         await bus.publish_inbound(InboundMessage(
                             channel=cli_channel,
@@ -2599,8 +2634,15 @@ def status(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
 ):
     """Show nanobot status."""
+    from nanobot.providers.oauth_status import (
+        CLI_EXPIRY_WARNING_DAYS,
+        get_oauth_provider_status,
+        oauth_expiry_warning,
+    )
+
     config_path, loaded = _load_inspection_config(config=config, workspace=workspace)
     workspace_path = loaded.workspace_path
+    oauth_warnings: list[str] = []
 
     console.print(f"{__logo__} nanobot Status\n")
 
@@ -2618,11 +2660,24 @@ def status(
 
         # Check API keys from registry
         for spec in PROVIDERS:
+            if spec.is_oauth:
+                oauth_status = get_oauth_provider_status(spec)
+                if oauth_status.configured:
+                    detail = _format_oauth_status_detail(oauth_status)
+                    console.print(f"{spec.label}: [green]✓ logged in[/green]{detail}")
+                    warning = oauth_expiry_warning(
+                        spec,
+                        oauth_status,
+                        threshold_days=CLI_EXPIRY_WARNING_DAYS,
+                    )
+                    if warning:
+                        oauth_warnings.append(warning)
+                else:
+                    console.print(f"{spec.label}: [dim]not logged in[/dim]")
+                continue
             p = getattr(loaded.providers, spec.name, None)
             if p is None:
                 continue
-            if spec.is_oauth:
-                console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:
@@ -2632,6 +2687,9 @@ def status(
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+    for warning in oauth_warnings:
+        console.print(f"[yellow]! {warning}[/yellow]")
 
 
 # ============================================================================
@@ -2684,6 +2742,26 @@ def _resolve_oauth_provider(provider: str):
         console.print(f"[red]Unknown OAuth provider: {provider}[/red]  Supported: {names}")
         raise typer.Exit(1)
     return spec
+
+
+def _format_oauth_status_detail(status: Any) -> str:
+    parts: list[str] = []
+    if status.account:
+        parts.append(str(status.account))
+    if status.expires_at:
+        parts.append(f"expires {_format_oauth_expires_at(status.expires_at)}")
+    return f" [dim]({', '.join(parts)})[/dim]" if parts else ""
+
+
+def _format_oauth_expires_at(expires_at_ms: int | float | None) -> str:
+    if not expires_at_ms:
+        return "-"
+    from datetime import datetime
+
+    try:
+        return datetime.fromtimestamp(float(expires_at_ms) / 1000).strftime("%Y-%m-%d %H:%M")
+    except (OSError, OverflowError, ValueError):
+        return "-"
 
 
 def _set_oauth_provider_as_main(
@@ -2751,6 +2829,44 @@ def provider_login(
     handler()
     if set_main or model:
         _set_oauth_provider_as_main(spec.name, model=model, config_path=config)
+
+
+@provider_app.command("status")
+def provider_status():
+    """Show OAuth provider login status."""
+    from nanobot.providers.oauth_status import (
+        CLI_EXPIRY_WARNING_DAYS,
+        get_oauth_provider_status,
+        oauth_expiry_warning,
+        oauth_provider_specs,
+    )
+
+    table = Table(title="OAuth Provider Status")
+    table.add_column("Provider", style="cyan")
+    table.add_column("Status")
+    table.add_column("Account")
+    table.add_column("Token Expires")
+
+    warnings: list[str] = []
+    for spec in oauth_provider_specs():
+        status = get_oauth_provider_status(spec)
+        table.add_row(
+            spec.label,
+            "[green]logged in[/green]" if status.configured else "[dim]not logged in[/dim]",
+            status.account or "[dim]-[/dim]",
+            _format_oauth_expires_at(status.expires_at) if status.expires_at else "[dim]-[/dim]",
+        )
+        warning = oauth_expiry_warning(
+            spec,
+            status,
+            threshold_days=CLI_EXPIRY_WARNING_DAYS,
+        )
+        if warning:
+            warnings.append(warning)
+
+    console.print(table)
+    for warning in warnings:
+        console.print(f"[yellow]! {warning}[/yellow]")
 
 
 @provider_app.command("logout")

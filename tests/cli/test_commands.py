@@ -3,6 +3,7 @@ import json
 import re
 import shutil
 import signal
+import time
 from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
@@ -570,6 +571,58 @@ def test_provider_logout_rejects_unknown_provider():
 
     assert result.exit_code == 1
     assert "Unknown OAuth provider" in result.stdout
+
+
+def test_provider_status_shows_oauth_state_and_expiry_warning(monkeypatch):
+    from nanobot.providers.oauth_status import OAuthProviderStatus
+
+    expires_at = int(time.time() * 1000) + 3 * 24 * 60 * 60 * 1000
+
+    def fake_status(spec):
+        if spec.name == "openai_codex":
+            return OAuthProviderStatus(True, "acct-test", expires_at, True)
+        return OAuthProviderStatus(False, None, None, True)
+
+    monkeypatch.setattr("nanobot.providers.oauth_status.get_oauth_provider_status", fake_status)
+
+    result = runner.invoke(app, ["provider", "status"])
+
+    assert result.exit_code == 0
+    assert "OAuth Provider Status" in result.stdout
+    assert "OpenAI Codex" in result.stdout
+    assert "acct-test" in result.stdout
+    assert "GitHub Copilot" in result.stdout
+    assert "not logged in" in result.stdout
+    assert "OpenAI Codex OAuth token expires" in result.stdout
+    assert "nanobot provider login" in result.stdout
+    assert "openai-codex" in result.stdout
+
+
+def test_status_reports_oauth_login_state(monkeypatch, tmp_path):
+    from nanobot.providers.oauth_status import OAuthProviderStatus
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    def fake_status(spec):
+        if spec.name == "openai_codex":
+            return OAuthProviderStatus(True, "acct-test", None, True)
+        return OAuthProviderStatus(False, None, None, True)
+
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr("nanobot.providers.oauth_status.get_oauth_provider_status", fake_status)
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "OpenAI Codex" in result.stdout
+    assert "logged in" in result.stdout
+    assert "acct-test" in result.stdout
+    assert "GitHub Copilot" in result.stdout
+    assert "not logged in" in result.stdout
 
 
 def test_provider_logout_paths_resolve_to_expected_files():

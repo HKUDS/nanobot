@@ -426,6 +426,8 @@ export interface SettingsPayload {
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
+    oauth_expires_soon?: boolean;
+    oauth_expiry_warning?: string | null;
     oauth_login_supported?: boolean;
   }>;
   web_search: {
@@ -1060,6 +1062,11 @@ export type InboundEvent =
       event: "runtime_model_updated";
       model_name: string;
       model_preset?: string | null;
+    }
+  | {
+      event: "runtime_warning";
+      chat_id: string;
+      message: string;
     }
   | ({
       event: "turn_end";

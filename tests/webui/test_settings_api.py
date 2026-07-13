@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -405,13 +406,14 @@ def test_settings_payload_includes_oauth_provider_status(
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    later = int(time.time() * 1000) + 30 * 24 * 60 * 60 * 1000
 
     def fake_oauth_status(spec):
         if spec.name == "openai_codex":
             return {
                 "configured": True,
                 "account": "acct-test",
-                "expires_at": 123,
+                "expires_at": later,
                 "login_supported": True,
             }
         return {
@@ -429,6 +431,33 @@ def test_settings_payload_includes_oauth_provider_status(
     assert providers["openai_codex"]["auth_type"] == "oauth"
     assert providers["openai_codex"]["configured"] is True
     assert providers["openai_codex"]["oauth_account"] == "acct-test"
+    assert providers["openai_codex"]["oauth_expires_soon"] is False
+
+
+def test_settings_payload_marks_oauth_provider_expiring_soon(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    expires_at = int(time.time() * 1000) + 2 * 24 * 60 * 60 * 1000
+
+    def fake_oauth_status(spec):
+        return {
+            "configured": spec.name == "openai_codex",
+            "account": "acct-test" if spec.name == "openai_codex" else None,
+            "expires_at": expires_at if spec.name == "openai_codex" else None,
+            "login_supported": True,
+        }
+
+    monkeypatch.setattr("nanobot.webui.settings_api._oauth_provider_status", fake_oauth_status)
+
+    payload = settings_payload()
+    providers = {row["name"]: row for row in payload["providers"]}
+
+    assert providers["openai_codex"]["oauth_expires_soon"] is True
+    assert "OpenAI Codex OAuth token expires" in providers["openai_codex"]["oauth_expiry_warning"]
 
 
 def test_settings_payload_includes_dynamic_custom_provider(
