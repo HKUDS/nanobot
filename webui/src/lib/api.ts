@@ -1,6 +1,10 @@
 import type {
+  ApiServicePayload,
   AutomationsPayload,
   AutomationUpdatePayload,
+  ChannelConfigurePayload,
+  ChannelConnectPayload,
+  ChannelValidationPayload,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
@@ -10,6 +14,7 @@ import type {
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
+  PairingPayload,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
   SessionDeleteResult,
@@ -20,6 +25,7 @@ import type {
   SkillDetail,
   SkillsPayload,
   SlashCommand,
+  SlashCommandLifecycle,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
@@ -29,6 +35,22 @@ import type {
 import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
+const SLASH_COMMAND_LIFECYCLES = new Set<SlashCommandLifecycle>([
+  "side_channel",
+  "finalize_active_turn",
+  "stop_active_turn",
+  "agent_turn",
+  "agent_turn_with_args",
+]);
+
+function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle {
+  return (
+    typeof value === "string"
+    && SLASH_COMMAND_LIFECYCLES.has(value as SlashCommandLifecycle)
+  );
+}
+const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
+const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -371,13 +393,43 @@ export async function fetchNanobotFeatures(
   );
 }
 
+export async function fetchApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
+  return request<ApiServicePayload>(`${base}/api/settings/api-service`, token);
+}
+
+export async function startApiService(
+  token: string,
+  values: { host: string; port: number; timeout: number; apiKey?: string },
+  base: string = "",
+): Promise<ApiServicePayload> {
+  const query = new URLSearchParams({
+    host: values.host,
+    port: String(values.port),
+    timeout: String(values.timeout),
+  });
+  const headers = values.apiKey === undefined
+    ? undefined
+    : { [API_SERVICE_VALUES_HEADER]: JSON.stringify({ api_key: values.apiKey }) };
+  return request<ApiServicePayload>(
+    `${base}/api/settings/api-service/start?${query}`,
+    token,
+    { headers },
+  );
+}
+
+export async function stopApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
+  return request<ApiServicePayload>(`${base}/api/settings/api-service/stop`, token);
+}
+
 export async function enableNanobotFeature(
   token: string,
   name: string,
+  options: { instanceId?: string } = {},
   base: string = "",
 ): Promise<NanobotFeaturesPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features/enable?${query}`,
     token,
@@ -387,13 +439,135 @@ export async function enableNanobotFeature(
 export async function disableNanobotFeature(
   token: string,
   name: string,
+  options: { instanceId?: string } = {},
   base: string = "",
 ): Promise<NanobotFeaturesPayload> {
   const query = new URLSearchParams();
   query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features/disable?${query}`,
     token,
+  );
+}
+
+export async function fetchPairingRequests(
+  token: string,
+  base: string = "",
+): Promise<PairingPayload> {
+  return request<PairingPayload>(
+    `${base}/api/settings/pairing`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runPairingAction(
+  token: string,
+  action: "approve" | "deny",
+  code: string,
+  base: string = "",
+): Promise<PairingPayload> {
+  const query = new URLSearchParams();
+  query.set("code", code);
+  return request<PairingPayload>(
+    `${base}/api/settings/pairing/${action}?${query}`,
+    token,
+  );
+}
+
+export async function startChannelConnect(
+  token: string,
+  channel: "feishu" | "weixin",
+  options: {
+    domain?: "feishu" | "lark";
+    instanceId?: string;
+    mode?: "replace" | "create";
+    force?: boolean;
+  } = {},
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  if (options.domain) query.set("domain", options.domain);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  if (options.mode) query.set("mode", options.mode);
+  if (options.force) query.set("force", "true");
+  const suffix = query.toString();
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/start${suffix ? `?${suffix}` : ""}`,
+    token,
+  );
+}
+
+export async function pollChannelConnect(
+  token: string,
+  channel: "feishu" | "weixin",
+  sessionId: string,
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  query.set("session_id", sessionId);
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/poll?${query}`,
+    token,
+  );
+}
+
+export async function cancelChannelConnect(
+  token: string,
+  channel: "feishu" | "weixin",
+  sessionId: string,
+  base: string = "",
+): Promise<ChannelConnectPayload> {
+  const query = new URLSearchParams();
+  query.set("session_id", sessionId);
+  return request<ChannelConnectPayload>(
+    `${base}/api/settings/channels/${channel}/connect/cancel?${query}`,
+    token,
+  );
+}
+
+export async function configureChannel(
+  token: string,
+  name: string,
+  values: Record<string, string>,
+  options: { enable?: boolean; instanceId?: string } = {},
+  base: string = "",
+): Promise<ChannelConfigurePayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  if (options.enable !== undefined) query.set("enable", String(options.enable));
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  return request<ChannelConfigurePayload>(
+    `${base}/api/settings/channels/configure?${query}`,
+    token,
+    {
+      headers: {
+        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
+      },
+    },
+  );
+}
+
+export async function validateChannel(
+  token: string,
+  name: string,
+  values: Record<string, string> = {},
+  options: { instanceId?: string } = {},
+  base: string = "",
+): Promise<ChannelValidationPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  if (options.instanceId) query.set("instance_id", options.instanceId);
+  return request<ChannelValidationPayload>(
+    `${base}/api/settings/channels/validate?${query}`,
+    token,
+    {
+      headers: {
+        [CHANNEL_VALUES_HEADER]: JSON.stringify(values),
+      },
+    },
   );
 }
 
@@ -498,6 +672,8 @@ export async function listSlashCommands(
     description: string;
     icon: string;
     arg_hint?: string;
+    lifecycle?: unknown;
+    accepts_args?: unknown;
   };
   const body = await request<{ commands: Row[] }>(
     `${base}/api/commands`,
@@ -506,14 +682,18 @@ export async function listSlashCommands(
     API_READ_TIMEOUT_MS,
   );
   return body.commands
-    .filter((command) => !["/stop", "/restart"].includes(command.command))
-    .map((command) => ({
-      command: command.command,
-      title: command.title,
-      description: command.description,
-      icon: command.icon,
-      argHint: command.arg_hint ?? "",
-    }));
+    .flatMap((command) => {
+      if (!isSlashCommandLifecycle(command.lifecycle)) return [];
+      return [{
+        command: command.command,
+        title: command.title,
+        description: command.description,
+        icon: command.icon,
+        argHint: command.arg_hint ?? "",
+        lifecycle: command.lifecycle,
+        acceptsArgs: command.accepts_args === true,
+      }];
+    });
 }
 
 export async function fetchSidebarState(

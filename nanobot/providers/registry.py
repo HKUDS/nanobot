@@ -19,6 +19,16 @@ from pydantic.alias_generators import to_snake
 
 
 @dataclass(frozen=True)
+class ProviderModelSpec:
+    """A curated model exposed by providers without a model-list endpoint."""
+
+    id: str
+    label: str = ""
+    description: str = ""
+    context_window: int | None = None
+
+
+@dataclass(frozen=True)
 class ProviderSpec:
     """One LLM provider's metadata. See PROVIDERS below for real examples.
 
@@ -33,6 +43,8 @@ class ProviderSpec:
     env_key: str  # env var for API key, e.g. "DASHSCOPE_API_KEY"
     display_name: str = ""  # shown in `nanobot status`
     model_catalog: str = "auto"  # WebUI model-list source
+    builtin_models: tuple[ProviderModelSpec, ...] = ()
+    settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
@@ -179,12 +191,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         gateway_reasoning_style="reasoning_effort",
     ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
-    # OpenCode's own config uses "opencode/<model>"; send the bare model upstream.
+    # models.dev/OpenCode use provider id "opencode" and model ids like
+    # "opencode/<model>"; send the bare model upstream.
+    ProviderSpec(
+        name="opencode",
+        keywords=("opencode/", "opencode", "opencode-zen", "opencode_zen"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode.ai/zen",
+        default_api_base="https://opencode.ai/zen/v1",
+        strip_model_prefixes=("opencode", "opencode_zen", "opencode-zen"),
+    ),
+    # Compatibility alias for configs that already used providers.opencodeZen.
     ProviderSpec(
         name="opencode_zen",
         keywords=("opencode/", "opencode_zen", "opencode-zen"),
         env_key="OPENCODE_API_KEY",
         display_name="OpenCode Zen",
+        settings_alias_for="opencode",
         backend="openai_compat",
         is_gateway=True,
         detect_by_base_keyword="opencode.ai/zen",
@@ -348,6 +374,47 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("openai-codex",),
         env_key="",
         display_name="OpenAI Codex",
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-sol",
+                label="GPT-5.6-Sol",
+                description="Latest frontier agentic coding model.",
+                context_window=372000,
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-terra",
+                label="GPT-5.6-Terra",
+                description="Balanced agentic coding model for everyday work.",
+                context_window=372000,
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.6-luna",
+                label="GPT-5.6-Luna",
+                description="Fast and affordable agentic coding model.",
+                context_window=372000,
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.5",
+                label="GPT-5.5",
+                description="Frontier model for complex coding, research, and real-world work.",
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.4",
+                label="GPT-5.4",
+                description="Strong model for everyday coding.",
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.4-mini",
+                label="GPT-5.4-Mini",
+                description="Small, fast, and cost-efficient model for simpler coding tasks.",
+            ),
+            ProviderModelSpec(
+                id="openai-codex/gpt-5.3-codex-spark",
+                label="GPT-5.3-Codex-Spark",
+                description="Ultra-fast coding model.",
+            ),
+        ),
         backend="openai_codex",
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",

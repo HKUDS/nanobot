@@ -44,6 +44,7 @@ def _make_feishu_channel(
     channel._client = MagicMock()
     # _loop is only used by the WebSocket thread bridge; not needed for unit tests
     channel._loop = None
+    channel._running = True
     return channel
 
 
@@ -209,6 +210,35 @@ def test_reply_message_sync_returns_false_on_api_error() -> None:
     assert ok is False
 
 
+def test_reply_message_sync_falls_back_to_text_for_interactive_error() -> None:
+    channel = _make_feishu_channel()
+
+    interactive_resp = MagicMock()
+    interactive_resp.success.return_value = False
+    interactive_resp.code = 230099
+    interactive_resp.msg = "cardid is invalid"
+    interactive_resp.get_log_id.return_value = "log_x"
+
+    text_resp = MagicMock()
+    text_resp.success.return_value = True
+    channel._client.im.v1.message.reply.side_effect = [interactive_resp, text_resp]
+
+    ok = channel._reply_message_sync(
+        "om_parent",
+        "interactive",
+        json.dumps(
+            {
+                "config": {"wide_screen_mode": True},
+                "elements": [{"tag": "markdown", "content": "fallback body"}],
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    assert ok is True
+    assert channel._client.im.v1.message.reply.call_count == 2
+
+
 def test_reply_message_sync_returns_false_on_exception() -> None:
     channel = _make_feishu_channel()
     channel._client.im.v1.message.reply.side_effect = RuntimeError("network error")
@@ -366,6 +396,37 @@ async def test_send_fallback_to_create_when_reply_fails() -> None:
     # reply attempted first, then falls back to create
     channel._client.im.v1.message.reply.assert_called_once()
     channel._client.im.v1.message.create.assert_called_once()
+
+
+def test_send_message_sync_falls_back_to_text_for_interactive_error() -> None:
+    channel = _make_feishu_channel()
+
+    interactive_resp = MagicMock()
+    interactive_resp.success.return_value = False
+    interactive_resp.code = 230099
+    interactive_resp.msg = "cardid is invalid"
+    interactive_resp.get_log_id.return_value = "log_x"
+
+    text_resp = MagicMock()
+    text_resp.success.return_value = True
+    text_resp.data = SimpleNamespace(message_id="om_fallback")
+    channel._client.im.v1.message.create.side_effect = [interactive_resp, text_resp]
+
+    message_id = channel._send_message_sync(
+        "chat_id",
+        "oc_abc",
+        "interactive",
+        json.dumps(
+            {
+                "config": {"wide_screen_mode": True},
+                "elements": [{"tag": "markdown", "content": "fallback body"}],
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    assert message_id == "om_fallback"
+    assert channel._client.im.v1.message.create.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -550,6 +611,64 @@ async def test_on_message_no_extra_api_call_when_no_parent_id() -> None:
     assert len(captured) == 1
 
 
+@pytest.mark.parametrize(("chat_type", "group_policy", "should_send"), [
+    ("p2p", "mention", True),
+    ("group", "open", False),
+])
+@pytest.mark.asyncio
+async def test_on_message_new_system_divider_only_in_p2p(
+    chat_type: str,
+    group_policy: str,
+    should_send: bool,
+) -> None:
+    channel = _make_feishu_channel(group_policy=group_policy)
+    channel._processed_message_ids.clear()
+    channel._send_message_sync = MagicMock(return_value="om_system")
+    channel._handle_message = AsyncMock()
+
+    with patch.object(channel, "_add_reaction", return_value=None):
+        await channel._on_message(_make_feishu_event(
+            chat_type=chat_type,
+            content='{"text": "/new"}',
+        ))
+
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.call_args.kwargs["content"] == "/new"
+    if not should_send:
+        channel._send_message_sync.assert_not_called()
+        return
+    _, receive_id, msg_type, content = channel._send_message_sync.call_args.args
+    assert receive_id == "ou_alice"
+    assert msg_type == "system"
+    assert json.loads(content)["type"] == "divider"
+
+
+@pytest.mark.asyncio
+async def test_send_new_session_text_suppressed_in_p2p_only() -> None:
+    p2p = _make_feishu_channel()
+    p2p._send_message_sync = MagicMock()
+
+    await p2p.send(OutboundMessage(
+        channel="feishu",
+        chat_id="ou_alice",
+        content="New session started.",
+        metadata={"chat_type": "p2p"},
+    ))
+
+    group = _make_feishu_channel()
+    group._send_message_sync = MagicMock(return_value="om_text")
+
+    await group.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_group",
+        content="New session started.",
+        metadata={"chat_type": "group"},
+    ))
+
+    p2p._send_message_sync.assert_not_called()
+    assert group._send_message_sync.call_args.args[2] == "text"
+
+
 @pytest.mark.asyncio
 async def test_on_message_strips_required_leading_bot_mention_for_commands() -> None:
     channel = _make_feishu_channel(group_policy="mention")
@@ -726,6 +845,36 @@ async def test_session_key_group_no_root_id_uses_message_id() -> None:
 
     assert len(bus_spy) == 1
     assert bus_spy[0].session_key == "feishu:oc_abc:om_001"
+
+
+@pytest.mark.asyncio
+async def test_session_key_named_instance_uses_runtime_channel_namespace() -> None:
+    """Named Feishu assistant instances keep group sessions separate."""
+    channel = _make_feishu_channel(group_policy="open")
+    channel.name = "feishu.product"
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    event = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "hello"}',
+        root_id="om_root123",
+        message_id="om_child456",
+    )
+    await channel._on_message(event)
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].channel == "feishu.product"
+    assert bus_spy[0].session_key == "feishu.product:oc_abc:om_root123"
 
 
 @pytest.mark.asyncio
@@ -976,6 +1125,33 @@ def test_on_background_task_done_removes_from_set() -> None:
         loop.close()
 
     assert task not in channel._background_tasks
+
+
+def test_on_message_sync_ignores_events_after_channel_stops() -> None:
+    """Late WebSocket callbacks should not schedule work after the assistant is off."""
+    channel = _make_feishu_channel()
+    channel._running = False
+    channel._loop = MagicMock()
+    channel._loop.is_running.return_value = True
+
+    with patch("asyncio.run_coroutine_threadsafe") as schedule:
+        channel._on_message_sync(_make_feishu_event())
+
+    schedule.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_message_ignores_events_after_channel_stops() -> None:
+    """Stopped assistants must not react, pair, or publish stale Feishu events."""
+    channel = _make_feishu_channel(group_policy="open")
+    channel._running = False
+    channel._add_reaction = AsyncMock()
+    channel._handle_message = AsyncMock()
+
+    await channel._on_message(_make_feishu_event())
+
+    channel._add_reaction.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

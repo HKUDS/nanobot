@@ -144,7 +144,9 @@ class TestMessageToolSuppressLogic:
         async def on_progress(content: str, *, tool_hint: bool = False) -> None:
             progress.append((content, tool_hint))
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert progress == [
@@ -156,11 +158,12 @@ class TestMessageToolTurnTracking:
 
     def test_sent_in_turn_tracks_same_target(self) -> None:
         tool = MessageTool()
-        from nanobot.agent.tools.context import RequestContext
-        tool.set_context(RequestContext(channel="feishu", chat_id="chat1"))
-        assert not tool._sent_in_turn
-        tool._sent_in_turn = True
-        assert tool._sent_in_turn
+        from nanobot.agent.tools.context import RequestContext, request_context
+
+        with request_context(RequestContext(channel="feishu", chat_id="chat1")):
+            assert not tool._sent_in_turn
+            tool._sent_in_turn = True
+            assert tool._sent_in_turn
 
     def test_start_turn_resets(self) -> None:
         tool = MessageTool()

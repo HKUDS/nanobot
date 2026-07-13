@@ -15,6 +15,8 @@ import httpx
 import pytest
 import websockets
 
+_BOOTSTRAP_SECRET = "smoke-secret"
+
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -45,6 +47,7 @@ def _write_smoke_config(path: Path, *, workspace: Path, ws_port: int, gateway_po
                 "host": "127.0.0.1",
                 "port": ws_port,
                 "allowFrom": ["*"],
+                "tokenIssueSecret": _BOOTSTRAP_SECRET,
             }
         },
         "gateway": {
@@ -95,6 +98,17 @@ def _get_json(url: str, *, token: str | None = None) -> dict:
     return response.json()
 
 
+def _get_bootstrap(url: str) -> dict:
+    response = httpx.get(
+        url,
+        headers={"X-Nanobot-Auth": _BOOTSTRAP_SECRET},
+        timeout=5.0,
+        trust_env=False,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def _wait_for_bootstrap(base_url: str, process: subprocess.Popen[bytes], log_path: Path) -> dict:
     deadline = time.monotonic() + 20
     last_error: Exception | None = None
@@ -102,7 +116,7 @@ def _wait_for_bootstrap(base_url: str, process: subprocess.Popen[bytes], log_pat
         if process.poll() is not None:
             break
         try:
-            return _get_json(f"{base_url}/webui/bootstrap")
+            return _get_bootstrap(f"{base_url}/webui/bootstrap")
         except (httpx.HTTPError, OSError) as exc:
             last_error = exc
             time.sleep(0.2)
@@ -162,7 +176,7 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             assert "Current model: `custom/smoke-model`" in answer["text"]
             await _recv_until(ws, "turn_end")
 
-        api_token = _wait_for_bootstrap(base_url, process, log_path)["token"]
+        api_token = _wait_for_bootstrap(base_url, process, log_path)["api_token"]
         sessions = _get_json(f"{base_url}/api/sessions", token=api_token)
         key = f"websocket:{chat_id}"
         assert key in {row["key"] for row in sessions["sessions"]}

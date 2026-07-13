@@ -1914,6 +1914,36 @@ async def test_send_delta_stream_end_replaces_existing_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_keeps_same_room_stream_ids_independent(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    event_ids = ["event-a", "event-b"]
+
+    async def _send_room_content(room_id, content):
+        client.room_send_calls.append({"room_id": room_id, "content": content})
+        return SimpleNamespace(event_id=event_ids.pop(0) if event_ids else "event-final")
+
+    monkeypatch.setattr(channel, "_send_room_content", _send_room_content)
+
+    await channel.send_delta("!room:matrix.org", "A", stream_id="stream-a")
+    await channel.send_delta("!room:matrix.org", "B", stream_id="stream-b")
+    await channel.send_delta("!room:matrix.org", "1", stream_id="stream-a")
+    await channel.send_delta("!room:matrix.org", "2", stream_id="stream-b")
+
+    await channel.send_delta("!room:matrix.org", "", stream_id="stream-a", stream_end=True)
+    await channel.send_delta("!room:matrix.org", "", stream_id="stream-b", stream_end=True)
+
+    final_a = client.room_send_calls[-2]["content"]
+    final_b = client.room_send_calls[-1]["content"]
+    assert final_a["body"] == "A1"
+    assert final_a["m.relates_to"]["event_id"] == "event-a"
+    assert final_b["body"] == "B2"
+    assert final_b["m.relates_to"]["event_id"] == "event-b"
+
+
+@pytest.mark.asyncio
 async def test_send_delta_starts_threaded_stream_inside_thread() -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)

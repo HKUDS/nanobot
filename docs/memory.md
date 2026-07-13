@@ -1,4 +1,8 @@
-# Memory in nanobot
+# AI Agent Memory in nanobot
+
+This page explains how nanobot implements long-term AI agent memory: session
+history, compressed archives, durable knowledge files, Dream consolidation, and
+Git-backed memory changes.
 
 nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
 

@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytest.importorskip("lark_oapi")
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus

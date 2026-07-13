@@ -26,6 +26,7 @@ from websockets.http11 import Response
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
@@ -44,6 +45,9 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.http_utils import (
     http_response as _http_response,
+)
+from nanobot.webui.http_utils import (
+    is_local_browser_request as _is_local_browser_request,
 )
 from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
@@ -158,6 +162,7 @@ class GatewayHTTPHandler:
         local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        channel_feature_action: Callable[..., Any] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -190,6 +195,7 @@ class GatewayHTTPHandler:
             error_response=_http_error,
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
+            channel_feature_action=channel_feature_action,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -306,33 +312,41 @@ class GatewayHTTPHandler:
 
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
+        is_local_browser = _is_local_browser_request(connection, request.headers)
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not _is_localhost(connection):
+        elif not is_local_browser:
             return _http_error(403, "bootstrap is localhost-only")
 
-        if not self.tokens.can_issue(include_api_token=True):
+        api_token_allowed = bool(secret) or is_local_browser
+        if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
                 status=429,
                 content_type="application/json; charset=utf-8",
             )
-        token = self.tokens.issue_token(self.config.token_ttl_s, api_token=True)
+        token = self.tokens.issue_token(self.config.token_ttl_s)
+        api_token = (
+            self.tokens.issue_api_token(self.config.token_ttl_s)
+            if api_token_allowed
+            else None
+        )
 
         ws_url = self._bootstrap_ws_url(request)
         expected_path = _normalize_config_path(self.config.path)
-        return _http_json_response(
-            {
-                "token": token,
-                "ws_path": expected_path,
-                "ws_url": ws_url,
-                "expires_in": self.config.token_ttl_s,
-                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
-                "runtime_surface": self._runtime_surface,
-                "runtime_capabilities": self._capabilities,
-            }
-        )
+        payload = {
+            "token": token,
+            "ws_path": expected_path,
+            "ws_url": ws_url,
+            "expires_in": self.config.token_ttl_s,
+            "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+            "runtime_surface": self._runtime_surface,
+            "runtime_capabilities": self._capabilities,
+        }
+        if api_token is not None:
+            payload["api_token"] = api_token
+        return _http_json_response(payload)
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
@@ -415,6 +429,9 @@ class GatewayHTTPHandler:
         messages = data.get("messages")
         if isinstance(messages, list):
             scrub_subagent_messages_for_channel(messages)
+            data["messages"] = public_history_messages(
+                message for message in messages if isinstance(message, dict)
+            )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
 

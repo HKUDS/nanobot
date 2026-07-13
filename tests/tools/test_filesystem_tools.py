@@ -78,6 +78,13 @@ class TestReadFileTool:
         assert "not found" in result
 
     @pytest.mark.asyncio
+    async def test_workspace_relative_builtin_skill_read_falls_back_to_packaged_skill(self, tool):
+        result = await tool.execute(path="skills/cron/SKILL.md", limit=5)
+
+        assert "Error" not in result
+        assert "cron" in result.lower()
+
+    @pytest.mark.asyncio
     async def test_missing_path_returns_clear_error(self, tool):
         result = await tool.execute()
         assert result == "Error reading file: Unknown path"

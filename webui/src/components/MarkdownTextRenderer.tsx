@@ -1,10 +1,7 @@
 import {
   Children,
   isValidElement,
-  useCallback,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
 import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
@@ -22,6 +19,7 @@ import {
   isFilePatternReference,
   isLikelyFilePath,
 } from "@/components/FileReferenceChip";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferMediaKind } from "@/lib/media";
 import { faviconUrls } from "@/lib/provider-brand";
 import { remarkTexMath } from "@/lib/remark-tex-math";
@@ -304,7 +302,7 @@ function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview |
 }
 
 function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
-  const { favicon, onFaviconError } = useFaviconFallback(link.host);
+  const { favicon, onFaviconError, onFaviconLoad } = useFaviconFallback(link.host);
   const label = link.prefix
     ? `${link.prefix} — ${link.title}`
     : link.title;
@@ -332,14 +330,16 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
             src={favicon}
             alt=""
             className="h-3 w-3 rounded-[2px] object-contain"
+            decoding="async"
             loading="lazy"
+            onLoad={onFaviconLoad}
             onError={onFaviconError}
           />
         ) : (
           <Globe2 className="h-3 w-3" />
         )}
       </span>
-      <span className="min-w-0 truncate leading-normal">
+      <span className="min-w-0 [overflow-wrap:anywhere] leading-normal sm:truncate">
         {label}
       </span>
     </a>
@@ -348,19 +348,12 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
 
 function useFaviconFallback(host: string) {
   const faviconCandidates = useMemo(() => faviconUrls(host), [host]);
-  const [faviconIndex, setFaviconIndex] = useState(0);
-
-  useEffect(() => {
-    setFaviconIndex(0);
-  }, [host]);
-
-  const onFaviconError = useCallback(() => {
-    setFaviconIndex((index) => Math.min(index + 1, faviconCandidates.length));
-  }, [faviconCandidates.length]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(faviconCandidates);
 
   return {
-    favicon: faviconCandidates[faviconIndex] ?? null,
-    onFaviconError,
+    favicon: logoUrl ?? null,
+    onFaviconError: onLogoError,
+    onFaviconLoad: onLogoLoad,
   };
 }
 
@@ -417,7 +410,7 @@ export default function MarkdownTextRenderer({
           return (
             <code
               className={cn(
-                "block min-w-0 whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
+                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
                 "leading-snug text-inherit",
                 cls,
               )}
@@ -495,6 +488,19 @@ export default function MarkdownTextRenderer({
           >
             {markdownChildren}
           </a>
+        );
+      },
+      table({ children, ...props }) {
+        // Wrap wide markdown tables in a horizontal-scroll container (the
+        // pattern used by DeepSeek/others) so a 6+ column table scrolls inside
+        // the conversation column instead of forcing the page wider than 100vw.
+        // min-w-max keeps natural column widths; w-full stretches narrow tables.
+        return (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-max" {...props}>
+              {children}
+            </table>
+          </div>
         );
       },
       li({ children: markdownChildren, className: itemClassName }) {

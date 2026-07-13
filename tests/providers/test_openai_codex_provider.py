@@ -18,6 +18,7 @@ from nanobot.providers.openai_codex_provider import (
     _request_codex,
     _should_retry_status,
 )
+from nanobot.providers.registry import find_by_name
 
 
 def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -28,6 +29,14 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
         "nanobot.providers.openai_codex_provider.get_codex_token",
         fake_token,
     )
+
+
+def test_codex_default_model_matches_curated_flagship() -> None:
+    spec = find_by_name("openai_codex")
+
+    assert spec is not None
+    assert spec.builtin_models
+    assert OpenAICodexProvider().get_default_model() == spec.builtin_models[0].id
 
 
 class _WarningCaptureLogger:

@@ -29,6 +29,7 @@ from nanobot.providers.image_generation import (
     image_gen_provider_names,
 )
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
+from nanobot.security.network import is_loopback_host
 from nanobot.security.workspace_access import workspace_sandbox_status
 from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.workspaces import (
@@ -45,6 +46,31 @@ def _version_payload() -> dict[str, Any]:
     return {
         "current": __version__,
     }
+
+
+_DOCS_STABLE_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:\.post\d+)?$")
+_DOCS_LATEST_URL = "https://nanobot.wiki/docs/latest"
+
+
+def _docs_version(version: str) -> str:
+    """Map package versions to the matching public docs path."""
+    normalized = version.strip()
+    if _DOCS_STABLE_VERSION_RE.fullmatch(normalized):
+        return normalized
+    return "latest"
+
+
+def _docs_payload() -> dict[str, Any]:
+    """Return version-aware documentation links for the WebUI."""
+    docs_version = _docs_version(__version__)
+    base_url = f"https://nanobot.wiki/docs/{docs_version}"
+    return {
+        "version": docs_version,
+        "base_url": base_url,
+        "chat_apps_url": f"{base_url}/getting-started/chat-apps",
+        "latest_url": _DOCS_LATEST_URL,
+    }
+
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
@@ -342,6 +368,7 @@ def _provider_settings_row(
         "api_base": provider_config.api_base,
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
+        "model_catalog": _model_catalog_kind(spec),
     }
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
@@ -350,6 +377,38 @@ def _provider_settings_row(
     if spec.name == "openai":
         row["api_type"] = provider_config.api_type
     return row
+
+
+def _provider_settings_rows(config: Any, selected_provider: str | None) -> list[dict[str, Any]]:
+    """Return one Settings row per provider family while preserving legacy configs."""
+    aliases: dict[str, list[Any]] = {}
+    for spec in PROVIDERS:
+        if spec.settings_alias_for:
+            aliases.setdefault(spec.settings_alias_for, []).append(spec)
+
+    rows: list[dict[str, Any]] = []
+    for canonical in PROVIDERS:
+        if canonical.settings_alias_for:
+            continue
+        candidates = [canonical, *aliases.get(canonical.name, [])]
+        chosen = next((spec for spec in candidates if spec.name == selected_provider), None)
+        if chosen is None:
+            chosen = next(
+                (
+                    spec
+                    for spec in candidates
+                    if (provider_config := getattr(config.providers, spec.name, None)) is not None
+                    and _provider_configured_for_settings(spec, provider_config)
+                ),
+                canonical,
+            )
+        provider_config = getattr(config.providers, chosen.name, None)
+        if provider_config is None:
+            continue
+        row = _provider_settings_row(chosen.name, chosen, provider_config)
+        row["label"] = canonical.label
+        rows.append(row)
+    return rows
 
 
 def _model_catalog_kind(spec: Any) -> str:
@@ -404,20 +463,27 @@ def _model_row_payload(row: Any) -> dict[str, Any] | None:
     if not model_id:
         return None
     label: str | None = None
+    description: str | None = None
     owned_by: str | None = None
     if isinstance(row, dict):
         raw_label = row.get("display_name") or row.get("label") or row.get("name")
         if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
             label = raw_label.strip()
+        raw_description = row.get("description")
+        if isinstance(raw_description, str) and raw_description.strip():
+            description = raw_description.strip()
         raw_owner = row.get("owned_by") or row.get("owner") or row.get("organization")
         if isinstance(raw_owner, str) and raw_owner.strip():
             owned_by = raw_owner.strip()
-    return {
+    payload = {
         "id": model_id,
         "label": label,
         "owned_by": owned_by,
         "context_window": _model_context_window(row),
     }
+    if description:
+        payload["description"] = description
+    return payload
 
 
 def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
@@ -467,6 +533,24 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
             **base_payload,
             "status": "unsupported",
             "message": "Model list is not available for this provider. Type a model ID manually.",
+        }
+
+    if catalog_kind == "builtin":
+        rows = [
+            {
+                "id": model.id,
+                "label": model.label or None,
+                "description": model.description or None,
+                "owned_by": spec.label,
+                "context_window": model.context_window,
+            }
+            for model in spec.builtin_models
+        ]
+        return {
+            **base_payload,
+            "status": "available",
+            "models": rows,
+            "model_count": len(rows),
         }
 
     api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
@@ -684,12 +768,7 @@ def settings_payload(
         spec = find_by_name(effective_preset.provider)
         selected_provider = spec.name if spec else provider_name
 
-    providers = []
-    for spec in PROVIDERS:
-        provider_config = getattr(config.providers, spec.name, None)
-        if provider_config is None:
-            continue
-        providers.append(_provider_settings_row(spec.name, spec, provider_config))
+    providers = _provider_settings_rows(config, selected_provider)
     for provider_key, provider_config in _dynamic_provider_items(config):
         providers.append(
             _provider_settings_row(
@@ -795,6 +874,20 @@ def settings_payload(
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
         },
+        "api": {
+            "host": config.api.host,
+            "port": config.api.port,
+            "timeout": config.api.timeout,
+            "api_key_hint": _mask_secret_hint(config.api.api_key),
+        },
+        "observability": {
+            "provider": "langfuse",
+            "configured": bool(
+                os.environ.get("LANGFUSE_SECRET_KEY")
+                and os.environ.get("LANGFUSE_PUBLIC_KEY")
+            ),
+            "base_url": os.environ.get("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com",
+        },
         "image_generation": {
             "enabled": image_config.enabled,
             "provider": image_config.provider,
@@ -850,6 +943,7 @@ def settings_payload(
         },
         "requires_restart": requires_restart,
         "version": _version_payload(),
+        "docs": _docs_payload(),
     }
     return decorate_settings_payload(
         payload,
@@ -1119,7 +1213,9 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         try:
             from oauth_cli_kit import get_token, login_oauth_interactive
         except ImportError:
-            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
 
         try:
             proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
@@ -1146,7 +1242,9 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 login_github_copilot,
             )
         except ImportError:
-            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
 
         token = get_github_copilot_login_status()
         if not token:
@@ -1171,13 +1269,17 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
             from oauth_cli_kit.storage import FileTokenStorage
         except ImportError:
-            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
         token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
     elif spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
-            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+            raise WebUISettingsError(
+                "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
+            ) from None
         token_path = get_storage().get_token_path()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
@@ -1307,6 +1409,49 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
     if changed:
         save_config(config)
     return settings_payload(requires_restart=restart_required)
+
+
+def update_api_settings(query: QueryParams) -> dict[str, Any]:
+    """Update the managed OpenAI-compatible API configuration."""
+    config = load_config()
+    api = config.api
+
+    host = _query_first(query, "host")
+    if host is not None:
+        host = host.strip()
+        if not host:
+            raise WebUISettingsError("host is required")
+        api.host = host
+
+    port = _query_first(query, "port")
+    if port is not None:
+        try:
+            parsed_port = int(port)
+        except ValueError:
+            raise WebUISettingsError("port must be an integer") from None
+        if parsed_port < 1 or parsed_port > 65535:
+            raise WebUISettingsError("port must be between 1 and 65535")
+        api.port = parsed_port
+
+    timeout = _query_first(query, "timeout")
+    if timeout is not None:
+        try:
+            parsed_timeout = float(timeout)
+        except ValueError:
+            raise WebUISettingsError("timeout must be a number") from None
+        if parsed_timeout < 1 or parsed_timeout > 3600:
+            raise WebUISettingsError("timeout must be between 1 and 3600")
+        api.timeout = parsed_timeout
+
+    api_key = _query_first_alias(query, "api_key", "apiKey")
+    if api_key is not None:
+        api.api_key = api_key.strip()
+
+    if not is_loopback_host(api.host) and not api.api_key.strip():
+        raise WebUISettingsError("an API key is required when the API is available on the network")
+
+    save_config(config)
+    return settings_payload()
 
 
 def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:

@@ -418,38 +418,19 @@ See [`configuration.md#providers`](./configuration.md#providers) for Bedrock-spe
 
 Some providers do not use API keys in `config.json`.
 
+For OpenAI Codex:
+
 ```bash
-nanobot provider login openai-codex
-nanobot provider login github-copilot
+nanobot provider login openai-codex --set-main
 ```
 
-Then explicitly select the provider and model in a preset. OAuth providers are not valid automatic fallbacks.
+For GitHub Copilot:
 
-For OpenAI Codex, add `providers.openai_codex.proxy` only when Codex OAuth/token refresh or Codex API requests must use a proxy:
-
-```json
-{
-  "providers": {
-    "openai_codex": {
-      "proxy": "http://127.0.0.1:7890"
-    }
-  },
-  "modelPresets": {
-    "codex": {
-      "provider": "openai_codex",
-      "model": "gpt-5.1-codex",
-      "reasoningEffort": "high"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "codex"
-    }
-  }
-}
+```bash
+nanobot provider login github-copilot --set-main
 ```
 
-If you run the login command on a remote/headless machine and open the authorization URL in a local browser, paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted. See [`configuration.md#providers`](./configuration.md#providers) for the full OAuth provider notes.
+Each command authenticates the selected provider and makes its current default model active. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
 ## Provider Resolution
 

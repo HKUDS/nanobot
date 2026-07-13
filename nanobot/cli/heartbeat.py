@@ -235,7 +235,8 @@ def _build_heartbeat_execution_prompt(content: str, decision: HeartbeatDecision)
     tasks = decision.tasks.strip() or "The active tasks listed in HEARTBEAT.md."
     return (
         HEARTBEAT_PREAMBLE
-        + "Execute the active heartbeat tasks for the user.\n\n"
+        + "You are executing periodic heartbeat tasks. Perform each active task "
+        + "for the user, then report what you did.\n\n"
         + f"Phase 1 extracted tasks:\n{tasks}\n\n"
         + f"Full HEARTBEAT.md for context:\n\n{content}"
     )

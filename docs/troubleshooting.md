@@ -111,10 +111,10 @@ Common config mistakes:
 To refresh missing defaults without overwriting existing settings, run:
 
 ```bash
-nanobot onboard
+nanobot onboard --refresh
 ```
 
-When prompted about overwriting the config, choose the option that keeps current values and merges missing defaults.
+For an interactive choice between resetting and refreshing, run `nanobot onboard` and choose the option that keeps current values and merges missing defaults.
 
 ## Provider and Model Problems
 
@@ -135,7 +135,12 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Provider cannot be inferred | Pin `modelPresets.<name>.provider` in the active preset instead of using `"auto"`. For legacy direct configs, pin `agents.defaults.provider`. |
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
-| OAuth provider fails | Run `nanobot provider login openai-codex` or `nanobot provider login github-copilot`, then select the provider explicitly. |
+| OAuth provider fails | Run `nanobot provider login openai-codex --set-main` or `nanobot provider login github-copilot --set-main`. |
+| Codex OAuth needs a proxy | Set `providers.openaiCodex.proxy` before running the login command. The proxy applies to login, token refresh, and Codex API requests. |
+| Codex login runs on a remote/headless machine | Open the printed URL in a local browser, then paste the final `http://localhost:1455/auth/callback?...` URL back into the terminal. |
+| Codex login runs in Docker | Start the container with `docker run -it` so the OAuth flow has an interactive terminal. |
+| Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
+| Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |
 
 ## Langfuse Problems
 

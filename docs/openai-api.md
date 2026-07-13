@@ -1,4 +1,4 @@
-# OpenAI-Compatible API
+# Nanobot OpenAI-Compatible API: Run a Local Agent Behind /v1/chat/completions
 
 nanobot can expose a minimal OpenAI-compatible endpoint for local integrations:
 

@@ -2,6 +2,7 @@
 
 from nanobot.pairing.store import (
     approve_code,
+    clear_channel,
     deny_code,
     format_expiry,
     format_pairing_reply,
@@ -11,6 +12,7 @@ from nanobot.pairing.store import (
     is_approved,
     list_pending,
     revoke,
+    revoke_channel,
 )
 
 # Metadata keys used by channels and commands to tag pairing-related messages.
@@ -19,6 +21,7 @@ PAIRING_COMMAND_META_KEY = "_pairing_command"
 
 __all__ = [
     "approve_code",
+    "clear_channel",
     "deny_code",
     "format_expiry",
     "format_pairing_reply",
@@ -28,6 +31,7 @@ __all__ = [
     "is_approved",
     "list_pending",
     "revoke",
+    "revoke_channel",
     "PAIRING_CODE_META_KEY",
     "PAIRING_COMMAND_META_KEY",
 ]

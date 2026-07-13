@@ -77,14 +77,18 @@ async def test_consolidation_ratio_controls_target(
 
     remaining_estimates = list(estimates)
 
-    def mock_estimate(_session, *, session_summary=None):
-        assert session_summary is None
+    runtime = loop.llm_runtime()
+
+    def mock_estimate(_session, *, runtime):
         return (remaining_estimates.pop(0), "test")
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 100)
 
-    await loop.consolidator.maybe_consolidate_by_tokens(session)
+    await loop.consolidator.maybe_consolidate_by_tokens(
+        session,
+        runtime=runtime,
+    )
 
     assert loop.consolidator.archive.await_count == expected_archives
 

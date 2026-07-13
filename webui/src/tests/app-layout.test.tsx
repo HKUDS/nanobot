@@ -175,12 +175,20 @@ vi.mock("@/hooks/useTheme", async () => {
 });
 
 vi.mock("@/lib/bootstrap", () => ({
+  BootstrapAuthRequiredError: class BootstrapAuthRequiredError extends Error {
+    constructor(message = "bootstrap authentication required") {
+      super(message);
+      this.name = "BootstrapAuthRequiredError";
+    }
+  },
   fetchBootstrap: vi.fn().mockResolvedValue({
     token: "tok",
+    api_token: "api-tok",
     ws_path: "/",
     expires_in: 300,
   }),
   deriveWsUrl: vi.fn(() => "ws://test"),
+  consumeUrlBootstrapSecret: vi.fn(() => ""),
   loadSavedSecret: vi.fn(() => ""),
   saveSecret: vi.fn(),
   clearSavedSecret: vi.fn(),
@@ -215,7 +223,11 @@ vi.mock("@/lib/nanobot-client", () => {
   return { NanobotClient: MockClient };
 });
 
-import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import {
+  BootstrapAuthRequiredError,
+  deriveWsUrl,
+  fetchBootstrap,
+} from "@/lib/bootstrap";
 import App from "@/App";
 
 describe("App layout", () => {
@@ -237,8 +249,11 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
+    localStorage.removeItem("nanobot-webui.restartStartedAt");
+    localStorage.removeItem("nanobot-webui.restartRoute");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
+      api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
     });
@@ -259,6 +274,20 @@ describe("App layout", () => {
   it("shows the auth form without an invalid-password error on first load", async () => {
     vi.mocked(fetchBootstrap).mockRejectedValueOnce(
       new Error("bootstrap failed: HTTP 401"),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("Authentication required")).toBeInTheDocument();
+    expect(screen.queryByText("Invalid password. Try again.")).not.toBeInTheDocument();
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows the auth form when bootstrap does not issue an API token", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new BootstrapAuthRequiredError(
+        "bootstrap authentication required: missing api_token",
+      ),
     );
 
     render(<App />);
@@ -314,6 +343,35 @@ describe("App layout", () => {
       skillsButton.compareDocumentPosition(automationsButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("restores the Settings route after a restart fallback hash", async () => {
+    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
+    localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
+    window.history.replaceState(null, "", "/#/new");
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/nanobot-features": {
+        features: [{
+          name: "websocket",
+          display_name: "Websocket",
+          type: "channel",
+          enabled: true,
+          installed: true,
+          ready: true,
+          status: "enabled",
+          install_supported: true,
+          requires_restart: true,
+        }],
+        enabled_count: 1,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect((await screen.findAllByRole("heading", { name: "Channels" })).length).toBeGreaterThan(0);
+    expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
   it("opens Skills from the main sidebar", async () => {
@@ -723,6 +781,7 @@ describe("App layout", () => {
     ];
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok",
+      api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
       runtime_surface: "native",
@@ -1558,6 +1617,7 @@ describe("App layout", () => {
     expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
+    expect(within(settingsNav).queryByRole("button", { name: "Files" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
@@ -1678,6 +1738,16 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
+  });
+
+  it("falls back to Overview for the retired Files settings URL", async () => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    window.history.replaceState(null, "", "/#/settings?section=files");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   });
 
   it("updates the URL hash when switching settings sections", async () => {
@@ -2147,11 +2217,13 @@ describe("App layout", () => {
     vi.mocked(fetchBootstrap)
       .mockResolvedValueOnce({
         token: "tok-1",
+        api_token: "api-tok-1",
         ws_path: "/",
         expires_in: 30,
       })
       .mockResolvedValueOnce({
         token: "tok-2",
+        api_token: "api-tok-2",
         ws_path: "/",
         expires_in: 300,
       });

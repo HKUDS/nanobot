@@ -89,6 +89,20 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def merge_missing_defaults(existing: Any, defaults: Any) -> Any:
+    """Recursively add missing defaults without replacing configured values."""
+    if not isinstance(existing, dict) or not isinstance(defaults, dict):
+        return existing
+
+    merged = dict(existing)
+    for key, value in defaults.items():
+        if key not in merged:
+            merged[key] = value
+        else:
+            merged[key] = merge_missing_defaults(merged[key], value)
+    return merged
+
+
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 

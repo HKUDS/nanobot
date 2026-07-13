@@ -70,7 +70,7 @@ def test_edit_file_expected_replacements_allows_replace_all_when_count_matches(t
     assert target.read_text() == "changed\nchanged\n"
 
 
-def test_edit_file_can_select_nearest_line_hint(tmp_path):
+def test_edit_file_line_hint_selects_matching_occurrence(tmp_path):
     target = tmp_path / "duplicate.txt"
     target.write_text("one\nsame\ntwo\nsame\n")
     tool = EditFileTool(workspace=tmp_path)
@@ -84,6 +84,39 @@ def test_edit_file_can_select_nearest_line_hint(tmp_path):
 
     assert "Successfully edited" in result
     assert target.read_text() == "one\nsame\ntwo\nchanged\n"
+
+
+def test_edit_file_rejects_unique_match_outside_line_hint(tmp_path):
+    target = tmp_path / "wrong-line.txt"
+    target.write_text("one\nsame\ntwo\nother\n")
+    tool = EditFileTool(workspace=tmp_path)
+
+    result = asyncio.run(tool.execute(
+        path=str(target),
+        old_text="same",
+        new_text="changed",
+        line_hint=4,
+    ))
+
+    assert "line_hint 4 does not match the old_text location" in result
+    assert "old_text appears at line 2" in result
+    assert target.read_text() == "one\nsame\ntwo\nother\n"
+
+
+def test_edit_file_line_hint_can_cover_multiline_match(tmp_path):
+    target = tmp_path / "block.txt"
+    target.write_text("before\nstart\nmiddle\nend\nafter\n")
+    tool = EditFileTool(workspace=tmp_path)
+
+    result = asyncio.run(tool.execute(
+        path=str(target),
+        old_text="start\nmiddle\nend",
+        new_text="start\nchanged\nend",
+        line_hint=3,
+    ))
+
+    assert "Successfully edited" in result
+    assert target.read_text() == "before\nstart\nchanged\nend\nafter\n"
 
 
 def test_edit_file_can_edit_ipynb_as_json(tmp_path):
@@ -119,18 +152,18 @@ def test_edit_file_multiple_match_hint_mentions_occurrence(tmp_path):
 
 def test_edit_file_rejects_ambiguous_line_hint(tmp_path):
     target = tmp_path / "duplicate.txt"
-    target.write_text("same\nmiddle\nsame\n")
+    target.write_text("same same\n")
     tool = EditFileTool(workspace=tmp_path)
 
     result = asyncio.run(tool.execute(
         path=str(target),
         old_text="same",
         new_text="changed",
-        line_hint=2,
+        line_hint=1,
     ))
 
-    assert "line_hint 2 is ambiguous" in result
-    assert target.read_text() == "same\nmiddle\nsame\n"
+    assert "line_hint 1 is ambiguous" in result
+    assert target.read_text() == "same same\n"
 
 
 def test_edit_file_rejects_occurrence_with_replace_all(tmp_path):

@@ -7,6 +7,7 @@ from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from typer.testing import CliRunner
@@ -112,7 +113,7 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
     asyncio.run(_run())
 
 
-def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
+def test_interactive_tty_mode_restores_line_input(monkeypatch) -> None:
     try:
         import os
         import pty
@@ -128,19 +129,52 @@ def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
 
     try:
         attrs = termios.tcgetattr(slave_fd)
+        attrs[0] &= ~termios.ICRNL
+        attrs[0] |= termios.IGNCR
         attrs[3] &= ~(termios.ISIG | termios.ICANON | termios.ECHO)
         termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
         monkeypatch.setattr(cli_commands.sys, "stdin", _Stdin())
-        cli_commands._ensure_gateway_tty_signal_mode()
+        cli_commands._ensure_interactive_tty_mode()
 
         restored = termios.tcgetattr(slave_fd)
+        assert restored[0] & termios.ICRNL
+        assert not restored[0] & termios.IGNCR
         assert restored[3] & termios.ISIG
         assert restored[3] & termios.ICANON
         assert restored[3] & termios.ECHO
     finally:
         os.close(master_fd)
         os.close(slave_fd)
+
+
+def test_webui_restores_tty_before_loading_config(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    calls: list[str] = []
+    original_resolve = cli_commands._resolve_webui_config_path
+
+    monkeypatch.setattr(
+        cli_commands,
+        "_ensure_interactive_tty_mode",
+        lambda: calls.append("tty"),
+    )
+    monkeypatch.setattr(
+        cli_commands,
+        "_resolve_webui_config_path",
+        lambda path: calls.append("config") or original_resolve(path),
+    )
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr(cli_commands, "sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(cli_commands, "_gateway_health_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_commands, "_webui_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_commands, "_tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_commands, "_run_gateway", lambda *_args, **_kwargs: None)
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
+
+    assert result.exit_code == 0
+    assert calls[:2] == ["tty", "config"]
 
 
 def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
@@ -154,6 +188,36 @@ def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
     store.set_last_dream_cursor(10)
     cli_commands._advance_dream_cursor_if_behind(store)
     assert store.get_last_dream_cursor() == 10
+
+
+def test_commit_dream_changes_skips_noop_run(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.write_soul("# Soul")
+    store.write_memory("# Memory")
+    store.git.init()
+    store.git.auto_commit("initial")
+    store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
+
+    assert cli_commands._commit_dream_changes(store) is None
+    store.git.auto_commit.assert_not_called()
+
+
+def test_commit_dream_changes_commits_real_edits(tmp_path) -> None:
+    store = MemoryStore(tmp_path)
+    store.write_soul("# Soul")
+    store.write_memory("# Memory")
+    store.git.init()
+    store.git.auto_commit("initial")
+    store.write_memory("# Memory\n- Research notes")
+    store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
+
+    sha = cli_commands._commit_dream_changes(store)
+
+    assert sha is not None
+    store.git.auto_commit.assert_called_once()
+    message = store.git.auto_commit.call_args.args[0]
+    assert message.startswith("dream: periodic memory consolidation\n\n")
+    assert "Research notes" in message
 
 
 @pytest.fixture
@@ -219,6 +283,20 @@ def test_onboard_existing_config_refresh(mock_paths):
     assert (workspace_dir / "AGENTS.md").exists()
 
 
+def test_onboard_existing_config_refresh_non_interactive(mock_paths):
+    """Config exists, user specifies --refresh — should refresh non-interactively (no prompt)."""
+    config_file, workspace_dir, _ = mock_paths
+    config_file.write_text('{"existing": true}')
+
+    result = runner.invoke(app, ["onboard", "--refresh"])
+
+    assert result.exit_code == 0
+    assert "Config already exists" not in result.stdout
+    assert "existing values preserved" in result.stdout
+    assert workspace_dir.exists()
+    assert (workspace_dir / "AGENTS.md").exists()
+
+
 def test_onboard_existing_config_overwrite(mock_paths):
     """Config exists, user confirms overwrite — should reset to defaults."""
     config_file, workspace_dir, _ = mock_paths
@@ -262,6 +340,7 @@ def test_onboard_help_shows_workspace_and_config_options():
     assert "--config" in stripped_output
     assert "-c" in stripped_output
     assert "--wizard" in stripped_output
+    assert "--refresh" in stripped_output
     assert "--dir" not in stripped_output
 
 
@@ -372,9 +451,19 @@ def test_config_matches_github_copilot_codex_with_hyphen_prefix():
 
 def test_config_matches_openai_codex_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    config.agents.defaults.model = "openai-codex/gpt-5.6-sol"
 
     assert config.get_provider_name() == "openai_codex"
+
+
+def test_openai_codex_oauth_default_matches_curated_flagship():
+    spec = find_by_name("openai_codex")
+
+    assert spec is not None
+    assert spec.builtin_models
+    assert cli_commands._OAUTH_PROVIDER_DEFAULT_MODELS["openai_codex"] == (
+        spec.builtin_models[0].id
+    )
 
 
 def test_config_dump_excludes_oauth_provider_blocks():
@@ -527,7 +616,7 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
     assert saved.agents.defaults.provider == "openai_codex"
-    assert saved.agents.defaults.model == "openai-codex/gpt-5.4-mini"
+    assert saved.agents.defaults.model == "openai-codex/gpt-5.6-sol"
     assert saved.agents.defaults.model_preset is None
     assert make_provider(saved).__class__.__name__ == "OpenAICodexProvider"
 
@@ -993,8 +1082,8 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
-    assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
-    assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+    assert _strip_model_prefix("openai-codex/gpt-5.6-sol") == "gpt-5.6-sol"
+    assert _strip_model_prefix("openai_codex/gpt-5.6-sol") == "gpt-5.6-sol"
 
 
 def test_make_provider_passes_extra_headers_to_custom_provider():
@@ -1698,6 +1787,7 @@ def test_run_heartbeat_trigger_executes_phase_two_and_delivers(monkeypatch, tmp_
 
     assert result.status == "delivered"
     assert result.delivered is True
+    assert "Perform each active task" in seen["phase_two_prompt"]
     assert "Phase 1 extracted tasks" in seen["phase_two_prompt"]
     assert "Check the build status." in seen["phase_two_prompt"]
     assert seen["phase_two_kwargs"]["session_key"] == "heartbeat"
@@ -1753,6 +1843,12 @@ def _patch_webui_provider_ready(monkeypatch) -> None:
     monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _snapshot)
 
 
+def _patch_gateway_ports_free(monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_a, **_kw: False)
+    monkeypatch.setattr("nanobot.cli.commands._tcp_endpoint_reachable", lambda *_a, **_kw: False)
+    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_a, **_kw: False)
+
+
 def _patch_cli_command_runtime(
     monkeypatch,
     config: Config,
@@ -1789,6 +1885,7 @@ def _patch_cli_command_runtime(
         "nanobot.providers.factory.load_provider_snapshot",
         lambda _config_path=None: _test_provider_snapshot(provider_factory(config), config),
     )
+    _patch_gateway_ports_free(monkeypatch)
 
     if message_bus is not None:
         monkeypatch.setattr("nanobot.bus.queue.MessageBus", message_bus)
@@ -1843,9 +1940,21 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert websocket["host"] == "127.0.0.1"
     assert websocket["port"] == 8899
     assert websocket["websocketRequiresToken"] is True
+    assert isinstance(websocket["tokenIssueSecret"], str)
+    assert len(websocket["tokenIssueSecret"]) >= 32
     assert data["agents"]["defaults"]["workspace"] == str(workspace)
     assert seen["templates"] == workspace
-    assert seen["gateway_kwargs"] == {"port": 18888, "open_browser_url": None}
+    assert seen["gateway_kwargs"] == {
+        "port": 18888,
+        "open_browser_url": None,
+        "webui_bundle_mode": "auto",
+    }
+    compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
+    assert "bootstrap secret was generated" in compact_output
+    assert "channels.websocket.tokenIssueSecret" in compact_output
+    assert "rerun without --no-open" in compact_output
+    assert "nanobot is running in this terminal" in compact_output
+    assert "Press Ctrl+C here to stop nanobot" in compact_output
 
 
 def test_webui_yes_refuses_missing_provider_setup(monkeypatch, tmp_path: Path) -> None:
@@ -1872,6 +1981,10 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._prepare_webui_bundle_for_gateway",
+        lambda *_args, **_kwargs: None,
+    )
 
     class _FakeRuntime:
         def __init__(self, **kwargs) -> None:
@@ -1920,7 +2033,223 @@ def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path
     assert options.port == 18889
     assert options.config_path == str(config_file.resolve(strict=False))
     assert options.workspace == str(workspace.resolve(strict=False))
-    assert seen["opened_url"] == "http://127.0.0.1:8765"
+    opened_url = seen["opened_url"]
+    assert isinstance(opened_url, str)
+    assert opened_url.startswith("http://127.0.0.1:8765/#/?bootstrapSecret=")
+    assert "bootstrapSecret=<redacted>" in compact_output
+    assert "bootstrapSecret=" in opened_url
+    assert "Closing the browser does not stop channels or automations" in compact_output
+    assert "nanobot gateway stop --config" in compact_output
+
+
+def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> None:
+    opened: list[str] = []
+    url = "http://127.0.0.1:8765/#/?bootstrapSecret=super-secret"
+    monkeypatch.setattr("webbrowser.open", lambda value: opened.append(value))
+
+    cli_commands._open_webui_browser(url, wait=False)
+
+    assert opened == [url]
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "bootstrapSecret=<redacted>" in output
+    assert "super-secret" not in output
+
+
+def test_webui_background_restarts_when_config_changes_and_gateway_is_running(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.gateway import GatewayStartOptions, GatewayStatus, RuntimeResult
+
+    config_file = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    config_file.write_text("{}")
+    seen: dict[str, object] = {}
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._prepare_webui_bundle_for_gateway",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def _status(options: GatewayStartOptions) -> GatewayStatus:
+        return GatewayStatus(
+            running=True,
+            pid=123,
+            state_path=tmp_path / "gateway.json",
+            log_path=tmp_path / "gateway.log",
+            port=options.port,
+            reason="running",
+        )
+
+    class _FakeRuntime:
+        def __init__(self, **kwargs) -> None:
+            seen["runtime_kwargs"] = kwargs
+
+        def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
+            seen["start_options"] = options
+            return RuntimeResult(False, "gateway_already_running", _status(options))
+
+        def restart(self, options: GatewayStartOptions, *, timeout_s: int) -> RuntimeResult:
+            seen["restart_options"] = options
+            seen["restart_timeout"] = timeout_s
+            return RuntimeResult(True, "gateway_started_background", _status(options))
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._open_webui_browser",
+        lambda url: seen.__setitem__("opened_url", url),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "webui",
+            "--config",
+            str(config_file),
+            "--workspace",
+            str(workspace),
+            "--background",
+            "--gateway-port",
+            "18889",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0
+    compact_output = _strip_ansi(result.stdout).replace("\n", " ")
+    assert "WebUI config changed; restarting the background gateway" in compact_output
+    assert "Gateway restarted in the background" in compact_output
+    assert "Gateway is already running" not in compact_output
+    options = seen["restart_options"]
+    assert isinstance(options, GatewayStartOptions)
+    assert options is seen["start_options"]
+    assert seen["restart_timeout"] == 20
+    assert options.port == 18889
+    assert options.config_path == str(config_file.resolve(strict=False))
+    assert options.workspace == str(workspace.resolve(strict=False))
+    opened_url = seen["opened_url"]
+    assert isinstance(opened_url, str)
+    assert opened_url.startswith("http://127.0.0.1:8765/#/?bootstrapSecret=")
+
+
+def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}")
+    seen: dict[str, object] = {}
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._open_webui_browser",
+        lambda url, **kwargs: seen.update({"opened_url": url, "open_kwargs": kwargs}),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.commands._run_gateway",
+        lambda *_args, **_kwargs: pytest.fail("existing gateway should be reused"),
+    )
+
+    class _FakeRuntime:
+        def __init__(self, **kwargs) -> None:
+            seen["runtime_kwargs"] = kwargs
+
+        def status(self):
+            return SimpleNamespace(running=True)
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._attach_to_background_gateway",
+        lambda runtime: seen.__setitem__("attached_runtime", runtime),
+    )
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+
+    assert result.exit_code == 0
+    assert "Gateway is already running; attaching to the existing WebUI" in result.stdout
+    assert isinstance(seen["attached_runtime"], _FakeRuntime)
+    opened_url = seen["opened_url"]
+    assert isinstance(opened_url, str)
+    parsed = urlparse(opened_url)
+    assert f"{parsed.scheme}://{parsed.netloc}" == "http://127.0.0.1:8765"
+    fragment = parsed.fragment.removeprefix("/?")
+    assert parse_qs(fragment).get("bootstrapSecret")
+    assert seen["open_kwargs"] == {"wait": False}
+
+
+def test_attach_to_background_gateway_stops_on_ctrl_c(monkeypatch, capsys) -> None:
+    stopped = False
+
+    class _FakeRuntime:
+        def status(self):
+            return SimpleNamespace(running=True)
+
+        def stop(self):
+            nonlocal stopped
+            stopped = True
+            return SimpleNamespace(ok=True, message="gateway_stopped")
+
+    def _interrupt(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("nanobot.cli.commands.time.sleep", _interrupt)
+
+    cli_commands._attach_to_background_gateway(_FakeRuntime())
+
+    assert stopped is True
+    output = capsys.readouterr().out
+    assert "Closing the browser does not stop channels or automations" in output
+    assert "Press Ctrl+C here to stop nanobot" in output
+    assert "Gateway stopped" in output
+
+
+def test_webui_foreground_does_not_claim_unmanaged_gateway(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}")
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_args: True)
+    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_args: True)
+    monkeypatch.setattr("nanobot.cli.commands._open_webui_browser", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._attach_to_background_gateway",
+        lambda _runtime: pytest.fail("unmanaged gateway must not be attached"),
+    )
+
+    class _FakeRuntime:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def status(self):
+            return SimpleNamespace(running=False)
+
+    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+
+    assert result.exit_code == 0
+    assert "controlled by another foreground command" in result.stdout
+
+
+def test_webui_foreground_refuses_occupied_webui_port(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}")
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._gateway_health_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("nanobot.cli.commands._tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._run_gateway",
+        lambda *_args, **_kwargs: pytest.fail("gateway should not start on occupied ports"),
+    )
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
+
+    assert result.exit_code == 1
+    assert "nanobot cannot start because one of its local ports is already in use" in result.stdout
+    assert "--port" in result.stdout
+    assert "--gateway-port" in result.stdout
 
 
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
@@ -2060,6 +2389,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
+    _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
         lambda _config: _test_provider_snapshot(provider, _config),
@@ -2186,6 +2516,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
+    _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
         lambda _config: _test_provider_snapshot(provider, _config),
@@ -2634,11 +2965,23 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert "port 18792" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("host", "display_url", "warns_about_public_bind"),
+    [
+        ("127.0.0.1", "http://127.0.0.1:18791/health", False),
+        ("0.0.0.0", "http://127.0.0.1:18791/health", True),
+    ],
+)
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(
-    monkeypatch, tmp_path: Path
+    monkeypatch,
+    tmp_path: Path,
+    host: str,
+    display_url: str,
+    warns_about_public_bind: bool,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
+    config.gateway.host = host
     config.gateway.port = 18791
     captured: dict[str, object] = {}
 
@@ -2744,21 +3087,26 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert result.exit_code == 0
-    assert captured["host"] == "127.0.0.1"
+    assert captured["host"] == host
     assert captured["port"] == 18791
-    assert "Health endpoint: http://127.0.0.1:18791/health" in result.stdout
+    assert f"Health endpoint: {display_url}" in result.stdout
+    assert ("unauthenticated health endpoint" in result.stdout) is warns_about_public_bind
+    assert ("may be reachable from other devices" in result.stdout) is warns_about_public_bind
+    assert ("listening on 0.0.0.0" in result.stdout) is warns_about_public_bind
+
+    health_handler = captured["handler"]
+    assert callable(health_handler)
 
     def _call_handler(path: str) -> tuple[str, _FakeWriter]:
         request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
         writer = _FakeWriter()
-        handler = captured["handler"]
-        assert callable(handler)
-        asyncio.run(handler(_FakeReader(request), writer))
+        asyncio.run(health_handler(_FakeReader(request), writer))
         return writer.output.decode(), writer
 
     root_response, root_writer = _call_handler("/")
     assert root_writer.closed is True
     assert "HTTP/1.0 404 Not Found" in root_response
+    assert "Connection: close" in root_response
     assert root_response.endswith("\r\n\r\nNot Found")
 
     health_response, health_writer = _call_handler("/health")
@@ -2771,6 +3119,53 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert missing_writer.closed is True
     assert "HTTP/1.0 404 Not Found" in missing_response
     assert missing_response.endswith("\r\n\r\nNot Found")
+
+    if host == "127.0.0.1":
+        async def _exercise_connection_limit() -> None:
+            release = asyncio.Event()
+            all_started = asyncio.Event()
+            started = 0
+
+            class _BlockingReader:
+                async def read(self, _size: int) -> bytes:
+                    nonlocal started
+                    started += 1
+                    if started == cli_commands._GATEWAY_HEALTH_MAX_CONNECTIONS:
+                        all_started.set()
+                    await release.wait()
+                    return b"GET /health HTTP/1.1\r\n\r\n"
+
+            active_writers = [
+                _FakeWriter() for _ in range(cli_commands._GATEWAY_HEALTH_MAX_CONNECTIONS)
+            ]
+            active_tasks = [
+                asyncio.create_task(health_handler(_BlockingReader(), writer))
+                for writer in active_writers
+            ]
+            await asyncio.wait_for(all_started.wait(), timeout=1)
+
+            overflow_writer = _FakeWriter()
+            await health_handler(
+                _FakeReader(b"GET /health HTTP/1.1\r\n\r\n"),
+                overflow_writer,
+            )
+            assert overflow_writer.closed is True
+            assert overflow_writer.output == b""
+
+            release.set()
+            await asyncio.gather(*active_tasks)
+
+        asyncio.run(_exercise_connection_limit())
+
+        class _NeverRespondingReader:
+            async def read(self, _size: int) -> bytes:
+                await asyncio.Event().wait()
+
+        monkeypatch.setattr(cli_commands, "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS", 0.01)
+        timed_out_writer = _FakeWriter()
+        asyncio.run(health_handler(_NeverRespondingReader(), timed_out_writer))
+        assert timed_out_writer.closed is True
+        assert timed_out_writer.output == b""
 
 
 def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
@@ -2997,6 +3392,7 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     config.api.host = "127.0.0.2"
     config.api.port = 18900
     config.api.timeout = 45.0
+    config.api.api_key = "secret"
     override_workspace = tmp_path / "override-workspace"
     seen: dict[str, object] = {}
 
@@ -3012,7 +3408,7 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["host"] == "127.0.0.2"
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0
-    assert seen["api_key"] == ""
+    assert seen["api_key"] == "secret"
 
 
 def test_trigger_cli_queues_message_in_workspace(
@@ -3053,6 +3449,7 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     config.api.host = "127.0.0.2"
     config.api.port = 18900
     config.api.timeout = 45.0
+    config.api.api_key = "secret"
     seen: dict[str, object] = {}
 
     _patch_serve_runtime(monkeypatch, config, seen)
@@ -3076,6 +3473,20 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 18901
     assert seen["request_timeout"] == 46.0
+    assert seen["api_key"] == "secret"
+
+
+def test_serve_allows_loopback_without_api_key(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["host"] == "127.0.0.1"
     assert seen["api_key"] == ""
 
 
@@ -3104,6 +3515,28 @@ def test_serve_rejects_wildcard_host_without_api_key(monkeypatch, tmp_path: Path
 
     assert result.exit_code == 1
     assert "api_key is not set" in result.stdout
+    assert "workspace" not in seen
+    assert "api_app" not in seen
+
+
+def test_serve_rejects_specific_network_interface_without_api_key(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(
+        app,
+        ["serve", "--config", str(config_file), "--host", "192.168.1.10"],
+    )
+
+    assert result.exit_code == 1
+    assert "api_key" in result.stdout
+    assert "prevent unauthenticated access" in result.stdout
     assert "api_app" not in seen
 
 
