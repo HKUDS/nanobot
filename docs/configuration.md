@@ -660,14 +660,14 @@ nanobot agent -m "Reply with one short sentence."
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
-Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openai_codex` block is optional and is only needed for provider-specific settings such as a proxy.
+Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openaiCodex` block is optional and is only needed for provider-specific settings such as a proxy.
 
 **1. Optional proxy** (configure this before login if Codex OAuth or API traffic must use a proxy):
 
 ```json
 {
   "providers": {
-    "openai_codex": {
+    "openaiCodex": {
       "proxy": "http://127.0.0.1:7890"
     }
   }
@@ -714,8 +714,11 @@ Use `reasoningEffort` in the preset to send a Codex reasoning effort such as `"l
 The similar-looking names have different roles:
 
 - `openai-codex` is the CLI login name and the canonical model prefix.
-- `openai_codex` is the provider ID used in config.
+- `openaiCodex` is the settings key under `providers`, for example `providers.openaiCodex.proxy`.
+- `openai_codex` is the provider ID used as a `modelPresets.<name>.provider` value.
 - `openai/...` selects the direct OpenAI API provider; do not use that prefix with Codex OAuth.
+
+Do not keep both `openaiCodex` and `openai_codex` as keys under `providers`; they are aliases for the same built-in provider and duplicate entries are rejected.
 
 When `provider` is explicitly `openai_codex`, the model prefix is optional, so `gpt-5.6-sol` also works. The examples keep the `openai-codex/` prefix to make the route unambiguous.
 

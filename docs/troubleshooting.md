@@ -137,6 +137,7 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run `nanobot provider login openai-codex` or `nanobot provider login github-copilot`, then select the provider explicitly. |
 | Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
+| Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |
 
 ## Langfuse Problems
 
