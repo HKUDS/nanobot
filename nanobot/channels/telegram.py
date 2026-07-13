@@ -286,15 +286,17 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
-def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
-    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
-    chunks: list[str] = []
+def _split_telegram_markdown_html_chunks(
+    content: str, max_html_len: int,
+) -> list[tuple[str, str]]:
+    """Return raw Markdown and rendered HTML chunk pairs within Telegram's limit."""
+    chunks: list[tuple[str, str]] = []
     pending = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
     while pending:
         chunk = pending.pop(0)
         html = _markdown_to_telegram_html(chunk)
         if len(html) <= max_html_len:
-            chunks.append(html)
+            chunks.append((chunk, html))
             continue
 
         # Markdown can expand when rendered as HTML (tags/entities). Re-split
@@ -302,14 +304,17 @@ def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
         next_limit = max(1, int(len(chunk) * max_html_len / len(html)) - 8)
         next_limit = min(next_limit, len(chunk) - 1)
         if next_limit <= 0:
-            chunks.extend(split_message(html, max_html_len))
-            continue
+            raise ValueError("A rendered Telegram HTML token exceeds the message limit")
         parts = _split_telegram_markdown(chunk, next_limit)
         if len(parts) == 1 and parts[0] == chunk:
-            chunks.extend(split_message(html, max_html_len))
-            continue
+            raise ValueError("Unable to split Telegram Markdown within the HTML limit")
         pending = parts + pending
     return chunks
+
+
+def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
+    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
+    return [html for _, html in _split_telegram_markdown_html_chunks(content, max_html_len)]
 
 
 _SEND_MAX_RETRIES = 3
@@ -1057,28 +1062,27 @@ class TelegramChannel(BaseChannel):
         intermediate chunks as standalone messages, then opens a new message
         for the tail so subsequent deltas continue streaming into it.
         """
-        chunks = _split_telegram_markdown(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
         if len(chunks) <= 1:
             return
-        html_chunks = [_markdown_to_telegram_html(chunk) for chunk in chunks]
+        _, first_html = chunks[0]
         try:
             await self._call_with_retry(
                 self._app.bot.edit_message_text,
                 chat_id=chat_id, message_id=buf.message_id,
-                text=html_chunks[0],
+                text=first_html,
                 parse_mode="HTML",
             )
         except Exception as e:
             if not self._is_not_modified_error(e):
                 self.logger.warning("Stream overflow edit failed: {}", e)
                 raise
-        for chunk in html_chunks[1:-1]:
+        for _, html in chunks[1:-1]:
             await self._call_with_retry(
                 self._app.bot.send_message,
-                chat_id=chat_id, text=chunk, parse_mode="HTML", **thread_kwargs,
+                chat_id=chat_id, text=html, parse_mode="HTML", **thread_kwargs,
             )
-        markdown_tail = chunks[-1]
-        tail_html = html_chunks[-1]
+        markdown_tail, tail_html = chunks[-1]
         sent = await self._call_with_retry(
             self._app.bot.send_message,
             chat_id=chat_id, text=tail_html, parse_mode="HTML", **thread_kwargs,

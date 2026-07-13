@@ -851,7 +851,42 @@ async def test_send_delta_incremental_edit_splits_oversized_buffer() -> None:
     """Mid-stream overflow: once buf.text exceeds Telegram's limit, split into
     chunks, edit the current message with the first chunk, and re-anchor the
     buffer to a new message for the tail so further deltas keep streaming."""
-    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    first_chunk = f"**{'x' * 3900}**\n"
+    tail = "**tail** " * 50
+    oversized = first_chunk + tail
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=oversized, message_id=7, last_edit=0.0, stream_id="s:0"
+    )
+
+    await channel.send_delta("123", "y", stream_id="s:0")
+
+    channel._app.bot.edit_message_text.assert_called_once()
+    edit_kwargs = channel._app.bot.edit_message_text.call_args.kwargs
+    assert edit_kwargs["text"] == _markdown_to_telegram_html(first_chunk.rstrip())
+    assert edit_kwargs["parse_mode"] == "HTML"
+
+    channel._app.bot.send_message.assert_called_once()
+    send_kwargs = channel._app.bot.send_message.call_args.kwargs
+    assert send_kwargs["parse_mode"] == "HTML"
+    buf = channel._stream_bufs["123"]
+    assert buf.message_id == 99
+    assert buf.text == tail + "y"
+    assert send_kwargs["text"] == _markdown_to_telegram_html(buf.text)
+    assert buf.last_edit > 0.0
+
+
+@pytest.mark.asyncio
+async def test_send_delta_incremental_html_expansion_does_not_overflow() -> None:
+    """Mid-stream HTML chunks stay within Telegram's rendered payload limit."""
+    from nanobot.channels.telegram import TELEGRAM_HTML_MAX_LEN
 
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -861,22 +896,25 @@ async def test_send_delta_incremental_edit_splits_oversized_buffer() -> None:
     channel._app.bot.edit_message_text = AsyncMock()
     channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
 
-    oversized = "x" * (TELEGRAM_MAX_MESSAGE_LEN + 500)
+    oversized = "**bold** " * 501
+    assert len(_markdown_to_telegram_html(oversized)) > TELEGRAM_HTML_MAX_LEN
     channel._stream_bufs["123"] = _StreamBuf(
         text=oversized, message_id=7, last_edit=0.0, stream_id="s:0"
     )
 
     await channel.send_delta("123", "y", stream_id="s:0")
 
-    channel._app.bot.edit_message_text.assert_called_once()
-    edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
-    assert len(edit_text) <= TELEGRAM_MAX_MESSAGE_LEN
+    payloads = [
+        channel._app.bot.edit_message_text.call_args.kwargs,
+        *[call.kwargs for call in channel._app.bot.send_message.call_args_list],
+    ]
+    assert len(payloads) > 1
+    assert all(payload["parse_mode"] == "HTML" for payload in payloads)
+    assert all(len(payload["text"]) <= TELEGRAM_HTML_MAX_LEN for payload in payloads)
 
-    channel._app.bot.send_message.assert_called_once()
     buf = channel._stream_bufs["123"]
-    assert buf.message_id == 99
-    assert len(buf.text) <= TELEGRAM_MAX_MESSAGE_LEN
-    assert buf.last_edit > 0.0
+    assert payloads[-1]["text"] == _markdown_to_telegram_html(buf.text)
+    assert "<b>" not in buf.text
 
 
 @pytest.mark.asyncio
