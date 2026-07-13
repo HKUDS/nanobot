@@ -356,7 +356,7 @@ class GitStore:
                     wt_path = self._workspace / path
                     try:
                         wt_text = (
-                            wt_path.read_text(encoding="utf-8")
+                            wt_path.read_bytes().decode("utf-8")
                             if wt_path.exists()
                             else ""
                         )
@@ -368,12 +368,12 @@ class GitStore:
                         changed += 1
                         summary_lines.append(f"{path}: binary or non-UTF-8 file changed")
                         continue
-                    # Git blobs preserve line endings while read_text() normalizes
-                    # them. Compare the same logical lines used by the diff.
+                    # Treat CRLF and LF as equivalent without hiding other
+                    # newline changes, such as a missing final newline.
+                    if head_text.replace("\r\n", "\n") == wt_text.replace("\r\n", "\n"):
+                        continue
                     head_lines = head_text.splitlines()
                     wt_lines = wt_text.splitlines()
-                    if head_lines == wt_lines:
-                        continue
                     changed += 1
                     hunks = list(difflib.unified_diff(
                         head_lines,
