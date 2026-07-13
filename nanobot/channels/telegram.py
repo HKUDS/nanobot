@@ -8,8 +8,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 from loguru import logger
-from telegram import BotCommand, ReplyParameters, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import ReplyParameters, Update
+from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -111,12 +111,12 @@ class TelegramChannel(BaseChannel):
     name = "telegram"
 
     # Commands registered with Telegram's command menu
-    BOT_COMMANDS = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("new", "Start a new conversation"),
-        BotCommand("stop", "Stop the current task"),
-        BotCommand("help", "Show available commands"),
-    ]
+    # BOT_COMMANDS = [
+    #     BotCommand("start", "Start the bot"),
+    #     BotCommand("new", "Start a new conversation"),
+    #     BotCommand("stop", "Stop the current task"),
+    #     BotCommand("help", "Show available commands"),
+    # ]
 
     def __init__(
         self,
@@ -150,9 +150,9 @@ class TelegramChannel(BaseChannel):
         self._app.add_error_handler(self._on_error)
 
         # Add command handlers
-        self._app.add_handler(CommandHandler("start", self._on_start))
-        self._app.add_handler(CommandHandler("new", self._forward_command))
-        self._app.add_handler(CommandHandler("help", self._on_help))
+        # self._app.add_handler(CommandHandler("start", self._on_start))
+        # self._app.add_handler(CommandHandler("new", self._forward_command))
+        # self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -173,11 +173,11 @@ class TelegramChannel(BaseChannel):
         bot_info = await self._app.bot.get_me()
         logger.info("Telegram bot @{} connected", bot_info.username)
 
-        try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
-            logger.debug("Telegram bot commands registered")
-        except Exception as e:
-            logger.warning("Failed to register bot commands: {}", e)
+        # try:
+        #     await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+        #     logger.debug("Telegram bot commands registered")
+        # except Exception as e:
+        #     logger.warning("Failed to register bot commands: {}", e)
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
@@ -356,28 +356,28 @@ class TelegramChannel(BaseChannel):
         _on_stream.chat_id = int_chat_id  # type: ignore[attr-defined]
         return _on_stream
 
-    async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /start command."""
-        if not update.message or not update.effective_user:
-            return
+    # async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    #     """Handle /start command."""
+    #     if not update.message or not update.effective_user:
+    #         return
+    #
+    #     user = update.effective_user
+    #     await update.message.reply_text(
+    #         f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
+    #         "Send me a message and I'll respond!\n"
+    #         "Type /help to see available commands."
+    #     )
 
-        user = update.effective_user
-        await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
-        )
-
-    async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command, bypassing ACL so all users can access it."""
-        if not update.message:
-            return
-        await update.message.reply_text(
-            "🐈 nanobot commands:\n"
-            "/new — Start a new conversation\n"
-            "/stop — Stop the current task\n"
-            "/help — Show available commands"
-        )
+    # async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    #     """Handle /help command, bypassing ACL so all users can access it."""
+    #     if not update.message:
+    #         return
+    #     await update.message.reply_text(
+    #         "🐈 nanobot commands:\n"
+    #         "/new — Start a new conversation\n"
+    #         "/stop — Stop the current task\n"
+    #         "/help — Show available commands"
+    #     )
 
     @staticmethod
     def _sender_id(user) -> str:
@@ -385,15 +385,15 @@ class TelegramChannel(BaseChannel):
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
 
-    async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Forward slash commands to the bus for unified handling in AgentLoop."""
-        if not update.message or not update.effective_user:
-            return
-        await self._handle_message(
-            sender_id=self._sender_id(update.effective_user),
-            chat_id=str(update.message.chat_id),
-            content=update.message.text,
-        )
+    # async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    #     """Forward slash commands to the bus for unified handling in AgentLoop."""
+    #     if not update.message or not update.effective_user:
+    #         return
+    #     await self._handle_message(
+    #         sender_id=self._sender_id(update.effective_user),
+    #         chat_id=str(update.message.chat_id),
+    #         content=update.message.text,
+    #     )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""

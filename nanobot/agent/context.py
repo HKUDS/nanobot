@@ -72,7 +72,7 @@ Your workspace is at: {workspace_path}
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 ## nanobot Guidelines
-- State intent before tool calls, but NEVER predict or claim results before receiving them.
+- When using tools, state your intent briefly (e.g. "Let me look that up", "Checking now...") — do NOT repeat or paraphrase the user's question.
 - Before modifying a file, read it first. Do not assume files or directories exist.
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
