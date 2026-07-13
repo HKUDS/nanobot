@@ -998,6 +998,35 @@ def _host_for_local_browser(host: str) -> str:
     return host
 
 
+def _gateway_health_url(host: str, port: int) -> str:
+    """Return a health URL that can be opened from this device."""
+    return f"http://{_host_for_local_browser(host)}:{port}/health"
+
+
+def _gateway_health_bind_note(host: str) -> str:
+    """Describe a non-local bind without presenting it as a usable URL."""
+    return "" if is_loopback_host(host) else f" [dim](listening on {host})[/dim]"
+
+
+_GATEWAY_HEALTH_MAX_CONNECTIONS = 64
+_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS = 2.0
+
+
+def _print_gateway_health_endpoint(host: str, port: int) -> None:
+    """Print a usable health URL and make non-loopback binds explicit."""
+    console.print(
+        f"[green]✓[/green] Health endpoint: {_gateway_health_url(host, port)}"
+        f"{_gateway_health_bind_note(host)}"
+    )
+    if is_loopback_host(host):
+        return
+
+    console.print(
+        "[yellow]Warning: the unauthenticated health endpoint is reachable beyond this device. "
+        f"Keep port {port} private or protect it with a firewall or reverse proxy.[/yellow]"
+    )
+
+
 def _webui_bootstrap_secret(config: Config) -> str:
     ws_cfg = _webui_config_dict(config)
     return str(ws_cfg.get("tokenIssueSecret") or ws_cfg.get("token") or "").strip()
@@ -1454,7 +1483,14 @@ def webui(
 
     console.print()
     console.print(f"WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
-    console.print(f"Gateway health: [cyan]http://{runtime_config.gateway.host}:{effective_gateway_port}/health[/cyan]")
+    gateway_health_url = _gateway_health_url(
+        runtime_config.gateway.host,
+        effective_gateway_port,
+    )
+    console.print(
+        f"Gateway health: [cyan]{gateway_health_url}[/cyan]"
+        f"{_gateway_health_bind_note(runtime_config.gateway.host)}"
+    )
     if no_open:
         console.print("[dim]Browser opening disabled by --no-open.[/dim]")
         if generated_bootstrap_secret:
@@ -1916,42 +1952,52 @@ def _run_gateway(
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
 
+        connection_slots = asyncio.Semaphore(_GATEWAY_HEALTH_MAX_CONNECTIONS)
+
         async def handle(reader, writer):
-            try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except (asyncio.TimeoutError, ConnectionError):
+            if connection_slots.locked():
                 writer.close()
                 return
 
-            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
-            method, path = "", ""
-            parts = request_line.split(" ")
-            if len(parts) >= 2:
-                method, path = parts[0], parts[1]
+            async with connection_slots:
+                try:
+                    data = await asyncio.wait_for(
+                        reader.read(4096),
+                        timeout=_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS,
+                    )
+                    request_line = data.split(b"\r\n", 1)[0].decode(
+                        "utf-8", errors="replace",
+                    )
+                    method, path = "", ""
+                    parts = request_line.split(" ")
+                    if len(parts) >= 2:
+                        method, path = parts[0], parts[1]
 
-            if method == "GET" and path == "/health":
-                body = _json.dumps({"status": "ok"})
-                resp = (
-                    f"HTTP/1.0 200 OK\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-            else:
-                body = "Not Found"
-                resp = (
-                    f"HTTP/1.0 404 Not Found\r\n"
-                    f"Content-Type: text/plain\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
+                    if method == "GET" and path == "/health":
+                        body = _json.dumps({"status": "ok"})
+                        status = "200 OK"
+                        content_type = "application/json"
+                    else:
+                        body = "Not Found"
+                        status = "404 Not Found"
+                        content_type = "text/plain"
 
-            writer.write(resp.encode())
-            await writer.drain()
-            writer.close()
+                    resp = (
+                        f"HTTP/1.0 {status}\r\n"
+                        f"Content-Type: {content_type}\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        "Connection: close\r\n"
+                        f"\r\n{body}"
+                    )
+                    writer.write(resp.encode())
+                    await writer.drain()
+                except (asyncio.TimeoutError, ConnectionError):
+                    pass
+                finally:
+                    writer.close()
 
         server = await asyncio.start_server(handle, host, health_port)
-        console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
+        _print_gateway_health_endpoint(host, health_port)
         async with server:
             await server.serve_forever()
     # Register Dream system job (idempotent on restart)

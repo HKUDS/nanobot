@@ -2763,11 +2763,23 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert "port 18792" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("host", "display_url", "warns_about_public_bind"),
+    [
+        ("127.0.0.1", "http://127.0.0.1:18791/health", False),
+        ("0.0.0.0", "http://127.0.0.1:18791/health", True),
+    ],
+)
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(
-    monkeypatch, tmp_path: Path
+    monkeypatch,
+    tmp_path: Path,
+    host: str,
+    display_url: str,
+    warns_about_public_bind: bool,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
+    config.gateway.host = host
     config.gateway.port = 18791
     captured: dict[str, object] = {}
 
@@ -2873,21 +2885,25 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert result.exit_code == 0
-    assert captured["host"] == "127.0.0.1"
+    assert captured["host"] == host
     assert captured["port"] == 18791
-    assert "Health endpoint: http://127.0.0.1:18791/health" in result.stdout
+    assert f"Health endpoint: {display_url}" in result.stdout
+    assert ("unauthenticated health endpoint" in result.stdout) is warns_about_public_bind
+    assert ("listening on 0.0.0.0" in result.stdout) is warns_about_public_bind
+
+    health_handler = captured["handler"]
+    assert callable(health_handler)
 
     def _call_handler(path: str) -> tuple[str, _FakeWriter]:
         request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
         writer = _FakeWriter()
-        handler = captured["handler"]
-        assert callable(handler)
-        asyncio.run(handler(_FakeReader(request), writer))
+        asyncio.run(health_handler(_FakeReader(request), writer))
         return writer.output.decode(), writer
 
     root_response, root_writer = _call_handler("/")
     assert root_writer.closed is True
     assert "HTTP/1.0 404 Not Found" in root_response
+    assert "Connection: close" in root_response
     assert root_response.endswith("\r\n\r\nNot Found")
 
     health_response, health_writer = _call_handler("/health")
@@ -2900,6 +2916,43 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert missing_writer.closed is True
     assert "HTTP/1.0 404 Not Found" in missing_response
     assert missing_response.endswith("\r\n\r\nNot Found")
+
+    if host == "127.0.0.1":
+        async def _exercise_connection_limit() -> None:
+            release = asyncio.Event()
+            all_started = asyncio.Event()
+            started = 0
+
+            class _BlockingReader:
+                async def read(self, _size: int) -> bytes:
+                    nonlocal started
+                    started += 1
+                    if started == cli_commands._GATEWAY_HEALTH_MAX_CONNECTIONS:
+                        all_started.set()
+                    await release.wait()
+                    return b"GET /health HTTP/1.1\r\n\r\n"
+
+            active_writers = [
+                _FakeWriter() for _ in range(cli_commands._GATEWAY_HEALTH_MAX_CONNECTIONS)
+            ]
+            active_tasks = [
+                asyncio.create_task(health_handler(_BlockingReader(), writer))
+                for writer in active_writers
+            ]
+            await asyncio.wait_for(all_started.wait(), timeout=1)
+
+            overflow_writer = _FakeWriter()
+            await health_handler(
+                _FakeReader(b"GET /health HTTP/1.1\r\n\r\n"),
+                overflow_writer,
+            )
+            assert overflow_writer.closed is True
+            assert overflow_writer.output == b""
+
+            release.set()
+            await asyncio.gather(*active_tasks)
+
+        asyncio.run(_exercise_connection_limit())
 
 
 def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(

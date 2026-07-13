@@ -13,7 +13,7 @@ Check these once before Docker, systemd, or LaunchAgent:
 | Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
 | `~/.nanobot/` or your custom config/workspace path is persistent | Sessions, memory, channel login state, generated artifacts, and cron jobs live there |
 | Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
-| Ports are planned | Gateway health defaults to `18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
+| Ports are planned | Gateway health defaults to local-only `127.0.0.1:18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
 | Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |
 
 Restart the deployed process after editing `config.json`. Long-running processes read config at startup.
@@ -54,6 +54,9 @@ Restart the deployed process after editing `config.json`. Long-running processes
 > ```
 >
 > When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
+> The gateway health route itself is intentionally minimal and unauthenticated. When the
+> container binds it to `0.0.0.0`, publish port `18790` to host loopback only; place any
+> remotely monitored health endpoint behind a firewall or reverse proxy.
 
 ### Docker Compose
 
@@ -93,7 +96,7 @@ docker run \
   --security-opt apparmor=unconfined \
   --security-opt seccomp=unconfined \
   -v ~/.nanobot:/home/nanobot/.nanobot \
-  -p 18790:18790 -p 8765:8765 \
+  -p 127.0.0.1:18790:18790 -p 8765:8765 \
   nanobot gateway
 
 # Or run a single command
