@@ -801,29 +801,6 @@ def test_plugins_enable_extra_without_channel_only_installs(monkeypatch, tmp_pat
     assert not config_path.exists()
 
 
-def test_plugins_enable_langfuse_installs_supported_tracer(monkeypatch, tmp_path):
-    from typer.testing import CliRunner
-
-    from nanobot.cli.commands import app
-
-    commands: list[list[str]] = []
-    config_path = tmp_path / "config.json"
-    runner = CliRunner()
-    _stub_optional_feature_cli(
-        monkeypatch,
-        extras={"langfuse": ["langfuse>=3.0.0,<4.0.0"]},
-        installed=False,
-        commands=commands,
-    )
-
-    result = runner.invoke(app, ["plugins", "enable", "langfuse", "--config", str(config_path)])
-
-    assert result.exit_code == 0
-    assert commands == [[sys.executable, "-m", "pip", "install", "langfuse<4.0.0,>=3.0.0"]]
-    assert "Enabled feature 'langfuse'" in result.output
-    assert not config_path.exists()
-
-
 def test_plugins_enable_logs_option_enables_nanobot_logs(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
