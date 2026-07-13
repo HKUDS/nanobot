@@ -433,17 +433,31 @@ class GitStore:
                 return c
         return None
 
-    def show_commit_diff(self, short_sha: str, max_entries: int = 20) -> tuple[CommitInfo, str] | None:
-        """Find a commit and return it with its diff vs the parent."""
-        commits = self.log(max_entries=max_entries)
-        for i, c in enumerate(commits):
-            if c.sha.startswith(short_sha):
-                if i + 1 < len(commits):
-                    diff = self.diff_commits(commits[i + 1].sha, c.sha)
-                else:
-                    diff = ""
-                return c, diff
-        return None
+    def show_commit_diff(
+        self,
+        short_sha: str,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> tuple[CommitInfo, str] | None:
+        """Find a commit and return it with its diff vs its actual parent."""
+        try:
+            from dulwich.repo import Repo
+
+            commits = self.log(max_entries=max_entries, message_prefix=message_prefix)
+            for c in commits:
+                if c.sha.startswith(short_sha):
+                    full_sha = self._resolve_sha(c.sha)
+                    if not full_sha:
+                        return None
+                    with Repo(str(self._workspace)) as repo:
+                        commit = repo[full_sha]
+                        parent = commit.parents[0] if commit.parents else None
+                    diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
+                    return c, diff
+            return None
+        except Exception:
+            logger.exception("Git show_commit_diff failed")
+            return None
 
     # -- restore ---------------------------------------------------------------
 

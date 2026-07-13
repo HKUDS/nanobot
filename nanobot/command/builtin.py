@@ -648,7 +648,14 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     else:
         # Default: show the latest Dream commit's diff
         commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
-        result = git.show_commit_diff(commits[0].sha) if commits else None
+        result = (
+            git.show_commit_diff(
+                commits[0].sha,
+                max_entries=1,
+                message_prefix=_DREAM_COMMIT_PREFIX,
+            )
+            if commits else None
+        )
         if result:
             commit, diff = result
             content = _format_dream_log_content(commit, diff)
@@ -689,21 +696,28 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
             content = _format_dream_restore_list(commits)
     else:
         sha = args.split()[0]
-        result = git.show_commit_diff(sha)
-        changed_files = _format_changed_files(result[1]) if result else "the tracked memory files"
-        new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
-        if new_sha:
-            content = (
-                f"Restored Dream memory to the state before `{sha}`.\n\n"
-                f"- New safety commit: `{new_sha}`\n"
-                f"- Restored files: {changed_files}\n\n"
-                f"Use `/dream-log {new_sha}` to inspect the restore diff."
-            )
-        else:
+        result = git.show_commit_diff(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+        if not result:
             content = (
                 f"Couldn't restore Dream change `{sha}`.\n\n"
-                "It may not exist, or it may be the first saved version with no earlier state to restore."
+                "Only Dream memory versions can be restored. "
+                "Use `/dream-restore` to list recent versions."
             )
+        else:
+            changed_files = _format_changed_files(result[1])
+            new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+            if new_sha:
+                content = (
+                    f"Restored Dream memory to the state before `{sha}`.\n\n"
+                    f"- New safety commit: `{new_sha}`\n"
+                    f"- Restored files: {changed_files}\n\n"
+                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                )
+            else:
+                content = (
+                    f"Couldn't restore Dream change `{sha}`.\n\n"
+                    "It may be the first saved version with no earlier state to restore."
+                )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=content, metadata={"render_as": "text"},

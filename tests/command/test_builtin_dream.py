@@ -80,8 +80,16 @@ class _FakeGit:
             commits = [c for c in commits if c.message.startswith(message_prefix)]
         return commits[:max_entries]
 
-    def show_commit_diff(self, sha: str, max_entries: int = 20):
-        return self._diff_map.get(sha)
+    def show_commit_diff(
+        self,
+        sha: str,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ):
+        result = self._diff_map.get(sha)
+        if result and message_prefix is not None and not result[0].message.startswith(message_prefix):
+            return None
+        return result
 
     def revert(self, sha: str, *, message_prefix: str | None = None) -> str | None:
         self.revert_calls.append((sha, message_prefix))
@@ -431,3 +439,20 @@ async def test_dream_restore_success_mentions_files_and_followup() -> None:
     assert "- Restored files: `SOUL.md`, `memory/MEMORY.md`" in out.content
     assert "Use `/dream-log eeee9999` to inspect the restore diff." in out.content
     assert git.revert_calls == [("abcd1234", "dream:")]
+
+
+@pytest.mark.asyncio
+async def test_dream_restore_rejects_non_dream_commit_clearly() -> None:
+    commit = CommitInfo(
+        sha="cccc3333", message="backup: workspace", timestamp="2026-04-04 10:00",
+    )
+    git = _FakeGit(
+        diff_map={commit.sha: (commit, "unrelated diff")},
+        revert_result="eeee9999",
+    )
+
+    out = await cmd_dream_restore(_make_ctx("/dream-restore cccc3333", git, args="cccc3333"))
+
+    assert "Only Dream memory versions can be restored." in out.content
+    assert "Use `/dream-restore` to list recent versions." in out.content
+    assert git.revert_calls == []

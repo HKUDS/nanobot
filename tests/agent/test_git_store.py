@@ -189,6 +189,25 @@ class TestShowCommitDiff:
     def test_returns_none_for_unknown(self, git_ready):
         assert git_ready.show_commit_diff("deadbeef") is None
 
+    def test_message_prefix_finds_commit_beyond_unrelated_history_window(self, git_ready):
+        ws = git_ready._workspace
+        (ws / "SOUL.md").write_text("dream content", encoding="utf-8")
+        dream_sha = git_ready.auto_commit("dream: latest")
+        for i in range(20):
+            (ws / "SOUL.md").write_text(f"backup {i}", encoding="utf-8")
+            git_ready.auto_commit(f"backup: {i}")
+
+        result = git_ready.show_commit_diff(
+            dream_sha,
+            max_entries=1,
+            message_prefix="dream:",
+        )
+
+        assert result is not None
+        commit, diff = result
+        assert commit.sha == dream_sha
+        assert "dream content" in diff
+
 
 class TestCommitInfoFormat:
     def test_format_with_diff(self):
