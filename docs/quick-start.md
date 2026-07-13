@@ -160,6 +160,8 @@ python -m pip install .
 nanobot onboard --wizard
 ```
 
+On Windows, if `python -m pip install .` reports that it cannot launch `npm`, run `cd webui`, `npm.cmd install --package-lock=false`, `npm.cmd run build`, and `cd ..` in order, then retry the install.
+
 The source path follows current `main` and can be newer than the published package. A non-editable install triggers the build hook that bundles the current WebUI. For editable Python or frontend development, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`../webui/README.md`](../webui/README.md).
 
 If the package is installed but the shell cannot find `nanobot`, use the module form:

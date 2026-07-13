@@ -130,6 +130,8 @@ python -m pip install .
 nanobot onboard --wizard
 ```
 
+On Windows, if `python -m pip install .` reports that it cannot launch `npm`, run `cd webui`, `npm.cmd install --package-lock=false`, `npm.cmd run build`, and `cd ..` in order, then retry the install.
+
 Use a source install when you want current `main` behavior or plan to test unreleased features. Use PyPI, `uv`, or `pipx` for a stable day-to-day install; those packages already contain the WebUI and do not need Node.js or Bun. Contributors who need an editable checkout should follow [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`webui/README.md`](./webui/README.md).
 
 Useful first checks:

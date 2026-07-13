@@ -128,7 +128,7 @@ for provider setup and output behavior.
 
 ## Channels
 
-Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, choose **Connect**, and follow the fields or QR flow shown for that channel. The guided setup can:
+Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
 
 - install missing optional channel support when the WebUI is running locally;
 - collect platform credentials while preserving previously saved values;

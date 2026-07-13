@@ -42,7 +42,7 @@ Use the guided channel setup:
 
 1. Get the platform token, login state, webhook, or mailbox credentials.
 2. Open **Settings → Channels** in the WebUI.
-3. Choose the platform and select **Connect**.
+3. Choose the platform and open its setup panel.
 4. Complete the credential or QR flow and install optional support if prompted.
 5. Restart when the WebUI requests it.
 6. Send a private test message.

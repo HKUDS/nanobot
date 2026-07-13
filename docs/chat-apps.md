@@ -32,7 +32,7 @@ For normal local setup, let the WebUI write and validate the channel config:
 
 1. Run `nanobot webui`.
 2. Open **Settings → Channels**.
-3. Search for the platform and choose **Connect**.
+3. Search for the platform and open its setup panel.
 4. Follow the credential fields or QR flow. The screen tells you which platform-side token, permission, account, or URL it needs.
 5. Let nanobot install the optional channel support when prompted.
 6. Restart from the WebUI if it reports that a restart is required.
