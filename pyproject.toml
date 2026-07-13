@@ -49,6 +49,7 @@ dependencies = [
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
     "packaging>=24.0",
+    "dotenv>=0.9.9",
 ]
 
 [project.optional-dependencies]
@@ -151,6 +152,11 @@ nanobot = "nanobot.cli.commands:app"
 # automatically via pkgutil scanning in ToolLoader.discover().
 # [project.entry-points."nanobot.tools"]
 # my_plugin = "my_package.plugins:MyTool"
+
+# Third-party hook plugins register here.  Built-in hooks are discovered
+# automatically via pkgutil scanning in nanobot/agent/hooks/discovery.py.
+# [project.entry-points."nanobot.hooks"]
+# my_hook = "my_package:module"
 
 [build-system]
 requires = ["hatchling"]

@@ -133,3 +133,6 @@ def create_file_edit_activity_hook(context: AgentTurnHookContext) -> AgentHook |
         on_progress=context.on_progress,
         workspace=context.workspace,
     )
+
+
+hook_factories = [create_file_edit_activity_hook]

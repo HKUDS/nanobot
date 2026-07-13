@@ -61,7 +61,6 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
-from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.bus.outbound_events import (  # noqa: E402
     ProgressEvent,
@@ -1205,7 +1204,6 @@ def serve(
             runtime_config, bus,
             session_manager=session_manager,
             image_generation_provider_configs=image_gen_provider_configs(runtime_config),
-            hook_factories=[create_file_edit_activity_hook],
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -1458,7 +1456,6 @@ def _run_gateway(
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
-        hook_factories=[create_file_edit_activity_hook],
     )
     WebuiTurnCoordinator(
         bus=bus,
@@ -1939,7 +1936,6 @@ def agent(
             config, bus,
             cron_service=cron,
             image_generation_provider_configs=image_gen_provider_configs(config),
-            hook_factories=[create_file_edit_activity_hook],
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")

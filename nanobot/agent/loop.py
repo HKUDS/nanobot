@@ -437,6 +437,7 @@ class AgentLoop:
         allowing callers to override or extend the standard config-derived
         parameters (e.g. ``cron_service``, ``session_manager``).
         """
+        from nanobot.agent.hooks.discovery import discover_all
         from nanobot.providers.factory import make_provider
 
         if bus is None:
@@ -451,6 +452,12 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        # Auto-discover built-in and plugin hooks; merge with caller-supplied extras.
+        discovered_factories, discovered_hooks = discover_all()
+        extra_factories: list = extra.pop("hook_factories", [])
+        extra_hooks: list = extra.pop("hooks", [])
+        hook_factories = discovered_factories + extra_factories
+        hooks = discovered_hooks + extra_hooks
         return cls(
             bus=bus,
             provider=provider,
@@ -478,6 +485,8 @@ class AgentLoop:
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            hook_factories=hook_factories,
+            hooks=hooks,
             **extra,
         )
 
