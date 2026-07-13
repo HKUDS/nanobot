@@ -1,31 +1,22 @@
 # Install and Quick Start
 
-This guide has one goal: get a normal nanobot reply in your browser. Do not add
-chat apps, MCP servers, fallback models, or deployment until this path works.
+This guide has one goal: get a normal nanobot reply in your browser. Do not add chat apps, MCP servers, fallback models, or deployment until this path works.
 
-If terminals, Python, or API keys are unfamiliar, use the
-[beginner walkthrough](./start-without-technical-background.md), which explains
-each term and screen.
+If terminals, Python, or API keys are unfamiliar, use the [beginner walkthrough](./start-without-technical-background.md), which explains each term and screen.
 
-These repository docs follow current `main`. The recommended installer uses
-the stable package, so a newly documented WebUI screen may not appear until the
-next release. Each advanced guide also provides a CLI or manual config path.
+These repository docs follow current `main`. The recommended installer uses the stable package, so a newly documented WebUI screen may not appear until the next release. Each advanced guide also provides a CLI or manual config path.
 
 ## What You Need
 
 - Python 3.11 or newer.
 - Access to one supported AI provider, company endpoint, or local model server.
-- The credential, endpoint URL, and model ID required by that service. Local
-  providers such as Ollama may not require a key.
+- The credential, endpoint URL, and model ID required by that service. Local providers such as Ollama may not require a key.
 
-Git is only needed for a source install. The published package already contains
-the WebUI. A current-source install needs `bun` or `npm` so its WebUI bundle
-can be built.
+Git is only needed for a source install. The published package already contains the WebUI. A current-source install needs `bun` or `npm` so its WebUI bundle can be built.
 
 ## 1. Install nanobot
 
-The recommended installer keeps nanobot out of the system Python environment
-and opens the setup wizard when installation finishes.
+The recommended installer keeps nanobot out of the system Python environment and opens the setup wizard when installation finishes.
 
 **macOS / Linux**
 
@@ -39,18 +30,13 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer chooses an active virtual environment, `uv`, `pipx`, or a
-managed environment under `~/.nanobot/venv`. It installs the stable PyPI
-release unless you explicitly pass `--dev`.
+The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`.
 
-If you prefer to inspect the scripts first, open
-[`install.sh`](../scripts/install.sh) or
-[`install.ps1`](../scripts/install.ps1).
+If you prefer to inspect the scripts first, open [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1).
 
 ## 2. Complete Quick Start
 
-The installer opens `nanobot onboard --wizard`. Choose **Quick Start** and
-follow the prompts:
+The installer opens `nanobot onboard --wizard`. Choose **Quick Start** and follow the prompts:
 
 1. Choose the provider or endpoint that owns your credential.
 2. Enter its API key or base URL when requested.
@@ -71,8 +57,7 @@ If the installer did not open the wizard, run it yourself:
 nanobot onboard --wizard
 ```
 
-If you skip the wizard and run `nanobot webui` with no usable model, the
-launcher offers to run the same Quick Start flow before starting the browser.
+If you skip the wizard and run `nanobot webui` with no usable model, the launcher offers to run the same Quick Start flow before starting the browser.
 
 ## 3. Check the Setup
 
@@ -86,8 +71,7 @@ You want:
 - the model or preset you selected;
 - a configured state for the provider used by that model.
 
-Most other providers can say `not set`. This command validates local setup but
-does not call the model.
+Most other providers can say `not set`. This command validates local setup but does not call the model.
 
 ## 4. Get the First Reply
 
@@ -95,9 +79,7 @@ does not call the model.
 nanobot webui
 ```
 
-The launcher prepares the local WebSocket channel, starts the gateway, and opens
-`http://127.0.0.1:8765`. It binds to localhost for the first run, so other
-devices on your network cannot reach it.
+The launcher prepares the local WebSocket channel, starts the gateway, and opens `http://127.0.0.1:8765`. It binds to localhost for the first run, so other devices on your network cannot reach it.
 
 Send:
 
@@ -105,24 +87,20 @@ Send:
 Hello!
 ```
 
-Any normal assistant answer is success. It proves that nanobot can load the
-config, reach the selected model, use the workspace, and serve the browser UI.
+Any normal assistant answer is success. It proves that nanobot can load the config, reach the selected model, use the workspace, and serve the browser UI.
 
-Leave the terminal open while using the WebUI. If you prefer a managed
-background process, stop the foreground process with `Ctrl+C`, then run:
+Leave the terminal open while using the WebUI. If you prefer a managed background process, stop the foreground process with `Ctrl+C`, then run:
 
 ```bash
 nanobot webui --background
 nanobot gateway status
 ```
 
-Use `nanobot gateway logs`, `restart`, and `stop` to manage that background
-gateway.
+Use `nanobot gateway logs`, `restart`, and `stop` to manage that background gateway.
 
 ## Terminal-Only Check
 
-If you do not want the browser or need to isolate a WebUI problem, send one
-message directly:
+If you do not want the browser or need to isolate a WebUI problem, send one message directly:
 
 ```bash
 nanobot agent -m "Hello!"
@@ -134,8 +112,7 @@ Then start an interactive terminal chat with:
 nanobot agent
 ```
 
-In interactive mode, `Enter` sends and `Alt+Enter` inserts a newline. Exit
-with `exit`, `/exit`, `:q`, or `Ctrl+D`.
+In interactive mode, `Enter` sends and `Alt+Enter` inserts a newline. Exit with `exit`, `/exit`, `:q`, or `Ctrl+D`.
 
 ## Choose One Next Step
 
@@ -170,14 +147,11 @@ python -m pip install nanobot-ai
 nanobot onboard --wizard
 ```
 
-If pip reports `externally-managed-environment`, use the recommended installer,
-`uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual
-environment. Do not force a system-wide install.
+If pip reports `externally-managed-environment`, use the recommended installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment. Do not force a system-wide install.
 
 **Current source**
 
-`bun` or `npm` must be available. Activate a virtual environment first,
-then run:
+`bun` or `npm` must be available. Activate a virtual environment first, then run:
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -186,14 +160,9 @@ python -m pip install .
 nanobot onboard --wizard
 ```
 
-The source path follows current `main` and can be newer than the published
-package. A non-editable install triggers the build hook that bundles the current
-WebUI. For editable Python or frontend development, follow
-[`../CONTRIBUTING.md`](../CONTRIBUTING.md) and
-[`../webui/README.md`](../webui/README.md).
+The source path follows current `main` and can be newer than the published package. A non-editable install triggers the build hook that bundles the current WebUI. For editable Python or frontend development, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`../webui/README.md`](../webui/README.md).
 
-If the package is installed but the shell cannot find `nanobot`, use the
-module form:
+If the package is installed but the shell cannot find `nanobot`, use the module form:
 
 ```bash
 python -m nanobot --version
@@ -201,15 +170,11 @@ python -m nanobot onboard --wizard
 python -m nanobot webui
 ```
 
-Some systems name Python `python3` or `py`; use the command that reports
-Python 3.11 or newer. On Windows, `~` means your user profile directory, such
-as `C:\Users\you`.
+Some systems name Python `python3` or `py`; use the command that reports Python 3.11 or newer. On Windows, `~` means your user profile directory, such as `C:\Users\you`.
 
 ## Manual Configuration Fallback
 
-Use this only when the wizard is unavailable or you intentionally manage JSON.
-First run `nanobot onboard`, then merge a provider and a named model preset
-into `~/.nanobot/config.json`.
+Use this only when the wizard is unavailable or you intentionally manage JSON. First run `nanobot onboard`, then merge a provider and a named model preset into `~/.nanobot/config.json`.
 
 A generic OpenAI-compatible setup has this shape:
 
@@ -235,10 +200,7 @@ A generic OpenAI-compatible setup has this shape:
 }
 ```
 
-Replace the provider, endpoint, and model together. Do not pair a credential
-from one service with a model ID from another. See
-[Provider Cookbook](./provider-cookbook.md) for hosted, OAuth, company, and
-local examples, and [Configuration](./configuration.md) for exact fields.
+Replace the provider, endpoint, and model together. Do not pair a credential from one service with a model ID from another. See [Provider Cookbook](./provider-cookbook.md) for hosted, OAuth, company, and local examples, and [Configuration](./configuration.md) for exact fields.
 
 ## Updating
 
@@ -261,8 +223,7 @@ git pull
 python -m pip install .
 ```
 
-Then check `nanobot --version`. Run `nanobot onboard --refresh` when you want
-to add newly introduced default fields while preserving existing settings.
+Then check `nanobot --version`. Run `nanobot onboard --refresh` when you want to add newly introduced default fields while preserving existing settings.
 
 ## If the First Reply Fails
 
@@ -283,5 +244,4 @@ nanobot agent -m "Hello!"
 | CLI works but WebUI does not open | Use port `8765`, not gateway health port `18790` |
 | WebUI works but a chat app does not | Check **Settings → Channels**, then run `nanobot channels status` |
 
-Continue with the ordered [Troubleshooting guide](./troubleshooting.md) if the
-cause is still unclear.
+Continue with the ordered [Troubleshooting guide](./troubleshooting.md) if the cause is still unclear.

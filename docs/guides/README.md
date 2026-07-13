@@ -1,8 +1,6 @@
 # nanobot Task Guides
 
-Start with [Install and Quick Start](../quick-start.md) and get one reply before
-using a guide below. Each guide targets one outcome; linked reference pages hold
-the complete option tables and edge cases.
+Start with [Install and Quick Start](../quick-start.md) and get one reply before using a guide below. Each guide targets one outcome; linked reference pages hold the complete option tables and edge cases.
 
 ## Start and Use
 
@@ -16,8 +14,7 @@ the complete option tables and edge cases.
 
 ## Connect a Chat App
 
-Use **Settings → Channels** in the WebUI for guided setup. These guides explain
-the account, bot, token, permission, and test-message steps on each platform.
+Use **Settings → Channels** in the WebUI for guided setup. These guides explain the account, bot, token, permission, and test-message steps on each platform.
 
 | Goal | Guide |
 |---|---|

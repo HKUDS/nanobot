@@ -34,14 +34,11 @@
   </p>
 </div>
 
-🐈 **nanobot** is an open-source personal AI agent you can run on your own
-computer or server. Use it from a browser, terminal, or chat app; give it tools,
-memory, and scheduled work without giving up control of your data and runtime.
+🐈 **nanobot** is an open-source personal AI agent you can run on your own computer or server. Use it from a browser, terminal, or chat app; give it tools, memory, and scheduled work without giving up control of your data and runtime.
 
 ## Get a Reply in Your Browser
 
-You need Python 3.11 or newer and access to an AI provider account, company
-endpoint, or local model.
+You need Python 3.11 or newer and access to an AI provider account, company endpoint, or local model.
 
 **1. Install and run the setup wizard**
 
@@ -57,9 +54,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer uses an isolated environment when needed and opens
-`nanobot onboard --wizard`. Choose **Quick Start**, then enter the provider,
-model, and credential details requested by the wizard.
+The installer uses an isolated environment when needed and opens `nanobot onboard --wizard`. Choose **Quick Start**, then enter the provider, model, and credential details requested by the wizard.
 
 **2. Open nanobot**
 
@@ -67,18 +62,11 @@ model, and credential details requested by the wizard.
 nanobot webui
 ```
 
-This starts the local gateway and opens `http://127.0.0.1:8765`. Send
-`Hello!`. A normal reply means installation, model access, and the WebUI are
-working.
+This starts the local gateway and opens `http://127.0.0.1:8765`. Send `Hello!`. A normal reply means installation, model access, and the WebUI are working.
 
-If terminals, Python, API keys, or configuration files are new to you, follow
-the [beginner walkthrough](./docs/start-without-technical-background.md).
-For installation alternatives and first-run checks, use the
-[full quick start](./docs/quick-start.md).
+If terminals, Python, API keys, or configuration files are new to you, follow the [beginner walkthrough](./docs/start-without-technical-background.md). For installation alternatives and first-run checks, use the [full quick start](./docs/quick-start.md).
 
-Repository docs describe current `main`, while the stable package can lag
-behind it. If a linked WebUI screen is not present in your installed version,
-use the manual path on that page or install the current source version.
+Repository docs describe current `main`, while the stable package can lag behind it. If a linked WebUI screen is not present in your installed version, use the manual path on that page or install the current source version.
 
 ## Choose Your Next Step
 
@@ -111,13 +99,11 @@ The WebUI is included in the published package; no frontend build is needed.
   <img src="images/nanobot_webui.png" alt="nanobot WebUI showing a chat and agent activity" width="900">
 </p>
 
-See the [WebUI guide](./docs/webui.md) for workspaces, access modes, Apps, Skills,
-Automations, settings, and LAN access.
+See the [WebUI guide](./docs/webui.md) for workspaces, access modes, Apps, Skills, Automations, settings, and LAN access.
 
 ## Other Installation Methods
 
-The commands above install the stable PyPI release. You can also choose one of
-these methods:
+The commands above install the stable PyPI release. You can also choose one of these methods:
 
 **uv**
 
@@ -135,8 +121,7 @@ nanobot onboard --wizard
 
 **Current source**
 
-`bun` or `npm` must be available so the source build can bundle the WebUI.
-From an activated virtual environment:
+`bun` or `npm` must be available so the source build can bundle the WebUI. From an activated virtual environment:
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -145,12 +130,7 @@ python -m pip install .
 nanobot onboard --wizard
 ```
 
-Use a source install when you want current `main` behavior or plan to
-test unreleased features. Use PyPI, `uv`, or `pipx` for a stable day-to-day
-install; those packages already contain the WebUI and do not need Node.js or
-Bun. Contributors who need an editable checkout should follow
-[`CONTRIBUTING.md`](./CONTRIBUTING.md) and
-[`webui/README.md`](./webui/README.md).
+Use a source install when you want current `main` behavior or plan to test unreleased features. Use PyPI, `uv`, or `pipx` for a stable day-to-day install; those packages already contain the WebUI and do not need Node.js or Bun. Contributors who need an editable checkout should follow [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`webui/README.md`](./webui/README.md).
 
 Useful first checks:
 
@@ -160,9 +140,7 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-If `nanobot` is not on `PATH`, use `python -m nanobot` in the same
-commands. See [Install and Quick Start](./docs/quick-start.md) for updates,
-source installs, and operating-system notes.
+If `nanobot` is not on `PATH`, use `python -m nanobot` in the same commands. See [Install and Quick Start](./docs/quick-start.md) for updates, source installs, and operating-system notes.
 
 ## Documentation
 
@@ -175,16 +153,11 @@ The [documentation index](./docs/README.md) is organized by user task:
 - **Operate:** [deployment](./docs/deployment.md) · [multiple instances](./docs/multiple-instances.md) · [troubleshooting](./docs/troubleshooting.md)
 - **Contribute:** [architecture](./docs/architecture.md) · [development](./docs/development.md) · [contribution guide](./CONTRIBUTING.md)
 
-Repository docs track the current source tree. For the latest published release,
-visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
+Repository docs track the current source tree. For the latest published release, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
 
 ## Release and Project Links
 
-The latest tagged release is
-[v0.2.2 — Durability Release](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2).
-See [GitHub Releases](https://github.com/HKUDS/nanobot/releases) for release
-notes and the [release archive](./docs/release-archive.md) for development
-highlights.
+The latest tagged release is [v0.2.2 — Durability Release](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2). See [GitHub Releases](https://github.com/HKUDS/nanobot/releases) for release notes and the [release archive](./docs/release-archive.md) for development highlights.
 
 <p align="center">
   <a href="https://platform.kimi.com?aff=nanobot"><picture><source media="(prefers-color-scheme: dark)" srcset="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69mt3v89kkekg24gg"><img alt="Kimi Open Source Friends" height="44" src="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69fudcmosb3pipls0"></picture></a>
@@ -193,18 +166,14 @@ highlights.
 
 ## Contributing and Community
 
-Issues and pull requests are welcome. Start with
-[CONTRIBUTING.md](./CONTRIBUTING.md) for setup, testing, and review guidance.
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, testing, and review guidance.
 
 - [GitHub Issues](https://github.com/HKUDS/nanobot/issues)
 - [GitHub Discussions](https://github.com/HKUDS/nanobot/discussions)
 - [Discord](https://discord.gg/MnCvHqpUGB)
 - [Feishu and WeChat groups](./COMMUNICATION.md)
 
-This project was started by [Xubin Ren](https://github.com/re-bin) as a personal
-open-source project and continues to be maintained with contributions from the
-community. For questions, ideas, or collaboration, contact
-[xubinrencs@gmail.com](mailto:xubinrencs@gmail.com).
+This project was started by [Xubin Ren](https://github.com/re-bin) as a personal open-source project and continues to be maintained with contributions from the community. For questions, ideas, or collaboration, contact [xubinrencs@gmail.com](mailto:xubinrencs@gmail.com).
 
 ### Contributors
 

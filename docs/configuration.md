@@ -4,12 +4,7 @@ Config file: `~/.nanobot/config.json`
 
 This is the full reference. If this is your first install, start with [`quick-start.md`](./quick-start.md). If you are trying to choose a model or fix provider/model matching, use [`providers.md`](./providers.md) first and come back here for exact fields and advanced options.
 
-For normal local use, prefer the WebUI before editing JSON: **Settings →
-Models** manages model choices and provider credentials, **Settings → Channels**
-guides chat-platform setup, other Settings pages cover built-in capabilities,
-and **Apps** manages CLI App and MCP integrations. Edit `config.json` directly
-when you need an advanced field, automate deployment, or intentionally manage
-configuration as code.
+For normal local use, prefer the WebUI before editing JSON: **Settings → Models** manages model choices and provider credentials, **Settings → Channels** guides chat-platform setup, other Settings pages cover built-in capabilities, and **Apps** manages CLI App and MCP integrations. Edit `config.json` directly when you need an advanced field, automate deployment, or intentionally manage configuration as code.
 
 The JSON examples below are usually partial snippets to merge into your existing config, not full replacement files. For the mental model behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
 
@@ -18,9 +13,7 @@ The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`
 For setup and runtime failures, follow the diagnosis order in [`troubleshooting.md`](./troubleshooting.md) before changing multiple config areas at once.
 
 > [!NOTE]
-> If your config file is older than the current schema, run
-> `nanobot onboard --refresh`. nanobot adds missing default fields while
-> preserving your existing values.
+> If your config file is older than the current schema, run `nanobot onboard --refresh`. nanobot adds missing default fields while preserving your existing values.
 
 ## Configuration Guides
 
@@ -58,8 +51,7 @@ the focused guides first and come back here for exact fields and defaults.
 
 ## Where a Setting Lives
 
-If the WebUI does not expose the option you need, start from the task below.
-Most advanced changes touch one config section and one verification command.
+If the WebUI does not expose the option you need, start from the task below. Most advanced changes touch one config section and one verification command.
 
 | Task | First keys to check | Verify with | Deep dive |
 |---|---|---|---|

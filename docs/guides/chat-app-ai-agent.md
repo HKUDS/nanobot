@@ -24,8 +24,7 @@ nanobot onboard --wizard
 nanobot webui
 ```
 
-Send `Hello!` in the WebUI before adding a channel. Then choose one platform
-guide for the bot/account prerequisites:
+Send `Hello!` in the WebUI before adding a channel. Then choose one platform guide for the bot/account prerequisites:
 
 - [Telegram AI agent](./telegram-ai-agent.md)
 - [Discord AI agent](./discord-ai-agent.md)
@@ -47,12 +46,9 @@ Use the guided channel setup:
 4. Complete the credential or QR flow and install optional support if prompted.
 5. Restart when the WebUI requests it.
 6. Send a private test message.
-7. Approve the pairing request in the WebUI when a DM-capable channel asks for
-   one.
+7. Approve the pairing request in the WebUI when a DM-capable channel asks for one.
 
-If your installed release does not show **Settings → Channels**, use the full
-[Chat Apps reference](../chat-apps.md#manual-setup-pattern) to configure the
-channel manually.
+If your installed release does not show **Settings → Channels**, use the full [Chat Apps reference](../chat-apps.md#manual-setup-pattern) to configure the channel manually.
 
 Check status from the terminal when you need a lower-level confirmation:
 
@@ -60,15 +56,13 @@ Check status from the terminal when you need a lower-level confirmation:
 nanobot channels status
 ```
 
-The `nanobot webui` command already runs the gateway. For a chat-only or
-server deployment, start it directly:
+The `nanobot webui` command already runs the gateway. For a chat-only or server deployment, start it directly:
 
 ```bash
 nanobot gateway
 ```
 
-Use the full [Chat Apps reference](../chat-apps.md) when you manage
-`config.json` directly or need platform-specific advanced settings.
+Use the full [Chat Apps reference](../chat-apps.md) when you manage `config.json` directly or need platform-specific advanced settings.
 
 ## Production notes
 
@@ -89,8 +83,7 @@ Use the full [Chat Apps reference](../chat-apps.md) when you manage
 
 - If `nanobot channels status` does not show the channel, the config key or
   optional dependency is likely missing.
-- If the first DM returns a pairing code, approve the pending request in the
-  WebUI or use `/pairing approve <code>` from an authorized chat.
+- If the first DM returns a pairing code, approve the pending request in the WebUI or use `/pairing approve <code>` from an authorized chat.
 - If messages do not arrive, run `nanobot gateway --verbose` and compare
   platform credentials, event permissions, and allow lists.
 - If group replies are unexpected, review that channel's group policy.

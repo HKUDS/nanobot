@@ -1,12 +1,8 @@
 # nanobot Documentation
 
-Use these docs to get a working agent first, then open a task guide only when
-you need the next capability. Source-level design and extension details are
-kept in the contributor section.
+Use these docs to get a working agent first, then open a task guide only when you need the next capability. Source-level design and extension details are kept in the contributor section.
 
-Repository docs follow the current source tree and can be newer than the latest
-package release. For published release docs, visit
-[nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
+Repository docs follow the current source tree and can be newer than the latest package release. For published release docs, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
 
 ## Start Here
 
@@ -23,10 +19,7 @@ The recommended first-run path is:
 3. Run `nanobot webui`.
 4. Send `Hello!` before configuring anything else.
 
-Most people do not need to edit JSON for the first run. The wizard handles the
-initial provider, model, and local WebUI settings. After the WebUI opens, use
-**Settings** for models and built-in capabilities, **Settings → Channels** for
-chat apps, and **Apps** for CLI App or MCP integrations.
+Most people do not need to edit JSON for the first run. The wizard handles the initial provider, model, and local WebUI settings. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for CLI App or MCP integrations.
 
 ## Add One Capability
 
@@ -48,8 +41,7 @@ Pick the row that matches what you want to accomplish next:
 | Call nanobot from Python | [Python SDK](./python-sdk.md) |
 | Expose an OpenAI-compatible endpoint | [OpenAI-Compatible API](./openai-api.md) |
 
-For shorter, outcome-focused walkthroughs, browse the
-[task guide index](./guides/README.md).
+For shorter, outcome-focused walkthroughs, browse the [task guide index](./guides/README.md).
 
 ## Operate nanobot
 
@@ -64,8 +56,7 @@ For shorter, outcome-focused walkthroughs, browse the
 
 ## Reference
 
-Use reference pages to look up an exact option after you know what you are
-trying to configure:
+Use reference pages to look up an exact option after you know what you are trying to configure:
 
 | Area | Reference |
 |---|---|
@@ -77,15 +68,11 @@ trying to configure:
 | OpenAI-compatible HTTP routes and payloads | [OpenAI-Compatible API](./openai-api.md) |
 | Runtime self-inspection and tuning | [My Tool](./my-tool.md) |
 
-Configuration examples are usually snippets to merge into
-`~/.nanobot/config.json`, not complete replacement files. The docs use
-camelCase because nanobot writes config that way. Keep real API keys, bot
-tokens, and passwords out of issues and public logs.
+Configuration examples are usually snippets to merge into `~/.nanobot/config.json`, not complete replacement files. The docs use camelCase because nanobot writes config that way. Keep real API keys, bot tokens, and passwords out of issues and public logs.
 
 ## Extend or Contribute
 
-These pages explain implementation and extension points. You do not need them
-to install or operate nanobot.
+These pages explain implementation and extension points. You do not need them to install or operate nanobot.
 
 | Goal | Read |
 |---|---|
@@ -94,6 +81,4 @@ to install or operate nanobot.
 | Add a channel package | [Channel Plugin Guide](./channel-plugin-guide.md) |
 | Build the WebUI source | [WebUI Development](../webui/README.md) |
 
-If a command or screen no longer matches these docs, please
-[open an issue](https://github.com/HKUDS/nanobot/issues) with your nanobot
-version, operating system, and the page that needs correction.
+If a command or screen no longer matches these docs, please [open an issue](https://github.com/HKUDS/nanobot/issues) with your nanobot version, operating system, and the page that needs correction.

@@ -59,17 +59,11 @@ Use the WebUI as the primary setup surface after Quick Start:
 
 1. Send `Hello!` in a new chat to prove the selected model works.
 2. Open **Settings → Models** and confirm the active model preset.
-3. Start a separate chat before project work, then choose the intended workspace
-   and access mode.
-4. Add only one capability next: a chat channel in **Settings → Channels**, a
-   web/voice/image provider in **Settings**, or an App/MCP integration in
-   **Apps**.
-5. Restart when the WebUI shows a restart requirement, then test that capability
-   with the smallest possible request.
+3. Start a separate chat before project work, then choose the intended workspace and access mode.
+4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
+5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
 
-This path avoids hand-editing `config.json` for normal setup. Use the reference
-docs when you need an option the WebUI does not expose or when you manage config
-as code.
+This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
 
 ## What It Is For
 
@@ -134,9 +128,7 @@ for provider setup and output behavior.
 
 ## Channels
 
-Open **Settings → Channels** to connect chat apps without assembling JSON by
-hand. Search for a platform, choose **Connect**, and follow the fields or QR flow
-shown for that channel. The guided setup can:
+Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, choose **Connect**, and follow the fields or QR flow shown for that channel. The guided setup can:
 
 - install missing optional channel support when the WebUI is running locally;
 - collect platform credentials while preserving previously saved values;
@@ -144,15 +136,9 @@ shown for that channel. The guided setup can:
 - validate the connection and show actionable setup errors;
 - tell you when the gateway needs to restart.
 
-The platform itself may still require you to create a bot, enable event
-permissions, copy a token, or configure a webhook. Use
-[`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for
-manual JSON/reference options.
+The platform itself may still require you to create a bot, enable event permissions, copy a token, or configure a webhook. Use [`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for manual JSON/reference options.
 
-Test a new channel with a private DM. When a supported channel sends a pairing
-code, the WebUI surfaces the pending request so you can approve the sender.
-Keep access narrow; do not use a wildcard allowlist unless public access is
-intentional.
+Test a new channel with a private DM. When a supported channel sends a pairing code, the WebUI surfaces the pending request so you can approve the sender. Keep access narrow; do not use a wildcard allowlist unless public access is intentional.
 
 ## Apps
 

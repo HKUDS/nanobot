@@ -2,10 +2,7 @@
 
 Use this page when the first reply fails because of provider/model mismatch, or when you want to adapt the concrete setup example to a different provider. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
-For normal local setup, open **Settings → Models** in the WebUI to add provider
-credentials, create a model preset, and select the active model. Use the JSON
-below for manual deployments, local endpoints, provider-specific fields, or
-diagnosis.
+For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
 
 For every setup, answer three questions:
 

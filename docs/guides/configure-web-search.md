@@ -34,8 +34,7 @@ For local interactive setup:
 2. Open **Settings → Web**.
 3. Enable web search, choose a provider, and enter its API key if required.
 4. Save and restart when prompted.
-5. Ask a question that requires current information and inspect the cited
-   sources.
+5. Ask a question that requires current information and inspect the cited sources.
 
 For manual or deployment-managed config, use the default search provider:
 

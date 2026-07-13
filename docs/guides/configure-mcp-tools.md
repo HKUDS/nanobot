@@ -30,15 +30,12 @@ remote HTTP endpoint.
 For local interactive setup:
 
 1. Run `nanobot webui` and open **Apps**.
-2. Choose a known integration preset, or add a custom stdio, HTTP, or SSE
-   server.
+2. Choose a known integration preset, or add a custom stdio, HTTP, or SSE server.
 3. Limit the enabled tools when the server exposes more than the task needs.
 4. Save and restart when prompted.
-5. Mention the integration with `@` in the next message and ask for a small
-   test action.
+5. Mention the integration with `@` in the next message and ask for a small test action.
 
-For manual or deployment-managed config, add this to
-`~/.nanobot/config.json`:
+For manual or deployment-managed config, add this to `~/.nanobot/config.json`:
 
 ```json
 {
