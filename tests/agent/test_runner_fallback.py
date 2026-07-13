@@ -178,6 +178,37 @@ def test_provider_signature_tracks_fallback_presets_and_provider_config() -> Non
     assert signature != provider_signature(Config.model_validate(changed_key))
 
 
+def test_provider_failure_domain_uses_resolved_provider_endpoint_and_credentials() -> None:
+    from nanobot.config.schema import Config
+    from nanobot.providers.factory import _provider_failure_domain
+
+    def _config(*, api_key: str, api_base: str) -> Config:
+        return Config.model_validate({
+            "modelPresets": {
+                "auto": {"model": "openai/gpt-4.1", "provider": "auto"},
+                "explicit": {"model": "openai/gpt-4.1", "provider": "openai"},
+            },
+            "providers": {
+                "openai": {"apiKey": api_key, "apiBase": api_base},
+            },
+        })
+
+    config = _config(api_key="secret-a", api_base="https://api.example.test/v1/")
+    auto_domain = _provider_failure_domain(config, config.model_presets["auto"])
+    explicit_domain = _provider_failure_domain(config, config.model_presets["explicit"])
+
+    assert auto_domain == explicit_domain
+    assert auto_domain != _provider_failure_domain(
+        _config(api_key="secret-b", api_base="https://api.example.test/v1"),
+        config.model_presets["explicit"],
+    )
+    assert auto_domain != _provider_failure_domain(
+        _config(api_key="secret-a", api_base="https://other.example.test/v1"),
+        config.model_presets["explicit"],
+    )
+    assert "secret-a" not in repr(auto_domain)
+
+
 def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
     from nanobot.config.schema import Config
     from nanobot.providers.factory import build_provider_snapshot
@@ -461,7 +492,34 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_auth_error(self) -> None:
+    async def test_invalid_request_from_fallback_stops_chain(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        invalid = _FakeProvider(
+            "invalid",
+            _make_response(
+                "invalid request",
+                finish_reason="error",
+                error_status_code=400,
+                error_kind="invalid_request",
+            ),
+        )
+        unused = _FakeProvider("unused", _make_response("should not run"))
+        factory = MagicMock(side_effect=[invalid, unused])
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a"), _fallback("fallback-b")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "invalid request"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+
+class TestProviderFailureDomainFailover:
+    @pytest.mark.asyncio
+    async def test_auth_error_skips_same_domain_and_tries_different_provider(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response(
@@ -471,16 +529,134 @@ class TestNoFallbackOnNonRetryableError:
                 error_kind="authentication",
             ),
         )
-        factory = MagicMock()
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        same_domain = _fallback("same-account", provider="openai")
+        other_domain = _fallback("other-account", provider="anthropic")
         fb = FallbackProvider(
             primary=primary,
-            fallback_presets=[_fallback("fallback-a")],
+            fallback_presets=[same_domain, other_domain],
             provider_factory=factory,
+            primary_failure_domain="openai-account",
+            fallback_failure_domains=["openai-account", "anthropic-account"],
         )
 
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
 
-        assert result.finish_reason == "error"
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(other_domain)
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_quota_error_tries_different_provider(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "insufficient quota",
+                finish_reason="error",
+                error_status_code=429,
+                error_type="insufficient_quota",
+                error_should_retry=False,
+            ),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        other_domain = _fallback("other-account", provider="anthropic")
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[other_domain],
+            provider_factory=factory,
+            primary_failure_domain="openai-account",
+            fallback_failure_domains=["anthropic-account"],
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(other_domain)
+
+    @pytest.mark.asyncio
+    async def test_fallback_domain_error_skips_later_candidate_in_same_domain(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        quota = _FakeProvider(
+            "quota",
+            _make_response(
+                "payment required",
+                finish_reason="error",
+                error_status_code=402,
+                error_code="payment_required",
+                error_should_retry=False,
+            ),
+        )
+        success = _FakeProvider("success", _make_response("fallback ok"))
+        factory = MagicMock(side_effect=[quota, success])
+        first_account = _fallback("account-a-model-1", provider="openai")
+        same_account = _fallback("account-a-model-2", provider="openai")
+        other_account = _fallback("account-b-model", provider="anthropic")
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[first_account, same_account, other_account],
+            provider_factory=factory,
+            primary_failure_domain="primary-account",
+            fallback_failure_domains=["account-a", "account-a", "account-b"],
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        assert [entry.args[0] for entry in factory.call_args_list] == [
+            first_account,
+            other_account,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_model_error_can_try_next_model_in_same_domain(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "model unavailable",
+                finish_reason="error",
+                error_status_code=404,
+                error_type="invalid_request_error",
+                error_code="model_not_found",
+                error_should_retry=False,
+            ),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        same_domain = _fallback("available-model", provider="openai")
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[same_domain],
+            provider_factory=factory,
+            primary_failure_domain="openai-account",
+            fallback_failure_domains=["openai-account"],
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(same_domain)
+
+    @pytest.mark.asyncio
+    async def test_all_same_domain_candidates_return_original_error(self) -> None:
+        primary_error = _make_response(
+            "unauthorized",
+            finish_reason="error",
+            error_status_code=401,
+        )
+        primary = _FakeProvider("primary", primary_error)
+        factory = MagicMock()
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("same-account", provider="openai")],
+            provider_factory=factory,
+            primary_failure_domain="openai-account",
+            fallback_failure_domains=["openai-account"],
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result is primary_error
         factory.assert_not_called()
 
     @pytest.mark.asyncio
@@ -706,6 +882,35 @@ class TestCircuitBreaker:
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
         assert result.content == "fallback ok"
         assert len(primary.chat_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_open_circuit_remembers_failed_provider_domain(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "unauthorized",
+                finish_reason="error",
+                error_status_code=401,
+            ),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        same_domain = _fallback("same-account", provider="openai")
+        other_domain = _fallback("other-account", provider="anthropic")
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[same_domain, other_domain],
+            provider_factory=factory,
+            primary_failure_domain="openai-account",
+            fallback_failure_domains=["openai-account", "anthropic-account"],
+        )
+
+        for _ in range(4):
+            result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+            assert result.content == "fallback ok"
+
+        assert len(primary.chat_calls) == 3
+        assert [entry.args[0] for entry in factory.call_args_list] == [other_domain] * 4
 
 
 class TestGenerationForwarded:
