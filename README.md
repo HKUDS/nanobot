@@ -34,7 +34,7 @@
   </p>
 </div>
 
-🐈 **nanobot** is an open-source personal AI agent you can run on your own computer or server. Use it from a browser, terminal, or chat app; give it tools, memory, and scheduled work without giving up control of your data and runtime.
+🐈 **nanobot** is an open-source, ultra-lightweight personal AI agent you can run on your own computer or server. Use it from a browser, terminal, or chat app; give it tools, memory, and scheduled work without giving up control of your data and runtime.
 
 ## Get a Reply in Your Browser
 
