@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from nanobot.config.loader import load_config, save_config
@@ -49,6 +50,31 @@ def test_validate_telegram_bad_token_is_invalid(tmp_path, monkeypatch: pytest.Mo
     assert payload["status"] == "invalid"
     assert payload["can_enable"] is False
     assert payload["missing_fields"] == []
+
+
+def test_validate_telegram_does_not_expose_saved_token_in_http_errors(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "123456:abcdefghijklmnopqrstuvwxyz"
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"channels": {"telegram": {"token": token}}}),
+        config_path,
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def raise_http_error(url: str, **_kwargs) -> dict:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+    monkeypatch.setattr(channel_validation, "_http_get", raise_http_error)
+
+    payload = validate_channel_config("telegram", {"channels.telegram.token": ""})
+
+    assert token not in str(payload)
+    assert any("HTTP 401" in check.get("message", "") for check in payload["checks"])
 
 
 def test_validate_email_presets_are_checked_without_saving(

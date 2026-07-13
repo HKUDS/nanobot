@@ -1429,6 +1429,51 @@ def test_optional_features_payload_records_feishu_identity_attempt_on_empty_resu
     assert "avatarUrl" not in saved
 
 
+def test_optional_features_payload_preserves_legacy_flat_feishu_config(monkeypatch, tmp_path):
+    from nanobot.channels import feishu as feishu_module
+    from nanobot.config import loader
+    from nanobot.optional_features import optional_features_payload
+
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({
+            "channels": {
+                "feishu": {
+                    "enabled": True,
+                    "appId": "cli_legacy",
+                    "appSecret": "legacy-secret",
+                    "groupPolicy": "mention",
+                }
+            }
+        }),
+        config_path,
+    )
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr(feishu_module, "FEISHU_AVAILABLE", True)
+    monkeypatch.setattr(
+        feishu_module,
+        "fetch_feishu_app_identity",
+        lambda *_args: {
+            "displayName": "Legacy assistant",
+            "avatarUrl": "https://example.com/legacy.png",
+            "identityFetchedAt": "2026-07-06T00:00:00Z",
+        },
+    )
+
+    payload = optional_features_payload()
+
+    assert payload["features"][0]["instances"][0]["display_name"] == "Legacy assistant"
+    saved = json.loads(config_path.read_text(encoding="utf-8"))["channels"]["feishu"]
+    assert saved["appId"] == "cli_legacy"
+    assert saved["appSecret"] == "legacy-secret"
+    assert saved["displayName"] == "Legacy assistant"
+    assert saved["avatarUrl"] == "https://example.com/legacy.png"
+    assert "instances" not in saved
+
+
 def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
     from nanobot import optional_features
 

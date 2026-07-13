@@ -29,6 +29,7 @@ from nanobot.channels._feishu_instances import (
     DEFAULT_INSTANCE_ID,
     feishu_instance_specs,
     runtime_channel_name,
+    update_feishu_instance_preserving_shape,
     upsert_feishu_instance,
 )
 from nanobot.channels._feishu_ws import get_feishu_ws_runner
@@ -649,7 +650,7 @@ def sync_saved_feishu_identity_boundary(
         clear_channel(runtime_channel_name("feishu", instance_id))
 
     if not previous_identity_key or access_cleared:
-        feishu_cfg = upsert_feishu_instance(
+        feishu_cfg = update_feishu_instance_preserving_shape(
             feishu_cfg,
             defaults,
             instance_id,
@@ -752,7 +753,7 @@ def refresh_saved_feishu_identities(config: Any | None = None) -> bool:
         if not identity:
             identity = {"identityFetchedAt": _identity_timestamp()}
 
-        feishu_cfg = upsert_feishu_instance(
+        feishu_cfg = update_feishu_instance_preserving_shape(
             feishu_cfg,
             defaults,
             spec.instance_id,

@@ -355,6 +355,33 @@ def test_sync_saved_identity_boundary_backfills_marker_without_resetting_access(
     assert pairing_store.is_approved("feishu.assistant-test", "paired-user") is True
 
 
+def test_sync_saved_identity_boundary_preserves_legacy_flat_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.channels.feishu = {
+        "enabled": True,
+        "appId": "cli_existing",
+        "appSecret": "secret",
+        "domain": "feishu",
+        "allowFrom": ["old-open-id"],
+    }
+    loader.save_config(config, config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+
+    assert feishu_module.sync_saved_feishu_identity_boundary(
+        instance_id="default",
+        app_id="cli_existing",
+        domain="feishu",
+    ) is False
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))["channels"]["feishu"]
+    assert saved["appId"] == "cli_existing"
+    assert saved["appSecret"] == "secret"
+    assert saved["identityKey"] == "feishu:cli_existing"
+    assert saved["allowFrom"] == ["old-open-id"]
+    assert "instances" not in saved
+
+
 @pytest.mark.asyncio
 async def test_feishu_login_creates_missing_active_config(monkeypatch, tmp_path):
     missing_config = tmp_path / "missing.json"

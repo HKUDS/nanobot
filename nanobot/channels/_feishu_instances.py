@@ -153,6 +153,27 @@ def upsert_feishu_instance(
     return canonical
 
 
+def update_feishu_instance_preserving_shape(
+    section: Any,
+    defaults: dict[str, Any],
+    instance_id: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    """Update background metadata without migrating a legacy flat section."""
+    instance_id = validate_instance_id(instance_id)
+    if hasattr(section, "model_dump"):
+        section = section.model_dump(mode="json", by_alias=True)
+
+    if (
+        instance_id == DEFAULT_INSTANCE_ID
+        and isinstance(section, dict)
+        and not isinstance(section.get("instances"), list)
+    ):
+        return {**section, **values}
+
+    return upsert_feishu_instance(section, defaults, instance_id, values)
+
+
 def set_feishu_instance_enabled(
     section: Any,
     defaults: dict[str, Any],

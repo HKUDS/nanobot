@@ -92,8 +92,24 @@ def _validate_telegram(name: str, values: dict[str, Any]) -> dict[str, Any]:
                     checks.append(_check("get_me", "Bot identity", "pass", "Telegram accepted the bot token."))
                     return _payload(name, "connected", checks, identity=identity, missing_fields=missing)
                 checks.append(_check("get_me", "Bot identity", "fail", _message_from_response(data, "Telegram rejected the token.")))
-            except Exception as exc:
-                checks.append(_check("get_me", "Bot identity", "warn", f"Could not reach Telegram now: {exc}"))
+            except httpx.HTTPStatusError as exc:
+                checks.append(
+                    _check(
+                        "get_me",
+                        "Bot identity",
+                        "warn",
+                        f"Telegram could not verify the token: HTTP {exc.response.status_code}.",
+                    )
+                )
+            except Exception:
+                checks.append(
+                    _check(
+                        "get_me",
+                        "Bot identity",
+                        "warn",
+                        "Could not reach Telegram now. Try again later.",
+                    )
+                )
     return _status_from_checks(name, checks, missing)
 
 
