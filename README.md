@@ -82,11 +82,11 @@ Highlights:
 
 ## Recent Updates
 
-- **2026-07-12** Explicit `/goal` activation, lifecycle-safe runtime context, safer workspace access changes.
-- **2026-07-11** Syntax-highlighted file previews and diffs, queued prompts, safer targeted edits.
-- **2026-07-10** Isolated model runtime routing, sturdier subprocess cleanup, broader multiline CLI support.
-- **2026-07-09** Live file-edit diff progress, tighter localhost bootstrap tokens, Matrix image fixes.
-- **2026-07-08** Safer WebUI/API bootstrap, non-interactive onboard refresh, responsive prompt rail.
+- **2026-07-12** Explicit `/goal` activation, safer runtime and workspace access.
+- **2026-07-11** Syntax-highlighted previews and diffs, queued prompts, safer edits.
+- **2026-07-10** Stable model routing, multiline CLI input, new automation guide.
+- **2026-07-09** Live file-edit diffs, safer localhost setup, Matrix image fixes.
+- **2026-07-08** Safer WebUI/API setup, onboard refresh, responsive prompt rail.
 
 For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
 
