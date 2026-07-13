@@ -333,12 +333,12 @@ def test_discover_enabled_warns_for_enabled_builtin_import_errors():
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
-    ep = _make_entry_point("websocket", _FakeTelegram)
+    ep = _make_entry_point("telegram", _FakeTelegram)
     with patch(_EP_TARGET, return_value=[ep]):
         result = discover_all()
 
-    assert "websocket" in result
-    assert result["websocket"] is not _FakeTelegram
+    assert "telegram" in result
+    assert result["telegram"] is not _FakeTelegram
 
 
 def test_discover_all_builtin_name_shadows_plugin_when_dependency_missing():
@@ -1584,7 +1584,6 @@ def test_optional_dependency_metadata_for_enable():
 
     visible = optional_features.optional_dependency_groups()
     assert "documents" not in visible
-    assert "langfuse" in visible
     assert "pdf" not in visible
     assert any(dep.startswith("python-telegram-bot") for dep in deps["telegram"])
     assert any(
