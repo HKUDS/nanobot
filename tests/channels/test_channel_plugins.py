@@ -824,29 +824,6 @@ def test_plugins_enable_langfuse_installs_supported_tracer(monkeypatch, tmp_path
     assert not config_path.exists()
 
 
-def test_plugins_enable_rejects_removed_langsmith_feature(monkeypatch, tmp_path):
-    from typer.testing import CliRunner
-
-    from nanobot.cli.commands import app
-
-    commands: list[list[str]] = []
-    config_path = tmp_path / "config.json"
-    runner = CliRunner()
-    _stub_optional_feature_cli(
-        monkeypatch,
-        extras={"langfuse": ["langfuse>=3.0.0,<4.0.0"]},
-        installed=False,
-        commands=commands,
-    )
-
-    result = runner.invoke(app, ["plugins", "enable", "langsmith", "--config", str(config_path)])
-
-    assert result.exit_code == 1
-    assert "Unknown feature: langsmith" in result.output
-    assert commands == []
-    assert not config_path.exists()
-
-
 def test_plugins_enable_logs_option_enables_nanobot_logs(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
@@ -1616,7 +1593,6 @@ def test_optional_dependency_metadata_for_enable():
     assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
     assert deps["feishu"] == ["lark-oapi>=1.5.0,<2.0.0"]
     assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
-    assert "langsmith" not in deps
     assert deps["mochat"] == [
         "python-socketio>=5.16.0,<6.0.0",
         "msgpack>=1.1.0,<2.0.0",
@@ -1632,7 +1608,6 @@ def test_optional_dependency_metadata_for_enable():
     visible = optional_features.optional_dependency_groups()
     assert "documents" not in visible
     assert "langfuse" in visible
-    assert "langsmith" not in visible
     assert "pdf" not in visible
     assert any(dep.startswith("python-telegram-bot") for dep in deps["telegram"])
     assert any(
