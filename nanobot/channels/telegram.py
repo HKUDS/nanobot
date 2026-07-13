@@ -1065,7 +1065,7 @@ class TelegramChannel(BaseChannel):
         chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
         if len(chunks) <= 1:
             return
-        _, first_html = chunks[0]
+        first_markdown, first_html = chunks[0]
         try:
             await self._call_with_retry(
                 self._app.bot.edit_message_text,
@@ -1073,20 +1073,44 @@ class TelegramChannel(BaseChannel):
                 text=first_html,
                 parse_mode="HTML",
             )
-        except Exception as e:
+        except BadRequest as e:
             if not self._is_not_modified_error(e):
-                self.logger.warning("Stream overflow edit failed: {}", e)
-                raise
-        for _, html in chunks[1:-1]:
-            await self._call_with_retry(
-                self._app.bot.send_message,
-                chat_id=chat_id, text=html, parse_mode="HTML", **thread_kwargs,
-            )
+                self.logger.warning(
+                    "Stream overflow HTML edit failed, falling back to plain text: {}", e
+                )
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=chat_id, message_id=buf.message_id,
+                        text=first_markdown,
+                    )
+                except Exception as plain_error:
+                    if not self._is_not_modified_error(plain_error):
+                        self.logger.warning("Stream overflow plain edit failed: {}", plain_error)
+                        raise
+        except Exception as e:
+            self.logger.warning("Stream overflow edit failed: {}", e)
+            raise
+
+        async def send_chunk(markdown: str, html: str) -> Any:
+            try:
+                return await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=chat_id, text=html, parse_mode="HTML", **thread_kwargs,
+                )
+            except BadRequest as e:
+                self.logger.warning(
+                    "Stream overflow HTML send failed, falling back to plain text: {}", e
+                )
+                return await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=chat_id, text=markdown, **thread_kwargs,
+                )
+
+        for markdown, html in chunks[1:-1]:
+            await send_chunk(markdown, html)
         markdown_tail, tail_html = chunks[-1]
-        sent = await self._call_with_retry(
-            self._app.bot.send_message,
-            chat_id=chat_id, text=tail_html, parse_mode="HTML", **thread_kwargs,
-        )
+        sent = await send_chunk(markdown_tail, tail_html)
         buf.message_id = sent.message_id
         buf.text = markdown_tail
 

@@ -918,6 +918,43 @@ async def test_send_delta_incremental_html_expansion_does_not_overflow() -> None
 
 
 @pytest.mark.asyncio
+async def test_send_delta_incremental_html_parse_failure_falls_back_to_plain() -> None:
+    """Telegram HTML rejections retry overflow chunks as plain text."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock(
+        side_effect=[BadRequest("Can't parse entities"), None]
+    )
+    channel._app.bot.send_message = AsyncMock(
+        side_effect=[BadRequest("Can't parse entities"), SimpleNamespace(message_id=99)]
+    )
+
+    first_chunk = f"**{'x' * 3900}**\n"
+    tail = "**tail** " * 50
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=first_chunk + tail, message_id=7, last_edit=0.0, stream_id="s:0"
+    )
+
+    await channel.send_delta("123", "y", stream_id="s:0")
+
+    edit_calls = channel._app.bot.edit_message_text.call_args_list
+    assert edit_calls[0].kwargs["parse_mode"] == "HTML"
+    assert edit_calls[1].kwargs["text"] == first_chunk.rstrip()
+    assert "parse_mode" not in edit_calls[1].kwargs
+
+    send_calls = channel._app.bot.send_message.call_args_list
+    assert send_calls[0].kwargs["parse_mode"] == "HTML"
+    assert send_calls[1].kwargs["text"] == tail + "y"
+    assert "parse_mode" not in send_calls[1].kwargs
+    assert channel._stream_bufs["123"].text == tail + "y"
+
+
+@pytest.mark.asyncio
 async def test_send_delta_initial_send_keeps_message_in_thread() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
