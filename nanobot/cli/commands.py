@@ -1797,7 +1797,7 @@ def _run_gateway(
 
             prompt = (
                 _HEARTBEAT_PREAMBLE
-                + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
+                + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
             )
 
             # Internal check: funnel all output through the post-run gate so the
