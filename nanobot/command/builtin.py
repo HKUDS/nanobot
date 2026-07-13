@@ -560,6 +560,9 @@ def _format_changed_files(diff: str) -> str:
     return ", ".join(f"`{path}`" for path in files)
 
 
+_DREAM_COMMIT_PREFIX = "dream:"
+
+
 def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
     files_line = _format_changed_files(diff)
     lines = [
@@ -608,7 +611,7 @@ def _format_dream_restore_list(commits: list) -> str:
 async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     """Show what the last Dream changed.
 
-    Default: diff of the latest commit (HEAD~1 vs HEAD).
+    Default: diff of the latest Dream commit versus its parent.
     With /dream-log <sha>: diff of that specific commit.
     """
     store = ctx.loop.consolidator.store
@@ -643,8 +646,8 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff, requested_sha=sha)
     else:
-        # Default: show the latest commit's diff
-        commits = git.log(max_entries=1)
+        # Default: show the latest Dream commit's diff
+        commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
         result = git.show_commit_diff(commits[0].sha) if commits else None
         if result:
             commit, diff = result
@@ -678,8 +681,8 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
     args = ctx.args.strip()
     if not args:
-        # Show recent commits for the user to pick
-        commits = git.log(max_entries=10)
+        # Show recent Dream commits for the user to pick
+        commits = git.log(max_entries=10, message_prefix=_DREAM_COMMIT_PREFIX)
         if not commits:
             content = "Dream memory has no saved versions to restore yet."
         else:
@@ -688,7 +691,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
         sha = args.split()[0]
         result = git.show_commit_diff(sha)
         changed_files = _format_changed_files(result[1]) if result else "the tracked memory files"
-        new_sha = git.revert(sha)
+        new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
         if new_sha:
             content = (
                 f"Restored Dream memory to the state before `{sha}`.\n\n"

@@ -214,8 +214,16 @@ class GitStore:
 
     # -- query -----------------------------------------------------------------
 
-    def log(self, max_entries: int = 20) -> list[CommitInfo]:
-        """Return simplified commit log."""
+    def log(
+        self,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> list[CommitInfo]:
+        """Return simplified commit log, optionally filtered by message prefix.
+
+        When filtering, *max_entries* counts matching commits rather than every
+        commit traversed in the repository.
+        """
         if not self.is_initialized():
             return []
 
@@ -239,11 +247,12 @@ class GitStore:
                         time.localtime(commit.commit_time),
                     )
                     msg = commit.message.decode("utf-8", errors="replace").strip()
-                    entries.append(CommitInfo(
-                        sha=sha.hex()[:8],
-                        message=msg,
-                        timestamp=ts,
-                    ))
+                    if message_prefix is None or msg.startswith(message_prefix):
+                        entries.append(CommitInfo(
+                            sha=sha.hex()[:8],
+                            message=msg,
+                            timestamp=ts,
+                        ))
                     sha = commit.parents[0] if commit.parents else None
 
             return entries
@@ -438,11 +447,13 @@ class GitStore:
 
     # -- restore ---------------------------------------------------------------
 
-    def revert(self, commit: str) -> str | None:
+    def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.
 
         Restores all tracked memory files to the state at the commit's parent,
-        then creates a new commit recording the revert.
+        then creates a new commit recording the revert. When *message_prefix*
+        is provided, commits outside that history are rejected before any files
+        are changed.
 
         Returns the new commit SHA, or None on failure.
         """
@@ -460,6 +471,15 @@ class GitStore:
             with Repo(str(self._workspace)) as repo:
                 commit_obj = repo[full_sha]
                 if commit_obj.type_name != b"commit":
+                    return None
+
+                commit_message = commit_obj.message.decode("utf-8", errors="replace").strip()
+                if message_prefix is not None and not commit_message.startswith(message_prefix):
+                    logger.warning(
+                        "Git revert: commit {} does not match message prefix {!r}",
+                        commit,
+                        message_prefix,
+                    )
                     return None
 
                 if not commit_obj.parents:
