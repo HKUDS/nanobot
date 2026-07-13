@@ -112,7 +112,7 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
     asyncio.run(_run())
 
 
-def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
+def test_interactive_tty_mode_restores_line_input(monkeypatch) -> None:
     try:
         import os
         import pty
@@ -128,19 +128,52 @@ def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
 
     try:
         attrs = termios.tcgetattr(slave_fd)
+        attrs[0] &= ~termios.ICRNL
+        attrs[0] |= termios.IGNCR
         attrs[3] &= ~(termios.ISIG | termios.ICANON | termios.ECHO)
         termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
         monkeypatch.setattr(cli_commands.sys, "stdin", _Stdin())
-        cli_commands._ensure_gateway_tty_signal_mode()
+        cli_commands._ensure_interactive_tty_mode()
 
         restored = termios.tcgetattr(slave_fd)
+        assert restored[0] & termios.ICRNL
+        assert not restored[0] & termios.IGNCR
         assert restored[3] & termios.ISIG
         assert restored[3] & termios.ICANON
         assert restored[3] & termios.ECHO
     finally:
         os.close(master_fd)
         os.close(slave_fd)
+
+
+def test_webui_restores_tty_before_loading_config(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    calls: list[str] = []
+    original_resolve = cli_commands._resolve_webui_config_path
+
+    monkeypatch.setattr(
+        cli_commands,
+        "_ensure_interactive_tty_mode",
+        lambda: calls.append("tty"),
+    )
+    monkeypatch.setattr(
+        cli_commands,
+        "_resolve_webui_config_path",
+        lambda path: calls.append("config") or original_resolve(path),
+    )
+    _patch_webui_provider_ready(monkeypatch)
+    monkeypatch.setattr(cli_commands, "sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(cli_commands, "_gateway_health_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_commands, "_webui_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_commands, "_tcp_endpoint_reachable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli_commands, "_run_gateway", lambda *_args, **_kwargs: None)
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
+
+    assert result.exit_code == 0
+    assert calls[:2] == ["tty", "config"]
 
 
 def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:

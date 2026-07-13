@@ -109,8 +109,8 @@ def _signal_name(signum: int) -> str:
     return f"signal {signum}"
 
 
-def _ensure_gateway_tty_signal_mode() -> None:
-    """Keep foreground gateway Ctrl+C usable even after a raw-mode TTY leak."""
+def _ensure_interactive_tty_mode() -> None:
+    """Restore interactive line input after a raw-mode TTY leak."""
     try:
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
@@ -122,14 +122,19 @@ def _ensure_gateway_tty_signal_mode() -> None:
         import termios
 
         attrs = termios.tcgetattr(fd)
-        lflag = attrs[3]
-        required = termios.ISIG | termios.ICANON | termios.ECHO
-        if (lflag & required) == required:
+        required_lflag = termios.ISIG | termios.ICANON | termios.ECHO
+        blocked_input_flags = getattr(termios, "IGNCR", 0) | getattr(termios, "INLCR", 0)
+        if (
+            (attrs[3] & required_lflag) == required_lflag
+            and attrs[0] & termios.ICRNL
+            and not attrs[0] & blocked_input_flags
+        ):
             return
-        attrs[3] = lflag | required
+        attrs[0] = (attrs[0] | termios.ICRNL) & ~blocked_input_flags
+        attrs[3] |= required_lflag
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
         termios.tcflush(fd, termios.TCIFLUSH)
-        logger.debug("Restored foreground gateway TTY signal mode")
+        logger.debug("Restored foreground gateway TTY mode")
 
 
 def _install_gateway_shutdown_handlers(
@@ -1406,6 +1411,7 @@ def webui(
     from nanobot.config.loader import save_config
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
+    _ensure_interactive_tty_mode()
     config_path = _resolve_webui_config_path(config)
     created_config = not config_path.exists()
     if created_config:
@@ -2011,7 +2017,7 @@ def _run_gateway(
         runtime_tasks: asyncio.Future | None = None
         runtime_tasks_drained = False
         shutdown_event = asyncio.Event()
-        _ensure_gateway_tty_signal_mode()
+        _ensure_interactive_tty_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
             asyncio.get_running_loop(),
             shutdown_event,
