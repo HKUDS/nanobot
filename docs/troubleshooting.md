@@ -111,10 +111,10 @@ Common config mistakes:
 To refresh missing defaults without overwriting existing settings, run:
 
 ```bash
-nanobot onboard
+nanobot onboard --refresh
 ```
 
-When prompted about overwriting the config, choose the option that keeps current values and merges missing defaults.
+For an interactive choice between resetting and refreshing, run `nanobot onboard` and choose the option that keeps current values and merges missing defaults.
 
 ## Provider and Model Problems
 

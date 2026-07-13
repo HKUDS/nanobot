@@ -13,6 +13,21 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
 
+## Configuration Guides
+
+This page is the complete configuration reference. For task-oriented setup, use
+the focused guides first and come back here for exact fields and defaults.
+
+| Task | Guide |
+|---|---|
+| Add MCP tools | [`guides/configure-mcp-tools.md`](./guides/configure-mcp-tools.md) |
+| Enable web search and web fetch | [`guides/configure-web-search.md`](./guides/configure-web-search.md) |
+| Configure model fallback | [`guides/configure-model-fallback.md`](./guides/configure-model-fallback.md) |
+| Add an OpenAI-compatible provider | [`guides/configure-openai-compatible-provider.md`](./guides/configure-openai-compatible-provider.md) |
+| Add Langfuse observability | [`guides/configure-langfuse-observability.md`](./guides/configure-langfuse-observability.md) |
+| Secure a local AI agent | [`guides/secure-local-ai-agent.md`](./guides/secure-local-ai-agent.md) |
+| Deploy the gateway | [`guides/deploy-nanobot-gateway.md`](./guides/deploy-nanobot-gateway.md) |
+
 ## Quick Jump
 
 | Need | Section |
@@ -42,7 +57,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Add fallback models | `modelPresets.<fallback>`, `agents.defaults.fallbackModels` | `nanobot status`, then a normal agent run | [Model Fallbacks](#model-fallbacks) |
 | Keep secrets out of the config file | `${ENV_VAR}` placeholders inside any string value | Start nanobot from the same environment that sets the variable | [Environment Variables for Secrets](#environment-variables-for-secrets) |
 | Open the bundled WebUI | `channels.websocket.enabled`, optional `channels.websocket.port`, `channels.websocket.tokenIssueSecret` | `nanobot webui` | [Channel Settings](#channel-settings), [WebSocket docs](./websocket.md) |
-| Connect one chat app | `channels.<channel>.enabled`, channel credentials, `channels.<channel>.allowFrom` | `nanobot channels status`, then `nanobot gateway --verbose` | [Channel Settings](#channel-settings), [Chat Apps](./chat-apps.md) |
+| Connect one chat app | `channels.<channel>.enabled`, channel credentials, optional pairing or `channels.<channel>.allowFrom` | `nanobot channels status`, then `nanobot gateway --verbose` | [Channel Settings](#channel-settings), [Chat Apps](./chat-apps.md) |
 | Enable voice transcription | `transcription.enabled`, `transcription.provider`, matching `providers.<name>.apiKey` | Send or upload a short voice message through a configured surface | [Transcription Settings](#transcription-settings) |
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
@@ -198,7 +213,7 @@ nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK
 Install the optional package in the same Python environment that runs nanobot:
 
 ```bash
-python -m pip install langfuse
+nanobot plugins enable langfuse
 ```
 
 Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or `nanobot serve`:
@@ -1526,7 +1541,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix / Mattermost keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
-| `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. Install parser dependencies with `nanobot plugins enable documents`. If you used document parsing before those parsers became optional, run that command after upgrading. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
+| `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. PDF, DOCX, XLSX, and PPTX readers are included in the standard installation. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 
 `channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
@@ -1600,18 +1615,21 @@ nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP conne
 
 Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server.
 
+HTTP/SSE MCP connections use the same process-wide proxy environment behavior as `web_fetch`: proxied targets use the configured proxy, and URLs excluded by `NO_PROXY` remain DNS-pinned direct connections.
+
 > [!TIP]
-> Use `proxy` in `tools.web` to route all web requests (search + fetch) through a proxy:
+> Use `proxy` in `tools.web` to route web requests through a proxy:
 > ```json
 > { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
 > ```
+> `web_fetch` applies DNS pinning for direct connections. When an explicit `tools.web.proxy` or a process-wide proxy environment variable applies to the target URL, nanobot still validates the requested URL locally, but DNS resolution for the outbound fetch happens at the proxy; configure only trusted proxies. URLs excluded by `NO_PROXY` keep the DNS-pinned direct path unless `tools.web.proxy` is configured.
 
 ### `tools.web`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enable` | boolean | `true` | Enable or disable all built-in web tools (`web_search` + `web_fetch`) |
-| `proxy` | string or null | `null` | Proxy for all web requests, for example `http://127.0.0.1:7890` |
+| `proxy` | string or null | `null` | Proxy for web requests, for example `http://127.0.0.1:7890`. `web_fetch` DNS pinning applies only to direct connections; proxied fetches rely on the configured proxy as the trusted network exit. |
 | `userAgent` | string or null | `null` | User-Agent header for all web requests. If null, a browser one will be used |
 
 ### Web Search
@@ -1950,7 +1968,7 @@ Pairing lets users get access to the bot through a simple code exchange — no c
 
 ### How it works
 
-1. A user sends a DM to the bot on any channel (Telegram, Discord, Slack, or Mattermost) where they aren't yet approved.
+1. A user sends a DM to the bot on a pairing-capable channel where they aren't yet approved. This includes Telegram, Discord, WeChat, and channels such as Slack or Mattermost when their DM policy is set to `allowlist`.
 2. The bot replies with a pairing code (like `ABCD-EFGH`) and tells them to forward it to you.
 3. You approve the code:
 
@@ -1964,13 +1982,28 @@ Pairing only works in **DMs** — unapproved users in group chats are silently i
 
 ### Pairing-only mode
 
-By default, if you don't set `allowFrom`, anyone who isn't approved yet will get a pairing code when they DM the bot. This means you can skip `allowFrom` entirely and manage all access through pairing:
+By default, if you don't set `allowFrom`, pairing-capable channels can issue a pairing code when an unapproved user DMs the bot. This means you can skip `allowFrom` entirely and manage access through pairing:
 
 ```json
 {
   "channels": {
     "telegram": {
       "enabled": true
+    }
+  }
+}
+```
+
+Slack and Mattermost DMs are open by default. To use pairing there, set the
+channel's `dm.policy` to `"allowlist"` and leave `dm.allowFrom` empty until you
+approve users:
+
+```json
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "dm": { "policy": "allowlist" }
     }
   }
 }

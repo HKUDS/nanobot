@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
@@ -17,6 +17,7 @@ class ProviderSnapshot:
     model: str
     context_window_tokens: int
     signature: tuple[object, ...]
+    generation: GenerationSettings | None = None
 
 
 def _resolve_model_preset(
@@ -268,6 +269,7 @@ def build_provider_snapshot(
         model=resolved.model,
         context_window_tokens=min([resolved.context_window_tokens, *fallback_windows]),
         signature=provider_signature(config, preset=resolved),
+        generation=resolved.to_generation_settings(),
     )
 
 

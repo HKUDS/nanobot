@@ -1,10 +1,7 @@
 import {
   Children,
   isValidElement,
-  useCallback,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
 import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
@@ -22,6 +19,7 @@ import {
   isFilePatternReference,
   isLikelyFilePath,
 } from "@/components/FileReferenceChip";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferMediaKind } from "@/lib/media";
 import { faviconUrls } from "@/lib/provider-brand";
 import { remarkTexMath } from "@/lib/remark-tex-math";
@@ -304,7 +302,7 @@ function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview |
 }
 
 function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
-  const { favicon, onFaviconError } = useFaviconFallback(link.host);
+  const { favicon, onFaviconError, onFaviconLoad } = useFaviconFallback(link.host);
   const label = link.prefix
     ? `${link.prefix} — ${link.title}`
     : link.title;
@@ -332,7 +330,9 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
             src={favicon}
             alt=""
             className="h-3 w-3 rounded-[2px] object-contain"
+            decoding="async"
             loading="lazy"
+            onLoad={onFaviconLoad}
             onError={onFaviconError}
           />
         ) : (
@@ -348,19 +348,12 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
 
 function useFaviconFallback(host: string) {
   const faviconCandidates = useMemo(() => faviconUrls(host), [host]);
-  const [faviconIndex, setFaviconIndex] = useState(0);
-
-  useEffect(() => {
-    setFaviconIndex(0);
-  }, [host]);
-
-  const onFaviconError = useCallback(() => {
-    setFaviconIndex((index) => Math.min(index + 1, faviconCandidates.length));
-  }, [faviconCandidates.length]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(faviconCandidates);
 
   return {
-    favicon: faviconCandidates[faviconIndex] ?? null,
-    onFaviconError,
+    favicon: logoUrl ?? null,
+    onFaviconError: onLogoError,
+    onFaviconLoad: onLogoLoad,
   };
 }
 

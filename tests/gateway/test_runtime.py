@@ -1,9 +1,13 @@
 import json
 import signal
 import subprocess
+import sys
+import threading
 from pathlib import Path
 
-from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+import pytest
+
+from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions, GatewayStatus
 
 
 class FakeProcess:
@@ -81,6 +85,57 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
     assert state["pid"] == 12345
     assert state["identity"] == 12345
     assert state["port"] == 18790
+
+
+def test_concurrent_background_starts_create_only_one_process(tmp_path, monkeypatch):
+    first_spawned = threading.Event()
+    release_first = threading.Event()
+    calls: list[list[str]] = []
+
+    def fake_popen(command, **_kwargs):
+        calls.append(command)
+        first_spawned.set()
+        return FakeProcess()
+
+    def first_sleep(_seconds):
+        assert release_first.wait(timeout=2)
+
+    first = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Linux",
+        popen=fake_popen,
+        sleep=first_sleep,
+    )
+    second = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Linux",
+        popen=fake_popen,
+        sleep=lambda _seconds: None,
+    )
+    for runtime in (first, second):
+        monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+        monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
+
+    results = []
+    first_thread = threading.Thread(
+        target=lambda: results.append(first.start_background(GatewayStartOptions(port=18790)))
+    )
+    second_thread = threading.Thread(
+        target=lambda: results.append(second.start_background(GatewayStartOptions(port=18790)))
+    )
+
+    first_thread.start()
+    assert first_spawned.wait(timeout=2)
+    second_thread.start()
+    release_first.set()
+    first_thread.join(timeout=2)
+    second_thread.join(timeout=2)
+
+    assert len(calls) == 1
+    assert sorted((result.ok, result.message) for result in results) == [
+        (False, "gateway_already_running"),
+        (True, "gateway_started_background"),
+    ]
 
 
 def test_start_background_uses_windows_process_group_flags(tmp_path, monkeypatch):
@@ -172,6 +227,34 @@ def test_stop_keeps_state_when_process_survives_timeout(tmp_path, monkeypatch):
     assert runtime.paths.state_path.exists()
 
 
+def test_stop_succeeds_when_process_exits_at_timeout_boundary(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    running = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=runtime.paths.state_path,
+        log_path=runtime.paths.log_path,
+    )
+    stopped = GatewayStatus(
+        running=False,
+        pid=None,
+        state_path=runtime.paths.state_path,
+        log_path=runtime.paths.log_path,
+        reason="stop_timeout",
+    )
+    statuses = iter([running, stopped])
+    monkeypatch.setattr(runtime, "status", lambda **_kwargs: next(statuses))
+    monkeypatch.setattr(runtime, "_read_state", lambda: {"pid": 12345, "identity": 12345})
+    monkeypatch.setattr(runtime, "_record_matches_process", lambda *_args: True)
+    monkeypatch.setattr(runtime, "_terminate", lambda *_args, **_kwargs: False)
+
+    result = runtime.stop(timeout_s=0)
+
+    assert result.ok is True
+    assert result.message == "gateway_stopped"
+    assert result.status.running is False
+
+
 def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monkeypatch):
     taskkill_calls: list[dict] = []
     wait_timeouts: list[int | float] = []
@@ -191,7 +274,7 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
     def fake_kill(_pid, _signal):
         raise OSError(87, "The parameter is incorrect")
 
-    monkeypatch.setattr("nanobot.gateway.runtime.os.kill", fake_kill)
+    monkeypatch.setattr("nanobot.process_runtime.os.kill", fake_kill)
 
     def fake_wait_for_exit(_pid, _timeout_s):
         wait_timeouts.append(_timeout_s)
@@ -212,3 +295,30 @@ def test_terminate_windows_falls_back_when_ctrl_break_is_rejected(tmp_path, monk
             },
         }
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups are unavailable")
+def test_terminate_posix_tolerates_process_group_disappearing_before_sigkill(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path),
+        platform_name="Darwin",
+        sleep=lambda _seconds: None,
+    )
+    waits = iter([False, True])
+    monkeypatch.setattr(
+        "nanobot.process_runtime.os.getpgid",
+        lambda _pid: 1234,
+        raising=False,
+    )
+
+    def fake_killpg(_pgid, sent_signal):
+        if sent_signal == signal.SIGKILL:
+            raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("nanobot.process_runtime.os.killpg", fake_killpg, raising=False)
+    monkeypatch.setattr(runtime, "_wait_for_exit", lambda *_args: next(waits))
+
+    assert runtime._terminate_posix(1234, timeout_s=1) is True

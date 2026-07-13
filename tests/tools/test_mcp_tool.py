@@ -23,6 +23,8 @@ from nanobot.agent.tools.mcp import (
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.config.schema import MCPServerConfig
 
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
 
 class _FakeTextContent:
     def __init__(self, text: str) -> None:
@@ -48,6 +50,12 @@ class _FakeImageContent:
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
     return {"session": None}
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -714,6 +722,8 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
     [
         MCPServerConfig(url="http://127.0.0.1:9/sse"),
         MCPServerConfig(type="streamableHttp", url="http://127.0.0.1:9/mcp"),
+        MCPServerConfig(url="http://169.254.169.254/sse"),
+        MCPServerConfig(type="streamableHttp", url="http://169.254.169.254/mcp"),
     ],
 )
 async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
@@ -743,6 +753,93 @@ async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
 
 
 @pytest.mark.asyncio
+async def test_validate_mcp_request_url_rejects_loopback_without_whitelist() -> None:
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    configure_ssrf_whitelist([])
+    request = httpx.Request("GET", "http://127.0.0.1/private")
+
+    with pytest.raises(httpx.RequestError, match="Blocked unsafe MCP URL"):
+        await mcp_mod._validate_mcp_request_url(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        MCPServerConfig(type="sse", url="https://mcp.example.com/sse"),
+        MCPServerConfig(type="streamableHttp", url="https://mcp.example.com/mcp"),
+    ],
+)
+async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_transport(
+    config: MCPServerConfig,
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    client_kwargs: list[dict[str, object]] = []
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            client_kwargs.append(kwargs)
+
+        async def __aenter__(self) -> object:
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            return False
+
+    @asynccontextmanager
+    async def _capturing_sse_client(_url: str, httpx_client_factory=None):
+        assert httpx_client_factory is not None
+        async with httpx_client_factory():
+            pass
+        yield object(), object()
+
+    @asynccontextmanager
+    async def _capturing_streamable_http_client(_url: str, http_client=None):
+        assert http_client is not None
+        yield object(), object(), object()
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _capturing_streamable_http_client,
+    )
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"remote": config}, registry)
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert client_kwargs
+    assert all("transport" in kwargs for kwargs in client_kwargs)
+    assert all("mounts" in kwargs for kwargs in client_kwargs)
+
+
+def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "mcp.example.com")
+
+    kwargs = mcp_mod._pinned_transport_kwargs()
+
+    assert "transport" in kwargs
+    assert any(transport is None for transport in kwargs["mounts"].values())
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("config", "expected_transport"),
     [
@@ -762,7 +859,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     sent_urls: list[str] = []
     used_transports: list[str] = []
 
-    def _validate(url: str) -> tuple[bool, str]:
+    def _validate(url: str, **_kwargs: object) -> tuple[bool, str]:
         checked_urls.append(url)
         if url == "http://127.0.0.1/private":
             return False, "loopback blocked"
@@ -804,6 +901,11 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda **_kwargs: httpx.MockTransport(_handler),
+    )
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
     monkeypatch.setattr(

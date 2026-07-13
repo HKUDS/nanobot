@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -67,11 +68,13 @@ class TestMaxMessagesInit:
 
     def test_default_for_200k_context_reaches_file_cap(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._max_messages == FILE_MAX_MESSAGES
+        runtime = loop.runtime_resolver.runtime
+        assert replay_max_messages_for_context(runtime.context_window_tokens) == FILE_MAX_MESSAGES
 
     def test_default_scales_with_context_window(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path, context_window_tokens=32_768)
-        assert loop._max_messages == 327
+        runtime = loop.runtime_resolver.runtime
+        assert replay_max_messages_for_context(runtime.context_window_tokens) == 327
 
     def test_provider_refresh_resyncs_context_derived_limit(self, tmp_path: Path) -> None:
         old_provider = MagicMock()
@@ -93,9 +96,10 @@ class TestMaxMessagesInit:
             ),
         )
 
-        assert loop._max_messages == 327
-        loop._refresh_provider_snapshot()
-        assert loop._max_messages == FILE_MAX_MESSAGES
+        initial = loop.runtime_resolver.runtime
+        assert replay_max_messages_for_context(initial.context_window_tokens) == 327
+        refreshed = loop.llm_runtime()
+        assert replay_max_messages_for_context(refreshed.context_window_tokens) == FILE_MAX_MESSAGES
 
 
 class TestGetHistoryWithMaxMessages:
@@ -136,7 +140,7 @@ class TestMaxMessagesIntegration:
     async def test_process_message_passes_limit_to_history_call(self, tmp_path: Path) -> None:
         """The real message path should pass max_messages into session history replay."""
         loop = _make_loop(tmp_path)
-        loop._max_messages = 25
+        runtime = replace(loop.llm_runtime(), context_window_tokens=32_768)
         loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[], usage={})
         )
@@ -146,12 +150,13 @@ class TestMaxMessagesIntegration:
         session = loop.sessions.get_or_create("cli:test")
         with patch.object(session, "get_history", wraps=session.get_history) as mock_hist:
             result = await loop._process_message(
-                InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
+                InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello"),
+                runtime=runtime,
             )
 
         assert result is not None
         assert mock_hist.call_count == 1
-        assert mock_hist.call_args.kwargs["max_messages"] == 25
+        assert mock_hist.call_args.kwargs["max_messages"] == 327
         assert mock_hist.call_args.kwargs["extend_to_user"] is False
 
     @pytest.mark.asyncio
@@ -182,8 +187,7 @@ class TestMaxMessagesIntegration:
         tmp_path: Path,
     ) -> None:
         """A live user turn should not extend history to an older long tool turn."""
-        loop = _make_loop(tmp_path)
-        loop._max_messages = 6
+        loop = _make_loop(tmp_path, context_window_tokens=8_000)
         loop.provider.chat_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[], usage={})
         )
@@ -194,7 +198,7 @@ class TestMaxMessagesIntegration:
         session.add_message("user", "old")
         session.add_message("assistant", "old answer")
         session.add_message("user", "long older turn")
-        for i in range(8):
+        for i in range(70):
             session.messages.extend(_tool_round(f"older-{i}"))
         session.add_message("assistant", "older final")
 

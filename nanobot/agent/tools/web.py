@@ -111,6 +111,39 @@ def _validate_url_safe(url: str) -> tuple[bool, str]:
     return validate_url_target(url)
 
 
+def _resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
+    """Validate URL and return the resolved IPs to pin during the request."""
+    from nanobot.security.network import resolve_url_target
+
+    return resolve_url_target(url)
+
+
+def _pinned_dns_transport() -> httpx.AsyncBaseTransport:
+    from nanobot.security.network import PinnedDNSAsyncTransport
+
+    return PinnedDNSAsyncTransport()
+
+
+def _fetch_client_kwargs(proxy: str | None, timeout: float) -> dict[str, Any]:
+    from nanobot.security.network import httpx_env_proxy_mounts
+
+    kwargs: dict[str, Any] = {"timeout": timeout}
+    if proxy:
+        kwargs["proxy"] = proxy
+    else:
+        kwargs["transport"] = _pinned_dns_transport()
+        mounts = httpx_env_proxy_mounts()
+        if mounts:
+            kwargs["mounts"] = mounts
+    return kwargs
+
+
+def _unsafe_url_request_error(exc: BaseException) -> str | None:
+    from nanobot.security.network import UnsafeURLRequestError
+
+    return str(exc) if isinstance(exc, UnsafeURLRequestError) else None
+
+
 async def _get_with_safe_redirects(
     client: httpx.AsyncClient,
     url: str,
@@ -119,11 +152,17 @@ async def _get_with_safe_redirects(
     """GET a URL while validating every redirect target before requesting it."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg = _validate_url_safe(current_url)
+        is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
             return None, f"Redirect blocked: {error_msg}"
 
-        response = await client.get(current_url, headers=headers, follow_redirects=False)
+        try:
+            response = await client.get(current_url, headers=headers, follow_redirects=False)
+        except httpx.RequestError as exc:
+            unsafe_error = _unsafe_url_request_error(exc)
+            if unsafe_error is not None:
+                return None, f"Redirect blocked: {unsafe_error}"
+            raise
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
             return response, None
@@ -152,7 +191,7 @@ async def _stream_with_safe_redirects(
     """Open a streamed response while validating every redirect target first."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg = _validate_url_safe(current_url)
+        is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
             return None, None, f"Redirect blocked: {error_msg}"
 
@@ -162,7 +201,13 @@ async def _stream_with_safe_redirects(
             headers=headers,
             follow_redirects=False,
         )
-        response = await stream.__aenter__()
+        try:
+            response = await stream.__aenter__()
+        except httpx.RequestError as exc:
+            unsafe_error = _unsafe_url_request_error(exc)
+            if unsafe_error is not None:
+                return None, None, f"Redirect blocked: {unsafe_error}"
+            raise
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
             return response, stream, None
@@ -953,7 +998,9 @@ class WebFetchTool(Tool):
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
-            async with httpx.AsyncClient(proxy=self.proxy, timeout=15.0) as client:
+            async with httpx.AsyncClient(
+                **_fetch_client_kwargs(self.proxy, 15.0),
+            ) as client:
                 r, stream, redirect_error = await _stream_with_safe_redirects(
                     client,
                     url,
@@ -974,6 +1021,9 @@ class WebFetchTool(Tool):
                     if stream is not None:
                         await stream.__aexit__(None, None, None)
         except Exception as e:
+            unsafe_error = _unsafe_url_request_error(e)
+            if unsafe_error is not None:
+                return json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False)
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         result = None
@@ -1023,8 +1073,7 @@ class WebFetchTool(Tool):
         """Local fallback using readability-lxml."""
         try:
             async with httpx.AsyncClient(
-                timeout=30.0,
-                proxy=self.proxy,
+                **_fetch_client_kwargs(self.proxy, 30.0),
             ) as client:
                 r, redirect_error = await _get_with_safe_redirects(
                     client,

@@ -1,15 +1,17 @@
 """Matrix (Element) channel — inbound sync + outbound message/media delivery."""
 
 import asyncio
+import html
 import json
 import mimetypes
+import re
 import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from pydantic import Field
 
@@ -18,7 +20,7 @@ from nanobot.security.workspace_policy import is_path_within
 try:
     import aiohttp
     import nh3
-    from mistune import create_markdown
+    from mistune import HTMLRenderer, create_markdown
     from nio import (
         AsyncClient,
         AsyncClientConfig,
@@ -77,7 +79,7 @@ class _MediaTooLargeError(Exception):
     """Raised when an inbound Matrix media download exceeds the configured cap."""
 
 MATRIX_MARKDOWN = create_markdown(
-    escape=True,
+    renderer=HTMLRenderer(escape=True, allow_harmful_protocols=("mxc://",)),
     plugins=["table", "strikethrough", "url", "superscript", "subscript"],
 )
 
@@ -92,6 +94,19 @@ MATRIX_ALLOWED_HTML_ATTRIBUTES: dict[str, set[str]] = {
     "img": {"src", "alt", "title", "width", "height"},
 }
 MATRIX_ALLOWED_URL_SCHEMES = {"https", "http", "matrix", "mailto", "mxc"}
+_MXC_IMAGE_PLACEHOLDER_PREFIX = "https://nanobot.invalid/matrix-mxc/"
+_MXC_MARKDOWN_IMAGE_RE = re.compile(
+    r"(?P<prefix>!\[[^\]]*\]\()"
+    r"(?P<value>mxc://[^\s)]+)"
+    r"(?P<suffix>(?:\s+[^)]*)?\))"
+)
+_MXC_IMAGE_SRC_RE = re.compile(
+    r"(?P<prefix>\bsrc=)(?P<quote>[\"'])(?P<value>mxc://[^\"']+)(?P=quote)",
+    re.IGNORECASE,
+)
+_MXC_PLACEHOLDER_SRC_RE = re.compile(
+    rf'src="{re.escape(_MXC_IMAGE_PLACEHOLDER_PREFIX)}([^"]+)"'
+)
 
 
 def _filter_matrix_html_attribute(tag: str, attr: str, value: str) -> str | None:
@@ -99,7 +114,10 @@ def _filter_matrix_html_attribute(tag: str, attr: str, value: str) -> str | None
     if tag == "a" and attr == "href":
         return value if value.lower().startswith(("https://", "http://", "matrix:", "mailto:")) else None
     if tag == "img" and attr == "src":
-        return value if value.lower().startswith("mxc://") else None
+        lowered = value.lower()
+        if lowered.startswith("mxc://") or lowered.startswith(_MXC_IMAGE_PLACEHOLDER_PREFIX):
+            return value
+        return None
     if tag == "code" and attr == "class":
         classes = [c for c in value.split() if c.startswith("language-") and not c.startswith("language-_")]
         return " ".join(classes) if classes else None
@@ -114,6 +132,39 @@ MATRIX_HTML_CLEANER = nh3.Cleaner(
     strip_comments=True,
     link_rel="noopener noreferrer",
 )
+
+
+def _mask_mxc_markdown_image_sources(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        value = quote(match.group("value"), safe="")
+        return (
+            f"{match.group('prefix')}"
+            f"{_MXC_IMAGE_PLACEHOLDER_PREFIX}{value}"
+            f"{match.group('suffix')}"
+        )
+
+    return _MXC_MARKDOWN_IMAGE_RE.sub(repl, text)
+
+
+def _mask_mxc_image_sources(rendered_html: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        value = quote(match.group("value"), safe="")
+        return (
+            f'{match.group("prefix")}{match.group("quote")}'
+            f"{_MXC_IMAGE_PLACEHOLDER_PREFIX}{value}"
+            f'{match.group("quote")}'
+        )
+
+    return _MXC_IMAGE_SRC_RE.sub(repl, rendered_html)
+
+
+def _unmask_mxc_image_sources(cleaned_html: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        value = html.escape(unquote(match.group(1)), quote=True)
+        return f'src="{value}"'
+
+    return _MXC_PLACEHOLDER_SRC_RE.sub(repl, cleaned_html)
+
 
 @dataclass
 class _StreamBuf:
@@ -135,7 +186,9 @@ class _StreamBuf:
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
     try:
-        formatted = MATRIX_HTML_CLEANER.clean(MATRIX_MARKDOWN(text)).strip()
+        masked_text = _mask_mxc_markdown_image_sources(text)
+        rendered = _mask_mxc_image_sources(MATRIX_MARKDOWN(masked_text))
+        formatted = _unmask_mxc_image_sources(MATRIX_HTML_CLEANER.clean(rendered).strip())
     except Exception:
         return None
     if not formatted:

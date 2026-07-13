@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import nullcontext
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -26,7 +25,7 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     mock_prompt_session.prompt_async.return_value = "hello world"
 
     result = await commands._read_interactive_input_async()
-    
+
     assert result == "hello world"
     mock_prompt_session.prompt_async.assert_called_once()
     args, _ = mock_prompt_session.prompt_async.call_args
@@ -46,20 +45,104 @@ def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
     commands._PROMPT_SESSION = None
-    
-    with patch("nanobot.cli.commands.PromptSession") as MockSession, \
-         patch("nanobot.cli.commands.FileHistory") as MockHistory, \
+
+    with patch("nanobot.cli.commands.PromptSession") as mock_session_cls, \
+         patch("nanobot.cli.commands.FileHistory"), \
          patch("pathlib.Path.home") as mock_home:
-        
+
         mock_home.return_value = MagicMock()
-        
+
         commands._init_prompt_session()
-        
+
         assert commands._PROMPT_SESSION is not None
-        MockSession.assert_called_once()
-        _, kwargs = MockSession.call_args
-        assert kwargs["multiline"] is False
+        mock_session_cls.assert_called_once()
+        _, kwargs = mock_session_cls.call_args
+        # Buffer is multiline-capable so Alt+Enter can insert newlines;
+        # Enter-to-submit is restored via custom key bindings.
+        assert kwargs["multiline"] is True
         assert kwargs["enable_open_in_editor"] is False
+        assert kwargs.get("key_bindings") is not None
+
+
+def test_cli_key_bindings_enter_submits_and_alt_enter_newlines():
+    """Enter submits the buffer; Alt+Enter inserts a newline."""
+    from prompt_toolkit.keys import Keys
+
+    kb = commands._build_cli_key_bindings()
+
+    def _keys(binding):
+        return tuple(getattr(k, "value", k) for k in binding.keys)
+
+    bound = {_keys(b): b for b in kb.bindings}
+
+    # Enter -> submit
+    enter = bound[(Keys.Enter.value,)]
+    buf = MagicMock()
+    enter.call(MagicMock(current_buffer=buf))
+    buf.validate_and_handle.assert_called_once()
+    buf.insert_text.assert_not_called()
+
+    # Alt+Enter (escape, enter) -> newline
+    alt_enter = bound[(Keys.Escape.value, Keys.Enter.value)]
+    buf = MagicMock()
+    alt_enter.call(MagicMock(current_buffer=buf))
+    buf.insert_text.assert_called_once_with("\n")
+
+
+@pytest.mark.asyncio
+async def test_raw_lf_enter_still_submits_like_wsl_terminals():
+    """A raw LF byte (\\x0a) is what some terminals -- e.g. WSL -- send for a
+    plain Enter keypress. It must submit the buffer, not insert a newline;
+    a mock buffer can't catch a key binding shadowing prompt_toolkit's own
+    default \\n-as-\\r handling, so this drives a real PromptSession/parser.
+    """
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("hello\x0aworld\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "hello"
+
+
+@pytest.mark.asyncio
+async def test_alt_enter_inserts_newline_on_lf_terminals():
+    """LF-as-Enter terminals send Alt+Enter as ESC + LF, which needs its own binding."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("foo\x1b\x0abar\r")
+            result = await session.prompt_async("> ")
+
+    assert result == "foo\nbar"
+
+
+@pytest.mark.asyncio
+async def test_csi_u_shift_enter_inserts_newline_not_raw_escape():
+    """CSI-u Shift+Enter inserts a newline instead of raw escape bytes."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            commands._init_prompt_session()
+            session = commands._PROMPT_SESSION
+            pipe_input.send_text("foo\x1b[13;2ubar\r")
+            result = await session.prompt_async("> ")
+
+    # A newline is inserted and no raw escape bytes leak into the result.
+    assert result == "foo\nbar"
 
 
 def test_thinking_spinner_pause_stops_and_restarts():

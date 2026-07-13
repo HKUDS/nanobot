@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
-from nanobot.session.manager import Session
+from nanobot.runtime_context import public_history_messages
+from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     ensure_dir,
@@ -30,8 +31,7 @@ from nanobot.utils.helpers import (
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
-    from nanobot.providers.base import LLMProvider
-    from nanobot.session.manager import SessionManager
+    from nanobot.utils.llm_runtime import LLMRuntime
 
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
@@ -660,7 +660,10 @@ class MemoryStore:
     ) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
-        formatted = truncate_text(self._format_messages(messages), limit)
+        formatted = truncate_text(
+            self._format_messages(public_history_messages(messages)),
+            limit,
+        )
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
             f"{formatted}",
@@ -701,12 +704,15 @@ class MemoryStore:
     def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:
         """Remove the oldest Dream session files, keeping only the N most recent.
 
-        Only files matching ``dream_*.jsonl`` are considered. Non-dream session
-        files are never touched.
+        Only current base64url-encoded Dream session keys are considered.
+        Non-dream session files are never touched.
         """
-        dream_files = sorted(
-            sessions_dir.glob("dream_*.jsonl"), key=lambda p: p.stat().st_mtime,
-        )
+        dream_files = []
+        for path in sessions_dir.glob("*.jsonl"):
+            decoded_key = SessionManager._decode_storage_key(path.stem)
+            if decoded_key is not None and decoded_key.startswith("dream:"):
+                dream_files.append(path)
+        dream_files.sort(key=lambda p: p.stat().st_mtime)
         if len(dream_files) <= keep:
             return
 
@@ -742,22 +748,14 @@ class Consolidator:
     def __init__(
         self,
         store: MemoryStore,
-        provider: LLMProvider,
-        model: str,
         sessions: SessionManager,
-        context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
-        max_completion_tokens: int = 4096,
         consolidation_ratio: float = 0.5,
         unified_session: bool = False,
     ):
         self.store = store
-        self.provider = provider
-        self.model = model
         self.sessions = sessions
-        self.context_window_tokens = context_window_tokens
-        self.max_completion_tokens = max_completion_tokens
         self.consolidation_ratio = consolidation_ratio
         self.unified_session = unified_session
         self._build_messages = build_messages
@@ -765,17 +763,6 @@ class Consolidator:
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
-
-    def set_provider(
-        self,
-        provider: LLMProvider,
-        model: str,
-        context_window_tokens: int,
-    ) -> None:
-        self.provider = provider
-        self.model = model
-        self.context_window_tokens = context_window_tokens
-        self.max_completion_tokens = provider.generation.max_tokens
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -854,6 +841,8 @@ class Consolidator:
         self,
         session: Session,
         replay_max_messages: int | None,
+        *,
+        runtime: LLMRuntime,
     ) -> str | None:
         """Archive messages that would be hidden by the replay message window."""
         end_idx = self._replay_overflow_boundary(session, replay_max_messages)
@@ -868,7 +857,11 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
-        summary = await self.archive(chunk, session_key=session.key)
+        summary = await self.archive(
+            chunk,
+            runtime=runtime,
+            session_key=session.key,
+        )
         session.last_consolidated = end_idx
         self.sessions.save(session)
         return summary
@@ -884,6 +877,8 @@ class Consolidator:
     def estimate_session_prompt_tokens(
         self,
         session: Session,
+        *,
+        runtime: LLMRuntime,
     ) -> tuple[int, str]:
         """Estimate prompt size from the full unconsolidated session tail."""
         history = self._full_unconsolidated_history(session)
@@ -903,20 +898,23 @@ class Consolidator:
             unified_session=self.unified_session,
         )
         return estimate_prompt_tokens_chain(
-            self.provider,
-            self.model,
+            runtime.provider,
+            runtime.model,
             probe_messages,
             self._get_tool_definitions(),
         )
 
-    @property
-    def _input_token_budget(self) -> int:
+    def _input_token_budget(self, runtime: LLMRuntime) -> int:
         """Available input token budget for consolidation LLM."""
-        return self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+        return (
+            runtime.context_window_tokens
+            - runtime.generation.max_tokens
+            - self._SAFETY_BUFFER
+        )
 
-    def _truncate_to_token_budget(self, text: str) -> str:
+    def _truncate_to_token_budget(self, text: str, *, runtime: LLMRuntime) -> str:
         """Truncate text so it fits within the consolidation LLM's token budget."""
-        budget = self._input_token_budget
+        budget = self._input_token_budget(runtime)
         if budget <= 0:
             return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
         return truncate_text_to_tokens(text, budget)
@@ -925,6 +923,7 @@ class Consolidator:
         self,
         messages: list[dict],
         *,
+        runtime: LLMRuntime,
         session_key: str | None = None,
         summary_messages: list[dict] | None = None,
     ) -> str | None:
@@ -939,12 +938,14 @@ class Consolidator:
         """
         if not messages:
             return None
-        messages_to_summarize = summary_messages if summary_messages is not None else messages
+        messages_to_summarize = public_history_messages(
+            summary_messages if summary_messages is not None else messages
+        )
         try:
             formatted = MemoryStore._format_messages(messages_to_summarize)
-            formatted = self._truncate_to_token_budget(formatted)
-            response = await self.provider.chat_with_retry(
-                model=self.model,
+            formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
+            response = await runtime.provider.chat_with_retry(
+                model=runtime.model,
                 messages=[
                     {
                         "role": "system",
@@ -957,6 +958,9 @@ class Consolidator:
                 ],
                 tools=None,
                 tool_choice=None,
+                temperature=runtime.generation.temperature,
+                max_tokens=runtime.generation.max_tokens,
+                reasoning_effort=runtime.generation.reasoning_effort,
             )
             if response.finish_reason == "error":
                 raise RuntimeError(f"LLM returned error: {response.content}")
@@ -976,6 +980,7 @@ class Consolidator:
         self,
         session: Session,
         *,
+        runtime: LLMRuntime,
         replay_max_messages: int | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
@@ -983,7 +988,7 @@ class Consolidator:
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
         """
-        if self.context_window_tokens <= 0:
+        if runtime.context_window_tokens <= 0:
             return
 
         lock = self.get_lock(session.key)
@@ -995,15 +1000,17 @@ class Consolidator:
             if not session.messages:
                 return
 
-            budget = self._input_token_budget
+            budget = self._input_token_budget(runtime)
             target = int(budget * self.consolidation_ratio)
             last_summary = await self._consolidate_replay_overflow(
                 session,
                 replay_max_messages,
+                runtime=runtime,
             )
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
+                    runtime=runtime,
                 )
             except Exception:
                 logger.exception("Token estimation failed for {}", session.key)
@@ -1017,7 +1024,7 @@ class Consolidator:
                     "Token consolidation idle {}: {}/{} via {}, msgs={}",
                     session.key,
                     estimated,
-                    self.context_window_tokens,
+                    runtime.context_window_tokens,
                     source,
                     unconsolidated_count,
                 )
@@ -1048,11 +1055,15 @@ class Consolidator:
                     round_num,
                     session.key,
                     estimated,
-                    self.context_window_tokens,
+                    runtime.context_window_tokens,
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(chunk, session_key=session.key)
+                summary = await self.archive(
+                    chunk,
+                    runtime=runtime,
+                    session_key=session.key,
+                )
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call
@@ -1069,6 +1080,7 @@ class Consolidator:
                 try:
                     estimated, source = self.estimate_session_prompt_tokens(
                         session,
+                        runtime=runtime,
                     )
                 except Exception:
                     logger.exception("Token estimation failed for {}", session.key)
@@ -1084,6 +1096,8 @@ class Consolidator:
     async def compact_idle_session(
         self,
         session_key: str,
+        *,
+        runtime: LLMRuntime,
         max_suffix: int = 8,
     ) -> str | None:
         """Hard-truncate an idle session under the consolidation lock.
@@ -1126,6 +1140,7 @@ class Consolidator:
                 # the messages that are no longer kept in the live session.
                 summary = await self.archive(
                     messages_to_remove,
+                    runtime=runtime,
                     session_key=session_key,
                     summary_messages=messages_to_summarize,
                 )

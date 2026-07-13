@@ -941,6 +941,70 @@ def test_replay_file_edit_absorbs_matching_write_tool_event() -> None:
     ]
 
 
+def test_replay_file_edit_stays_separate_from_mixed_tool_trace() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-file",
+            "text": "",
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-read",
+                    "name": "read_file",
+                    "arguments": {"path": "quicksort.py"},
+                },
+                {
+                    "phase": "start",
+                    "call_id": "call-write",
+                    "name": "write_file",
+                    "arguments": {"path": "sorting/quicksort.py", "content": "def quicksort():\n"},
+                },
+            ],
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "sorting/quicksort.py",
+                    "phase": "end",
+                    "added": 3,
+                    "deleted": 0,
+                    "approximate": False,
+                    "status": "done",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 2
+    assert msgs[0]["kind"] == "trace"
+    assert msgs[0]["traces"] == ['read_file({"path": "quicksort.py"})']
+    assert [event["name"] for event in msgs[0]["toolEvents"]] == ["read_file"]
+    assert "fileEdits" not in msgs[0]
+    assert msgs[1]["kind"] == "trace"
+    assert msgs[1]["traces"] == []
+    assert "toolEvents" not in msgs[1]
+    assert msgs[1]["fileEdits"] == [
+        {
+            "version": 1,
+            "call_id": "call-write",
+            "tool": "write_file",
+            "path": "sorting/quicksort.py",
+            "phase": "end",
+            "added": 3,
+            "deleted": 0,
+            "approximate": False,
+            "status": "done",
+        },
+    ]
+
+
 def test_replay_keeps_every_file_from_one_apply_patch_call() -> None:
     msgs = replay_transcript_to_ui_messages([
         {

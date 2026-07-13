@@ -88,6 +88,21 @@ describe("CodeBlock", () => {
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
   });
 
+  it("normalizes file language aliases before loading Prism", async () => {
+    render(
+      <ThemeProvider theme="light">
+        <CodeBlock language="html" code="<main />" />
+      </ThemeProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("highlighted-code")).toHaveAttribute("data-language", "markup");
+  });
+
   it("renders ANSI output without mounting the syntax highlighter", () => {
     render(
       <ThemeProvider theme="dark">

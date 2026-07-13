@@ -65,6 +65,7 @@ import {
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
@@ -91,6 +92,50 @@ const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
+type ResolvedSlashCommandLifecycle =
+  | "side_channel"
+  | "finalize_active_turn"
+  | "stop_active_turn"
+  | "agent_turn";
+
+function slashCommandName(content: string): string {
+  return content.split(/\s+/, 1)[0];
+}
+
+function slashCommandArgs(content: string, commandName: string): string {
+  return content.slice(commandName.length).trim();
+}
+
+function matchingSlashCommand(content: string, slashCommands: SlashCommand[]): SlashCommand | null {
+  const commandName = slashCommandName(content);
+  if (!commandName.startsWith("/")) return null;
+  const command = slashCommands.find((item) => item.command === commandName);
+  if (!command) return null;
+  if (slashCommandArgs(content, command.command).length > 0 && !command.acceptsArgs) return null;
+  return command;
+}
+
+function slashCommandLifecycle(
+  content: string,
+  slashCommands: SlashCommand[],
+): ResolvedSlashCommandLifecycle | null {
+  const command = matchingSlashCommand(content, slashCommands);
+  if (!command) return null;
+  if (command.lifecycle === "agent_turn_with_args") {
+    return slashCommandArgs(content, command.command).length > 0
+      ? "agent_turn"
+      : "side_channel";
+  }
+  return command.lifecycle;
+}
+
+function isSideChannelLifecycle(lifecycle: ResolvedSlashCommandLifecycle | null): boolean {
+  return (
+    lifecycle === "side_channel"
+    || lifecycle === "finalize_active_turn"
+    || lifecycle === "stop_active_turn"
+  );
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -268,7 +313,12 @@ type MentionCandidate =
   | { kind: "cli"; name: string; app: CliAppInfo }
   | { kind: "mcp"; name: string; preset: McpPresetInfo };
 
-interface SlashPaletteCommand extends SlashCommand {
+interface SlashPaletteCommand {
+  command: string;
+  title: string;
+  description: string;
+  icon: string;
+  argHint?: string;
   detail: string;
   badge?: string;
   recent: boolean;
@@ -803,6 +853,8 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
+  // Only the prompt queued by the immediately preceding Enter can use the second-Enter shortcut.
+  const secondEnterPromptIdRef = useRef<string | null>(null);
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const wasStreamingRef = useRef(isStreaming);
@@ -822,6 +874,7 @@ export function ThreadComposer({
     && workspaceControls?.can_change_project !== false;
 
   useEffect(() => {
+    secondEnterPromptIdRef.current = null;
     skipQueuedPromptPersistRef.current = true;
     setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
   }, [queuedPromptStorageKey]);
@@ -853,6 +906,7 @@ export function ThreadComposer({
   const addFiles = useCallback(
     (files: File[]) => {
       if (files.length === 0) return;
+      secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         setInlineError(formatRejection(rejected[0].reason));
@@ -926,17 +980,12 @@ export function ThreadComposer({
   }, [cursorPosition, disabled, slashMenuDismissed, value]);
 
   const visibleSlashCommands = useMemo(() => {
-    const baseCommands = slashCommands.filter((command) => command.command !== "/stop");
-    if (!(isStreaming && onStop)) return baseCommands;
-    const stopCommand = slashCommands.find((command) => command.command === "/stop") ?? {
-      command: "/stop",
-      title: "Stop current task",
-      description: "Cancel the active agent turn for this chat.",
-      icon: "square",
-    };
+    if (!(isStreaming && onStop)) return slashCommands;
+    const stopCommand = slashCommands.find((command) => command.command === "/stop");
+    if (!stopCommand) return slashCommands;
     return [
       stopCommand,
-      ...baseCommands,
+      ...slashCommands.filter((command) => command.command !== "/stop"),
     ];
   }, [isStreaming, onStop, slashCommands]);
 
@@ -969,6 +1018,15 @@ export function ThreadComposer({
     if (slashQuery === null) return [];
     const withDetails = visibleSlashCommands
       .filter((command) => {
+        if (
+          slashQuery === ""
+          && (
+            command.command === "/restart"
+            || (command.command === "/stop" && !(isStreaming && onStop))
+          )
+        ) {
+          return false;
+        }
         const commandKey = slashCommandI18nKey(command.command);
         const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
           defaultValue: command.title,
@@ -1198,6 +1256,7 @@ export function ThreadComposer({
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
+    secondEnterPromptIdRef.current = null;
     setValue("");
     setInlineError(null);
     setSlashMenuDismissed(false);
@@ -1215,6 +1274,7 @@ export function ThreadComposer({
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
+    secondEnterPromptIdRef.current = null;
     setValue((current) => {
       if (!current.trim()) return transcript;
       const separator = /[\s\n]$/.test(current) ? "" : " ";
@@ -1245,6 +1305,7 @@ export function ThreadComposer({
     function onKeyDown(event: KeyboardEvent): void {
       if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
       event.preventDefault();
+      secondEnterPromptIdRef.current = null;
       voiceShortcutDownRef.current = true;
       voiceRecorder.beginShortcutHold();
     }
@@ -1352,10 +1413,12 @@ export function ThreadComposer({
     if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
     const queuedImages = readyImagesToQueuedImages(readyImages);
     queuedPromptCounterRef.current += 1;
+    const id = `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`;
+    secondEnterPromptIdRef.current = id;
     setQueuedPrompts((items) => [
       ...items,
       {
-        id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
+        id,
         text,
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
       },
@@ -1365,11 +1428,13 @@ export function ThreadComposer({
   }, [canQueueGuidance, clear, clearComposerText, readyImages, value]);
 
   const removeQueuedPrompt = useCallback((id: string) => {
+    secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== id));
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
   const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
+    secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
     setValue(prompt.text);
     setInlineError(null);
@@ -1392,6 +1457,7 @@ export function ThreadComposer({
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
+    secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => {
       const from = items.findIndex((item) => item.id === dragId);
       const to = items.findIndex((item) => item.id === targetId);
@@ -1405,6 +1471,7 @@ export function ThreadComposer({
 
   const sendQueuedPrompt = useCallback(
     (prompt: QueuedPrompt) => {
+      secondEnterPromptIdRef.current = null;
       const text = prompt.text.trim();
       const queuedImages = queuedImagesToSendImages(prompt.images);
       setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
@@ -1434,6 +1501,7 @@ export function ThreadComposer({
   useEffect(() => {
     const wasStreaming = wasStreamingRef.current;
     wasStreamingRef.current = isStreaming;
+    if (!isStreaming) secondEnterPromptIdRef.current = null;
     if (!wasStreaming || isStreaming || queuedPrompts.length === 0) return;
     if (skipNextQueuedFlushRef.current) {
       skipNextQueuedFlushRef.current = false;
@@ -1443,6 +1511,7 @@ export function ThreadComposer({
   }, [sendNextQueuedPrompt, isStreaming, queuedPrompts.length]);
 
   const handleStop = useCallback(() => {
+    secondEnterPromptIdRef.current = null;
     if (queuedPrompts.length > 0) {
       skipNextQueuedFlushRef.current = true;
     }
@@ -1480,7 +1549,38 @@ export function ThreadComposer({
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    onSend(content, payload, options);
+    const hasPlainTextCommandPayload =
+      payload === undefined
+      && attachedCliApps.length === 0
+      && attachedMcpPresets.length === 0;
+    const slashLifecycle = hasPlainTextCommandPayload
+      ? slashCommandLifecycle(content, slashCommands)
+      : null;
+    if (
+      slashLifecycle === "stop_active_turn"
+      && isStreaming
+      && onStop
+    ) {
+      handleStop();
+      setQueuedPrompts([]);
+      clear();
+      clearComposerText();
+      return;
+    }
+    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
+    const finalizeActiveTurn =
+      slashLifecycle === "finalize_active_turn";
+    onSend(
+      content,
+      payload,
+      isSlashSideChannel
+        ? {
+            ...options,
+            sideChannel: true,
+            ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
+          }
+        : options,
+    );
     setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
@@ -1492,10 +1592,14 @@ export function ThreadComposer({
     canSend,
     clear,
     clearComposerText,
+    handleStop,
+    isStreaming,
     modelNeedsSetup,
     onModelBadgeClick,
     onSend,
+    onStop,
     readyImages,
+    slashCommands,
     value,
   ]);
 
@@ -1551,9 +1655,25 @@ export function ThreadComposer({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
-        queueGuidancePrompt();
+        if (!e.repeat) queueGuidancePrompt();
         return;
       }
+      const secondEnterPrompt = queuedPrompts.find(
+        (prompt) => prompt.id === secondEnterPromptIdRef.current,
+      );
+      if (
+        isStreaming
+        && value.length === 0
+        && images.length === 0
+        && !e.altKey
+        && !e.ctrlKey
+        && !e.metaKey
+        && secondEnterPrompt
+      ) {
+        if (!e.repeat) sendQueuedPrompt(secondEnterPrompt);
+        return;
+      }
+      secondEnterPromptIdRef.current = null;
       submit();
     }
   };
@@ -1691,6 +1811,7 @@ export function ThreadComposer({
             onDelete={removeQueuedPrompt}
             onEdit={editQueuedPrompt}
             onDragStart={(id) => {
+              secondEnterPromptIdRef.current = null;
               draggedQueuedPromptIdRef.current = id;
             }}
             onDragEnd={() => {
@@ -1743,10 +1864,14 @@ export function ThreadComposer({
             ref={textareaRef}
             value={value}
             onChange={(e) => {
+              secondEnterPromptIdRef.current = null;
               setValue(e.target.value);
               setSlashMenuDismissed(false);
               setCliAppMenuDismissed(false);
               setCursorPosition(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onBlur={() => {
+              secondEnterPromptIdRef.current = null;
             }}
             onInput={onInput}
             onKeyDown={onKeyDown}
@@ -2136,14 +2261,11 @@ function ComposerModelBadge({
 }) {
   const inferredProvider = needsSetup ? null : provider || inferProviderFromModelName(label);
   const brand = providerBrand(inferredProvider);
-  const [logoIndex, setLogoIndex] = useState(0);
-  const logoUrl = brand?.logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   const showLogo = !!logoUrl;
   const title = providerLabel ? `${label} · ${providerLabel}` : label;
   const interactive = Boolean(onClick);
   const Container = interactive ? "button" : "span";
-
-  useEffect(() => setLogoIndex(0), [inferredProvider]);
 
   return (
     <Container
@@ -2181,8 +2303,11 @@ function ComposerModelBadge({
           <img
             src={logoUrl}
             alt=""
+            decoding="async"
+            loading="lazy"
             className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
-            onError={() => setLogoIndex((index) => index + 1)}
+            onLoad={onLogoLoad}
+            onError={onLogoError}
           />
         ) : brand ? (
           <span
@@ -2378,15 +2503,12 @@ function MentionCandidateLogo({
   candidate: MentionCandidate;
   selected: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const color = (candidate.kind === "cli"
     ? candidate.app.brand_color
     : candidate.preset.brand_color) || "hsl(var(--primary))";
   const rawLogoUrl = candidate.kind === "cli" ? candidate.app.logo_url : candidate.preset.logo_url;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
-  const logoUrl = logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [rawLogoUrl]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
   if (logoUrl) {
     return (
@@ -2399,8 +2521,11 @@ function MentionCandidateLogo({
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-5 w-5 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );

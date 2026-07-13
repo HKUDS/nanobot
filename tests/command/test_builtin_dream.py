@@ -345,11 +345,11 @@ async def test_dream_prompt_init_recreates_empty_prompt(tmp_path) -> None:
 
 def test_dream_prompt_command_in_help_and_palette() -> None:
     palette = builtin_command_palette()
+    dream_prompt = next(item for item in palette if item["command"] == "/dream-prompt")
 
-    assert any(
-        item["command"] == "/dream-prompt" and item["arg_hint"] == "[init]"
-        for item in palette
-    )
+    assert dream_prompt["arg_hint"] == "[init]"
+    assert dream_prompt["lifecycle"] == "side_channel"
+    assert dream_prompt["accepts_args"] is True
     assert "/dream-prompt [init]" in build_help_text()
 
 

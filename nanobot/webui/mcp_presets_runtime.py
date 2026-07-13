@@ -1,5 +1,5 @@
-"""Compatibility exports for WebUI-attached MCP preset annotations."""
+"""Compatibility export for persisted WebUI MCP preset metadata."""
 
-from nanobot.agent.tools.mcp import runtime_lines, session_extra
+from nanobot.agent.tools.mcp import session_extra
 
-__all__ = ["runtime_lines", "session_extra"]
+__all__ = ["session_extra"]

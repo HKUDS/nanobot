@@ -57,19 +57,6 @@ export function readStoredLocale(): SupportedLocale | null {
   }
 }
 
-export function detectNavigatorLocale(): SupportedLocale {
-  if (typeof navigator === "undefined") return defaultLocale;
-  const candidates = [
-    ...(navigator.languages ?? []),
-    navigator.language,
-  ].filter(Boolean);
-  for (const locale of candidates) {
-    const normalized = normalizeLocale(locale);
-    if (normalized) return normalized;
-  }
-  return defaultLocale;
-}
-
 export function resolveInitialLocale(): SupportedLocale {
   return readStoredLocale() ?? defaultLocale;
 }

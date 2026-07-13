@@ -568,4 +568,26 @@
   .thread-viewport-scrollbar {
     overflow-x: hidden;
   }
+
+  .thread-viewport {
+    container-name: thread-viewport;
+    container-type: inline-size;
+  }
+
+  .thread-prompt-rail {
+    display: none;
+    left: 1.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .thread-prompt-rail {
+      display: block;
+    }
+  }
+
+  @container thread-viewport (max-width: 59rem) {
+    .thread-prompt-rail {
+      display: none;
+    }
+  }
 }

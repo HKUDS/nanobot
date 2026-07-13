@@ -664,7 +664,9 @@ class DiscordChannel(BaseChannel):
         content: str,
     ) -> bool:
         """Check if inbound Discord message should be processed."""
-        if not self.is_allowed(sender_id):
+        # Reject unauthorized guild messages before any side effects, but let DMs
+        # reach BaseChannel._handle_message so it can issue a pairing code.
+        if message.guild is not None and not self.is_allowed(sender_id):
             return False
         # Channel-based filtering: only respond in allowed channels
         allow_channels = self.config.allow_channels

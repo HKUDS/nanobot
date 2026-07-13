@@ -1,7 +1,6 @@
 ---
 name: my
-description: Check and set the agent's own runtime state (model, iterations, context window, token usage, web config). Use when diagnosing why something doesn't work ("why can't you search the web?", "why did you stop?"), checking resource limits before complex tasks, adapting configuration for long or simple tasks, or remembering user preferences across turns. Also use when the user asks what model you are running, how many tokens you've used, or what your settings are.
-always: true
+description: Inspect and optionally adjust the agent's runtime state. Use to check the current model or preset, context window, iteration progress and limits, token usage, workspace and tool configuration, subagent status, and request routing metadata such as channel, chat ID, and sender ID; diagnose unavailable capabilities; change allowed runtime settings; or store temporary session scratchpad values.
 ---
 
 # Self-Awareness

@@ -274,7 +274,8 @@ class LLMProvider(ABC):
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Sanitize message content: fix empty blocks, strip internal _meta fields."""
         result: list[dict[str, Any]] = []
-        for msg in messages:
+        for raw_msg in messages:
+            msg = {key: value for key, value in raw_msg.items() if key != "_meta"}
             content = msg.get("content")
 
             if isinstance(content, str) and not content:

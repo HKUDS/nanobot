@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import nanobot.agent.runner as runner_module
+from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.filesystem import WriteFileTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStatusEvent,
@@ -20,6 +21,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
@@ -31,7 +33,13 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    return AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    return AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        hook_factories=[create_file_edit_activity_hook],
+    )
 
 
 def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
@@ -69,7 +77,9 @@ class TestToolEventProgress:
         ) -> None:
             progress.append((content, tool_hint, tool_events))
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert progress == [
@@ -122,15 +132,10 @@ class TestToolEventProgress:
         ])
         loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
+        tool = WriteFileTool(workspace=tmp_path)
         loop.tools.prepare_call = MagicMock(
-            return_value=(None, {"path": "foo.txt", "content": "new\nextra\n"}, None),
+            return_value=(tool, {"path": "foo.txt", "content": "new\nextra\n"}, None),
         )
-
-        async def execute(name: str, params: dict) -> str:
-            target.write_text(params["content"], encoding="utf-8")
-            return "ok"
-
-        loop.tools.execute = AsyncMock(side_effect=execute)
         file_events: list[dict] = []
 
         async def on_progress(
@@ -143,7 +148,9 @@ class TestToolEventProgress:
             if file_edit_events:
                 file_events.extend(file_edit_events)
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert [event["phase"] for event in file_events] == ["start", "end"]
@@ -154,14 +161,15 @@ class TestToolEventProgress:
             "path": "foo.txt",
             "absolute_path": (tmp_path / "foo.txt").resolve().as_posix(),
             "phase": "start",
-            "added": 2,
-            "deleted": 1,
+            "added": 0,
+            "deleted": 0,
             "approximate": True,
             "status": "editing",
         }
         assert file_events[1]["status"] == "done"
         assert file_events[1]["approximate"] is False
         assert (file_events[1]["added"], file_events[1]["deleted"]) == (2, 1)
+        assert file_events[1]["diff"]["format"] == "unified"
 
     @pytest.mark.asyncio
     async def test_file_edit_snapshot_skipped_when_progress_callback_cannot_emit_file_edits(
@@ -172,6 +180,16 @@ class TestToolEventProgress:
         loop = _make_loop(tmp_path)
         target = tmp_path / "foo.txt"
         target.write_text("old\n", encoding="utf-8")
+        prepare_file_edit_trackers = MagicMock()
+
+        class ObservableWriteTool:
+            name = "write_file"
+
+            async def execute(self, path: str, content: str) -> str:
+                target.write_text(content, encoding="utf-8")
+                return "ok"
+
+        tool = ObservableWriteTool()
         tool_call = ToolCallRequest(
             id="call-write",
             name="write_file",
@@ -184,16 +202,8 @@ class TestToolEventProgress:
         loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.tools.prepare_call = MagicMock(
-            return_value=(None, {"path": "foo.txt", "content": "new\n"}, None),
+            return_value=(tool, {"path": "foo.txt", "content": "new\n"}, None),
         )
-
-        async def execute(name: str, params: dict) -> str:
-            target.write_text(params["content"], encoding="utf-8")
-            return "ok"
-
-        loop.tools.execute = AsyncMock(side_effect=execute)
-        prepare_tracker = MagicMock(side_effect=AssertionError("unexpected file snapshot"))
-        monkeypatch.setattr(runner_module, "prepare_file_edit_tracker", prepare_tracker)
 
         async def on_progress(
             content: str,
@@ -203,11 +213,18 @@ class TestToolEventProgress:
         ) -> None:
             pass
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        monkeypatch.setattr(
+            "nanobot.agent.hooks.file_edit_activity.prepare_file_edit_trackers",
+            prepare_file_edit_trackers,
+        )
+
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert final_content == "Done"
         assert target.read_text(encoding="utf-8") == "new\n"
-        prepare_tracker.assert_not_called()
+        prepare_file_edit_trackers.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_exec_does_not_emit_file_edit_progress(self, tmp_path: Path) -> None:
@@ -239,7 +256,9 @@ class TestToolEventProgress:
             if file_edit_events:
                 file_events.extend(file_edit_events)
 
-        await loop._run_agent_loop([], on_progress=on_progress)
+        await loop._run_agent_loop(
+            [], runtime=loop.llm_runtime(), on_progress=on_progress
+        )
 
         assert file_events == []
 
@@ -342,31 +361,18 @@ class TestToolEventProgress:
         assert outbound.event.file_edit_events == edit_events
 
     @pytest.mark.asyncio
-    async def test_goal_turn_keeps_live_file_edit_progress_for_webui(self, tmp_path: Path) -> None:
+    async def test_goal_turn_keeps_file_edit_progress_for_webui(self, tmp_path: Path) -> None:
         """The /goal command rewrites the prompt but must not bypass WebUI file-edit progress."""
         bus = MessageBus()
         provider = MagicMock()
         provider.supports_progress_deltas = True
         provider.get_default_model.return_value = "test-model"
         call_count = 0
-        target = tmp_path / "goal.txt"
 
-        async def chat_stream_with_retry(*, on_tool_call_delta=None, **kwargs):
+        async def chat_stream_with_retry(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                assert on_tool_call_delta is not None
-                await on_tool_call_delta({
-                    "index": 0,
-                    "call_id": "call-goal-write",
-                    "name": "write_file",
-                    "arguments_delta": '{"path":"goal.txt","content":"',
-                })
-                await on_tool_call_delta({
-                    "index": 0,
-                    "arguments_delta": "one\\ntwo\\nthree\\n",
-                })
-                await on_tool_call_delta({"index": 0, "arguments_delta": '"}'})
                 return LLMResponse(
                     content=None,
                     tool_calls=[
@@ -383,25 +389,26 @@ class TestToolEventProgress:
                 )
             return LLMResponse(content="Done", tool_calls=[], usage={})
 
-        async def execute(name: str, params: dict) -> str:
-            assert name == "write_file"
-            target.write_text(params["content"], encoding="utf-8")
-            return "ok"
-
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            model="test-model",
+            hook_factories=[create_file_edit_activity_hook],
+        )
+        tool = WriteFileTool(workspace=tmp_path)
         loop.tools.get_definitions = MagicMock(return_value=[
             {"type": "function", "function": {"name": "write_file"}},
         ])
         loop.tools.prepare_call = MagicMock(
             return_value=(
-                None,
+                tool,
                 {"path": "goal.txt", "content": "one\ntwo\nthree\n"},
                 None,
             ),
         )
-        loop.tools.execute = AsyncMock(side_effect=execute)
         loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
@@ -425,13 +432,14 @@ class TestToolEventProgress:
         assert any(
             event["status"] == "editing"
             and event["approximate"]
-            and event["added"] == 3
+            and event["added"] == 0
             for event in edit_events
         )
         assert any(
             event["status"] == "done"
             and not event["approximate"]
             and event["added"] == 3
+            and event.get("diff", {}).get("format") == "unified"
             for event in edit_events
         )
         provider.chat_with_retry.assert_not_awaited()
@@ -624,6 +632,7 @@ class TestToolEventProgress:
 
         final_content, _, _, _, _ = await loop._run_agent_loop(
             [],
+            runtime=loop.llm_runtime(),
             on_progress=on_progress,
             on_stream=on_stream,
         )
@@ -807,8 +816,14 @@ class TestToolEventProgress:
         ))
 
         assert len(scheduled_title) == 1
-        loop.provider = MagicMock()
-        loop.model = "switched-after-turn"
+        next_provider = MagicMock()
+        next_provider.generation = loop.llm_runtime().generation
+        loop.runtime_resolver.adopt_snapshot(ProviderSnapshot(
+            provider=next_provider,
+            model="switched-after-turn",
+            context_window_tokens=loop.context_window_tokens,
+            signature=("switched-after-turn",),
+        ))
 
         await scheduled_title[0]  # type: ignore[misc]
 

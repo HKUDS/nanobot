@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { AlertCircle, ChevronRight, FileText, Loader2, X } from "lucide-react";
+import { AlertCircle, ChevronRight, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
@@ -24,11 +24,6 @@ type PreviewState =
   | { status: "error"; message: string }
   | { status: "ready"; payload: FilePreviewPayload };
 
-function supportsHoverCloseControl(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-}
-
 export function FilePreviewPanel({
   sessionKey,
   path,
@@ -41,24 +36,10 @@ export function FilePreviewPanel({
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [entered, setEntered] = useState(false);
-  const [supportsHoverClose, setSupportsHoverClose] = useState(supportsHoverCloseControl);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
     return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return undefined;
-    const query = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const update = () => setSupportsHoverClose(query.matches);
-    update();
-    if (typeof query.addEventListener === "function") {
-      query.addEventListener("change", update);
-      return () => query.removeEventListener("change", update);
-    }
-    query.addListener(update);
-    return () => query.removeListener(update);
   }, []);
 
   useEffect(() => {
@@ -89,15 +70,28 @@ export function FilePreviewPanel({
   const normalizedPreviewPath = previewPath.replace(/\\/g, "/");
   const hasRootPrefix = normalizedPreviewPath.startsWith("/");
   const { name } = splitFilePath(displayPath);
-  const breadcrumbs = useMemo(
+  const fileName = name || displayPath;
+  const pathParts = useMemo(
     () => normalizedPreviewPath.split("/").filter(Boolean),
     [normalizedPreviewPath],
   );
-  const compactBreadcrumbs = useMemo(
-    () => (breadcrumbs.length > 2 ? breadcrumbs.slice(-2) : breadcrumbs),
-    [breadcrumbs],
+  const directoryParts = useMemo(
+    () => (pathParts.length > 1 ? pathParts.slice(0, -1) : []),
+    [pathParts],
   );
-  const hasCompactPrefix = breadcrumbs.length > compactBreadcrumbs.length;
+  const breadcrumbParts = useMemo(
+    () => (directoryParts.length > 0 ? [...directoryParts, fileName] : [fileName]),
+    [directoryParts, fileName],
+  );
+  const compactBreadcrumbParts = useMemo(
+    () => (breadcrumbParts.length > 3 ? breadcrumbParts.slice(-3) : breadcrumbParts),
+    [breadcrumbParts],
+  );
+  const hasCompactPrefix = breadcrumbParts.length > compactBreadcrumbParts.length;
+  const breadcrumbTitle = `${hasRootPrefix ? "/" : ""}${[
+    ...directoryParts,
+    fileName,
+  ].join("/")}`;
 
   return (
     <aside
@@ -144,143 +138,115 @@ export function FilePreviewPanel({
           </button>
         ) : null}
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-            {supportsHoverClose ? (
-              <div
-                className={cn(
-                  "group inline-flex max-w-full min-w-0 items-center gap-2 rounded-[12px]",
-                  "bg-muted/70 px-2.5 py-1.5 text-sm font-medium",
-                )}
-                title={name || displayPath}
-              >
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className={cn(
-                    "relative inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full",
-                    "text-muted-foreground/75 transition-[background-color,color,opacity] duration-150 ease-out",
-                    "group-hover:bg-foreground group-hover:text-background group-hover:opacity-100",
-                    "group-focus-within:bg-foreground group-focus-within:text-background",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                  aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
-                >
-                  <FileText
-                    className={cn(
-                      "absolute h-4 w-4 transition-all duration-150 ease-out",
-                      "opacity-100 group-hover:scale-75 group-hover:opacity-0",
-                      "group-focus-within:scale-75 group-focus-within:opacity-0",
-                    )}
+          <div
+            className="flex h-11 shrink-0 items-center gap-2 border-b border-border/60 px-3"
+            title={previewPath}
+          >
+            <nav
+              aria-label={t("filePreview.breadcrumb", { defaultValue: "File path" })}
+              className="flex min-w-0 flex-1 items-center overflow-hidden text-sm leading-5"
+              title={breadcrumbTitle}
+              data-testid="file-preview-breadcrumb"
+            >
+              {hasCompactPrefix ? (
+                <>
+                  <span className="shrink-0 text-muted-foreground/55">...</span>
+                  <ChevronRight
+                    className="mx-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/35"
                     aria-hidden
                   />
-                  <X
-                    className={cn(
-                      "absolute h-3.5 w-3.5 scale-75 opacity-0 transition-all duration-150 ease-out",
-                      "group-hover:scale-100 group-hover:opacity-100",
-                      "group-focus-within:scale-100 group-focus-within:opacity-100",
-                    )}
+                </>
+              ) : hasRootPrefix ? (
+                <>
+                  <span className="shrink-0 text-muted-foreground/55">/</span>
+                  <ChevronRight
+                    className="mx-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/35"
                     aria-hidden
                   />
-                </button>
-                <span className="min-w-0 truncate">{name || displayPath}</span>
+                </>
+              ) : null}
+              {compactBreadcrumbParts.map((part, index) => {
+                const isLast = index === compactBreadcrumbParts.length - 1;
+                return (
+                  <span
+                    key={`${part}-${index}`}
+                    className="flex min-w-0 items-center overflow-hidden"
+                  >
+                    {index > 0 ? (
+                      <ChevronRight
+                        className="mx-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/35"
+                        aria-hidden
+                      />
+                    ) : null}
+                    <span
+                      className={cn(
+                        "min-w-0 truncate rounded-[4px] px-1 py-0.5",
+                        isLast
+                          ? "font-medium text-foreground"
+                          : "max-w-[26vw] shrink text-muted-foreground/78",
+                      )}
+                      data-testid={isLast ? "file-preview-title" : undefined}
+                    >
+                      {part}
+                    </span>
+                  </span>
+                );
+              })}
+            </nav>
+            <button
+              type="button"
+              onClick={onClose}
+              className={cn(
+                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+              title={t("filePreview.close", { defaultValue: "Close file preview" })}
+              aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
+              data-testid="file-preview-close"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto">
+            {state.status === "loading" ? (
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                {t("filePreview.loading", { defaultValue: "Loading preview..." })}
+              </div>
+            ) : state.status === "error" ? (
+              <div className="flex h-full items-center justify-center px-8 text-center text-sm text-muted-foreground">
+                <div className="max-w-sm">
+                  <AlertCircle
+                    className="mx-auto mb-3 h-5 w-5 text-muted-foreground/70"
+                    aria-hidden
+                  />
+                  <p>{state.message}</p>
+                </div>
               </div>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className={cn(
-                    "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
-                    "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                  aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
-                >
-                  <X className="h-5 w-5" aria-hidden />
-                </button>
-                <span className="min-w-0 truncate text-sm font-medium">
-                  {name || displayPath}
-                </span>
-              </>
+              <div className="min-h-full">
+                {state.payload.truncated ? (
+                  <div className="mx-4 mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                    {t("filePreview.truncated", {
+                      defaultValue: "Preview is truncated because this file is large.",
+                    })}
+                  </div>
+                ) : null}
+                <CodeBlock
+                  language={state.payload.language}
+                  code={state.payload.content}
+                  chrome="none"
+                  highlight
+                  showLineNumbers
+                  wrapLongLines={false}
+                  className="min-h-full"
+                />
+              </div>
             )}
           </div>
-
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div
-              className={cn(
-                "flex min-h-10 shrink-0 items-center gap-1.5 overflow-hidden",
-                "border-b border-border/45 px-4 text-[13px] text-muted-foreground",
-              )}
-              title={previewPath}
-            >
-              <div className="flex min-w-0 items-center gap-1.5">
-                {hasCompactPrefix ? (
-                  <span className="shrink-0 text-muted-foreground/55">...</span>
-                ) : hasRootPrefix ? (
-                  <span className="shrink-0 text-muted-foreground/55">/</span>
-                ) : null}
-                {compactBreadcrumbs.length > 0 ? (
-                  compactBreadcrumbs.map((part, index) => (
-                    <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-1.5">
-                      {index > 0 || hasCompactPrefix || hasRootPrefix ? (
-                        <ChevronRight
-                          className="h-3 w-3 shrink-0 text-muted-foreground/40"
-                          aria-hidden
-                        />
-                      ) : null}
-                      <span
-                        className={cn(
-                          "min-w-0 truncate",
-                          index === compactBreadcrumbs.length - 1
-                            ? "font-medium text-foreground"
-                            : "max-w-[42vw] shrink text-muted-foreground/76",
-                        )}
-                      >
-                        {part}
-                      </span>
-                    </span>
-                  ))
-                ) : (
-                  <span className="truncate">{previewPath}</span>
-                )}
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-auto">
-              {state.status === "loading" ? (
-                <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  {t("filePreview.loading", { defaultValue: "Loading preview..." })}
-                </div>
-              ) : state.status === "error" ? (
-                <div className="flex h-full items-center justify-center px-8 text-center text-sm text-muted-foreground">
-                  <div className="max-w-sm">
-                    <AlertCircle className="mx-auto mb-3 h-5 w-5 text-muted-foreground/70" aria-hidden />
-                    <p>{state.message}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="min-h-full">
-                  {state.payload.truncated ? (
-                    <div className="mx-4 mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
-                      {t("filePreview.truncated", {
-                        defaultValue: "Preview is truncated because this file is large.",
-                      })}
-                    </div>
-                  ) : null}
-                  <CodeBlock
-                    language={state.payload.language}
-                    code={state.payload.content}
-                    chrome="none"
-                    showLineNumbers
-                    wrapLongLines={false}
-                    className="min-h-full"
-                  />
-                </div>
-              )}
-          </div>
         </div>
-      </div>
       </div>
     </aside>
   );
