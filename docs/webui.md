@@ -205,12 +205,6 @@ the relevant control.
 Browser-only display preferences, such as file edit display mode, take effect
 immediately for the current browser and do not change gateway configuration.
 
-To use OpenAI Codex, open **Settings → Providers**, select **OpenAI Codex**, and
-complete OAuth sign-in. Then open **Settings → Models**, create or edit a model
-configuration, choose **OpenAI Codex** as the provider, and select a model from
-the built-in catalog. Both OAuth sign-in and an active Codex model configuration
-are required; no API key is stored in `config.json`.
-
 ## LAN Access
 
 To open the WebUI from another device on the same network, bind the WebSocket

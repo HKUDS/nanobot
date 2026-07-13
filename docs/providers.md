@@ -418,41 +418,19 @@ See [`configuration.md#providers`](./configuration.md#providers) for Bedrock-spe
 
 Some providers do not use API keys in `config.json`.
 
+For OpenAI Codex:
+
 ```bash
-# Choose one OAuth provider:
 nanobot provider login openai-codex --set-main
+```
+
+For GitHub Copilot:
+
+```bash
 nanobot provider login github-copilot --set-main
 ```
 
-`--set-main` authenticates the provider and selects its current default model. Add `--model <model-id>` to choose a model explicitly, or omit `--set-main` when you only want to refresh the OAuth session. If you configure manually, select the OAuth provider and model explicitly in a preset; OAuth providers are not valid automatic fallbacks.
-
-For OpenAI Codex, add `providers.openaiCodex.proxy` before running the login command when OAuth/token refresh or Codex API requests must use a proxy:
-
-```json
-{
-  "providers": {
-    "openaiCodex": {
-      "proxy": "http://127.0.0.1:7890"
-    }
-  },
-  "modelPresets": {
-    "codex": {
-      "provider": "openai_codex",
-      "model": "openai-codex/gpt-5.6-sol",
-      "reasoningEffort": "high"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "codex"
-    }
-  }
-}
-```
-
-For Codex, `openai-codex` is the CLI login name and canonical model prefix, `openaiCodex` is the settings key under `providers`, and `openai_codex` is the provider ID used in a model preset. Do not keep both spellings as keys under `providers`, and do not use an `openai/...` model with `provider: "openai_codex"`; that prefix belongs to the direct OpenAI API provider. With the provider set explicitly, a bare Codex model such as `gpt-5.6-sol` is also accepted.
-
-If you run the login command on a remote/headless machine and open the authorization URL in a local browser, paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted. See [`configuration.md#providers`](./configuration.md#providers) for the full OAuth provider notes.
+Each command authenticates the selected provider and makes its current default model active. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
 ## Provider Resolution
 

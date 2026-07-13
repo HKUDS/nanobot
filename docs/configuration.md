@@ -298,7 +298,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `nvidia` | LLM (NVIDIA NIM) | [build.nvidia.com](https://build.nvidia.com/) |
-| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
+| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex --set-main` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
@@ -660,80 +660,19 @@ nanobot agent -m "Reply with one short sentence."
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
-Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openaiCodex` block is optional and is only needed for provider-specific settings such as a proxy.
-
-**1. Optional proxy** (configure this before login if Codex OAuth or API traffic must use a proxy):
-
-```json
-{
-  "providers": {
-    "openaiCodex": {
-      "proxy": "http://127.0.0.1:7890"
-    }
-  }
-}
-```
-
-The proxy applies to Codex OAuth token refresh, interactive token exchange, and Codex Responses API requests. It does not affect other providers; configure `proxy` separately on each supported provider that needs it.
-
-**2. Login and select Codex:**
+Codex uses OAuth instead of API keys and requires a ChatGPT Plus or Pro account. Authenticate it and make the current flagship model the active agent model with one command:
 
 ```bash
 nanobot provider login openai-codex --set-main
 ```
 
-This authenticates Codex and makes the current flagship model, `openai-codex/gpt-5.6-sol`, the active agent model. To choose another model from the Codex catalog, pass it explicitly:
+Then run:
 
-```bash
-nanobot provider login openai-codex --set-main --model openai-codex/gpt-5.6-sol
-```
-
-Omit `--set-main` when you only want to refresh the OAuth session without changing the active model. If the machine running nanobot cannot open a graphical browser, copy the printed URL into a real browser. For remote SSH login, open the URL locally, then paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted.
-
-**3. Named preset alternative** (merge into `~/.nanobot/config.json` when you prefer preset-based model switching):
-
-```json
-{
-  "modelPresets": {
-    "codex": {
-      "provider": "openai_codex",
-      "model": "openai-codex/gpt-5.6-sol",
-      "reasoningEffort": "high"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "codex"
-    }
-  }
-}
-```
-
-Use `reasoningEffort` in the preset to send a Codex reasoning effort such as `"low"`, `"medium"`, `"high"`, or another value supported by the selected model.
-
-The similar-looking names have different roles:
-
-- `openai-codex` is the CLI login name and the canonical model prefix.
-- `openaiCodex` is the settings key under `providers`, for example `providers.openaiCodex.proxy`.
-- `openai_codex` is the provider ID used as a `modelPresets.<name>.provider` value.
-- `openai/...` selects the direct OpenAI API provider; do not use that prefix with Codex OAuth.
-
-Do not keep both `openaiCodex` and `openai_codex` as keys under `providers`; they are aliases for the same built-in provider and duplicate entries are rejected.
-
-When `provider` is explicitly `openai_codex`, the model prefix is optional, so `gpt-5.6-sol` also works. The examples keep the `openai-codex/` prefix to make the route unambiguous.
-
-**4. Chat:**
 ```bash
 nanobot agent -m "Hello!"
-
-# Target a specific workspace/config locally
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
-
-# One-off workspace override on top of that config
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
 ```
 
-> Docker users: use `docker run -it` for interactive OAuth login.
+For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
 
 </details>
 
