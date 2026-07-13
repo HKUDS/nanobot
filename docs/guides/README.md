@@ -1,21 +1,23 @@
-# nanobot Guides
+# nanobot Task Guides
 
-These guides are short task entry points. Use them when you know what you want
-to build, then follow the linked reference docs for complete option tables and
-edge cases.
+Start with [Install and Quick Start](../quick-start.md) and get one reply before
+using a guide below. Each guide targets one outcome; linked reference pages hold
+the complete option tables and edge cases.
 
-## Build and operate
+## Start and Use
 
 | Goal | Guide |
 |---|---|
 | Build a personal AI agent | [Build a personal AI agent](./build-a-personal-ai-agent.md) |
-| Run a self-hosted AI agent | [Self-hosted AI agent](./self-hosted-ai-agent.md) |
 | Use the browser workbench | [AI agent WebUI](./ai-agent-webui.md) |
-| Run long-running tasks | [Long-running AI agent](./long-running-ai-agent.md) |
-| Add memory | [AI agent memory](./ai-agent-memory.md) |
-| Deploy a gateway | [Deploy a long-running nanobot AI agent gateway](./deploy-nanobot-gateway.md) |
+| Run a self-hosted AI agent | [Self-hosted AI agent](./self-hosted-ai-agent.md) |
+| Run a sustained goal | [Long-running AI agent](./long-running-ai-agent.md) |
+| Add long-term memory | [AI agent memory](./ai-agent-memory.md) |
 
-## Connect and integrate
+## Connect a Chat App
+
+Use **Settings → Channels** in the WebUI for guided setup. These guides explain
+the account, bot, token, permission, and test-message steps on each platform.
 
 | Goal | Guide |
 |---|---|
@@ -29,10 +31,15 @@ edge cases.
 | Connect QQ | [QQ AI agent](./qq-ai-agent.md) |
 | Connect Email | [Email AI agent](./email-ai-agent.md) |
 | Connect Mattermost | [Mattermost AI agent](./mattermost-ai-agent.md) |
+
+## Integrate from Code
+
+| Goal | Guide |
+|---|---|
 | Run from Python | [Python AI agent SDK](./python-ai-agent-sdk.md) |
 | Expose `/v1/chat/completions` | [OpenAI-compatible agent API](./openai-compatible-agent-api.md) |
 
-## Configure
+## Configure and Operate
 
 | Goal | Guide |
 |---|---|

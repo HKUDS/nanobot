@@ -6,7 +6,7 @@ through the Model Context Protocol.
 ## What you will build
 
 - a working nanobot agent
-- one MCP server entry in `~/.nanobot/config.json`
+- one MCP integration configured through Apps or `~/.nanobot/config.json`
 - a restricted set of MCP tools exposed to the model
 
 ## When to use this
@@ -27,7 +27,18 @@ remote HTTP endpoint.
 
 ## Minimal working example
 
-Add this to `~/.nanobot/config.json`:
+For local interactive setup:
+
+1. Run `nanobot webui` and open **Apps**.
+2. Choose a known integration preset, or add a custom stdio, HTTP, or SSE
+   server.
+3. Limit the enabled tools when the server exposes more than the task needs.
+4. Save and restart when prompted.
+5. Mention the integration with `@` in the next message and ask for a small
+   test action.
+
+For manual or deployment-managed config, add this to
+`~/.nanobot/config.json`:
 
 ```json
 {
