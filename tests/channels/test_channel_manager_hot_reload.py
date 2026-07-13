@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, ChannelInstanceSpec
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import Config
 
@@ -30,6 +30,29 @@ class _HotChannel(BaseChannel):
 
     async def send(self, msg):  # pragma: no cover - not used by this test
         raise AssertionError("send should not be called")
+
+
+class _MultiHotChannel(_HotChannel):
+    name = "multi"
+    display_name = "Multi"
+
+    @classmethod
+    def runtime_name(cls, instance_id: str = "default") -> str:
+        return cls.name if instance_id == "default" else f"{cls.name}.{instance_id}"
+
+    @classmethod
+    def instance_specs(cls, section, *, enabled_only=True):
+        instances = section.get("instances", []) if isinstance(section, dict) else []
+        return [
+            ChannelInstanceSpec(
+                base_name=cls.name,
+                instance_id=item["id"],
+                runtime_name=cls.runtime_name(item["id"]),
+                config=item,
+            )
+            for item in instances
+            if not enabled_only or item.get("enabled", False)
+        ]
 
 
 @pytest.mark.asyncio
@@ -112,3 +135,42 @@ async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_f
     assert manager.channels["hot"] is old_channel
     assert old_channel.is_running is True
     assert not old_channel.stopped.is_set()
+
+
+@pytest.mark.asyncio
+async def test_apply_channel_feature_action_uses_channel_runtime_name(monkeypatch):
+    config = Config.model_validate({
+        "channels": {
+            "websocket": {"enabled": False},
+            "multi": {
+                "instances": [
+                    {"id": "default", "enabled": True},
+                    {"id": "product", "enabled": True},
+                ]
+            },
+        }
+    })
+
+    import nanobot.channels.registry as registry
+
+    monkeypatch.setattr(registry, "discover_channel_names", lambda: ["multi"])
+    monkeypatch.setattr(registry, "discover_plugins", lambda enabled_names=None: {})
+    monkeypatch.setattr(
+        registry,
+        "discover_enabled",
+        lambda enabled_names, **_kwargs: (
+            {"multi": _MultiHotChannel} if "multi" in enabled_names else {}
+        ),
+    )
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: config)
+
+    manager = ChannelManager(config, MessageBus())
+    product = manager.channels["multi.product"]
+    product._running = True
+
+    result = await manager.apply_channel_feature_action("disable", "multi", "product")
+
+    assert result["requires_restart"] is False
+    assert "multi" in manager.channels
+    assert "multi.product" not in manager.channels
+    assert product.is_running is False

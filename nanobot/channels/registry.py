@@ -41,6 +41,16 @@ def load_channel_class(module_name: str) -> type[BaseChannel]:
     raise ImportError(f"No BaseChannel subclass in nanobot.channels.{module_name}")
 
 
+def load_any_channel_class(name: str) -> type[BaseChannel]:
+    """Load one built-in or entry-point channel without central name switches."""
+    if name in discover_channel_names():
+        return load_channel_class(name)
+    plugin = discover_plugins({name}).get(name)
+    if plugin is not None:
+        return plugin
+    raise ImportError(f"Unknown channel: {name}")
+
+
 def discover_plugins(enabled_names: set[str] | None = None) -> dict[str, type[BaseChannel]]:
     """Discover external channel plugins registered via entry_points."""
     from importlib.metadata import entry_points

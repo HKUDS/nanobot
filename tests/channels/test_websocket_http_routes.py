@@ -869,10 +869,10 @@ async def test_nanobot_feature_channel_action_can_apply_without_restart(
 ) -> None:
     config_path = tmp_path / "config.json"
     _stub_matrix_feature(monkeypatch, config_path, deps=["matrix-nio>=0.25.2"])
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
-        calls.append((action, name))
+    async def channel_feature_action(action: str, name: str, instance_id: str) -> dict[str, Any]:
+        calls.append((action, name, instance_id))
         return {
             "handled": True,
             "ok": True,
@@ -901,7 +901,7 @@ async def test_nanobot_feature_channel_action_can_apply_without_restart(
     assert response is not None
     assert response.status_code == 200
     body = json.loads(response.body.decode())
-    assert calls == [("enable", "matrix")]
+    assert calls == [("enable", "matrix", "")]
     assert body["requires_restart"] is False
     assert body["restart_required_sections"] == []
     assert body["last_action"]["hot_reload"] is True
@@ -970,10 +970,10 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
             "last_action": {"ok": True, "message": "Enabled channel 'feishu'", "enabled": True},
         },
     )
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
-        calls.append((action, name))
+    async def channel_feature_action(action: str, name: str, instance_id: str) -> dict[str, Any]:
+        calls.append((action, name, instance_id))
         return {
             "handled": True,
             "ok": True,
@@ -1021,7 +1021,7 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
     assert body["status"] == "succeeded"
     assert body["instance_id"] == "default"
     assert "app_secret" not in body
-    assert calls == [("enable", "feishu")]
+    assert calls == [("enable", "feishu", "default")]
     assert body["nanobot_features"]["requires_restart"] is False
     data = json.loads(config_path.read_text(encoding="utf-8"))
     assert data["channels"]["feishu"]["instances"][0]["id"] == "default"
@@ -1125,7 +1125,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
         allow_install: bool = True,
     ) -> dict[str, Any]:
         assert action == "enable"
-        assert query == {"name": ["discord"]}
+        assert query == {"name": ["discord"], "instance_id": ["default"]}
         cfg = loader.load_config()
         section = dict(getattr(cfg.channels, "discord", {}) or {})
         section["enabled"] = True
@@ -1149,10 +1149,10 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
         }
 
     monkeypatch.setattr("nanobot.webui.settings_routes.nanobot_features_action", fake_feature_action)
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
-        calls.append((action, name))
+    async def channel_feature_action(action: str, name: str, instance_id: str) -> dict[str, Any]:
+        calls.append((action, name, instance_id))
         cfg = loader.load_config()
         assert getattr(cfg.channels, "discord")["token"] == "discord-token"
         return {
@@ -1194,7 +1194,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
     assert body["saved"] is True
     assert body["name"] == "discord"
     assert "discord-token" not in response.body.decode()
-    assert calls == [("enable", "discord")]
+    assert calls == [("enable", "discord", "default")]
     assert body["nanobot_features"]["requires_restart"] is False
     data = json.loads(config_path.read_text(encoding="utf-8"))
     assert data["channels"]["discord"] == {

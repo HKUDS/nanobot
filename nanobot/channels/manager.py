@@ -24,7 +24,6 @@ from nanobot.bus.outbound_events import (
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.channels._feishu_instances import ChannelInstanceSpec, feishu_instance_specs
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
@@ -68,12 +67,16 @@ def _default_channel_config(name: str) -> dict[str, Any] | None:
 
 
 def _channel_config_enabled(name: str, section: Any) -> bool:
-    if name == "feishu":
-        from nanobot.channels.feishu import FeishuChannel
-
-        return bool(feishu_instance_specs(section, FeishuChannel.default_config(), enabled_only=True))
     default_enabled = name in DEFAULT_ENABLED_CHANNELS
     if isinstance(section, dict):
+        instances = section.get("instances")
+        if isinstance(instances, list):
+            inherited = bool(section.get("enabled", default_enabled))
+            return any(
+                bool(item.get("enabled", inherited))
+                for item in instances
+                if isinstance(item, dict)
+            )
         return bool(section.get("enabled", default_enabled))
     return bool(getattr(section, "enabled", default_enabled))
 
@@ -144,29 +147,6 @@ class ChannelManager:
             if default is not None:
                 default_sections[name] = default
         return default_sections.get(name)
-
-    def _channel_instance_specs(
-        self,
-        name: str,
-        cls: type[BaseChannel],
-        section: Any,
-        *,
-        enabled_only: bool = True,
-    ) -> list[ChannelInstanceSpec]:
-        if name == "feishu":
-            return feishu_instance_specs(
-                section,
-                cls.default_config(),
-                enabled_only=enabled_only,
-            )
-        return [
-            ChannelInstanceSpec(
-                base_name=name,
-                instance_id="default",
-                runtime_name=name,
-                config=section,
-            )
-        ]
 
     def _build_channel(
         self,
@@ -246,7 +226,7 @@ class ChannelManager:
             if section is None:
                 continue
             try:
-                for spec in self._channel_instance_specs(name, cls, section):
+                for spec in cls.instance_specs(section):
                     self.channels[spec.runtime_name] = self._build_channel(
                         name,
                         cls,
@@ -349,7 +329,12 @@ class ChannelManager:
         names = discover_channel_names()
         return discover_enabled({name}, _names=names, warn_import_errors=True).get(name)
 
-    async def apply_channel_feature_action(self, action: str, name: str) -> dict[str, Any]:
+    async def apply_channel_feature_action(
+        self,
+        action: str,
+        name: str,
+        instance_id: str = "",
+    ) -> dict[str, Any]:
         """Apply a WebUI channel enable/disable action without restarting the gateway.
 
         Returns a small transport-neutral result. ``handled=False`` means the
@@ -357,9 +342,7 @@ class ChannelManager:
         response semantics.
         """
         name = name.strip()
-        instance_id = ""
-        if "." in name:
-            name, instance_id = name.split(".", 1)
+        instance_id = instance_id.strip()
         if not name or not self._is_known_channel_name(name):
             return {"handled": False}
         if name == "websocket":
@@ -374,14 +357,25 @@ class ChannelManager:
 
         self.config = load_config()
         section = self._channel_section(name)
+        cls = self._load_channel_class(name)
+        if cls is None:
+            return {
+                "handled": True,
+                "ok": False,
+                "requires_restart": True,
+                "message": f"{name} channel could not be loaded.",
+            }
+
         if action == "disable":
-            runtime_names = [name if not instance_id else f"{name}.{instance_id}"]
-            if name == "feishu" and not instance_id:
-                runtime_names = [
+            runtime_names = (
+                [cls.runtime_name(instance_id)]
+                if instance_id
+                else [
                     runtime_name
-                    for runtime_name in self.channels
-                    if runtime_name == "feishu" or runtime_name.startswith("feishu.")
+                    for runtime_name, channel in self.channels.items()
+                    if isinstance(channel, cls)
                 ]
+            )
             stopped = False
             for runtime_name in runtime_names:
                 stopped = await self._stop_channel(runtime_name) or stopped
@@ -396,24 +390,7 @@ class ChannelManager:
         if action != "enable":
             return {"handled": True, "ok": False, "requires_restart": True}
 
-        if section is None or not _channel_config_enabled(name, section):
-            return {
-                "handled": True,
-                "ok": False,
-                "requires_restart": True,
-                "message": f"{name} channel config was not enabled.",
-            }
-
-        cls = self._load_channel_class(name)
-        if cls is None:
-            return {
-                "handled": True,
-                "ok": False,
-                "requires_restart": True,
-                "message": f"{name} channel could not be loaded.",
-            }
-
-        specs = self._channel_instance_specs(name, cls, section)
+        specs = cls.instance_specs(section) if section is not None else []
         if instance_id:
             specs = [spec for spec in specs if spec.instance_id == instance_id]
         if not specs:

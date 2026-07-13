@@ -15,7 +15,9 @@ from typing import Any
 
 import httpx
 
-from nanobot.channels._setup import channel_setup_spec
+from nanobot.channels._setup import ChannelSetupSpec, channel_setup_spec
+from nanobot.channels.base import BaseChannel
+from nanobot.channels.registry import load_any_channel_class
 from nanobot.config.loader import load_config
 from nanobot.security.network import resolve_url_target
 
@@ -26,8 +28,18 @@ _TIMEOUT_SECONDS = 4.0
 
 
 def _official_action(name: str) -> str | None:
-    spec = channel_setup_spec(name)
+    _, spec = _channel_contract(name)
     return spec.official_url if spec is not None else None
+
+
+def _channel_contract(
+    name: str,
+) -> tuple[type[BaseChannel] | None, ChannelSetupSpec | None]:
+    try:
+        channel_cls = load_any_channel_class(name)
+    except (ImportError, TypeError):
+        channel_cls = None
+    return channel_cls, channel_setup_spec(name, channel_cls)
 
 
 def validate_channel_config(
@@ -44,8 +56,24 @@ def validate_channel_config(
 
     config = load_config()
     section = getattr(config.channels, channel, None)
-    values = _channel_config(channel, section, instance_id=instance_id)
-    values = _merge_form_values(channel, values, raw_values or {})
+    channel_cls, setup_spec = _channel_contract(channel)
+    values = _channel_config(
+        section,
+        channel_cls=channel_cls,
+        instance_id=instance_id,
+    )
+    values = _merge_form_values(channel, values, raw_values or {}, setup_spec=setup_spec)
+
+    if channel_cls is not None:
+        custom_payload = channel_cls.validate_setup(values)
+        if custom_payload is not None:
+            payload = dict(custom_payload)
+            payload.setdefault("checks", [])
+            payload.setdefault("missing_fields", [])
+            payload.setdefault("can_enable", payload.get("status") in {"configured", "connected"})
+            payload.setdefault("requires_restart", True)
+            payload["name"] = channel
+            return payload
 
     validator = _VALIDATORS.get(channel, _validate_generic)
     if channel == "email":
@@ -298,7 +326,7 @@ def _validate_cli_handoff(name: str, values: dict[str, Any]) -> dict[str, Any]:
 
 def _validate_generic(name: str, values: dict[str, Any]) -> dict[str, Any]:
     checks, missing = _required_checks(name, values)
-    spec = channel_setup_spec(name)
+    _, spec = _channel_contract(name)
     if spec is not None and spec.required:
         checks.append(_check("manual_review", "Manual setup", "skipped", "This channel can be checked from saved fields, but not fully verified in-browser."))
         return _status_from_checks(name, checks, missing)
@@ -320,17 +348,14 @@ _VALIDATORS = {
 }
 
 
-def _channel_config(name: str, section: Any, *, instance_id: str) -> dict[str, Any]:
-    if name == "feishu":
-        try:
-            from nanobot.channels._feishu_instances import feishu_instance_specs
-            from nanobot.channels.feishu import FeishuChannel
-
-            specs = feishu_instance_specs(section, FeishuChannel.default_config())
-            selected = next((spec for spec in specs if spec.instance_id == instance_id), None)
-            return dict(selected.config) if selected is not None else {}
-        except Exception:
-            return {}
+def _channel_config(
+    section: Any,
+    *,
+    channel_cls: type[BaseChannel] | None,
+    instance_id: str,
+) -> dict[str, Any]:
+    if channel_cls is not None:
+        return channel_cls.instance_config(section, instance_id=instance_id)
     if hasattr(section, "model_dump"):
         return dict(section.model_dump(mode="json", by_alias=True))
     if isinstance(section, dict):
@@ -342,10 +367,12 @@ def _merge_form_values(
     name: str,
     values: dict[str, Any],
     raw_values: dict[str, Any],
+    *,
+    setup_spec: ChannelSetupSpec | None = None,
 ) -> dict[str, Any]:
     merged = dict(values)
     prefix = f"channels.{name}."
-    spec = channel_setup_spec(name)
+    spec = setup_spec
     secrets = spec.secrets if spec is not None else frozenset()
     for raw_key, raw_value in raw_values.items():
         if not isinstance(raw_key, str) or not raw_key:
@@ -360,7 +387,7 @@ def _merge_form_values(
 def _required_checks(name: str, values: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     checks: list[dict[str, Any]] = []
     missing: list[str] = []
-    spec = channel_setup_spec(name)
+    _, spec = _channel_contract(name)
     for field in spec.simple_required_fields if spec is not None else ():
         value = _get(values, field)
         if field == "consentGranted":

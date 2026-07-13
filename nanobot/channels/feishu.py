@@ -14,6 +14,7 @@ from collections import OrderedDict
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
@@ -33,7 +34,7 @@ from nanobot.channels._feishu_instances import (
     upsert_feishu_instance,
 )
 from nanobot.channels._feishu_ws import get_feishu_ws_runner
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, ChannelInstanceSpec
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
@@ -712,7 +713,12 @@ def save_registration_result(
     save_config(full_config)
 
 
-def refresh_saved_feishu_identities(config: Any | None = None) -> bool:
+def refresh_saved_feishu_identities(
+    config: Any | None = None,
+    *,
+    config_path: Path | None = None,
+    instance_id: str | None = None,
+) -> bool:
     """Backfill missing Feishu assistant display identity in saved config.
 
     Existing users may already have working App ID/Secret credentials from
@@ -729,6 +735,8 @@ def refresh_saved_feishu_identities(config: Any | None = None) -> bool:
     feishu_cfg = getattr(full_config.channels, "feishu", None)
     defaults = FeishuChannel.default_config()
     specs = feishu_instance_specs(feishu_cfg, defaults)
+    if instance_id:
+        specs = [spec for spec in specs if spec.instance_id == instance_id]
     updated = False
 
     for spec in specs:
@@ -765,7 +773,7 @@ def refresh_saved_feishu_identities(config: Any | None = None) -> bool:
         return False
 
     setattr(full_config.channels, "feishu", feishu_cfg)
-    save_config(full_config)
+    save_config(full_config, config_path)
     return True
 
 
@@ -870,6 +878,100 @@ class FeishuChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return FeishuConfig().model_dump(by_alias=True)
+
+    @classmethod
+    def runtime_name(cls, instance_id: str = DEFAULT_INSTANCE_ID) -> str:
+        return runtime_channel_name(cls.name, instance_id)
+
+    @classmethod
+    def instance_specs(
+        cls,
+        section: Any,
+        *,
+        enabled_only: bool = True,
+    ) -> list[ChannelInstanceSpec]:
+        return feishu_instance_specs(
+            section,
+            cls.default_config(),
+            enabled_only=enabled_only,
+        )
+
+    @classmethod
+    def set_config_enabled(
+        cls,
+        section: Any,
+        enabled: bool,
+        *,
+        instance_id: str = DEFAULT_INSTANCE_ID,
+    ) -> dict[str, Any]:
+        from nanobot.channels._feishu_instances import set_feishu_instance_enabled
+
+        existing = section if isinstance(section, dict) else {}
+        return set_feishu_instance_enabled(
+            existing,
+            cls.default_config(),
+            instance_id,
+            enabled,
+        )
+
+    @classmethod
+    def update_instance_config(
+        cls,
+        section: Any,
+        values: dict[str, Any],
+        *,
+        instance_id: str = DEFAULT_INSTANCE_ID,
+    ) -> dict[str, Any]:
+        from nanobot.channels._feishu_instances import upsert_feishu_instance
+
+        existing = section if isinstance(section, dict) else {}
+        return upsert_feishu_instance(
+            existing,
+            cls.default_config(),
+            instance_id,
+            values,
+        )
+
+    @classmethod
+    def feature_instances(cls, section: Any) -> list[dict[str, Any]]:
+        from nanobot.channels._setup import channel_setup_spec
+
+        setup = channel_setup_spec(cls.name, cls)
+        instances = []
+        for spec in cls.instance_specs(section, enabled_only=False):
+            config = spec.config
+            display_name = str(config.get("displayName") or "").strip()
+            local_name = str(config.get("name") or "").strip()
+            instances.append(
+                {
+                    "id": spec.instance_id,
+                    "name": local_name or "nanobot",
+                    "display_name": display_name or local_name or "nanobot",
+                    "avatar_url": config.get("avatarUrl") or "",
+                    "domain": config.get("domain") or "feishu",
+                    "enabled": bool(config.get("enabled", False)),
+                    "configured": bool(setup and setup.is_configured(config)),
+                    "app_id": config.get("appId") or config.get("app_id") or "",
+                    "group_policy": config.get("groupPolicy") or "mention",
+                    "allow_from": list(config.get("allowFrom") or []),
+                }
+            )
+        return instances
+
+    @classmethod
+    def refresh_feature_metadata(
+        cls,
+        config_path: Path,
+        *,
+        instance_id: str = DEFAULT_INSTANCE_ID,
+    ) -> bool:
+        from nanobot.config.loader import load_config
+
+        return refresh_saved_feishu_identities(
+            load_config(config_path),
+            config_path=config_path,
+            instance_id=instance_id,
+        )
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):

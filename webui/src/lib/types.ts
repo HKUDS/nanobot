@@ -696,12 +696,28 @@ export interface NanobotFeatureInfo {
   configured?: boolean;
   config_values?: Record<string, string>;
   configured_fields?: string[];
+  setup?: ChannelSetupContract;
   instances?: NanobotChannelInstanceInfo[];
   installed: boolean;
   ready: boolean;
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
   install_supported: boolean;
   requires_restart: boolean;
+}
+
+export interface ChannelSetupContractField {
+  key: string;
+  field: string;
+  kind: "string" | "secret" | "int" | "bool" | "list" | "enum" | string;
+  choices: string[];
+  required: boolean;
+}
+
+export interface ChannelSetupContract {
+  fields: ChannelSetupContractField[];
+  requirements: string[][][];
+  multi_instance: boolean;
+  official_url?: string;
 }
 
 export interface NanobotChannelInstanceInfo {

@@ -3,6 +3,7 @@ import type { useTranslation } from "react-i18next";
 
 import {
   CHANNEL_PRESENTATION,
+  type ChannelConfigField,
   type ChannelSetupPresentation,
 } from "@/components/settings/channels/catalog";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -12,7 +13,7 @@ import type { NanobotFeatureInfo } from "@/lib/types";
 export type ChannelFilter = "all" | "on" | "off";
 
 export function channelSetup(feature: NanobotFeatureInfo): ChannelSetupPresentation {
-  return CHANNEL_PRESENTATION[feature.name]?.setup ?? {
+  const presentation = CHANNEL_PRESENTATION[feature.name]?.setup ?? {
     summary:
       "Enable turns on this channel in nanobot, but this integration still needs platform-specific setup before it can receive messages.",
     steps: [
@@ -21,6 +22,53 @@ export function channelSetup(feature: NanobotFeatureInfo): ChannelSetupPresentat
       "Restart nanobot, then send a small test message from that platform.",
     ],
   };
+  const contract = feature.setup;
+  if (!contract) return presentation;
+
+  const primaryFields = new Map((presentation.fields ?? []).map((field) => [field.key, field]));
+  const manualFields = new Map((presentation.manualFields ?? []).map((field) => [field.key, field]));
+  const authoritativeFields = contract.fields.map((field): ChannelConfigField => {
+    const local = primaryFields.get(field.key) ?? manualFields.get(field.key);
+    const localOptions = new Map((local?.options ?? []).map((option) => [option.value, option]));
+    return {
+      ...local,
+      key: field.key,
+      label: local?.label ?? fieldLabel(field.field),
+      secret: field.kind === "secret",
+      optional: !field.required,
+      inputType: field.kind === "int" ? "number" : local?.inputType,
+      options:
+        field.kind === "enum"
+          ? field.choices.map((choice) => localOptions.get(choice) ?? {
+              value: choice,
+              label: fieldLabel(choice),
+            })
+          : field.kind === "bool"
+            ? local?.options ?? [
+                { value: "true", label: "True" },
+                { value: "false", label: "False" },
+              ]
+            : local?.options,
+    };
+  });
+  const manualKeys = new Set(manualFields.keys());
+  const fields = authoritativeFields.filter((field) => !manualKeys.has(field.key));
+  const manual = authoritativeFields.filter((field) => manualKeys.has(field.key));
+
+  return {
+    ...presentation,
+    officialUrl: contract.official_url ?? presentation.officialUrl,
+    fields: fields.length ? fields : undefined,
+    manualFields: manual.length ? manual : undefined,
+  };
+}
+
+function fieldLabel(value: string): string {
+  const spaced = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  return spaced ? spaced[0].toUpperCase() + spaced.slice(1) : value;
 }
 
 export function ChannelLogo({

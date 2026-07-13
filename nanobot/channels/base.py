@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,16 @@ from nanobot.pairing import (
     generate_code,
     is_approved,
 )
+
+
+@dataclass(frozen=True)
+class ChannelInstanceSpec:
+    """Runtime description for one independently managed channel instance."""
+
+    base_name: str
+    instance_id: str
+    runtime_name: str
+    config: Any
 
 
 class BaseChannel(ABC):
@@ -269,6 +280,123 @@ class BaseChannel(ABC):
     def default_config(cls) -> dict[str, Any]:
         """Return default config for onboard. Override in plugins to auto-populate config.json."""
         return {"enabled": False}
+
+    @classmethod
+    def setup_spec(cls) -> Any | None:
+        """Return the optional WebUI setup contract owned by this channel.
+
+        Plugins may override this hook and return ``ChannelSetupSpec``.  ``Any``
+        avoids coupling the runtime base class to the WebUI-facing DTO module.
+        """
+        return None
+
+    @classmethod
+    def validate_setup(cls, values: dict[str, Any]) -> dict[str, Any] | None:
+        """Optionally validate setup values for generic Settings consumers.
+
+        Return ``None`` to use nanobot's generic required-field validation, or
+        a validation payload containing at least ``status`` and ``checks``.
+        The hook is synchronous because Settings runs it in a worker thread.
+        """
+        return None
+
+    @classmethod
+    def runtime_name(cls, instance_id: str = "default") -> str:
+        """Return the routing name for one runtime instance."""
+        return cls.name
+
+    @classmethod
+    def instance_specs(
+        cls,
+        section: Any,
+        *,
+        enabled_only: bool = True,
+    ) -> list[ChannelInstanceSpec]:
+        """Expand persisted config into independently managed runtime instances."""
+        enabled = (
+            bool(section.get("enabled", False))
+            if isinstance(section, dict)
+            else bool(getattr(section, "enabled", False))
+        )
+        if enabled_only and not enabled:
+            return []
+        return [
+            ChannelInstanceSpec(
+                base_name=cls.name,
+                instance_id="default",
+                runtime_name=cls.runtime_name(),
+                config=section,
+            )
+        ]
+
+    @classmethod
+    def set_config_enabled(
+        cls,
+        section: Any,
+        enabled: bool,
+        *,
+        instance_id: str = "default",
+    ) -> dict[str, Any]:
+        """Return config with one instance enabled or disabled."""
+        if instance_id not in {"", "default"}:
+            raise ValueError(f"{cls.name} does not support multiple instances")
+        from nanobot.config.loader import merge_missing_defaults
+
+        existing = dict(section) if isinstance(section, dict) else {}
+        merged = merge_missing_defaults(existing, cls.default_config())
+        merged["enabled"] = enabled
+        return merged
+
+    @classmethod
+    def instance_config(
+        cls,
+        section: Any,
+        *,
+        instance_id: str = "default",
+    ) -> dict[str, Any]:
+        """Return the editable config for one instance."""
+        selected = next(
+            (
+                spec
+                for spec in cls.instance_specs(section, enabled_only=False)
+                if spec.instance_id == instance_id
+            ),
+            None,
+        )
+        if selected is None:
+            return {}
+        config = selected.config
+        if hasattr(config, "model_dump"):
+            return dict(config.model_dump(mode="json", by_alias=True))
+        return dict(config) if isinstance(config, dict) else {}
+
+    @classmethod
+    def update_instance_config(
+        cls,
+        section: Any,
+        values: dict[str, Any],
+        *,
+        instance_id: str = "default",
+    ) -> dict[str, Any]:
+        """Return a persisted channel section after editing one instance."""
+        if instance_id not in {"", "default"}:
+            raise ValueError(f"{cls.name} does not support multiple instances")
+        return values
+
+    @classmethod
+    def feature_instances(cls, section: Any) -> list[dict[str, Any]] | None:
+        """Return optional instance summaries for Settings feature payloads."""
+        return None
+
+    @classmethod
+    def refresh_feature_metadata(
+        cls,
+        config_path: Path,
+        *,
+        instance_id: str = "default",
+    ) -> bool:
+        """Refresh optional remote metadata after an explicit feature action."""
+        return False
 
     @property
     def is_running(self) -> bool:

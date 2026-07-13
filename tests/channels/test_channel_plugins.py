@@ -23,9 +23,10 @@ from nanobot.bus.outbound_events import (
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels._setup import ChannelFieldSpec, ChannelSetupSpec, SetupRequirement
+from nanobot.channels.base import BaseChannel, ChannelInstanceSpec
 from nanobot.channels.manager import ChannelManager
-from nanobot.config.loader import save_config
+from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import ChannelsConfig, Config
 from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
 from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
@@ -57,6 +58,37 @@ class _FakePlugin(BaseChannel):
         return True
 
 
+class _SetupPlugin(_FakePlugin):
+    name = "setupplugin"
+    display_name = "Setup Plugin"
+
+    @classmethod
+    def setup_spec(cls) -> ChannelSetupSpec:
+        return ChannelSetupSpec(
+            fields={
+                "token": ChannelFieldSpec(kind="secret"),
+                "region": ChannelFieldSpec(
+                    kind="enum",
+                    choices=frozenset({"us", "eu"}),
+                ),
+            },
+            required=(SetupRequirement((("token",),)),),
+            official_url="https://plugin.example/setup",
+        )
+
+    @classmethod
+    def validate_setup(cls, values):
+        token = str(values.get("token") or "")
+        return {
+            "status": "connected" if token.startswith("plugin-") else "invalid",
+            "checks": [{
+                "id": "plugin",
+                "label": "Plugin validation",
+                "status": "pass" if token.startswith("plugin-") else "fail",
+            }],
+        }
+
+
 class _FakeTelegram(BaseChannel):
     """Plugin that tries to shadow built-in telegram."""
     name = "telegram"
@@ -72,9 +104,9 @@ class _FakeTelegram(BaseChannel):
         pass
 
 
-class _FakeFeishu(BaseChannel):
-    name = "feishu"
-    display_name = "Feishu"
+class _FakeMultiChannel(BaseChannel):
+    name = "multi"
+    display_name = "Multi"
 
     @classmethod
     def default_config(cls) -> dict:
@@ -82,13 +114,26 @@ class _FakeFeishu(BaseChannel):
             "instanceId": "default",
             "name": "nanobot",
             "enabled": False,
-            "appId": "",
-            "appSecret": "",
-            "domain": "feishu",
-            "groupPolicy": "mention",
-            "topicIsolation": True,
-            "allowFrom": [],
+            "token": "",
         }
+
+    @classmethod
+    def runtime_name(cls, instance_id: str = "default") -> str:
+        return cls.name if instance_id == "default" else f"{cls.name}.{instance_id}"
+
+    @classmethod
+    def instance_specs(cls, section, *, enabled_only=True):
+        instances = section.get("instances", []) if isinstance(section, dict) else []
+        return [
+            ChannelInstanceSpec(
+                base_name=cls.name,
+                instance_id=item["id"],
+                runtime_name=cls.runtime_name(item["id"]),
+                config=item,
+            )
+            for item in instances
+            if not enabled_only or item.get("enabled", False)
+        ]
 
     async def start(self) -> None:
         pass
@@ -164,36 +209,33 @@ def test_channels_config_extract_document_text_accepts_camel_alias():
     assert cfg.extract_document_text is False
 
 
-def test_channel_manager_expands_feishu_instances(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+def test_channel_manager_delegates_instance_expansion_to_channel(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["multi"])
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_enabled",
-        lambda enabled, _names=None, warn_import_errors=True: {"feishu": _FakeFeishu}
-        if "feishu" in enabled
+        lambda enabled, _names=None, warn_import_errors=True: {"multi": _FakeMultiChannel}
+        if "multi" in enabled
         else {},
     )
 
     cfg = Config.model_validate({
         "channels": {
-            "feishu": {
+            "multi": {
                 "instances": [
                     {
                         "id": "default",
                         "enabled": True,
-                        "appId": "cli_default",
-                        "appSecret": "secret",
+                        "token": "default",
                     },
                     {
                         "id": "product",
                         "enabled": True,
-                        "appId": "cli_product",
-                        "appSecret": "secret",
+                        "token": "product",
                     },
                     {
                         "id": "off",
                         "enabled": False,
-                        "appId": "cli_off",
-                        "appSecret": "secret",
+                        "token": "off",
                     },
                 ]
             }
@@ -202,9 +244,9 @@ def test_channel_manager_expands_feishu_instances(monkeypatch: pytest.MonkeyPatc
 
     manager = ChannelManager(cfg, MessageBus())
 
-    assert set(manager.channels) == {"feishu", "feishu.product"}
-    assert manager.channels["feishu"].name == "feishu"
-    assert manager.channels["feishu.product"].name == "feishu.product"
+    assert set(manager.channels) == {"multi", "multi.product"}
+    assert manager.channels["multi"].name == "multi"
+    assert manager.channels["multi.product"].name == "multi.product"
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +265,93 @@ def test_discover_plugins_loads_entry_points():
 
     assert "line" in result
     assert result["line"] is _FakePlugin
+
+
+def test_plugin_setup_contract_drives_feature_payload(monkeypatch: pytest.MonkeyPatch):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({
+        "channels": {
+            "setupplugin": {
+                "enabled": False,
+                "token": "plugin-secret",
+                "region": "eu",
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda enabled_names=None: {"setupplugin": _SetupPlugin},
+    )
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    feature = payload["features"][0]
+    assert feature["configured"] is True
+    assert feature["setup"] == {
+        "fields": [
+            {
+                "key": "channels.setupplugin.token",
+                "field": "token",
+                "kind": "secret",
+                "choices": [],
+                "required": True,
+            },
+            {
+                "key": "channels.setupplugin.region",
+                "field": "region",
+                "kind": "enum",
+                "choices": ["eu", "us"],
+                "required": False,
+            },
+        ],
+        "requirements": [[['token']]],
+        "multi_instance": False,
+        "official_url": "https://plugin.example/setup",
+    }
+    assert feature["configured_fields"] == [
+        "channels.setupplugin.token",
+        "channels.setupplugin.region",
+    ]
+    assert feature["config_values"] == {"channels.setupplugin.region": "eu"}
+
+
+def test_plugin_setup_contract_drives_save_and_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from nanobot.config import loader
+    from nanobot.webui.channel_validation import validate_channel_config
+    from nanobot.webui.settings_routes import WebUISettingsRouter
+
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda enabled_names=None: {"setupplugin": _SetupPlugin},
+    )
+    router = object.__new__(WebUISettingsRouter)
+
+    saved = router._save_channel_config_values(
+        "setupplugin",
+        {
+            "channels.setupplugin.token": "plugin-secret",
+            "channels.setupplugin.region": "eu",
+        },
+    )
+    validation = validate_channel_config("setupplugin")
+
+    assert saved == [
+        "channels.setupplugin.token",
+        "channels.setupplugin.region",
+    ]
+    assert load_config(config_path).channels.setupplugin["token"] == "plugin-secret"
+    assert validation["status"] == "connected"
+    assert validation["checks"][0]["id"] == "plugin"
 
 
 def test_discover_plugins_skips_names_outside_enabled_set():
@@ -1333,10 +1462,54 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
     ]
 
 
-def test_optional_features_payload_backfills_saved_feishu_identity(monkeypatch, tmp_path):
+def test_optional_features_payload_does_not_refresh_saved_feishu_identity(monkeypatch, tmp_path):
     from nanobot.channels import feishu as feishu_module
     from nanobot.config import loader
     from nanobot.optional_features import optional_features_payload
+
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({
+            "channels": {
+                "feishu": {
+                    "instances": [{
+                        "id": "default",
+                        "name": "nanobot",
+                        "enabled": True,
+                        "appId": "cli_default",
+                        "appSecret": "secret",
+                    }]
+                }
+            }
+        }),
+        config_path,
+    )
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr(
+        feishu_module,
+        "fetch_feishu_app_identity",
+        lambda *_args: pytest.fail("feature discovery must not call Feishu"),
+    )
+    before = config_path.read_text(encoding="utf-8")
+
+    payload = optional_features_payload()
+
+    instance = payload["features"][0]["instances"][0]
+    assert instance["display_name"] == "nanobot"
+    assert instance["avatar_url"] == ""
+    assert config_path.read_text(encoding="utf-8") == before
+
+
+def test_enable_optional_feature_refreshes_feishu_identity(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.channels import feishu as feishu_module
+    from nanobot.config import loader
+    from nanobot.optional_features import enable_optional_feature
 
     config_path = tmp_path / "config.json"
     save_config(
@@ -1363,14 +1536,14 @@ def test_optional_features_payload_backfills_saved_feishu_identity(monkeypatch, 
     monkeypatch.setattr(
         feishu_module,
         "fetch_feishu_app_identity",
-        lambda app_id, app_secret, domain: {
+        lambda *_args: {
             "displayName": "Xubin Ren的智能助手",
             "avatarUrl": "https://example.com/assistant.png",
             "identityFetchedAt": "2026-07-06T00:00:00Z",
         },
     )
 
-    payload = optional_features_payload()
+    payload = enable_optional_feature("feishu", config_path=config_path)
 
     instance = payload["features"][0]["instances"][0]
     assert instance["display_name"] == "Xubin Ren的智能助手"
@@ -1381,52 +1554,6 @@ def test_optional_features_payload_backfills_saved_feishu_identity(monkeypatch, 
     assert saved["displayName"] == "Xubin Ren的智能助手"
     assert saved["avatarUrl"] == "https://example.com/assistant.png"
     assert saved["identityFetchedAt"] == "2026-07-06T00:00:00Z"
-
-
-def test_optional_features_payload_records_feishu_identity_attempt_on_empty_result(
-    monkeypatch,
-    tmp_path,
-):
-    from nanobot.channels import feishu as feishu_module
-    from nanobot.config import loader
-    from nanobot.optional_features import optional_features_payload
-
-    config_path = tmp_path / "config.json"
-    save_config(
-        Config.model_validate({
-            "channels": {
-                "feishu": {
-                    "instances": [{
-                        "id": "default",
-                        "name": "nanobot",
-                        "enabled": True,
-                        "appId": "cli_default",
-                        "appSecret": "secret",
-                    }]
-                }
-            }
-        }),
-        config_path,
-    )
-    monkeypatch.setattr(loader, "_current_config_path", config_path)
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
-    monkeypatch.setattr(feishu_module, "FEISHU_AVAILABLE", True)
-    monkeypatch.setattr(feishu_module, "fetch_feishu_app_identity", lambda *args: {})
-    monkeypatch.setattr(feishu_module, "_identity_timestamp", lambda: "2026-07-06T00:00:00Z")
-
-    payload = optional_features_payload()
-
-    instance = payload["features"][0]["instances"][0]
-    assert instance["display_name"] == "nanobot"
-    assert instance["avatar_url"] == ""
-
-    data = json.loads(config_path.read_text(encoding="utf-8"))
-    saved = data["channels"]["feishu"]["instances"][0]
-    assert saved["identityFetchedAt"] == "2026-07-06T00:00:00Z"
-    assert "displayName" not in saved
-    assert "avatarUrl" not in saved
 
 
 def test_optional_features_payload_preserves_legacy_flat_feishu_config(monkeypatch, tmp_path):
@@ -1452,25 +1579,22 @@ def test_optional_features_payload_preserves_legacy_flat_feishu_config(monkeypat
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["feishu"])
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
-    monkeypatch.setattr(feishu_module, "FEISHU_AVAILABLE", True)
     monkeypatch.setattr(
         feishu_module,
         "fetch_feishu_app_identity",
-        lambda *_args: {
-            "displayName": "Legacy assistant",
-            "avatarUrl": "https://example.com/legacy.png",
-            "identityFetchedAt": "2026-07-06T00:00:00Z",
-        },
+        lambda *_args: pytest.fail("feature discovery must not call Feishu"),
     )
+    before = config_path.read_text(encoding="utf-8")
 
     payload = optional_features_payload()
 
-    assert payload["features"][0]["instances"][0]["display_name"] == "Legacy assistant"
+    assert payload["features"][0]["instances"][0]["display_name"] == "nanobot"
+    assert config_path.read_text(encoding="utf-8") == before
     saved = json.loads(config_path.read_text(encoding="utf-8"))["channels"]["feishu"]
     assert saved["appId"] == "cli_legacy"
     assert saved["appSecret"] == "legacy-secret"
-    assert saved["displayName"] == "Legacy assistant"
-    assert saved["avatarUrl"] == "https://example.com/legacy.png"
+    assert "displayName" not in saved
+    assert "avatarUrl" not in saved
     assert "instances" not in saved
 
 

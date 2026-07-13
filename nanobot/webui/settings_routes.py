@@ -21,6 +21,7 @@ from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels._setup import channel_setup_spec
+from nanobot.channels.registry import load_any_channel_class
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.optional_features import (
     OptionalFeatureError,
@@ -622,10 +623,7 @@ class WebUISettingsRouter:
 
         try:
             instance_id = (_query_first(query, "instance_id") or "").strip()
-            runtime_name = name
-            if name == "feishu" and instance_id and instance_id != "default":
-                runtime_name = f"feishu.{instance_id}"
-            result = self._channel_feature_action(action, runtime_name)
+            result = self._channel_feature_action(action, name, instance_id)
             if inspect.isawaitable(result):
                 result = await result
         except Exception as exc:
@@ -700,7 +698,7 @@ class WebUISettingsRouter:
             return self._json_response(payload)
 
         feature_query = {"name": [name]}
-        if name == "feishu":
+        if instance_id:
             feature_query["instance_id"] = [instance_id]
 
         try:
@@ -766,28 +764,30 @@ class WebUISettingsRouter:
     ) -> list[str]:
         if not name:
             raise WebUISettingsError("missing channel name")
-        setup_spec = channel_setup_spec(name)
+        try:
+            channel_cls = load_any_channel_class(name)
+        except ImportError:
+            channel_cls = None
+        setup_spec = channel_setup_spec(name, channel_cls)
         if setup_spec is None:
             raise WebUISettingsError(f"channel '{name}' cannot be configured from WebUI", status=404)
+        if channel_cls is None and setup_spec.multi_instance:
+            raise WebUISettingsError(
+                f"channel '{name}' must be installed before configuring an instance",
+                status=409,
+            )
         field_types = setup_spec.route_field_types
         if not raw_values:
             return []
 
         config = load_config()
         section = getattr(config.channels, name, None)
-        if name == "feishu":
-            from nanobot.channels._feishu_instances import feishu_instance_specs
-            from nanobot.channels.feishu import FeishuChannel
-
-            specs = feishu_instance_specs(section, FeishuChannel.default_config())
-            selected = next((spec for spec in specs if spec.instance_id == instance_id), None)
-            channel_config = dict(selected.config) if selected is not None else {}
+        if channel_cls is not None:
+            channel_config = channel_cls.instance_config(section, instance_id=instance_id)
         elif hasattr(section, "model_dump"):
             channel_config = section.model_dump(mode="json", by_alias=True)
-        elif isinstance(section, dict):
-            channel_config = dict(section)
         else:
-            channel_config = {}
+            channel_config = dict(section) if isinstance(section, dict) else {}
 
         saved: list[str] = []
         prefix = f"channels.{name}."
@@ -804,19 +804,16 @@ class WebUISettingsRouter:
             self._assign_channel_config_value(channel_config, field, value)
             saved.append(raw_key)
 
-        if name == "feishu":
-            from nanobot.channels._feishu_instances import upsert_feishu_instance
-            from nanobot.channels.feishu import FeishuChannel
-
-            existing = getattr(config.channels, name, None)
-            channel_config = upsert_feishu_instance(
-                existing if isinstance(existing, dict) else {},
-                FeishuChannel.default_config(),
-                instance_id,
+        updated_section = (
+            channel_cls.update_instance_config(
+                section,
                 channel_config,
+                instance_id=instance_id,
             )
-
-        setattr(config.channels, name, channel_config)
+            if channel_cls is not None
+            else channel_config
+        )
+        setattr(config.channels, name, updated_section)
         save_config(config)
         return saved
 

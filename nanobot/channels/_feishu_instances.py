@@ -8,25 +8,15 @@ channel into a multi-instance abstraction.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
+from nanobot.channels.base import ChannelInstanceSpec
 from nanobot.config.loader import merge_missing_defaults
 
 DEFAULT_INSTANCE_ID = "default"
 _INSTANCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
-@dataclass(frozen=True)
-class ChannelInstanceSpec:
-    """Runtime description for one channel instance."""
-
-    base_name: str
-    instance_id: str
-    runtime_name: str
-    config: dict[str, Any]
 
 
 def validate_instance_id(value: str) -> str:

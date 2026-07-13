@@ -51,6 +51,7 @@ class ChannelSetupSpec:
     fields: dict[str, ChannelFieldSpec]
     required: tuple[SetupRequirement, ...] = ()
     official_url: str | None = None
+    multi_instance: bool = False
 
     @property
     def secrets(self) -> frozenset[str]:
@@ -80,6 +81,34 @@ class ChannelSetupSpec:
         return bool(self.required) and all(
             requirement.is_satisfied(values) for requirement in self.required
         )
+
+    def to_public_dict(self, channel_name: str) -> dict[str, Any]:
+        """Serialize the writable setup contract for generic WebUI consumers."""
+        simple_required = set(self.simple_required_fields)
+        fields = []
+        for name, field in self.fields.items():
+            if not field.writable:
+                continue
+            fields.append(
+                {
+                    "key": f"channels.{channel_name}.{name}",
+                    "field": name,
+                    "kind": field.kind,
+                    "choices": sorted(field.choices),
+                    "required": name in simple_required,
+                }
+            )
+        payload: dict[str, Any] = {
+            "fields": fields,
+            "requirements": [
+                [list(group) for group in requirement.alternatives]
+                for requirement in self.required
+            ],
+            "multi_instance": self.multi_instance,
+        }
+        if self.official_url:
+            payload["official_url"] = self.official_url
+        return payload
 
 
 def _field(
@@ -290,11 +319,31 @@ CHANNEL_SETUP_SPECS: dict[str, ChannelSetupSpec] = {
         },
         required=(_required("appId"), _required("appSecret")),
         official_url="https://open.feishu.cn/app",
+        multi_instance=True,
     ),
 }
 
 
-def channel_setup_spec(name: str) -> ChannelSetupSpec | None:
+def channel_setup_spec(
+    name: str,
+    channel_cls: type[Any] | None = None,
+) -> ChannelSetupSpec | None:
+    """Return a channel-owned setup contract, falling back to built-in metadata.
+
+    External channel plugins can override ``BaseChannel.setup_spec`` without
+    requiring a nanobot core change.  The built-in table remains a compatibility
+    fallback while built-in channels migrate to the same hook incrementally.
+    """
+    if channel_cls is not None:
+        provider = getattr(channel_cls, "setup_spec", None)
+        if callable(provider):
+            spec = provider()
+            if spec is not None:
+                if not isinstance(spec, ChannelSetupSpec):
+                    raise TypeError(
+                        f"{channel_cls.__name__}.setup_spec() must return ChannelSetupSpec or None"
+                    )
+                return spec
     return CHANNEL_SETUP_SPECS.get(name)
 
 
