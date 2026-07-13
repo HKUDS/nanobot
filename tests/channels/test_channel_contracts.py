@@ -10,6 +10,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.contracts import (
+    ChannelActivation,
     ChannelFieldSpec,
     ChannelSetupSpec,
     SetupRequirement,
@@ -19,6 +20,7 @@ from nanobot.channels.contracts import (
     channel_set_config_enabled,
     channel_update_instance_config,
 )
+from nanobot.channels.registry import discover_channel_names
 
 
 class _SingleChannel(BaseChannel):
@@ -69,6 +71,45 @@ def test_management_contract_does_not_expand_runtime_base_class() -> None:
     }
 
     assert management_hooks.isdisjoint(BaseChannel.__dict__)
+
+
+def test_contract_module_is_not_discovered_as_a_channel() -> None:
+    assert "contracts" not in discover_channel_names()
+
+
+@pytest.mark.parametrize(
+    ("section", "default", "expected"),
+    [
+        pytest.param({"enabled": True}, False, True, id="flat-enabled"),
+        pytest.param({}, True, True, id="flat-inherits-default"),
+        pytest.param(
+            {"enabled": False, "instances": [{"enabled": True}]},
+            False,
+            True,
+            id="instance-overrides-parent",
+        ),
+        pytest.param(
+            {"enabled": True, "instances": [{}, {"enabled": False}]},
+            False,
+            True,
+            id="instance-inherits-parent",
+        ),
+        pytest.param(
+            {"enabled": True, "instances": []},
+            False,
+            False,
+            id="empty-instance-list",
+        ),
+    ],
+)
+def test_channel_activation_normalizes_persisted_config(
+    section: dict[str, Any],
+    default: bool,
+    expected: bool,
+) -> None:
+    activation = ChannelActivation.from_config(section)
+
+    assert activation.resolve(default=default) is expected
 
 
 def _instance_contract_cases():

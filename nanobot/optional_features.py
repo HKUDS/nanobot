@@ -15,6 +15,7 @@ from packaging.utils import canonicalize_name
 
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.contracts import (
+    ChannelActivation,
     ChannelSetupSpec,
     channel_feature_instances,
     channel_field_value,
@@ -316,17 +317,7 @@ def channel_enabled(config: Config, name: str, channel_cls: Any | None = None) -
         return default_enabled
     if channel_cls is not None:
         return bool(channel_instance_specs(channel_cls, section, enabled_only=True))
-    if isinstance(section, dict):
-        instances = section.get("instances")
-        if isinstance(instances, list):
-            inherited = bool(section.get("enabled", default_enabled))
-            return any(
-                bool(item.get("enabled", inherited))
-                for item in instances
-                if isinstance(item, dict)
-            )
-        return bool(section.get("enabled", default_enabled))
-    return bool(getattr(section, "enabled", default_enabled))
+    return ChannelActivation.from_config(section).resolve(default=default_enabled)
 
 
 def _channel_config_snapshot(

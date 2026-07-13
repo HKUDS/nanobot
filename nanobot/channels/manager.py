@@ -25,7 +25,11 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.channels.contracts import channel_instance_specs, channel_runtime_name
+from nanobot.channels.contracts import (
+    ChannelActivation,
+    channel_instance_specs,
+    channel_runtime_name,
+)
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
 from nanobot.utils.restart import (
@@ -65,21 +69,6 @@ def _default_channel_config(name: str) -> dict[str, Any] | None:
     from nanobot.channels.websocket import WebSocketChannel
 
     return WebSocketChannel.default_config()
-
-
-def _channel_config_enabled(name: str, section: Any) -> bool:
-    default_enabled = name in DEFAULT_ENABLED_CHANNELS
-    if isinstance(section, dict):
-        instances = section.get("instances")
-        if isinstance(instances, list):
-            inherited = bool(section.get("enabled", default_enabled))
-            return any(
-                bool(item.get("enabled", inherited))
-                for item in instances
-                if isinstance(item, dict)
-            )
-        return bool(section.get("enabled", default_enabled))
-    return bool(getattr(section, "enabled", default_enabled))
 
 
 class ChannelManager:
@@ -215,7 +204,8 @@ class ChannelManager:
             section = self._channel_section(name, default_sections=default_sections)
             if section is None:
                 continue
-            if _channel_config_enabled(name, section):
+            activation = ChannelActivation.from_config(section)
+            if activation.resolve(default=name in DEFAULT_ENABLED_CHANNELS):
                 enabled_names.add(name)
 
         for name, cls in discover_enabled(

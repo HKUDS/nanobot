@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 _INTERNAL = frozenset({
     "base",
+    "contracts",
     "manager",
     "registry",
 })

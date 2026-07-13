@@ -11,6 +11,7 @@ RouteFieldType = str | tuple[str, set[str]]
 SetupValidator = Callable[[dict[str, Any]], dict[str, Any]]
 
 __all__ = [
+    "ChannelActivation",
     "ChannelFieldSpec",
     "ChannelInstanceSpec",
     "ChannelSetupSpec",
@@ -26,6 +27,52 @@ __all__ = [
     "refresh_channel_feature_metadata",
     "stringify_channel_value",
 ]
+
+
+_MISSING = object()
+
+
+@dataclass(frozen=True)
+class ChannelActivation:
+    """Normalized enablement state used before a channel runtime is imported.
+
+    Channel configuration may be a Pydantic model or persisted JSON, and a
+    channel may expose independently enabled instances.  Parse that storage
+    shape once here so discovery code never needs to inspect raw config keys.
+    """
+
+    enabled: bool | None = None
+    instances: tuple["ChannelActivation", ...] | None = None
+
+    @classmethod
+    def from_config(cls, section: Any) -> "ChannelActivation":
+        values = _config_mapping(section)
+        if values is None:
+            raw_enabled = getattr(section, "enabled", _MISSING)
+            return cls(enabled=None if raw_enabled is _MISSING else bool(raw_enabled))
+
+        raw_enabled = values.get("enabled", _MISSING)
+        raw_instances = values.get("instances", _MISSING)
+        instances = (
+            tuple(
+                cls.from_config(item)
+                for item in raw_instances
+                if _config_mapping(item) is not None
+            )
+            if isinstance(raw_instances, list)
+            else None
+        )
+        return cls(
+            enabled=None if raw_enabled is _MISSING else bool(raw_enabled),
+            instances=instances,
+        )
+
+    def resolve(self, *, default: bool = False) -> bool:
+        """Return whether the section contains at least one enabled runtime."""
+        inherited = default if self.enabled is None else self.enabled
+        if self.instances is None:
+            return inherited
+        return any(instance.resolve(default=inherited) for instance in self.instances)
 
 
 @dataclass(frozen=True)
@@ -288,6 +335,13 @@ def stringify_channel_value(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
     return str(value)
+
+
+def _config_mapping(value: Any) -> dict[str, Any] | None:
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(mode="json", by_alias=True)
+        return dumped if isinstance(dumped, dict) else None
+    return value if isinstance(value, dict) else None
 
 
 def _camel_to_snake(value: str) -> str:
