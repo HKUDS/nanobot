@@ -44,6 +44,7 @@ export type RestoredReadyImage = RestoredReadyAttachment;
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
 export type AttachmentError =
   | "unsupported_type"   // server whitelist excludes this MIME
+  | "empty_file"         // backend data-URL decoder rejects empty payloads
   | "too_many_attachments" // per-message cap (4) reached before enqueue
   | "magic_mismatch"     // extension lies about the real content
   | "decode_failed"      // Worker couldn't decode / re-encode
@@ -97,18 +98,18 @@ function extensionOf(name: string): string {
 
 function mimeForFile(file: File): string {
   const byName = DOCUMENT_MIME_BY_EXTENSION.get(extensionOf(file.name));
+  if (byName) return byName;
   if (!file.type || file.type === "application/octet-stream") {
-    return byName || "application/octet-stream";
+    return "application/octet-stream";
   }
   return file.type;
 }
 
 export function acceptedAttachmentKind(file: File): AttachmentKind | null {
+  if (DOCUMENT_MIME_BY_EXTENSION.has(extensionOf(file.name))) return "file";
   if (ACCEPTED_IMAGE_MIMES.has(file.type)) return "image";
   const mime = mimeForFile(file);
-  if (ACCEPTED_DOCUMENT_MIMES.has(mime) || DOCUMENT_MIME_BY_EXTENSION.has(extensionOf(file.name))) {
-    return "file";
-  }
+  if (ACCEPTED_DOCUMENT_MIMES.has(mime)) return "file";
   return null;
 }
 
@@ -251,6 +252,10 @@ export function useAttachedImages(): UseAttachedImagesApi {
         const kind = acceptedAttachmentKind(file);
         if (!kind) {
           rejected.push({ file, reason: "unsupported_type" });
+          continue;
+        }
+        if (file.size === 0) {
+          rejected.push({ file, reason: "empty_file" });
           continue;
         }
         if (slot <= 0) {

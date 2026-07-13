@@ -1035,11 +1035,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（已自动压缩）",
       "imageRejected": {
         "unsupported_type": "不支持的文件类型",
+        "empty_file": "不能附加空文件",
         "too_many_attachments": "每条消息最多 {{max}} 个附件",
         "too_many_images": "每条消息最多 {{max}} 张图片",
         "magic_mismatch": "文件看起来不像真实的图片",
         "decode_failed": "无法解码这张图片",
-        "too_large": "图片太大，请换一张小一点的",
+        "too_large": "文件太大，请换一个小一点的",
         "io": "无法读取该文件"
       },
       "goalStateCloseAria": "关闭目标",

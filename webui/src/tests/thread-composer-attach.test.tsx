@@ -28,6 +28,10 @@ function pdfFile(name = "report.pdf") {
   return new File(["%PDF-1.4"], name, { type: "application/pdf" });
 }
 
+function csvFile(name = "report.csv", type = "application/vnd.ms-excel") {
+  return new File(["name,value\nnanobot,1"], name, { type });
+}
+
 function resolveReady(file: File): EncodeResponse {
   return {
     id: "stub",
@@ -119,6 +123,105 @@ describe("ThreadComposer — attachments", () => {
     expect(attachments[0].preview.kind).toBe("file");
   });
 
+  it.each(["application/vnd.ms-excel", "image/png"])(
+    "normalizes document MIME from the file extension when the browser reports %s",
+    async (browserMime) => {
+      const file = csvFile("report.csv", browserMime);
+      const onSend = vi.fn();
+
+      render(<ThreadComposer onSend={onSend} />);
+
+      const input = screen
+        .getByLabelText(/message input/i)
+        .closest("form")!
+        .querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [file] } });
+      });
+
+      await waitFor(() =>
+        expect(screen.getByTestId("composer-chip")).toHaveTextContent("report.csv"),
+      );
+
+      const textarea = screen.getByLabelText(/message input/i);
+      fireEvent.change(textarea, { target: { value: "summarize" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      const [, attachments] = onSend.mock.calls[0];
+      expect(attachments[0].media.data_url).toMatch(/^data:text\/csv;base64,/);
+      expect(encodeImage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects empty attachments before sending them to the gateway", async () => {
+    const file = new File([], "empty.csv", { type: "application/vnd.ms-excel" });
+    const onSend = vi.fn();
+
+    render(<ThreadComposer onSend={onSend} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+
+    expect(screen.getByText("Empty files cannot be attached")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+    expect(encodeImage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("accepts supported documents from paste and drop", async () => {
+    const pasted = pdfFile("pasted.pdf");
+    const dropped = pdfFile("dropped.pdf");
+    const onSend = vi.fn();
+
+    render(<ThreadComposer onSend={onSend} />);
+
+    const textarea = screen.getByLabelText(/message input/i);
+    const form = textarea.closest("form")!;
+
+    await act(async () => {
+      fireEvent.paste(textarea, {
+        clipboardData: {
+          files: [pasted],
+          items: [{
+            kind: "file",
+            type: pasted.type,
+            getAsFile: () => pasted,
+          }],
+          types: ["Files"],
+          getData: () => "",
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("pasted.pdf")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.drop(form, {
+        dataTransfer: {
+          files: [dropped],
+          items: [],
+          types: ["Files"],
+          dropEffect: "copy",
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("dropped.pdf")).toBeInTheDocument(),
+    );
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
+    expect(encodeImage).not.toHaveBeenCalled();
+  });
+
   it("blocks send while an image is still encoding", async () => {
     const file = pngFile("slow.png");
     let resolveEncode: (r: EncodeResponse) => void = () => {};
@@ -153,7 +256,7 @@ describe("ThreadComposer — attachments", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a non-image paste silently without adding a chip", async () => {
+  it("keeps a plain-text paste untouched without adding a chip", async () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} />);
     const textarea = screen.getByLabelText(/message input/i);

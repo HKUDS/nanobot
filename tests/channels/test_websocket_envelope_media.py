@@ -1,4 +1,4 @@
-"""Tests for WS envelope media handling (client image upload path).
+"""Tests for WS envelope media handling (client attachment upload path).
 
 Exercises ``WebSocketChannel._dispatch_envelope`` for the ``message`` branch:
 decoding base64 data URLs, rejecting malformed / oversized / non-whitelisted
@@ -327,6 +327,32 @@ async def test_message_with_pdf_forwards_saved_path(tmp_path) -> None:
     assert saved.suffix == ".pdf"
     assert saved.name.endswith("_report.pdf")
     assert saved.read_bytes() == b"%PDF-1.4"
+
+
+@pytest.mark.asyncio
+async def test_message_with_csv_forwards_saved_path(tmp_path) -> None:
+    channel = _make_channel()
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "summarize",
+        "media": [
+            {"data_url": _data_url("text/csv", b"name,value\nnanobot,1"), "name": "report.csv"}
+        ],
+    }
+
+    with patch(
+        "nanobot.channels.websocket.get_media_dir", return_value=tmp_path
+    ):
+        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_awaited_once()
+    paths = channel._handle_message.call_args.kwargs["media"]
+    saved = Path(paths[0])
+    assert saved.suffix == ".csv"
+    assert saved.name.endswith("_report.csv")
+    assert saved.read_bytes() == b"name,value\nnanobot,1"
 
 
 @pytest.mark.asyncio

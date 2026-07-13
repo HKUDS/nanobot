@@ -895,7 +895,7 @@
         "edit": "Edit panduan",
         "drag": "Seret untuk mengurutkan"
       },
-      "attachImage": "Lampirkan gambar",
+      "attachImage": "Lampirkan file",
       "imageMode": {
         "label": "Buat gambar",
         "toggle": "Alihkan mode pembuatan gambar",
@@ -1012,11 +1012,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Tipe file tidak didukung",
+        "empty_file": "File kosong tidak dapat dilampirkan",
         "too_many_attachments": "Maksimal {{max}} lampiran per pesan",
         "too_many_images": "Maksimal {{max}} gambar per pesan",
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
         "decode_failed": "Tidak dapat mendekode gambar ini",
-        "too_large": "Gambar terlalu besar — coba yang lebih kecil",
+        "too_large": "File terlalu besar — coba yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {

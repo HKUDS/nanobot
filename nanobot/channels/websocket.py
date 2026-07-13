@@ -784,7 +784,7 @@ class WebSocketChannel(BaseChannel):
                     )
                     return
 
-            # Allow image-only turns (content may be empty when media is attached).
+            # Allow media-only turns (content may be empty when attachments are present).
             if not content.strip() and not media_paths:
                 await self._send_event(connection, "error", detail="missing content")
                 return

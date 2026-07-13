@@ -895,7 +895,7 @@
         "edit": "Sửa hướng dẫn",
         "drag": "Kéo để sắp xếp"
       },
-      "attachImage": "Đính kèm ảnh",
+      "attachImage": "Đính kèm tệp",
       "imageMode": {
         "label": "Tạo ảnh",
         "toggle": "Bật/tắt chế độ tạo ảnh",
@@ -1012,11 +1012,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
       "imageRejected": {
         "unsupported_type": "Loại tệp không được hỗ trợ",
+        "empty_file": "Không thể đính kèm tệp trống",
         "too_many_attachments": "Tối đa {{max}} tệp đính kèm mỗi tin nhắn",
         "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
         "magic_mismatch": "Tệp này không phải là một ảnh thực",
         "decode_failed": "Không thể giải mã ảnh này",
-        "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
+        "too_large": "Tệp quá lớn — hãy thử tệp nhỏ hơn",
         "io": "Không thể đọc tệp này"
       },
       "mentions": {

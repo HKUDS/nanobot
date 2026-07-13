@@ -62,6 +62,19 @@ def test_saves_document_with_safe_original_name(tmp_path) -> None:
     assert Path(result).read_bytes() == b"%PDF-1.4"
 
 
+def test_document_filename_cannot_escape_media_dir(tmp_path) -> None:
+    result = save_base64_data_url(
+        _data_url(b"%PDF-1.4", mime="application/pdf"),
+        tmp_path,
+        filename="../../escape.pdf",
+    )
+    assert result is not None
+    saved = Path(result)
+    assert saved.parent == tmp_path
+    assert saved.suffix == ".pdf"
+    assert saved.read_bytes() == b"%PDF-1.4"
+
+
 def test_returns_none_for_malformed_data_url(tmp_path) -> None:
     assert save_base64_data_url("not-a-data-url", tmp_path) is None
 

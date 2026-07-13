@@ -909,6 +909,8 @@ export function ThreadComposer({
       const key = `thread.composer.imageRejected.${reason}`;
       const fallback = reason === "too_many_attachments"
         ? `Max ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`
+        : reason === "empty_file"
+          ? "Empty files cannot be attached"
         : "Unsupported file type";
       return t(key, { max: MAX_ATTACHMENTS_PER_MESSAGE, defaultValue: fallback });
     },

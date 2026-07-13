@@ -68,8 +68,8 @@ export function useClipboardAndDrop(
     (event: React.ClipboardEvent) => {
       const files = extractImageFilesFromPaste(event);
       if (files.length === 0) return;
-      // Consume only when an image is actually present; plain-text paste still
-      // reaches the textarea unmolested.
+      // Consume only when an attachment is actually present; plain-text paste
+      // still reaches the textarea unmolested.
       event.preventDefault();
       onImageFiles(files);
     },

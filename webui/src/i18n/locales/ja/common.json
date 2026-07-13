@@ -895,7 +895,7 @@
         "edit": "ガイドを編集",
         "drag": "ドラッグして並べ替え"
       },
-      "attachImage": "画像を添付",
+      "attachImage": "ファイルを添付",
       "imageMode": {
         "label": "画像生成",
         "toggle": "画像生成モードを切り替え",
@@ -1012,11 +1012,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
       "imageRejected": {
         "unsupported_type": "対応していないファイル形式です",
+        "empty_file": "空のファイルは添付できません",
         "too_many_attachments": "1 メッセージにつき最大 {{max}} 件までです",
         "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
         "magic_mismatch": "画像ファイルではないようです",
         "decode_failed": "この画像をデコードできません",
-        "too_large": "画像が大きすぎます。小さいものを選んでください",
+        "too_large": "ファイルが大きすぎます。小さいものを選んでください",
         "io": "このファイルを読み込めません"
       },
       "mentions": {

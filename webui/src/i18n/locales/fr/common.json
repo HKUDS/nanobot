@@ -895,7 +895,7 @@
         "edit": "Modifier le guidage",
         "drag": "Faire glisser pour réordonner"
       },
-      "attachImage": "Joindre une image",
+      "attachImage": "Joindre des fichiers",
       "imageMode": {
         "label": "Génération d’image",
         "toggle": "Activer ou désactiver le mode génération d’image",
@@ -1012,11 +1012,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Type de fichier non pris en charge",
+        "empty_file": "Impossible de joindre des fichiers vides",
         "too_many_attachments": "Maximum {{max}} pièces jointes par message",
         "too_many_images": "Maximum {{max}} images par message",
         "magic_mismatch": "Ce fichier n'est pas une image",
         "decode_failed": "Impossible de décoder cette image",
-        "too_large": "Image trop grande — essayez-en une plus petite",
+        "too_large": "Fichier trop volumineux — essayez-en un plus petit",
         "io": "Impossible de lire ce fichier"
       },
       "mentions": {

@@ -896,7 +896,7 @@
         "edit": "Editar guía",
         "drag": "Arrastrar para reordenar"
       },
-      "attachImage": "Adjuntar imagen",
+      "attachImage": "Adjuntar archivos",
       "imageMode": {
         "label": "Generar imagen",
         "toggle": "Activar o desactivar modo de generación de imágenes",
@@ -1013,11 +1013,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
       "imageRejected": {
         "unsupported_type": "Tipo de archivo no compatible",
+        "empty_file": "No se pueden adjuntar archivos vacíos",
         "too_many_attachments": "Máximo {{max}} adjuntos por mensaje",
         "too_many_images": "Máximo {{max}} imágenes por mensaje",
         "magic_mismatch": "El archivo no parece una imagen real",
         "decode_failed": "No se pudo decodificar esta imagen",
-        "too_large": "Imagen demasiado grande — prueba una más pequeña",
+        "too_large": "Archivo demasiado grande — prueba uno más pequeño",
         "io": "No se pudo leer este archivo"
       },
       "mentions": {
