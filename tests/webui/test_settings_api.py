@@ -1220,7 +1220,7 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
         {
             "label": ["Codex"],
             "provider": ["openai_codex"],
-            "model": ["openai-codex/gpt-5.1-codex"],
+            "model": ["openai-codex/gpt-5.6-sol"],
         }
     )
 

@@ -450,9 +450,19 @@ def test_config_matches_github_copilot_codex_with_hyphen_prefix():
 
 def test_config_matches_openai_codex_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    config.agents.defaults.model = "openai-codex/gpt-5.6-sol"
 
     assert config.get_provider_name() == "openai_codex"
+
+
+def test_openai_codex_oauth_default_matches_curated_flagship():
+    spec = find_by_name("openai_codex")
+
+    assert spec is not None
+    assert spec.builtin_models
+    assert cli_commands._OAUTH_PROVIDER_DEFAULT_MODELS["openai_codex"] == (
+        spec.builtin_models[0].id
+    )
 
 
 def test_config_dump_excludes_oauth_provider_blocks():
@@ -605,7 +615,7 @@ def test_provider_login_can_set_openai_codex_as_main_provider(tmp_path):
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
     assert saved.agents.defaults.provider == "openai_codex"
-    assert saved.agents.defaults.model == "openai-codex/gpt-5.4-mini"
+    assert saved.agents.defaults.model == "openai-codex/gpt-5.6-sol"
     assert saved.agents.defaults.model_preset is None
     assert make_provider(saved).__class__.__name__ == "OpenAICodexProvider"
 
@@ -1071,8 +1081,8 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
-    assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
-    assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+    assert _strip_model_prefix("openai-codex/gpt-5.6-sol") == "gpt-5.6-sol"
+    assert _strip_model_prefix("openai_codex/gpt-5.6-sol") == "gpt-5.6-sol"
 
 
 def test_make_provider_passes_extra_headers_to_custom_provider():

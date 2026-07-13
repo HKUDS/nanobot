@@ -662,14 +662,7 @@ nanobot agent -m "Reply with one short sentence."
 
 Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. `nanobot provider login` stores the OAuth session outside config. A `providers.openai_codex` block is optional and is only needed for provider-specific settings such as a proxy.
 
-**1. Login:**
-```bash
-nanobot provider login openai-codex
-```
-
-If the machine running nanobot cannot open a graphical browser, copy the printed URL into a real browser. For remote SSH login, open the URL locally, then paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted.
-
-**2. Optional proxy** (merge into `~/.nanobot/config.json` if Codex OAuth or Codex API traffic must use a proxy):
+**1. Optional proxy** (configure this before login if Codex OAuth or API traffic must use a proxy):
 
 ```json
 {
@@ -683,13 +676,28 @@ If the machine running nanobot cannot open a graphical browser, copy the printed
 
 The proxy applies to Codex OAuth token refresh, interactive token exchange, and Codex Responses API requests. It does not affect other providers; configure `proxy` separately on each supported provider that needs it.
 
-**3. Set model** (merge into `~/.nanobot/config.json`):
+**2. Login and select Codex:**
+
+```bash
+nanobot provider login openai-codex --set-main
+```
+
+This authenticates Codex and makes the current flagship model, `openai-codex/gpt-5.6-sol`, the active agent model. To choose another model from the Codex catalog, pass it explicitly:
+
+```bash
+nanobot provider login openai-codex --set-main --model openai-codex/gpt-5.6-sol
+```
+
+Omit `--set-main` when you only want to refresh the OAuth session without changing the active model. If the machine running nanobot cannot open a graphical browser, copy the printed URL into a real browser. For remote SSH login, open the URL locally, then paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted.
+
+**3. Named preset alternative** (merge into `~/.nanobot/config.json` when you prefer preset-based model switching):
+
 ```json
 {
   "modelPresets": {
     "codex": {
       "provider": "openai_codex",
-      "model": "gpt-5.1-codex",
+      "model": "openai-codex/gpt-5.6-sol",
       "reasoningEffort": "high"
     }
   },
@@ -701,7 +709,15 @@ The proxy applies to Codex OAuth token refresh, interactive token exchange, and 
 }
 ```
 
-Use `reasoningEffort` in the preset to send a Codex reasoning effort such as `"low"`, `"medium"`, `"high"`, or another value supported by the selected model. When `provider` is explicitly `openai_codex`, the model name does not need the `openai-codex/` prefix.
+Use `reasoningEffort` in the preset to send a Codex reasoning effort such as `"low"`, `"medium"`, `"high"`, or another value supported by the selected model.
+
+The similar-looking names have different roles:
+
+- `openai-codex` is the CLI login name and the canonical model prefix.
+- `openai_codex` is the provider ID used in config.
+- `openai/...` selects the direct OpenAI API provider; do not use that prefix with Codex OAuth.
+
+When `provider` is explicitly `openai_codex`, the model prefix is optional, so `gpt-5.6-sol` also works. The examples keep the `openai-codex/` prefix to make the route unambiguous.
 
 **4. Chat:**
 ```bash

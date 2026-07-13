@@ -136,6 +136,7 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run `nanobot provider login openai-codex` or `nanobot provider login github-copilot`, then select the provider explicitly. |
+| Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
 
 ## Langfuse Problems
 
