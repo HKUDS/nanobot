@@ -123,6 +123,13 @@ import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
 import {
+  getBrowserNotificationPermission,
+  getTurnNotificationsEnabled,
+  requestTurnNotificationsPermission,
+  setTurnNotificationsEnabled,
+  showTestNotification,
+} from "@/lib/notifications";
+import {
   logoFallbackUrls,
   providerBrand,
   providerDisplayLabel,
@@ -2233,6 +2240,39 @@ function AppearanceSettings({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [turnNotificationsEnabled, setTurnNotificationsEnabledState] = useState(
+    () => getTurnNotificationsEnabled(),
+  );
+  const [notificationPermission, setNotificationPermission] = useState(
+    () => getBrowserNotificationPermission(),
+  );
+  const notificationUnavailable = notificationPermission === "unsupported";
+  const notificationDenied = notificationPermission === "denied";
+  const turnNotificationsActive = turnNotificationsEnabled && notificationPermission === "granted";
+  const handleTurnNotificationsChange = async (enabled: boolean) => {
+    if (!enabled) {
+      setTurnNotificationsEnabled(false);
+      setTurnNotificationsEnabledState(false);
+      setNotificationPermission(getBrowserNotificationPermission());
+      return;
+    }
+    const permission = await requestTurnNotificationsPermission();
+    setNotificationPermission(permission);
+    const allowed = permission === "granted";
+    setTurnNotificationsEnabled(allowed);
+    setTurnNotificationsEnabledState(allowed);
+    if (allowed) {
+      showTestNotification(
+        tx("notifications.test.title", "Nanobot notifications enabled"),
+        tx("notifications.test.body", "You will be notified when a background chat finishes."),
+      );
+    }
+  };
+  const notificationHelp = notificationUnavailable
+    ? tx("settings.help.turnNotificationsUnsupported", "Desktop notifications are not supported in this browser.")
+    : notificationDenied
+      ? tx("settings.help.turnNotificationsDenied", "Notifications are blocked in browser settings.")
+      : tx("settings.help.turnNotifications", "Show a desktop notification when a background chat finishes.");
   return (
     <div className="space-y-7">
       <section>
@@ -2347,6 +2387,19 @@ function AppearanceSettings({
               onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
               ariaLabel={tx("settings.rows.brandLogos", "Brand logos")}
               label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.turnNotifications", "Turn notifications")}
+            description={notificationHelp}
+          >
+            <ToggleButton
+              checked={turnNotificationsActive}
+              onChange={(enabled) => {
+                void handleTurnNotificationsChange(enabled);
+              }}
+              ariaLabel={tx("settings.rows.turnNotifications", "Turn notifications")}
+              label={turnNotificationsActive ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
         </SettingsGroup>

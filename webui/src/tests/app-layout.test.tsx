@@ -12,7 +12,7 @@ const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomatio
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
-const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
+const runStatusHandlers = new Set<(chatId: string, startedAt: number | null, completed?: boolean) => void>();
 const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
@@ -207,7 +207,7 @@ vi.mock("@/lib/nanobot-client", () => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
     };
-    onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
+    onRunStatus = (handler: (chatId: string, startedAt: number | null, completed?: boolean) => void) => {
       runStatusHandlers.add(handler);
       return () => runStatusHandlers.delete(handler);
     };
@@ -249,6 +249,7 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
+    localStorage.removeItem("nanobot-webui.turn-notifications.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       api_token: "api-tok",
@@ -1155,7 +1156,7 @@ describe("App layout", () => {
     expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", null, true);
     });
     expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
     expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
@@ -1207,7 +1208,7 @@ describe("App layout", () => {
     expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
 
     act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", null);
+      for (const handler of runStatusHandlers) handler("chat-a", null, true);
     });
     expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
     expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
@@ -1216,6 +1217,100 @@ describe("App layout", () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
     });
     expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+  });
+
+  it("shows a desktop notification when an inactive session finishes", async () => {
+    const notifications: Array<{ title: string; options?: NotificationOptions }> = [];
+    class FakeNotification {
+      static permission: NotificationPermission = "granted";
+      static requestPermission = vi.fn(async () => FakeNotification.permission);
+
+      constructor(title: string, options?: NotificationOptions) {
+        notifications.push({ title, options });
+      }
+    }
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: FakeNotification,
+    });
+    localStorage.setItem("nanobot-webui.turn-notifications.v1", "1");
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Background work",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+      for (const handler of runStatusHandlers) handler("chat-a", null, true);
+    });
+
+    expect(notifications).toEqual([
+      {
+        title: "Nanobot finished",
+        options: {
+          body: "Background work is ready for your reply.",
+          icon: "/brand/nanobot_icon.png",
+          renotify: true,
+          tag: "nanobot-turn-chat-a",
+        },
+      },
+    ]);
+  });
+
+  it("shows a desktop notification when the active session finishes without focus", async () => {
+    const notifications: Array<{ title: string; options?: NotificationOptions }> = [];
+    class FakeNotification {
+      static permission: NotificationPermission = "granted";
+      static requestPermission = vi.fn(async () => FakeNotification.permission);
+
+      constructor(title: string, options?: NotificationOptions) {
+        notifications.push({ title, options });
+      }
+    }
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: FakeNotification,
+    });
+    const hasFocusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    localStorage.setItem("nanobot-webui.turn-notifications.v1", "1");
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Active work",
+      },
+    ];
+
+    try {
+      render(<App />);
+
+      await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+      const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+      await act(async () => {
+        fireEvent.click(within(sidebar).getByRole("button", { name: /^Active work$/ }));
+      });
+
+      act(() => {
+        for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+        for (const handler of runStatusHandlers) handler("chat-a", null, true);
+      });
+
+      expect(notifications).toHaveLength(1);
+    } finally {
+      hasFocusSpy.mockRestore();
+    }
   });
 
   it("marks inactive sessions when a thread update arrives", async () => {
