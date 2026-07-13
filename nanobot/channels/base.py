@@ -296,14 +296,11 @@ class BaseChannel(ABC):
     ) -> list[ChannelInstanceSpec]:
         """Expand persisted config into independently managed runtime instances."""
         activation = ChannelActivation.from_config(section)
-        if activation.instances is not None:
-            raise ValueError(f"{cls.name} must implement instance_specs() for multi-instance config")
         if enabled_only and not activation.resolve():
             return []
         return [
             ChannelInstanceSpec(
                 instance_id="default",
-                runtime_name=cls.runtime_name(),
                 config=section,
             )
         ]

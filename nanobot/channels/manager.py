@@ -24,6 +24,7 @@ from nanobot.bus.outbound_events import (
     replace_outbound_event,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.contracts import (
     ChannelActivation,
@@ -191,20 +192,25 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_channel_names, discover_enabled
 
-        # Collect enabled module names first, then only import those.
-        # Channel configs live in ChannelsConfig's extra fields (via
-        # extra="allow"), so we enumerate candidates from pkgutil scan
-        # (cheap, no imports) and any plugin keys in __pydantic_extra__.
+        # Built-ins remain lazy: only dependency-free manifests may opt into
+        # instance-aware activation before their runtime module is imported.
+        # Configured external plugins are loaded so their instance_specs()
+        # implementation, rather than a reserved storage envelope, owns
+        # activation and expansion.
         names = discover_channel_names()
-        candidate_names = set(names) | self._config_extra_channel_names()
+        builtin_names = set(names)
         default_sections: dict[str, Any] = {}
 
-        enabled_names: set[str] = set()
-        for name in candidate_names:
+        enabled_names = self._config_extra_channel_names() - builtin_names
+        for name in builtin_names:
             section = self._channel_section(name, default_sections=default_sections)
             if section is None:
                 continue
-            activation = ChannelActivation.from_config(section)
+            setup_spec = channel_setup_spec(name)
+            activation = ChannelActivation.from_config(
+                section,
+                include_instances=bool(setup_spec and setup_spec.multi_instance),
+            )
             if activation.resolve(default=name in DEFAULT_ENABLED_CHANNELS):
                 enabled_names.add(name)
 
@@ -218,26 +224,32 @@ class ChannelManager:
                 continue
             try:
                 specs = channel_instance_specs(cls, section)
-                collisions = sorted(set(self.channels) & {spec.runtime_name for spec in specs})
+                runtime_specs = [
+                    (channel_runtime_name(cls, spec.instance_id), spec)
+                    for spec in specs
+                ]
+                collisions = sorted(
+                    set(self.channels) & {runtime_name for runtime_name, _ in runtime_specs}
+                )
                 if collisions:
                     raise ValueError(
                         f"runtime name(s) already owned by another channel: {', '.join(collisions)}"
                     )
                 built = [
                     (
-                        spec,
+                        runtime_name,
                         self._build_channel(
                             name,
                             cls,
                             spec.config,
-                            runtime_name=spec.runtime_name,
+                            runtime_name=runtime_name,
                         ),
                     )
-                    for spec in specs
+                    for runtime_name, spec in runtime_specs
                 ]
-                for spec, channel in built:
-                    self.channels[spec.runtime_name] = channel
-                    logger.info("{} channel enabled as {}", cls.display_name, spec.runtime_name)
+                for runtime_name, channel in built:
+                    self.channels[runtime_name] = channel
+                    logger.info("{} channel enabled as {}", cls.display_name, runtime_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
@@ -405,11 +417,15 @@ class ChannelManager:
                 "message": f"{name} channel config was not enabled.",
             }
 
-        collisions = [
-            spec.runtime_name
+        runtime_specs = [
+            (channel_runtime_name(cls, spec.instance_id), spec)
             for spec in specs
+        ]
+        collisions = [
+            runtime_name
+            for runtime_name, _spec in runtime_specs
             if (
-                (current := self.channels.get(spec.runtime_name)) is not None
+                (current := self.channels.get(runtime_name)) is not None
                 and not isinstance(current, cls)
             )
         ]
@@ -427,15 +443,15 @@ class ChannelManager:
         try:
             built = [
                 (
-                    spec.runtime_name,
+                    runtime_name,
                     self._build_channel(
                         name,
                         cls,
                         spec.config,
-                        runtime_name=spec.runtime_name,
+                        runtime_name=runtime_name,
                     ),
                 )
-                for spec in specs
+                for runtime_name, spec in runtime_specs
             ]
         except Exception as exc:
             logger.exception("Failed to build {} channel after settings change", name)

@@ -427,40 +427,50 @@ def optional_features_payload(
 
     for name in sorted(builtin_channels | set(plugin_channels) | set(extras)):
         is_channel = name in builtin_channels or name in plugin_channels
-        channel_cls = plugin_channels.get(name)
-        setup_spec = channel_setup_spec(name, channel_cls)
-        if channel_cls is None and setup_spec is not None and setup_spec.multi_instance:
-            try:
-                from nanobot.channels.registry import load_channel_class
-
-                channel_cls = load_channel_class(name)
-                setup_spec = channel_setup_spec(name, channel_cls)
-            except Exception:
-                channel_cls = None
         installed = extra_installed(name, extras[name]) if name in extras else True
-        enabled = channel_enabled(config, name, channel_cls) if is_channel else installed
-        configured = (
-            channel_configured(config, name, setup_spec, channel_cls)
-            if is_channel
-            else installed
-        )
-        ready = bool(enabled and installed)
-        status = "enabled" if ready else "missing_dependency" if not installed else "not_enabled"
         feature = {
             "name": name,
             "display_name": name.replace("_", " ").title(),
             "type": "channel" if is_channel else "feature",
-            "enabled": enabled,
-            "configured": configured,
             "installed": installed,
-            "ready": ready,
-            "status": status,
             "install_supported": name in extras or is_channel,
             "requires_restart": _feature_requires_restart(name, is_channel=is_channel),
         }
-        if is_channel:
+
+        if not is_channel:
+            feature.update({
+                "enabled": installed,
+                "configured": installed,
+                "ready": installed,
+                "status": "enabled" if installed else "missing_dependency",
+            })
+            features.append(feature)
+            continue
+
+        try:
+            channel_cls = plugin_channels.get(name)
+            setup_spec = channel_setup_spec(name, channel_cls)
+            if channel_cls is None and setup_spec is not None and setup_spec.multi_instance:
+                try:
+                    from nanobot.channels.registry import load_channel_class
+
+                    channel_cls = load_channel_class(name)
+                    setup_spec = channel_setup_spec(name, channel_cls)
+                except Exception:
+                    channel_cls = None
+
             if setup_spec is not None:
                 feature["setup"] = setup_spec.to_public_dict(name)
+            enabled = channel_enabled(config, name, channel_cls)
+            configured = channel_configured(config, name, setup_spec, channel_cls)
+            ready = bool(enabled and installed)
+            status = "enabled" if ready else "missing_dependency" if not installed else "not_enabled"
+            feature.update({
+                "enabled": enabled,
+                "configured": configured,
+                "ready": ready,
+                "status": status,
+            })
             config_values, configured_fields = _channel_config_snapshot(
                 getattr(config.channels, name, None),
                 name,
@@ -470,14 +480,23 @@ def optional_features_payload(
                 feature["config_values"] = config_values
             if configured_fields:
                 feature["configured_fields"] = configured_fields
-        if channel_cls is not None:
-            instances = channel_feature_instances(
-                channel_cls,
-                getattr(config.channels, name, None),
-                setup_spec=setup_spec,
-            )
-            if instances is not None:
-                feature["instances"] = instances
+            if channel_cls is not None:
+                instances = channel_feature_instances(
+                    channel_cls,
+                    getattr(config.channels, name, None),
+                    setup_spec=setup_spec,
+                )
+                if instances is not None:
+                    feature["instances"] = instances
+        except Exception as exc:
+            logger.warning("Could not inspect {} channel configuration: {}", name, exc)
+            feature.update({
+                "enabled": False,
+                "configured": False,
+                "ready": False,
+                "status": "invalid_config",
+                "error": "Channel configuration could not be inspected.",
+            })
         features.append(feature)
 
     payload = {

@@ -298,11 +298,17 @@ Multi-instance plugins additionally return `ChannelInstanceSpec` objects from
 `update_instance_config()`. The shared contract enforces these invariants:
 
 - every `instance_id` is non-empty and unique;
-- every `runtime_name` is unique and is either the channel name or starts with
+- `runtime_name(instance_id)` is the single source of routing names, and every
+  derived name is unique and is either the channel name or starts with
   `<channel-name>.`;
 - runtime names cannot overwrite a runtime already owned by another channel;
 - `feature_instances()` returns `None` or a list of dictionaries. Instance
   summaries should include `id`, `name`, `enabled`, and `configured`.
+
+`ChannelInstanceSpec` contains only `instance_id` and the instance config;
+nanobot derives its runtime name. Single-instance plugins keep ownership of
+their entire config, including a field named `instances`. Only plugins that
+override `instance_specs()` opt into instance expansion.
 
 Return a concrete iterable or generator from `instance_specs()`; nanobot
 materializes and validates it before constructing any runtime. Raise an

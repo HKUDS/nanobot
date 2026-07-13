@@ -38,25 +38,31 @@ class ChannelActivation:
     """Normalized enablement state used before a channel runtime is imported.
 
     Channel configuration may be a Pydantic model or persisted JSON, and a
-    channel may expose independently enabled instances.  Parse that storage
-    shape once here so discovery code never needs to inspect raw config keys.
+    built-in channel may expose independently enabled instances. Instance
+    envelopes are opt-in so an existing plugin can keep using an ``instances``
+    field as ordinary channel-owned configuration.
     """
 
     enabled: bool | None = None
     instances: tuple["ChannelActivation", ...] | None = None
 
     @classmethod
-    def from_config(cls, section: Any) -> "ChannelActivation":
+    def from_config(
+        cls,
+        section: Any,
+        *,
+        include_instances: bool = False,
+    ) -> "ChannelActivation":
         values = _config_mapping(section)
         if values is None:
             raw_enabled = getattr(section, "enabled", _MISSING)
             return cls(enabled=None if raw_enabled is _MISSING else bool(raw_enabled))
 
         raw_enabled = values.get("enabled", _MISSING)
-        raw_instances = values.get("instances", _MISSING)
+        raw_instances = values.get("instances", _MISSING) if include_instances else _MISSING
         instances = (
             tuple(
-                cls.from_config(item)
+                cls.from_config(item, include_instances=True)
                 for item in raw_instances
                 if _config_mapping(item) is not None
             )
@@ -189,7 +195,6 @@ class ChannelInstanceSpec:
     """One independently managed runtime instance."""
 
     instance_id: str
-    runtime_name: str
     config: Any
 
 
@@ -223,14 +228,14 @@ def channel_instance_specs(
                 f"{channel_cls.__name__}.instance_specs() returned duplicate instance id "
                 f"'{spec.instance_id}'"
             )
-        _validate_runtime_name(channel_cls, spec.runtime_name)
-        if spec.runtime_name in runtime_names:
+        runtime_name = channel_runtime_name(channel_cls, spec.instance_id)
+        if runtime_name in runtime_names:
             raise ValueError(
                 f"{channel_cls.__name__}.instance_specs() returned duplicate runtime name "
-                f"'{spec.runtime_name}'"
+                f"'{runtime_name}'"
             )
         instance_ids.add(spec.instance_id)
-        runtime_names.add(spec.runtime_name)
+        runtime_names.add(runtime_name)
     return specs
 
 

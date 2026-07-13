@@ -133,7 +133,6 @@ class _FakeMultiChannel(BaseChannel):
         return [
             ChannelInstanceSpec(
                 instance_id=item["id"],
-                runtime_name=cls.runtime_name(item["id"]),
                 config=item,
             )
             for item in instances
@@ -215,7 +214,7 @@ def test_channels_config_extract_document_text_accepts_camel_alias():
 
 
 def test_channel_manager_delegates_instance_expansion_to_channel(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["multi"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_enabled",
         lambda enabled, _names=None, warn_import_errors=True: {"multi": _FakeMultiChannel}
@@ -252,6 +251,31 @@ def test_channel_manager_delegates_instance_expansion_to_channel(monkeypatch: py
     assert set(manager.channels) == {"multi", "multi.product"}
     assert manager.channels["multi"].name == "multi"
     assert manager.channels["multi.product"].name == "multi.product"
+
+
+def test_channel_manager_preserves_single_instance_plugin_owned_instances(monkeypatch):
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_enabled",
+        lambda enabled, _names=None, warn_import_errors=True: {
+            "fakeplugin": _FakePlugin,
+        }
+        if "fakeplugin" in enabled
+        else {},
+    )
+    config = Config.model_validate({
+        "channels": {
+            "fakeplugin": {
+                "enabled": True,
+                "instances": ["plugin-owned-value"],
+            }
+        }
+    })
+
+    manager = ChannelManager(config, MessageBus())
+
+    assert set(manager.channels) == {"fakeplugin"}
+    assert manager.channels["fakeplugin"].config["instances"] == ["plugin-owned-value"]
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +343,51 @@ def test_plugin_setup_contract_drives_feature_payload(monkeypatch: pytest.Monkey
         "channels.setupplugin.region",
     ]
     assert feature["config_values"] == {"channels.setupplugin.region": "eu"}
+
+
+def test_plugin_contract_error_is_isolated_in_feature_payload(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    class _BrokenPlugin(_FakePlugin):
+        name = "broken"
+
+        @classmethod
+        def instance_specs(cls, section, *, enabled_only=True):
+            raise ValueError("malformed plugin instance config")
+
+    config = Config.model_validate({
+        "channels": {
+            "broken": {"enabled": True},
+            "setupplugin": {"enabled": False, "token": "plugin-secret"},
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda enabled_names=None: {
+            "broken": _BrokenPlugin,
+            "setupplugin": _SetupPlugin,
+        },
+    )
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    features = {feature["name"]: feature for feature in payload["features"]}
+    assert features["broken"] == {
+        "name": "broken",
+        "display_name": "Broken",
+        "type": "channel",
+        "enabled": False,
+        "configured": False,
+        "installed": True,
+        "ready": False,
+        "status": "invalid_config",
+        "install_supported": True,
+        "requires_restart": True,
+        "error": "Channel configuration could not be inspected.",
+    }
+    assert features["setupplugin"]["configured"] is True
 
 
 def test_plugin_setup_contract_drives_save_and_validation(

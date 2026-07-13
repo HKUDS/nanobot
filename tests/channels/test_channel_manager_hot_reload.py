@@ -47,7 +47,6 @@ class _MultiHotChannel(_HotChannel):
         return [
             ChannelInstanceSpec(
                 instance_id=item["id"],
-                runtime_name=cls.runtime_name(item["id"]),
                 config=item,
             )
             for item in instances
@@ -187,8 +186,12 @@ async def test_apply_channel_feature_action_uses_channel_runtime_name(monkeypatc
 
     import nanobot.channels.registry as registry
 
-    monkeypatch.setattr(registry, "discover_channel_names", lambda: ["multi"])
-    monkeypatch.setattr(registry, "discover_plugins", lambda enabled_names=None: {})
+    monkeypatch.setattr(registry, "discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        registry,
+        "discover_plugins",
+        lambda enabled_names=None: {"multi": _MultiHotChannel},
+    )
     monkeypatch.setattr(
         registry,
         "discover_enabled",

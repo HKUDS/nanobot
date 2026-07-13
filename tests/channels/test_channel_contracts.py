@@ -107,13 +107,21 @@ assert ChannelManager.__name__ == "ChannelManager"
 
 
 @pytest.mark.parametrize(
-    ("section", "default", "expected"),
+    ("section", "default", "include_instances", "expected"),
     [
-        pytest.param({"enabled": True}, False, True, id="flat-enabled"),
-        pytest.param({}, True, True, id="flat-inherits-default"),
+        pytest.param({"enabled": True}, False, False, True, id="flat-enabled"),
+        pytest.param({}, True, False, True, id="flat-inherits-default"),
+        pytest.param(
+            {"enabled": True, "instances": ["plugin-owned-value"]},
+            False,
+            False,
+            True,
+            id="single-instance-plugin-owns-instances-field",
+        ),
         pytest.param(
             {"enabled": False, "instances": [{"enabled": True}]},
             False,
+            True,
             True,
             id="instance-overrides-parent",
         ),
@@ -121,11 +129,13 @@ assert ChannelManager.__name__ == "ChannelManager"
             {"enabled": True, "instances": [{}, {"enabled": False}]},
             False,
             True,
+            True,
             id="instance-inherits-parent",
         ),
         pytest.param(
             {"enabled": True, "instances": []},
             False,
+            True,
             False,
             id="empty-instance-list",
         ),
@@ -134,9 +144,13 @@ assert ChannelManager.__name__ == "ChannelManager"
 def test_channel_activation_normalizes_persisted_config(
     section: dict[str, Any],
     default: bool,
+    include_instances: bool,
     expected: bool,
 ) -> None:
-    activation = ChannelActivation.from_config(section)
+    activation = ChannelActivation.from_config(
+        section,
+        include_instances=include_instances,
+    )
 
     assert activation.resolve(default=default) is expected
 
@@ -192,11 +206,8 @@ def test_channel_instance_contract_round_trip(
 
     assert {spec.instance_id for spec in all_specs} == expected_ids
     assert {spec.instance_id for spec in enabled_specs} == expected_ids
-    assert len({spec.runtime_name for spec in all_specs}) == len(all_specs)
-    assert all(
-        channel_runtime_name(channel_cls, spec.instance_id) == spec.runtime_name
-        for spec in all_specs
-    )
+    runtime_names = {channel_runtime_name(channel_cls, spec.instance_id) for spec in all_specs}
+    assert len(runtime_names) == len(all_specs)
 
     disabled = channel_set_config_enabled(
         channel_cls,
@@ -228,50 +239,70 @@ def test_channel_instance_contract_materializes_generators() -> None:
         name = "generated"
 
         @classmethod
+        def runtime_name(cls, instance_id="default"):
+            return cls.name if instance_id == "default" else f"{cls.name}.{instance_id}"
+
+        @classmethod
         def instance_specs(cls, section, *, enabled_only=True):
-            yield ChannelInstanceSpec("default", "generated", section)
-            yield ChannelInstanceSpec("product", "generated.product", section)
+            yield ChannelInstanceSpec("default", section)
+            yield ChannelInstanceSpec("product", section)
 
     specs = channel_instance_specs(_GeneratedChannel, {"enabled": True})
 
     assert [spec.instance_id for spec in specs] == ["default", "product"]
 
 
+def test_single_instance_contract_preserves_plugin_owned_instances_field() -> None:
+    section = {
+        "enabled": True,
+        "instances": ["plugin-owned-value"],
+    }
+
+    specs = channel_instance_specs(_SingleChannel, section)
+
+    assert specs == [ChannelInstanceSpec("default", section)]
+
+
 @pytest.mark.parametrize(
-    ("specs", "message"),
+    ("instance_ids", "message"),
     [
         pytest.param(
-            [ChannelInstanceSpec("default", "other", {})],
-            "must be scoped under 'invalid'",
-            id="foreign-runtime-name",
-        ),
-        pytest.param(
-            [
-                ChannelInstanceSpec("default", "invalid", {}),
-                ChannelInstanceSpec("default", "invalid.product", {}),
-            ],
+            ["default", "default"],
             "duplicate instance id 'default'",
             id="duplicate-instance-id",
         ),
         pytest.param(
-            [
-                ChannelInstanceSpec("default", "invalid", {}),
-                ChannelInstanceSpec("product", "invalid", {}),
-            ],
+            ["default", "product"],
             "duplicate runtime name 'invalid'",
             id="duplicate-runtime-name",
         ),
     ],
 )
-def test_channel_instance_contract_rejects_invalid_specs(specs, message) -> None:
+def test_channel_instance_contract_rejects_invalid_specs(instance_ids, message) -> None:
     class _InvalidChannel(_SingleChannel):
         name = "invalid"
 
         @classmethod
+        def runtime_name(cls, instance_id="default"):
+            return cls.name
+
+        @classmethod
         def instance_specs(cls, section, *, enabled_only=True):
-            return specs
+            return [ChannelInstanceSpec(instance_id, {}) for instance_id in instance_ids]
 
     with pytest.raises(ValueError, match=message):
+        channel_instance_specs(_InvalidChannel, {"enabled": True})
+
+
+def test_channel_instance_contract_rejects_runtime_name_outside_namespace() -> None:
+    class _InvalidChannel(_SingleChannel):
+        name = "invalid"
+
+        @classmethod
+        def runtime_name(cls, instance_id="default"):
+            return "other"
+
+    with pytest.raises(ValueError, match="must be scoped under 'invalid'"):
         channel_instance_specs(_InvalidChannel, {"enabled": True})
 
 

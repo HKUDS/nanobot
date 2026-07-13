@@ -1,9 +1,4 @@
-"""Helpers for channel instance configuration.
-
-The first consumer is Feishu/Lark.  Keep the helpers small and data-oriented so
-ChannelManager can support Feishu assistant instances without turning every
-channel into a multi-instance abstraction.
-"""
+"""Feishu-owned helpers for its persisted multi-instance configuration."""
 
 from __future__ import annotations
 
@@ -100,7 +95,6 @@ def feishu_instance_specs(
         specs.append(
             ChannelInstanceSpec(
                 instance_id=instance_id,
-                runtime_name=runtime_channel_name("feishu", instance_id),
                 config=config,
             )
         )
