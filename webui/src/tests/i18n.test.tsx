@@ -311,4 +311,18 @@ describe("webui i18n", () => {
     expect(settings.overview.webSearch).toBe("网页搜索");
     expect(settings.overview.workspace).toBe("工作区");
   });
+
+  it("keeps Brazilian Portuguese settings overview copy localized", () => {
+    const settings = resources["pt-BR"].common.settings;
+    const sidebar = resources["pt-BR"].common.sidebar;
+    const chat = resources["pt-BR"].common.chat;
+
+    expect(sidebar.settings).toBe("Configurações");
+    expect(chat.newChat).toBe("Nova conversa");
+    expect(settings.nav.browser).toBe("Web");
+    expect(settings.sections.webSearch).toBe("Busca na web");
+    expect(settings.byok.tabs.webSearch).toBe("Busca na web");
+    expect(settings.overview.webSearch).toBe("Busca na web");
+    expect(settings.overview.workspace).toBe("Workspace");
+  });
 });
