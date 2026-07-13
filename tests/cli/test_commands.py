@@ -2889,6 +2889,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert captured["port"] == 18791
     assert f"Health endpoint: {display_url}" in result.stdout
     assert ("unauthenticated health endpoint" in result.stdout) is warns_about_public_bind
+    assert ("may be reachable from other devices" in result.stdout) is warns_about_public_bind
     assert ("listening on 0.0.0.0" in result.stdout) is warns_about_public_bind
 
     health_handler = captured["handler"]
@@ -2953,6 +2954,16 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             await asyncio.gather(*active_tasks)
 
         asyncio.run(_exercise_connection_limit())
+
+        class _NeverRespondingReader:
+            async def read(self, _size: int) -> bytes:
+                await asyncio.Event().wait()
+
+        monkeypatch.setattr(cli_commands, "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS", 0.01)
+        timed_out_writer = _FakeWriter()
+        asyncio.run(health_handler(_NeverRespondingReader(), timed_out_writer))
+        assert timed_out_writer.closed is True
+        assert timed_out_writer.output == b""
 
 
 def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(

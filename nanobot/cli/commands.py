@@ -1022,7 +1022,8 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
         return
 
     console.print(
-        "[yellow]Warning: the unauthenticated health endpoint is reachable beyond this device. "
+        "[yellow]Warning: the unauthenticated health endpoint is listening beyond loopback "
+        "and may be reachable from other devices. "
         f"Keep port {port} private or protect it with a firewall or reverse proxy.[/yellow]"
     )
 

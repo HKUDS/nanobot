@@ -56,7 +56,9 @@ Restart the deployed process after editing `config.json`. Long-running processes
 > When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
 > The gateway health route itself is intentionally minimal and unauthenticated. When the
 > container binds it to `0.0.0.0`, publish port `18790` to host loopback only; place any
-> remotely monitored health endpoint behind a firewall or reverse proxy.
+> remotely monitored health endpoint behind a firewall or reverse proxy. If another host
+> must probe it directly, replace `127.0.0.1` in the port mapping with a trusted host
+> interface and restrict inbound traffic to the monitoring system.
 
 ### Docker Compose
 
