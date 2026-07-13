@@ -582,6 +582,27 @@ export async function updateSettings(
   if (update.toolHintMaxLength !== undefined) {
     query.set("tool_hint_max_length", String(update.toolHintMaxLength));
   }
+  if (update.temperature !== undefined) query.set("temperature", String(update.temperature));
+  if (update.maxTokens !== undefined) query.set("max_tokens", String(update.maxTokens));
+  if (update.reasoningEffort !== undefined)
+    query.set("reasoning_effort", update.reasoningEffort ?? "");
+  if (update.maxToolIterations !== undefined)
+    query.set("max_tool_iterations", String(update.maxToolIterations));
+  if (update.maxConcurrentSubagents !== undefined)
+    query.set("max_concurrent_subagents", String(update.maxConcurrentSubagents));
+  if (update.maxToolResultChars !== undefined)
+    query.set("max_tool_result_chars", String(update.maxToolResultChars));
+  if (update.providerRetryMode !== undefined)
+    query.set("provider_retry_mode", update.providerRetryMode);
+  if (update.unifiedSession !== undefined)
+    query.set("unified_session", String(update.unifiedSession));
+  if (update.sessionTtlMinutes !== undefined)
+    query.set("session_ttl_minutes", String(update.sessionTtlMinutes));
+  if (update.maxMessages !== undefined) query.set("max_messages", String(update.maxMessages));
+  if (update.consolidationRatio !== undefined)
+    query.set("consolidation_ratio", String(update.consolidationRatio));
+  if (update.contextBlockLimit !== undefined)
+    query.set("context_block_limit", update.contextBlockLimit === null ? "null" : String(update.contextBlockLimit));
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
 }
 
@@ -595,6 +616,14 @@ export async function createModelConfiguration(
   query.set("label", configuration.label);
   query.set("provider", configuration.provider);
   query.set("model", configuration.model);
+  if (configuration.temperature !== undefined)
+    query.set("temperature", String(configuration.temperature));
+  if (configuration.maxTokens !== undefined)
+    query.set("max_tokens", String(configuration.maxTokens));
+  if (configuration.reasoningEffort !== undefined)
+    query.set("reasoning_effort", configuration.reasoningEffort ?? "");
+  if (configuration.contextWindowTokens !== undefined)
+    query.set("context_window_tokens", String(configuration.contextWindowTokens));
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/create?${query}`,
     token,
@@ -614,6 +643,12 @@ export async function updateModelConfiguration(
   if (configuration.contextWindowTokens !== undefined) {
     query.set("context_window_tokens", String(configuration.contextWindowTokens));
   }
+  if (configuration.temperature !== undefined)
+    query.set("temperature", String(configuration.temperature));
+  if (configuration.maxTokens !== undefined)
+    query.set("max_tokens", String(configuration.maxTokens));
+  if (configuration.reasoningEffort !== undefined)
+    query.set("reasoning_effort", configuration.reasoningEffort ?? "");
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/update?${query}`,
     token,
@@ -730,4 +765,17 @@ export async function updateTranscriptionSettings(
     `${base}/api/settings/transcription/update?${query}`,
     token,
   );
+}
+
+export async function updateDreamSettings(
+  token: string,
+  update: { enabled?: boolean; intervalH?: number; modelOverride?: string | null },
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  if (update.enabled !== undefined) query.set("enabled", String(update.enabled));
+  if (update.intervalH !== undefined) query.set("interval_h", String(update.intervalH));
+  if (update.modelOverride !== undefined)
+    query.set("model_override", update.modelOverride ?? "");
+  return request<SettingsPayload>(`${base}/api/settings/dream/update?${query}`, token);
 }

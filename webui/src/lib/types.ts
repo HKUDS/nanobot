@@ -375,6 +375,17 @@ export interface SettingsPayload {
     bot_name: string;
     bot_icon: string;
     tool_hint_max_length: number;
+    max_tool_iterations: number;
+    max_concurrent_subagents: number;
+    max_tool_result_chars: number;
+    provider_retry_mode: "standard" | "persistent";
+    unified_session: boolean;
+    session_ttl_minutes: number;
+    max_messages: number;
+    consolidation_ratio: number;
+    context_block_limit: number | null;
+    disabled_skills: string[];
+    fallback_models: Array<string | { model: string; provider: string; max_tokens?: number; context_window_tokens?: number; temperature?: number; reasoning_effort?: string | null }>;
   };
   model_presets: Array<{
     name: string;
@@ -475,6 +486,9 @@ export interface SettingsPayload {
       keep_recent_messages: number;
     };
     dream: {
+      enabled: boolean;
+      interval_h: number;
+      model_override: string | null;
       schedule: string;
     };
     unified_session: boolean;
@@ -527,6 +541,7 @@ export interface SettingsPayload {
       provider_label: string;
       summary: string;
     };
+    ssrf_whitelist: string[];
     ssrf_whitelist_count: number;
     webui_allow_local_service_access: boolean;
     allow_local_preview_access?: boolean;
@@ -534,7 +549,10 @@ export interface SettingsPayload {
     private_service_protection_enabled: boolean;
     mcp_server_count: number;
     exec_enabled: boolean;
+    exec_timeout: number;
     exec_sandbox?: string | null;
+    exec_allow_patterns: string[];
+    exec_deny_patterns: string[];
     exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
   };
@@ -734,6 +752,18 @@ export interface SettingsUpdate {
   botName?: string;
   botIcon?: string;
   toolHintMaxLength?: number;
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: string | null;
+  maxToolIterations?: number;
+  maxConcurrentSubagents?: number;
+  maxToolResultChars?: number;
+  providerRetryMode?: "standard" | "persistent";
+  unifiedSession?: boolean;
+  sessionTtlMinutes?: number;
+  maxMessages?: number;
+  consolidationRatio?: number;
+  contextBlockLimit?: number | null;
 }
 
 export interface ModelConfigurationCreate {
@@ -741,6 +771,10 @@ export interface ModelConfigurationCreate {
   label: string;
   provider: string;
   model: string;
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: string | null;
+  contextWindowTokens?: number;
 }
 
 export interface ModelConfigurationUpdate {
@@ -749,6 +783,9 @@ export interface ModelConfigurationUpdate {
   provider?: string;
   model?: string;
   contextWindowTokens?: number;
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: string | null;
 }
 
 export interface ProviderSettingsUpdate {
