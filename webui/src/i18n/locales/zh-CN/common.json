@@ -689,6 +689,7 @@
     "renameProjectDescription": "为这个项目设置一个仅用于 WebUI 侧边栏的名称。",
     "renameProjectPlaceholder": "项目名称",
     "renameSave": "保存",
+    "exportMarkdown": "导出 Markdown",
     "archive": "归档",
     "unarchive": "取消归档",
     "showArchived": "显示归档",

@@ -689,6 +689,7 @@
     "renameProjectDescription": "為這個專案設定僅用於 WebUI 側邊欄的名稱。",
     "renameProjectPlaceholder": "專案名稱",
     "renameSave": "儲存",
+    "exportMarkdown": "匯出 Markdown",
     "archive": "封存",
     "unarchive": "取消封存",
     "showArchived": "顯示封存",
