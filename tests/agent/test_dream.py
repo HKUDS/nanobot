@@ -666,6 +666,37 @@ class TestDreamContentDiff:
         store.git.auto_commit("initial")
         assert store.dream_content_diff() == ""
 
+    def test_ignores_platform_line_ending_normalization(self, store, monkeypatch):
+        import subprocess
+
+        system_config = store.workspace / "system.gitconfig"
+        global_config = store.workspace / "global.gitconfig"
+        system_config.touch()
+        global_config.touch()
+        subprocess.run(
+            [
+                "git", "config", "--file", str(system_config),
+                "core.autocrlf", "false",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+
+        store.soul_file.write_bytes(b"# Soul\r\n- Helpful")
+        store.memory_file.write_bytes(b"# Memory\r\n- Project X active")
+        store.git.init()
+
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "--", "SOUL.md", "memory/MEMORY.md"],
+            cwd=store.workspace,
+            text=True,
+        )
+        assert status == ""
+        assert store.dream_content_diff() == ""
+
     def test_reflects_real_content_edits(self, store):
         store.git.init()
         store.git.auto_commit("initial")

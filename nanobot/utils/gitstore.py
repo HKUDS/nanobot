@@ -368,12 +368,16 @@ class GitStore:
                         changed += 1
                         summary_lines.append(f"{path}: binary or non-UTF-8 file changed")
                         continue
-                    if head_text == wt_text:
+                    # Git blobs preserve line endings while read_text() normalizes
+                    # them. Compare the same logical lines used by the diff.
+                    head_lines = head_text.splitlines()
+                    wt_lines = wt_text.splitlines()
+                    if head_lines == wt_lines:
                         continue
                     changed += 1
                     hunks = list(difflib.unified_diff(
-                        head_text.splitlines(),
-                        wt_text.splitlines(),
+                        head_lines,
+                        wt_lines,
                         fromfile=path,
                         tofile=path,
                         lineterm="",
