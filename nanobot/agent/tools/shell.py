@@ -65,6 +65,17 @@ def _reap_pid(pid: int) -> None:
         logger.debug("_reap_pid({}): {}", pid, exc)
 
 
+def _decode_process_output(data: bytes) -> str:
+    if not data:
+        return ""
+    if _IS_WINDOWS and b"\x00" in data[:200]:
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+
 # Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
     "\n\nNote: this is a hard policy boundary, not a transient failure. "
@@ -337,10 +348,10 @@ class ExecTool(Tool):
             output_parts = []
 
             if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
+                output_parts.append(_decode_process_output(stdout))
 
             if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
+                stderr_text = _decode_process_output(stderr)
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
 

@@ -466,6 +466,29 @@ class TestExecuteEndToEnd:
         assert "Exit code: 0" in result
 
     @pytest.mark.asyncio
+    async def test_windows_decodes_utf16_output(self):
+        """PowerShell output may arrive as UTF-16LE on Windows."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (
+            "ok café\r\n".encode("utf-16-le"),
+            "warn λ\r\n".encode("utf-16-le"),
+        )
+        mock_proc.returncode = 0
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch.object(ExecTool, "_spawn", return_value=mock_proc),
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            tool = ExecTool()
+            result = await tool.execute(command="echo ok")
+
+        assert "ok café" in result
+        assert "warn λ" in result
+        assert "\x00" not in result
+        assert "Exit code: 0" in result
+
+    @pytest.mark.asyncio
     async def test_unix_full_path(self):
         """Full execute() flow on Unix: env, spawn, output formatting."""
         mock_proc = AsyncMock()
