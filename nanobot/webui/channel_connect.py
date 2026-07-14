@@ -120,7 +120,7 @@ class FeishuConnectStore:
         session.domain = str(result.get("domain") or session.domain)
         status = result.get("status")
         if status == "succeeded":
-            feishu.save_registration_result(
+            session.instance_id = feishu.save_registration_result(
                 result,
                 instance_id=session.instance_id,
                 name=session.instance_name,

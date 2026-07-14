@@ -52,6 +52,22 @@ def _normalize_feishu_instance(
     return config
 
 
+def feishu_app_identity_key(app_id: Any, domain: Any = "feishu") -> str:
+    """Return the stable identity shared by persisted and runtime instances."""
+    app_id = str(app_id or "").strip()
+    if not app_id:
+        return ""
+    normalized_domain = "lark" if str(domain or "feishu").strip().lower() == "lark" else "feishu"
+    return f"{normalized_domain}:{app_id}"
+
+
+def _feishu_instance_identity(config: dict[str, Any]) -> str:
+    return feishu_app_identity_key(
+        config.get("appId") or config.get("app_id"),
+        config.get("domain"),
+    )
+
+
 def feishu_instance_specs(
     section: Any,
     defaults: dict[str, Any],
@@ -74,6 +90,8 @@ def feishu_instance_specs(
         raw_specs = [section] if section else [_base_feishu_instance_config(defaults)]
 
     specs: list[ChannelInstanceSpec] = []
+    instance_ids: set[str] = set()
+    identity_owners: dict[str, str] = {}
     for index, raw in enumerate(raw_specs):
         fallback_id = DEFAULT_INSTANCE_ID if index == 0 else f"assistant-{index + 1}"
         try:
@@ -87,11 +105,27 @@ def feishu_instance_specs(
             logger.warning("Skipping invalid Feishu instance config: {}", exc)
             continue
 
+        instance_id = str(config["instanceId"])
+        if instance_id in instance_ids:
+            logger.warning("Skipping duplicate Feishu instance id '{}'", instance_id)
+            continue
+
+        identity = _feishu_instance_identity(config)
+        if identity and identity in identity_owners:
+            logger.warning(
+                "Skipping Feishu instance '{}' because it uses the same app as instance '{}'",
+                instance_id,
+                identity_owners[identity],
+            )
+            continue
+
+        instance_ids.add(instance_id)
+        if identity:
+            identity_owners[identity] = instance_id
+
         enabled = bool(config.get("enabled", defaults.get("enabled", False)))
         if enabled_only and not enabled:
             continue
-
-        instance_id = str(config["instanceId"])
         specs.append(
             ChannelInstanceSpec(
                 instance_id=instance_id,

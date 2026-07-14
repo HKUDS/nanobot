@@ -234,6 +234,33 @@ def test_channel_instance_contract_round_trip(
     )["contractMarker"] == "preserved"
 
 
+def test_feishu_instance_contract_skips_duplicate_app_identity() -> None:
+    from nanobot.channels.feishu import FeishuChannel
+
+    section = {
+        "instances": [
+            {
+                "id": "default",
+                "enabled": True,
+                "appId": "cli_same",
+                "appSecret": "secret",
+                "domain": "feishu",
+            },
+            {
+                "id": "assistant-copy",
+                "enabled": True,
+                "appId": "cli_same",
+                "appSecret": "secret",
+                "domain": "feishu",
+            },
+        ]
+    }
+
+    specs = channel_instance_specs(FeishuChannel, section)
+
+    assert [spec.instance_id for spec in specs] == ["default"]
+
+
 def test_channel_instance_contract_materializes_generators() -> None:
     class _GeneratedChannel(_SingleChannel):
         name = "generated"

@@ -115,6 +115,48 @@ def test_save_registration_result_keeps_credentials_when_identity_fetch_fails(mo
     assert "avatarUrl" not in instance
 
 
+def test_save_registration_result_reuses_existing_app_instance(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.channels.feishu = {
+        "instances": [
+            {
+                "id": "default",
+                "instanceId": "default",
+                "name": "nanobot",
+                "enabled": True,
+                "appId": "cli_same",
+                "appSecret": "old-secret",
+                "domain": "feishu",
+                "identityKey": "feishu:cli_same",
+                "allowFrom": ["approved-user"],
+            }
+        ]
+    }
+    loader.save_config(config, config_path)
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr(feishu_module, "fetch_feishu_app_identity", lambda *_args: {})
+
+    effective_id = feishu_module.save_registration_result(
+        {
+            "app_id": "cli_same",
+            "app_secret": "rotated-secret",
+            "domain": "feishu",
+        },
+        instance_id="assistant-new",
+        name="nanobot assistant-new",
+    )
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    instances = data["channels"]["feishu"]["instances"]
+    assert effective_id == "default"
+    assert len(instances) == 1
+    assert instances[0]["id"] == "default"
+    assert instances[0]["name"] == "nanobot"
+    assert instances[0]["appSecret"] == "rotated-secret"
+    assert instances[0]["allowFrom"] == ["approved-user"]
+
+
 def test_save_registration_result_resets_access_when_instance_app_changes(
     monkeypatch,
     tmp_path,

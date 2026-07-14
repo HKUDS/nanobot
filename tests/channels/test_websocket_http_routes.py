@@ -1104,6 +1104,15 @@ def test_feishu_connect_create_appends_instance(
     assert instances[1]["displayName"] == "Assistant cli_new"
     assert instances[1]["avatarUrl"] == "https://example.com/cli_new.png"
 
+    duplicate_started = store.start(mode="create")
+    duplicate_polled = store.poll(duplicate_started["session_id"])
+    duplicate_instances = json.loads(config_path.read_text(encoding="utf-8"))[
+        "channels"
+    ]["feishu"]["instances"]
+
+    assert duplicate_polled["instance_id"] == polled["instance_id"]
+    assert len(duplicate_instances) == 2
+
 
 @pytest.mark.asyncio
 async def test_channel_configure_route_saves_discord_config_and_hot_reloads(

@@ -28,6 +28,7 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels._feishu_instances import (
     DEFAULT_INSTANCE_ID,
+    feishu_app_identity_key,
     feishu_instance_specs,
     runtime_channel_name,
     update_feishu_instance_preserving_shape,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 _LOGIN_CONSOLE = Console()
+_LARK_RUNTIME_LOCK = threading.Lock()
 
 
 def _identity_timestamp() -> str:
@@ -62,27 +64,32 @@ def _load_lark_runtime() -> tuple[Any, str, str]:
     """
     import sys
 
-    ws_client_already_imported = "lark_oapi.ws.client" in sys.modules
-    import lark_oapi as lark
-    import lark_oapi.ws.client as lark_ws_client
-    from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+    # The SDK creates a module-global event loop while importing its WebSocket
+    # client. Multiple Feishu instances start concurrently, so serialize this
+    # one-time import and cleanup rather than allowing two worker threads to
+    # close the same loop.
+    with _LARK_RUNTIME_LOCK:
+        ws_client_already_imported = "lark_oapi.ws.client" in sys.modules
+        import lark_oapi as lark
+        import lark_oapi.ws.client as lark_ws_client
+        from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 
-    if (
-        not ws_client_already_imported
-        and threading.current_thread() is not threading.main_thread()
-    ):
-        import_loop = getattr(lark_ws_client, "loop", None)
         if (
-            import_loop is not None
-            and not import_loop.is_running()
-            and not import_loop.is_closed()
+            not ws_client_already_imported
+            and threading.current_thread() is not threading.main_thread()
         ):
-            import_loop.close()
-        lark_ws_client.loop = None
-        with suppress(Exception):
-            asyncio.set_event_loop(None)
+            import_loop = getattr(lark_ws_client, "loop", None)
+            if (
+                import_loop is not None
+                and not import_loop.is_running()
+                and not import_loop.is_closed()
+            ):
+                import_loop.close()
+            lark_ws_client.loop = None
+            with suppress(Exception):
+                asyncio.set_event_loop(None)
 
-    return lark, FEISHU_DOMAIN, LARK_DOMAIN
+        return lark, FEISHU_DOMAIN, LARK_DOMAIN
 
 
 def fetch_feishu_app_identity(
@@ -593,9 +600,7 @@ def poll_registration_once(
 
 
 def _feishu_app_identity_key(app_id: str, domain: str) -> str:
-    normalized_app_id = app_id.strip()
-    normalized_domain = "lark" if domain.strip().lower() == "lark" else "feishu"
-    return f"{normalized_domain}:{normalized_app_id}" if normalized_app_id else ""
+    return feishu_app_identity_key(app_id, domain)
 
 
 def _saved_feishu_instance_identity_key(
@@ -610,6 +615,25 @@ def _saved_feishu_instance_identity_key(
                 str(spec.config.get("domain") or "feishu"),
             )
     return ""
+
+
+def _saved_feishu_instance_for_identity(
+    feishu_cfg: Any,
+    defaults: dict[str, Any],
+    app_id: str,
+    domain: str,
+) -> ChannelInstanceSpec | None:
+    identity_key = _feishu_app_identity_key(app_id, domain)
+    if not identity_key:
+        return None
+    for spec in feishu_instance_specs(feishu_cfg, defaults):
+        saved_identity = _feishu_app_identity_key(
+            str(spec.config.get("appId") or spec.config.get("app_id") or ""),
+            str(spec.config.get("domain") or "feishu"),
+        )
+        if saved_identity == identity_key:
+            return spec
+    return None
 
 
 def sync_saved_feishu_identity_boundary(
@@ -669,7 +693,7 @@ def save_registration_result(
     *,
     instance_id: str = DEFAULT_INSTANCE_ID,
     name: str | None = None,
-) -> None:
+) -> str:
     """Persist a successful Feishu/Lark registration result to config.json."""
     from nanobot.config.loader import load_config, save_config
 
@@ -681,7 +705,13 @@ def save_registration_result(
     app_id = str(result["app_id"]).strip()
     domain = str(result.get("domain", "feishu") or "feishu").strip().lower()
     domain = "lark" if domain == "lark" else "feishu"
-    previous_identity_key = _saved_feishu_instance_identity_key(feishu_cfg, defaults, instance_id)
+    existing = _saved_feishu_instance_for_identity(feishu_cfg, defaults, app_id, domain)
+    effective_instance_id = existing.instance_id if existing is not None else instance_id
+    previous_identity_key = _saved_feishu_instance_identity_key(
+        feishu_cfg,
+        defaults,
+        effective_instance_id,
+    )
     next_identity_key = _feishu_app_identity_key(app_id, domain)
     identity_changed = bool(previous_identity_key and previous_identity_key != next_identity_key)
     identity: dict[str, str] = {}
@@ -691,8 +721,19 @@ def save_registration_result(
             str(result["app_secret"]),
             domain,
         )
+    default_name = (
+        "nanobot"
+        if effective_instance_id == DEFAULT_INSTANCE_ID
+        else f"nanobot {effective_instance_id}"
+    )
+    existing_name = existing.config.get("name") if existing is not None else None
+    saved_name = (
+        existing_name
+        if existing is not None and existing.instance_id != instance_id
+        else name
+    )
     values = {
-        "name": name or ("nanobot" if instance_id == DEFAULT_INSTANCE_ID else f"nanobot {instance_id}"),
+        "name": str(saved_name or default_name),
         "appId": app_id,
         "appSecret": result["app_secret"],
         "domain": domain,
@@ -703,15 +744,16 @@ def save_registration_result(
     if identity_changed:
         values["allowFrom"] = []
         values["allow_from"] = []
-        clear_channel(runtime_channel_name("feishu", instance_id))
+        clear_channel(runtime_channel_name("feishu", effective_instance_id))
     feishu_cfg = upsert_feishu_instance(
         feishu_cfg,
         defaults,
-        instance_id,
+        effective_instance_id,
         values,
     )
     setattr(full_config.channels, "feishu", feishu_cfg)
     save_config(full_config)
+    return effective_instance_id
 
 
 def refresh_saved_feishu_identities(
