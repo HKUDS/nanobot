@@ -330,7 +330,7 @@ class BaseChannel(ABC):
         *,
         setup_spec: ChannelSetupSpec | None = None,
     ) -> list[dict[str, Any]] | None:
-        """Return optional instance summaries for settings consumers."""
+        """Return optional name, display_name, or avatar_url overrides by instance id."""
         return None
 
     @classmethod

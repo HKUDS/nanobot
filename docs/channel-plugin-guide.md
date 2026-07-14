@@ -257,7 +257,7 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | `runtime_name(instance_id)` (classmethod) | Returns the runtime routing key. Override only for multi-instance channels. |
 | `instance_specs(section, enabled_only=True)` (classmethod) | Expands persisted config into typed runtime instances. Override only for multi-instance channels. |
 | `update_instance_config(section, values, instance_id)` (classmethod) | Writes one instance while preserving the plugin-owned storage shape. |
-| `feature_instances(section, setup_spec)` (classmethod) | Optionally exposes instance summaries to settings consumers. |
+| `feature_instances(section, setup_spec)` (classmethod) | Optionally overrides instance names, display names, or avatars for settings consumers. |
 | `refresh_feature_metadata(config_path, instance_id)` (classmethod) | Optionally refreshes saved display metadata after an explicit settings action. It is never called by a read-only feature GET. |
 | `transcribe_audio(file_path)` | Transcribes audio via the shared top-level `transcription` config (if configured). |
 | `supports_streaming` (property) | `True` when config has `"streaming": true` **and** subclass overrides `send_delta()`. |
@@ -311,8 +311,13 @@ instance-mode mismatch. The shared contract enforces these invariants:
   derived name is unique and is either the channel name or starts with
   `<channel-name>.`;
 - runtime names cannot overwrite a runtime already owned by another channel;
-- `feature_instances()` returns `None` or a list of dictionaries. Instance
-  summaries should include `id`, `name`, `enabled`, and `configured`.
+- settings instance summaries are generated from `instance_specs()` and
+  `setup_spec()`. They contain the authoritative `enabled` and `configured`
+  state plus secret-safe `config_values` and `configured_fields` for the
+  generic instance editor;
+- `feature_instances()` may return `None` or presentation overrides containing
+  an `id` plus `name`, `display_name`, or `avatar_url`. It cannot override
+  runtime state or the configuration snapshot.
 
 `ChannelInstanceSpec` contains only `instance_id` and the instance config;
 nanobot derives its runtime name. Single-instance plugins keep ownership of

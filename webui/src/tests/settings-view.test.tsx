@@ -845,10 +845,13 @@ describe("SettingsView Apps catalog", () => {
             instances: [{
               id: "default",
               name: "nanobot",
-              domain: "feishu",
               enabled: true,
               configured: true,
-              app_id: "cli_test",
+              config_values: { "channels.feishu.appId": "cli_test" },
+              configured_fields: [
+                "channels.feishu.appId",
+                "channels.feishu.appSecret",
+              ],
             }],
             installed: true,
             ready: true,
@@ -911,26 +914,42 @@ describe("SettingsView Apps catalog", () => {
               status: "enabled",
               install_supported: true,
               requires_restart: true,
+              setup: channelSetupContract("feishu"),
               instances: [
                 {
                   id: "default",
                   name: "nanobot",
                   display_name: "Support Bot",
                   avatar_url: "https://example.com/support.png",
-                  domain: "feishu",
                   enabled: true,
                   configured: true,
-                  app_id: "cli_default",
+                  config_values: {
+                    "channels.feishu.appId": "cli_default",
+                    "channels.feishu.domain": "feishu",
+                    "channels.feishu.groupPolicy": "mention",
+                    "channels.feishu.allowFrom": "",
+                    "channels.feishu.topicIsolation": "true",
+                  },
+                  configured_fields: [
+                    "channels.feishu.appId",
+                    "channels.feishu.appSecret",
+                    "channels.feishu.domain",
+                    "channels.feishu.groupPolicy",
+                    "channels.feishu.topicIsolation",
+                  ],
                 },
                 {
                   id: "product",
                   name: "Product bot",
                   display_name: "Product Helper",
                   avatar_url: "https://example.com/product.png",
-                  domain: "feishu",
                   enabled: false,
                   configured: true,
-                  app_id: "cli_product",
+                  config_values: { "channels.feishu.appId": "cli_product" },
+                  configured_fields: [
+                    "channels.feishu.appId",
+                    "channels.feishu.appSecret",
+                  ],
                 },
               ],
             }],
@@ -963,6 +982,8 @@ describe("SettingsView Apps catalog", () => {
       "true",
     );
     expect(screen.getAllByText("cli_def...ault").length).toBeGreaterThan(0);
+    expect(screen.getByText("Advanced")).toBeInTheDocument();
+    expect(screen.getByText("Topic Isolation")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Product Helper/ }));
     expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
@@ -973,6 +994,68 @@ describe("SettingsView Apps catalog", () => {
       "aria-expanded",
       "true",
     );
+  });
+
+  it("renders external multi-instance channels from the shared contract", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name: "multiplugin",
+            display_name: "Multi Plugin",
+            type: "channel",
+            enabled: true,
+            configured: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: false,
+            setup: {
+              fields: [
+                channelSetupField("multiplugin", "token", "secret", { required: true }),
+                channelSetupField("multiplugin", "region", "enum", {
+                  choices: ["eu", "us"],
+                  defaultValue: "us",
+                }),
+              ],
+            },
+            instances: [
+              {
+                id: "default",
+                name: "Default worker",
+                enabled: true,
+                configured: true,
+                config_values: { "channels.multiplugin.region": "us" },
+                configured_fields: ["channels.multiplugin.token"],
+              },
+              {
+                id: "product",
+                name: "Product worker",
+                enabled: true,
+                configured: true,
+                config_values: { "channels.multiplugin.region": "eu" },
+                configured_fields: ["channels.multiplugin.token"],
+              },
+            ],
+          }],
+          enabled_count: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByText("Default worker")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Product worker" }));
+    expect(screen.getByRole("radio", { name: "Eu" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
   it("shows a single Feishu assistant without a duplicate assistant list", async () => {
@@ -994,10 +1077,13 @@ describe("SettingsView Apps catalog", () => {
           name: "nanobot",
           display_name: "Support Bot",
           avatar_url: "https://example.com/support.png",
-          domain: "feishu",
           enabled: true,
           configured: true,
-          app_id: "cli_support",
+          config_values: { "channels.feishu.appId": "cli_support" },
+          configured_fields: [
+            "channels.feishu.appId",
+            "channels.feishu.appSecret",
+          ],
         }],
       }],
       enabled_count: 1,

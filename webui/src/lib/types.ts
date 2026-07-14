@@ -724,12 +724,10 @@ export interface NanobotChannelInstanceInfo {
   name: string;
   display_name?: string;
   avatar_url?: string;
-  domain?: "feishu" | "lark" | string;
   enabled: boolean;
   configured: boolean;
-  app_id?: string;
-  group_policy?: string;
-  allow_from?: string[];
+  config_values: Record<string, string>;
+  configured_fields: string[];
 }
 
 export interface NanobotFeaturesPayload {

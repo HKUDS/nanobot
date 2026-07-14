@@ -41,6 +41,7 @@ import {
   ChannelValidationChecks,
   ChannelValidationDetails,
 } from "@/components/settings/channels/ChannelSetupParts";
+import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
 import { FeishuAssistantsPanel } from "@/components/settings/channels/FeishuAssistantsPanel";
 import { Button } from "@/components/ui/button";
 import {
@@ -135,6 +136,19 @@ export function ChannelSetupPanel({
         feature={feature}
         showBrandLogos={showBrandLogos}
         chatAppsDocsUrl={chatAppsDocsUrl}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />
+    );
+  }
+  if (feature.instances !== undefined) {
+    return (
+      <ChannelInstancesPanel
+        token={token}
+        feature={feature}
+        showBrandLogos={showBrandLogos}
+        chatAppsDocsUrl={chatAppsDocsUrl}
+        actionKey={actionKey}
+        onAction={onAction}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     );

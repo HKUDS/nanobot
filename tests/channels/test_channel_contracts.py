@@ -17,6 +17,7 @@ from nanobot.channels.contracts import (
     ChannelInstanceSpec,
     ChannelSetupSpec,
     SetupRequirement,
+    channel_feature_instances,
     channel_instance_config,
     channel_instance_specs,
     channel_runtime_name,
@@ -272,6 +273,82 @@ def test_channel_instance_contract_round_trip(
         updated,
         instance_id=target_id,
     )["contractMarker"] == "preserved"
+
+
+def test_channel_feature_instances_use_generic_setup_snapshot() -> None:
+    class _FeatureMultiChannel(_SingleChannel):
+        name = "feature-multi"
+
+        @classmethod
+        def runtime_name(cls, instance_id="default"):
+            return cls.name if instance_id == "default" else f"{cls.name}.{instance_id}"
+
+        @classmethod
+        def instance_specs(cls, section, *, enabled_only=True):
+            return [
+                ChannelInstanceSpec(item["id"], item)
+                for item in section["instances"]
+                if not enabled_only or item["enabled"]
+            ]
+
+        @classmethod
+        def feature_instances(cls, section, *, setup_spec=None):
+            return [{
+                "id": "product",
+                "display_name": "Catalog product helper",
+                "enabled": False,
+                "config_values": {"channels.feature-multi.token": "leaked"},
+            }]
+
+    setup_spec = ChannelSetupSpec(
+        fields={
+            "token": ChannelFieldSpec(kind="secret"),
+            "region": ChannelFieldSpec(kind="enum", choices=frozenset({"eu", "us"})),
+            "topicIsolation": ChannelFieldSpec(kind="bool"),
+        },
+        required=(SetupRequirement.field("token"),),
+        multi_instance=True,
+    )
+    section = {
+        "instances": [
+            {
+                "id": "product",
+                "name": "Product bot",
+                "displayName": "Product helper",
+                "avatarUrl": "https://example.com/product.png",
+                "enabled": True,
+                "token": "secret",
+                "region": "eu",
+                "topicIsolation": False,
+            }
+        ]
+    }
+
+    instances = channel_feature_instances(
+        _FeatureMultiChannel,
+        section,
+        setup_spec=setup_spec,
+    )
+
+    assert instances == [
+        {
+            "id": "product",
+            "name": "Product bot",
+            "display_name": "Catalog product helper",
+            "avatar_url": "https://example.com/product.png",
+            "enabled": True,
+            "configured": True,
+            "config_values": {
+                "channels.feature-multi.region": "eu",
+                "channels.feature-multi.topicIsolation": "false",
+            },
+            "configured_fields": [
+                "channels.feature-multi.token",
+                "channels.feature-multi.region",
+                "channels.feature-multi.topicIsolation",
+            ],
+        }
+    ]
 
 
 def test_feishu_instance_contract_skips_duplicate_app_identity() -> None:

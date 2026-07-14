@@ -36,7 +36,7 @@ from nanobot.channels._feishu_instances import (
 )
 from nanobot.channels._feishu_ws import get_feishu_ws_runner
 from nanobot.channels.base import BaseChannel
-from nanobot.channels.contracts import ChannelInstanceSpec, ChannelSetupSpec
+from nanobot.channels.contracts import ChannelInstanceSpec
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
@@ -952,36 +952,6 @@ class FeishuChannel(BaseChannel):
             instance_id,
             values,
         )
-
-    @classmethod
-    def feature_instances(
-        cls,
-        section: Any,
-        *,
-        setup_spec: ChannelSetupSpec | None = None,
-    ) -> list[dict[str, Any]]:
-        instances = []
-        for spec in cls.instance_specs(section, enabled_only=False):
-            config = spec.config
-            display_name = str(config.get("displayName") or "").strip()
-            local_name = str(config.get("name") or "").strip()
-            instances.append(
-                {
-                    "id": spec.instance_id,
-                    "name": local_name or "nanobot",
-                    "display_name": display_name or local_name or "nanobot",
-                    "avatar_url": config.get("avatarUrl") or "",
-                    "domain": config.get("domain") or "feishu",
-                    "enabled": bool(config.get("enabled", False)),
-                    "configured": bool(
-                        setup_spec and setup_spec.is_configured(config)
-                    ),
-                    "app_id": config.get("appId") or config.get("app_id") or "",
-                    "group_policy": config.get("groupPolicy") or "mention",
-                    "allow_from": list(config.get("allowFrom") or []),
-                }
-            )
-        return instances
 
     @classmethod
     def refresh_feature_metadata(

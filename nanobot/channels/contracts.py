@@ -323,12 +323,40 @@ def channel_feature_instances(
     *,
     setup_spec: ChannelSetupSpec | None = None,
 ) -> list[dict[str, Any]] | None:
-    instances = channel_cls.feature_instances(section, setup_spec=setup_spec)
-    if instances is not None and (
-        not isinstance(instances, list)
-        or any(not isinstance(instance, dict) for instance in instances)
+    overrides = channel_cls.feature_instances(section, setup_spec=setup_spec)
+    if overrides is None and not (setup_spec and setup_spec.multi_instance):
+        return None
+    if overrides is not None and (
+        not isinstance(overrides, list)
+        or any(not isinstance(instance, dict) for instance in overrides)
     ):
         raise TypeError(f"{channel_cls.__name__}.feature_instances() must return a list of dicts or None")
+
+    instances = [
+        _channel_feature_instance(channel_cls, spec, setup_spec)
+        for spec in channel_instance_specs(channel_cls, section, enabled_only=False)
+    ]
+    if overrides is None:
+        return instances
+
+    by_id = {instance["id"]: instance for instance in instances}
+    seen: set[str] = set()
+    for override in overrides:
+        instance_id = override.get("id")
+        if not isinstance(instance_id, str) or instance_id not in by_id:
+            raise ValueError(
+                f"{channel_cls.__name__}.feature_instances() returned unknown instance id "
+                f"'{instance_id}'"
+            )
+        if instance_id in seen:
+            raise ValueError(
+                f"{channel_cls.__name__}.feature_instances() returned duplicate instance id "
+                f"'{instance_id}'"
+            )
+        seen.add(instance_id)
+        for field in ("name", "display_name", "avatar_url"):
+            if field in override:
+                by_id[instance_id][field] = str(override[field] or "")
     return instances
 
 
@@ -385,6 +413,41 @@ def stringify_channel_value(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
     return str(value)
+
+
+def _channel_feature_instance(
+    channel_cls: type[Any],
+    instance: ChannelInstanceSpec,
+    setup_spec: ChannelSetupSpec | None,
+) -> dict[str, Any]:
+    config = instance.config
+    name = str(channel_field_value(config, "name") or instance.instance_id).strip()
+    display_name = str(channel_field_value(config, "displayName") or name).strip()
+    avatar_url = str(channel_field_value(config, "avatarUrl") or "").strip()
+    config_values: dict[str, str] = {}
+    configured_fields: list[str] = []
+    setup_fields = setup_spec.fields.items() if setup_spec else ()
+    for field_name, field_spec in setup_fields:
+        if not field_spec.writable:
+            continue
+        value = channel_field_value(config, field_name)
+        if not channel_value_present(value):
+            continue
+        key = f"channels.{channel_cls.name}.{field_name}"
+        configured_fields.append(key)
+        if field_spec.kind != "secret":
+            config_values[key] = stringify_channel_value(value)
+
+    return {
+        "id": instance.instance_id,
+        "name": name,
+        "display_name": display_name,
+        "avatar_url": avatar_url,
+        "enabled": bool(channel_field_value(config, "enabled")),
+        "configured": bool(setup_spec and setup_spec.is_configured(config)),
+        "config_values": config_values,
+        "configured_fields": configured_fields,
+    }
 
 
 def _config_mapping(value: Any) -> dict[str, Any] | None:
