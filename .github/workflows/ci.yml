@@ -64,9 +64,13 @@ jobs:
         with:
           bun-version: 1.3.6
 
+      - name: Verify npm lockfile
+        working-directory: webui
+        run: npm ci --ignore-scripts --dry-run
+
       - name: Install WebUI dependencies
         working-directory: webui
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Lint WebUI
         working-directory: webui
