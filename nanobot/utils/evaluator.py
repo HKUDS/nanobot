@@ -6,33 +6,34 @@ LLM call to decide whether the result warrants notifying the user.
 
 from __future__ import annotations
 
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from nanobot.utils.helpers import truncate_text
 from nanobot.utils.prompt_templates import render_template
+from nanobot.utils.workspace_prompts import (
+    WORKSPACE_PROMPT_MAX_CHARS,
+    has_workspace_prompt_override,
+    load_workspace_prompt_override,
+    workspace_prompt_file,
+)
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 # Cap for a workspace-local heartbeat evaluator prompt override.
-EVALUATOR_PROMPT_MAX_CHARS = 32_000
+EVALUATOR_PROMPT_MAX_CHARS = WORKSPACE_PROMPT_MAX_CHARS
 
 
 def evaluator_prompt_file(workspace: Path) -> Path:
     """Path to the workspace-local heartbeat evaluator prompt override."""
-    return workspace / "prompts" / "evaluator.md"
+    return workspace_prompt_file(workspace, "evaluator")
 
 
 def has_evaluator_prompt_override(workspace: Path) -> bool:
     """True when the workspace defines a non-empty evaluator prompt override."""
-    with suppress(OSError):
-        path = evaluator_prompt_file(workspace)
-        return path.is_file() and bool(path.read_text(encoding="utf-8").strip())
-    return False
+    return has_workspace_prompt_override(evaluator_prompt_file(workspace))
 
 
 def default_evaluator_prompt() -> str:
@@ -46,16 +47,14 @@ def resolve_evaluator_prompt(workspace: Path) -> str:
     Oversized overrides are truncated so a runaway file cannot blow up the
     evaluator call.
     """
-    with suppress(OSError):
-        text = evaluator_prompt_file(workspace).read_text(encoding="utf-8").rstrip()
-        if text:
-            if len(text) > EVALUATOR_PROMPT_MAX_CHARS:
-                logger.warning(
-                    "Workspace heartbeat evaluator prompt exceeds {} chars ({}); truncating.",
-                    EVALUATOR_PROMPT_MAX_CHARS, len(text),
-                )
-                return truncate_text(text, EVALUATOR_PROMPT_MAX_CHARS)
-            return text
+    text, original_chars = load_workspace_prompt_override(evaluator_prompt_file(workspace))
+    if text is not None:
+        if original_chars > EVALUATOR_PROMPT_MAX_CHARS:
+            logger.warning(
+                "Workspace heartbeat evaluator prompt exceeds {} chars ({}); truncating.",
+                EVALUATOR_PROMPT_MAX_CHARS, original_chars,
+            )
+        return text
     return default_evaluator_prompt()
 
 _EVALUATE_TOOL = [

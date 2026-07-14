@@ -1,7 +1,13 @@
 import pytest
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.utils.evaluator import evaluate_response
+from nanobot.utils.evaluator import (
+    EVALUATOR_PROMPT_MAX_CHARS,
+    default_evaluator_prompt,
+    evaluate_response,
+    evaluator_prompt_file,
+    resolve_evaluator_prompt,
+)
 
 
 class DummyProvider(LLMProvider):
@@ -32,6 +38,33 @@ def _eval_tool_call(should_notify: bool, reason: str = "") -> LLMResponse:
 
 
 _EVAL_PROMPT = "You are a notification gate. Call evaluate_notification."
+
+
+def test_resolve_evaluator_prompt_uses_workspace_override(tmp_path) -> None:
+    path = evaluator_prompt_file(tmp_path)
+    path.parent.mkdir()
+    path.write_text("Custom evaluator prompt.\n", encoding="utf-8")
+
+    assert resolve_evaluator_prompt(tmp_path) == "Custom evaluator prompt."
+
+
+def test_resolve_evaluator_prompt_uses_default_for_empty_override(tmp_path) -> None:
+    path = evaluator_prompt_file(tmp_path)
+    path.parent.mkdir()
+    path.write_text("  \n", encoding="utf-8")
+
+    assert resolve_evaluator_prompt(tmp_path) == default_evaluator_prompt()
+
+
+def test_resolve_evaluator_prompt_caps_workspace_override(tmp_path) -> None:
+    path = evaluator_prompt_file(tmp_path)
+    path.parent.mkdir()
+    path.write_text("x" * (EVALUATOR_PROMPT_MAX_CHARS + 1), encoding="utf-8")
+
+    prompt = resolve_evaluator_prompt(tmp_path)
+
+    assert prompt.startswith("x" * EVALUATOR_PROMPT_MAX_CHARS)
+    assert prompt.endswith("... (truncated)")
 
 
 @pytest.mark.asyncio

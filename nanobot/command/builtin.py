@@ -17,6 +17,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+from nanobot.utils.workspace_prompts import initialize_workspace_prompt
 
 # WebUI protocol contract for how a slash command participates in turn state:
 # - side_channel: returns control text without starting or ending an agent turn.
@@ -480,20 +481,12 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip().lower()
 
     if args == "init":
-        try:
-            prompt_exists_with_content = path.exists() and (
-                not path.is_file() or bool(path.read_text(encoding="utf-8").strip())
-            )
-        except OSError:
-            prompt_exists_with_content = True
-        if prompt_exists_with_content:
+        if not initialize_workspace_prompt(path, store.default_dream_prompt()):
             content = (
                 f"Dream memory instructions already exist at `{display_path}`.\n\n"
                 "Edit that file, or delete/empty it to return to nanobot's default."
             )
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(store.default_dream_prompt() + "\n", encoding="utf-8")
             content = (
                 f"Created Dream memory instructions at `{display_path}`.\n\n"
                 "Edit that file to teach Dream how to organize memory. "
@@ -537,20 +530,12 @@ async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip().lower()
 
     if args == "init":
-        try:
-            prompt_exists_with_content = path.exists() and (
-                not path.is_file() or bool(path.read_text(encoding="utf-8").strip())
-            )
-        except OSError:
-            prompt_exists_with_content = True
-        if prompt_exists_with_content:
+        if not initialize_workspace_prompt(path, default_evaluator_prompt()):
             content = (
                 f"Heartbeat evaluator prompt already exists at `{display_path}`.\n\n"
                 "Edit that file, or delete/empty it to return to nanobot's default."
             )
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(default_evaluator_prompt() + "\n", encoding="utf-8")
             content = (
                 f"Created heartbeat evaluator prompt at `{display_path}`.\n\n"
                 "Edit that file to control when the heartbeat notification gate speaks. "
