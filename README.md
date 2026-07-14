@@ -52,7 +52,7 @@
 
 Deploy nanobot's gateway and bundled WebUI as a single web service with persistent memory. Render reads [`render.yaml`](./render.yaml) and prompts for two secrets on deploy: `ANTHROPIC_API_KEY` and `NANOBOT_WEB_TOKEN` (the password that gates the public WebUI — generate a strong random value, e.g. `openssl rand -hex 32`).
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Ho1yShif/nanobot)
 
 ## What can nanobot do?
 
