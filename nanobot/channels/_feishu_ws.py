@@ -10,18 +10,35 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from loguru import logger
 
 
+class _LarkWsClient(Protocol):
+    """Private SDK surface isolated behind the Feishu runtime adapter."""
+
+    _auto_reconnect: bool
+    _receive_message_loop: Callable[[], Awaitable[None]]
+
+    async def _connect(self) -> None: ...
+
+    async def _disconnect(self) -> None: ...
+
+    async def _ping_loop(self) -> None: ...
+
+
 @dataclass
 class _ClientRuntime:
-    client: Any
+    client: _LarkWsClient
     stop_event: asyncio.Event
-    task: asyncio.Task
+    task: asyncio.Task[Any] | None
+    receive_loop: Callable[[], Awaitable[None]]
+    auto_reconnect: bool
+    receive_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
 
 
 class FeishuWsRunner:
@@ -34,7 +51,7 @@ class FeishuWsRunner:
         self._lock = threading.Lock()
         self._clients: dict[str, _ClientRuntime] = {}
 
-    async def start_client(self, key: str, client: Any) -> None:
+    async def start_client(self, key: str, client: _LarkWsClient) -> None:
         """Start or replace one client runtime."""
         loop = self._ensure_loop()
         await asyncio.wrap_future(
@@ -74,24 +91,63 @@ class FeishuWsRunner:
                 loop.run_until_complete(loop.shutdown_asyncgens())
             loop.close()
 
-    async def _start_client(self, key: str, client: Any) -> None:
+    async def _start_client(self, key: str, client: _LarkWsClient) -> None:
         await self._stop_client(key)
         stop_event = asyncio.Event()
-        task = asyncio.create_task(self._client_main(key, client, stop_event))
-        self._clients[key] = _ClientRuntime(client=client, stop_event=stop_event, task=task)
+        receive_loop = client._receive_message_loop
+        runtime = _ClientRuntime(
+            client=client,
+            stop_event=stop_event,
+            task=None,
+            receive_loop=receive_loop,
+            auto_reconnect=client._auto_reconnect,
+        )
+
+        # The SDK discards this task handle. Track it at the adapter boundary so
+        # an intentional stop can cancel recv() before closing the socket; otherwise
+        # the SDK logs close code 1000 as an error and starts an unwanted reconnect.
+        async def tracked_receive_loop() -> None:
+            if stop_event.is_set():
+                return
+            task = asyncio.current_task()
+            if task is not None:
+                runtime.receive_tasks.add(task)
+            try:
+                await receive_loop()
+            finally:
+                if task is not None:
+                    runtime.receive_tasks.discard(task)
+
+        client._receive_message_loop = tracked_receive_loop
+        runtime.task = asyncio.create_task(self._client_main(key, client, stop_event))
+        self._clients[key] = runtime
 
     async def _stop_client(self, key: str) -> None:
         runtime = self._clients.pop(key, None)
         if runtime is None:
             return
         runtime.stop_event.set()
-        with suppress(Exception):
-            await runtime.client._disconnect()
-        runtime.task.cancel()
-        with suppress(asyncio.CancelledError):
-            await runtime.task
+        runtime.client._auto_reconnect = False
+        try:
+            receive_tasks = tuple(runtime.receive_tasks)
+            for task in receive_tasks:
+                task.cancel()
+            if receive_tasks:
+                await asyncio.gather(*receive_tasks, return_exceptions=True)
 
-    async def _client_main(self, key: str, client: Any, stop_event: asyncio.Event) -> None:
+            if runtime.task is not None:
+                runtime.task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await runtime.task
+            with suppress(Exception):
+                await runtime.client._disconnect()
+        finally:
+            runtime.client._receive_message_loop = runtime.receive_loop
+            runtime.client._auto_reconnect = runtime.auto_reconnect
+
+    async def _client_main(
+        self, key: str, client: _LarkWsClient, stop_event: asyncio.Event
+    ) -> None:
         ping_task: asyncio.Task | None = None
         while not stop_event.is_set():
             try:
