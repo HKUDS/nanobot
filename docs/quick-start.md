@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`.
+The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`. At the end it prints the exact command it used to run nanobot; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
 
 If you prefer to inspect the scripts first, open [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1).
 
@@ -57,7 +57,7 @@ If the installer did not open the wizard, run it yourself:
 nanobot onboard --wizard
 ```
 
-If you skip the wizard and run `nanobot webui` with no usable model, the launcher offers to run the same Quick Start flow before starting the browser.
+Current source versions also provide `nanobot webui`. When run without a usable model, that launcher offers the same Quick Start flow before starting the browser.
 
 ## 3. Check the Setup
 
@@ -76,10 +76,10 @@ Most other providers can say `not set`. This command validates local setup but d
 ## 4. Get the First Reply
 
 ```bash
-nanobot webui
+nanobot gateway
 ```
 
-The launcher prepares the local WebSocket channel, starts the gateway, and opens `http://127.0.0.1:8765`. It binds to localhost for the first run, so other devices on your network cannot reach it.
+Quick Start has already prepared the local WebSocket channel. Leave the gateway terminal open and visit `http://127.0.0.1:8765`; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. On current source versions, you can run `nanobot webui` instead to perform the local WebUI checks, start the gateway, and open the browser automatically.
 
 Send:
 
@@ -92,7 +92,7 @@ Any normal assistant answer is success. It proves that nanobot can load the conf
 Leave the terminal open while using the WebUI. If you prefer a managed background process, stop the foreground process with `Ctrl+C`, then run:
 
 ```bash
-nanobot webui --background
+nanobot gateway --background
 nanobot gateway status
 ```
 
@@ -164,15 +164,15 @@ On Windows, if `python -m pip install .` reports that it cannot launch `npm`, ru
 
 The source path follows current `main` and can be newer than the published package. A non-editable install triggers the build hook that bundles the current WebUI. For editable Python or frontend development, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and [`../webui/README.md`](../webui/README.md).
 
-If the package is installed but the shell cannot find `nanobot`, use the module form:
+If the package is installed but the shell cannot find `nanobot`, use the runner that owns the installation. The recommended installer prints the exact command to reuse. Common forms are:
 
 ```bash
-python -m nanobot --version
-python -m nanobot onboard --wizard
-python -m nanobot webui
+uv tool run --from nanobot-ai nanobot --version
+pipx run --spec nanobot-ai nanobot --version
+~/.nanobot/venv/bin/python -m nanobot --version
 ```
 
-Some systems name Python `python3` or `py`; use the command that reports Python 3.11 or newer. On Windows, `~` means your user profile directory, such as `C:\Users\you`.
+On Windows, the managed-environment form is `& "$HOME\.nanobot\venv\Scripts\python.exe" -m nanobot --version`. Replace `--version` with `onboard --wizard`, `gateway`, or any other arguments you need. Use plain `python -m nanobot` only when that Python executable belongs to the environment where nanobot was installed.
 
 ## Manual Configuration Fallback
 
@@ -239,7 +239,7 @@ nanobot agent -m "Hello!"
 
 | Symptom | First check |
 |---|---|
-| `nanobot: command not found` | Use `python -m nanobot` from the environment where you installed it |
+| `nanobot: command not found` | Reuse the installer command or method-specific runner described under [Other Install Methods](#other-install-methods) |
 | JSON parse error | Check commas and braces; remember that docs examples are usually snippets |
 | `401` or invalid API key | Verify the selected provider owns that key and remove accidental spaces |
 | Model not found | Use a model ID available from the provider selected in the active preset |

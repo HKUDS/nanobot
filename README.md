@@ -54,15 +54,15 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer uses an isolated environment when needed and opens `nanobot onboard --wizard`. Choose **Quick Start**, then enter the provider, model, and credential details requested by the wizard.
+The installer uses an isolated environment when needed and opens `nanobot onboard --wizard`. Choose **Quick Start**, then enter the provider, model, and credential details requested by the wizard. It also prints the exact command it used to run nanobot; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
 
-**2. Open nanobot**
+**2. Start nanobot and open the browser**
 
 ```bash
-nanobot webui
+nanobot gateway
 ```
 
-This starts the local gateway and opens `http://127.0.0.1:8765`. Send `Hello!`. A normal reply means installation, model access, and the WebUI are working.
+Leave the terminal open, then open `http://127.0.0.1:8765` and send `Hello!`. A normal reply means installation, model access, and the WebUI are working. Current source versions also provide `nanobot webui`, which performs the local WebUI checks, starts the gateway, and opens the browser automatically.
 
 If terminals, Python, API keys, or configuration files are new to you, follow the [beginner walkthrough](./docs/start-without-technical-background.md). For installation alternatives and first-run checks, use the [full quick start](./docs/quick-start.md).
 
@@ -142,7 +142,7 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-If `nanobot` is not on `PATH`, use `python -m nanobot` in the same commands. See [Install and Quick Start](./docs/quick-start.md) for updates, source installs, and operating-system notes.
+If `nanobot` is not on `PATH`, invoke it through the method that installed it: reuse the exact command printed by the recommended installer, use `uv tool run --from nanobot-ai nanobot ...` or `pipx run --spec nanobot-ai nanobot ...`, or use the Python executable from the environment where pip installed the package. See [Install and Quick Start](./docs/quick-start.md) for updates, source installs, and operating-system notes.
 
 ## Documentation
 

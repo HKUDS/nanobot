@@ -16,10 +16,10 @@ The recommended first-run path is:
 
 1. Install nanobot.
 2. Choose **Quick Start** in `nanobot onboard --wizard`.
-3. Run `nanobot webui`.
+3. Run `nanobot gateway` and open `http://127.0.0.1:8765`.
 4. Send `Hello!` before configuring anything else.
 
-Most people do not need to edit JSON for the first run. The wizard handles the initial provider, model, and local WebUI settings. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for CLI App or MCP integrations.
+Most people do not need to edit JSON for the first run. The wizard handles the initial provider, model, and local WebUI settings. Current source versions also provide `nanobot webui` to start the gateway and open the browser in one step. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for CLI App or MCP integrations.
 
 ## Add One Capability
 
