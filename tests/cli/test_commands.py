@@ -1705,6 +1705,109 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
 
+def test_heartbeat_empty_response_still_retains_recent_messages(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.dream.enabled = True
+    config.workspace_path.mkdir(parents=True)
+    (config.workspace_path / "HEARTBEAT.md").write_text(
+        "## Active Tasks\n\n- Check repository health\n",
+        encoding="utf-8",
+    )
+
+    provider = _fake_provider()
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    class _FakeSession:
+        def retain_recent_legal_suffix(self, limit: int) -> None:
+            seen["retained_limit"] = limit
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            self.session = _FakeSession()
+            seen["heartbeat_session"] = self.session
+
+        def get_or_create(self, key: str) -> _FakeSession:
+            seen["session_key"] = key
+            return self.session
+
+        def save(self, session: _FakeSession) -> None:
+            seen["saved_session"] = session
+
+        def list_sessions(self) -> list[dict[str, str]]:
+            return [{"key": "telegram:u1"}]
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job: CronJob) -> None:
+            raise _StopGatewayError("stop")
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = kwargs.get("provider", object())
+            self.sessions = kwargs["session_manager"]
+            self.tools = {}
+
+        async def process_direct(self, *_args, **_kwargs):
+            return SimpleNamespace(content="")
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.enabled_channels = ["telegram"]
+
+    async def _unexpected_evaluator(*_args, **_kwargs) -> bool:
+        raise AssertionError("empty heartbeat response must not be evaluated")
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        make_provider=lambda _config: provider,
+        message_bus=lambda: bus,
+        session_manager=_FakeSessionManager,
+        cron_service=_FakeCron,
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cli.commands.read_webui_sidebar_state", lambda: {})
+    monkeypatch.setattr("nanobot.cli.commands.evaluate_response", _unexpected_evaluator)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    cron = seen["cron"]
+    response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
+
+    assert response is None
+    assert seen["session_key"] == "heartbeat"
+    assert seen["retained_limit"] == config.gateway.heartbeat.keep_recent_messages
+    assert seen["saved_session"] is seen["heartbeat_session"]
+
+
 def test_webui_yes_creates_config_and_enables_local_websocket(
     monkeypatch,
     tmp_path: Path,

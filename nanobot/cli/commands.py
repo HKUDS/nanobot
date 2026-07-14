@@ -1860,15 +1860,15 @@ def _run_gateway(
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
                     message_tool.reset_suppress_delivery(suppress_token)
 
-            if not resp or not resp.content:
-                return
-
-            response = resp.content
-
             # Keep a small tail of heartbeat history so the loop stays bounded.
             session = agent.sessions.get_or_create("heartbeat")
             session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
             agent.sessions.save(session)
+
+            if not resp or not resp.content:
+                return
+
+            response = resp.content
 
             evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
 
