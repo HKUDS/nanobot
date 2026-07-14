@@ -6,8 +6,6 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
-from secrets import token_hex
-from time import monotonic
 from typing import Any
 
 import httpx
@@ -77,17 +75,12 @@ class OpenAICodexProvider(LLMProvider):
         if tools:
             body["tools"] = convert_tools(tools)
 
-        attempt_id = token_hex(4)
         stage = "oauth_token"
-        stage_started_at = monotonic()
-        tls_verify: bool | None = None
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(token.account_id, token.access)
 
             stage = "codex_request"
-            stage_started_at = monotonic()
-            tls_verify = True
             try:
                 content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=True,
@@ -99,13 +92,7 @@ class OpenAICodexProvider(LLMProvider):
             except Exception as e:
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
-                logger.warning(
-                    "SSL verification failed for Codex API: attempt_id={}; "
-                    "retrying with verify=False",
-                    attempt_id,
-                )
-                stage_started_at = monotonic()
-                tls_verify = False
+                logger.warning("SSL verification failed for Codex API; retrying with verify=False")
                 content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=False,
                     proxy=self.proxy,
@@ -123,17 +110,10 @@ class OpenAICodexProvider(LLMProvider):
         except Exception as e:
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
-            elapsed_ms = max(0, round((monotonic() - stage_started_at) * 1000))
             logger.warning(
-                "Codex API request failed: attempt_id={} stage={} elapsed_ms={} model={} "
-                "proxy_enabled={} tls_verify={} type={} kind={} retryable={} status={} "
+                "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
                 "error_type={} error_code={} retry_after={} summary={}",
-                attempt_id,
                 stage,
-                elapsed_ms,
-                body["model"],
-                self.proxy is not None,
-                tls_verify,
                 exc_type,
                 response.error_kind,
                 response.error_should_retry,
