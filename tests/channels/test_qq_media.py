@@ -113,17 +113,18 @@ def test_guess_send_file_type_by_mime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_exception_caught_not_raised() -> None:
-    """Exceptions inside send() must not propagate."""
+async def test_send_exception_propagates_for_manager_retry() -> None:
+    """Delivery failures must propagate to the channel manager."""
     channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
     channel._client = _FakeClient()
 
     with patch.object(
         channel, "_send_text_only", new_callable=AsyncMock, side_effect=RuntimeError("boom")
     ) as send_text:
-        await channel.send(
-            OutboundMessage(channel="qq", chat_id="user1", content="hello")
-        )
+        with pytest.raises(RuntimeError, match="boom"):
+            await channel.send(
+                OutboundMessage(channel="qq", chat_id="user1", content="hello")
+            )
     send_text.assert_awaited_once()
 
 

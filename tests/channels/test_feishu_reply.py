@@ -266,8 +266,9 @@ async def test_send_uses_expected_feishu_msg_type_for_uploaded_files(
 
     send_calls: list[tuple[str, str, str, str]] = []
 
-    def _record_send(receive_id_type: str, receive_id: str, msg_type: str, content: str) -> None:
+    def _record_send(receive_id_type: str, receive_id: str, msg_type: str, content: str) -> str:
         send_calls.append((receive_id_type, receive_id, msg_type, content))
+        return "om_test"
 
     with patch.object(channel, "_upload_file_sync", return_value="file-key"), patch.object(
         channel, "_send_message_sync", side_effect=_record_send
@@ -396,6 +397,22 @@ async def test_send_fallback_to_create_when_reply_fails() -> None:
     # reply attempted first, then falls back to create
     channel._client.im.v1.message.reply.assert_called_once()
     channel._client.im.v1.message.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_create_api_does_not_deliver() -> None:
+    channel = _make_feishu_channel()
+
+    with patch.object(channel, "_send_message_sync", return_value=None):
+        with pytest.raises(RuntimeError, match="message was not delivered"):
+            await channel.send(
+                OutboundMessage(
+                    channel="feishu",
+                    chat_id="oc_abc",
+                    content="hello",
+                    metadata={},
+                )
+            )
 
 
 def test_send_message_sync_falls_back_to_text_for_interactive_error() -> None:

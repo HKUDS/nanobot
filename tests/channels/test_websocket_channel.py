@@ -1,18 +1,17 @@
 """Unit and lightweight integration tests for the WebSocket channel."""
 
 import asyncio
-import functools
 import json
 import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
+from ws_test_client import http_get as _http_get
 
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -166,13 +165,6 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "nanobot.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",
-    )
-
-
-async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Response:
-    """Run GET in a thread to avoid blocking the asyncio loop shared with websockets."""
-    return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 

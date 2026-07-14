@@ -629,7 +629,9 @@ async def test_send_delta_stream_end_treats_not_modified_as_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_stream_end_does_not_fallback_on_network_timeout() -> None:
+async def test_send_delta_stream_end_does_not_fallback_on_network_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """TimedOut during HTML edit should propagate, never fall back to plain text."""
     from telegram.error import TimedOut
 
@@ -638,6 +640,7 @@ async def test_send_delta_stream_end_does_not_fallback_on_network_timeout() -> N
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
+    monkeypatch.setattr("nanobot.channels.telegram._SEND_RETRY_BASE_DELAY", 0)
     # _call_with_retry retries TimedOut up to 3 times, so the mock will be called
     # multiple times – but all calls must be with parse_mode="HTML" (no plain fallback).
     channel._app.bot.edit_message_text = AsyncMock(side_effect=TimedOut("network timeout"))
@@ -650,6 +653,7 @@ async def test_send_delta_stream_end_does_not_fallback_on_network_timeout() -> N
     # no plain-text fallback call should have been made.
     for call in channel._app.bot.edit_message_text.call_args_list:
         assert call.kwargs.get("parse_mode") == "HTML"
+    assert channel._app.bot.edit_message_text.await_count == 3
     # Buffer should still be present (not cleaned up on error)
     assert "123" in channel._stream_bufs
 

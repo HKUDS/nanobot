@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -61,6 +61,33 @@ const MCP_PRESETS: McpPresetInfo[] = [
   },
 ];
 
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    command: "/model",
+    title: "Show or switch model",
+    description: "Show the active model or switch to another configuration.",
+    icon: "brain",
+    lifecycle: "agent_turn_with_args",
+    acceptsArgs: true,
+  },
+  {
+    command: "/goal",
+    title: "Start a goal",
+    description: "Start a sustained goal.",
+    icon: "activity",
+    lifecycle: "agent_turn_with_args",
+    acceptsArgs: true,
+  },
+  {
+    command: "/new",
+    title: "New chat",
+    description: "Start a new chat.",
+    icon: "square-pen",
+    lifecycle: "finalize_active_turn",
+    acceptsArgs: false,
+  },
+];
+
 describe("MessageBubble", () => {
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
@@ -105,6 +132,76 @@ describe("MessageBubble", () => {
     } finally {
       Reflect.deleteProperty(navigator, "clipboard");
     }
+  });
+
+  it("highlights recognized slash command names without adding container chrome", () => {
+    const message: UIMessage = {
+      id: "u-command",
+      role: "user",
+      content: "/model gpt-5",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} slashCommands={SLASH_COMMANDS} />);
+
+    const command = screen.getByTestId("message-slash-command");
+    expect(command).toHaveTextContent("/model");
+    expect(command).toHaveClass(
+      "font-medium",
+      "transition-[color,text-shadow]",
+      "duration-150",
+    );
+    expect(command).not.toHaveClass("font-mono", "font-semibold");
+    expect(command.getAttribute("style")).toContain("text-shadow");
+    expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(command.parentElement).toHaveTextContent("/model gpt-5");
+    expect(command.parentElement).toHaveClass("rounded-[18px]", "bg-secondary/70");
+  });
+
+  it("keeps unknown and invalid slash commands as plain message text", () => {
+    const unknown: UIMessage = {
+      id: "u-unknown-command",
+      role: "user",
+      content: "/unknown value",
+      createdAt: Date.now(),
+    };
+    const invalidExactCommand: UIMessage = {
+      id: "u-invalid-command",
+      role: "user",
+      content: "/new with-arguments",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(
+      <MessageBubble message={unknown} slashCommands={SLASH_COMMANDS} />,
+    );
+    expect(screen.queryByTestId("message-slash-command")).not.toBeInTheDocument();
+    expect(screen.getByText("/unknown value")).toBeInTheDocument();
+
+    rerender(<MessageBubble message={invalidExactCommand} slashCommands={SLASH_COMMANDS} />);
+    expect(screen.queryByTestId("message-slash-command")).not.toBeInTheDocument();
+    expect(screen.getByText("/new with-arguments")).toBeInTheDocument();
+  });
+
+  it("preserves installed capability mentions in slash command arguments", () => {
+    const message: UIMessage = {
+      id: "u-command-mention",
+      role: "user",
+      content: "/goal ask @zoom to schedule the review",
+      createdAt: Date.now(),
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        slashCommands={SLASH_COMMANDS}
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
   });
 
   it("renders fork control in completed assistant action rows", () => {

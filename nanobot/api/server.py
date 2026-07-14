@@ -41,6 +41,26 @@ __all__ = (
 
 API_SESSION_KEY = "api:default"
 API_CHAT_ID = "default"
+_AGENT_LOOP_KEY = web.AppKey[Any]("agent_loop")
+_MODEL_NAME_KEY = web.AppKey[str]("model_name")
+_REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
+_SESSION_LOCKS_KEY = web.AppKey[dict]("session_locks")
+_MISSING = object()
+
+
+def _app_value(
+    app: Any,
+    key: web.AppKey[Any],
+    legacy_key: str,
+    default: Any = _MISSING,
+) -> Any:
+    """Read typed aiohttp state while accepting lightweight dict test doubles."""
+    try:
+        return app[key]
+    except KeyError:
+        if default is _MISSING:
+            return app[legacy_key]
+        return app.get(legacy_key, default)
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +229,14 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     if not isinstance(content_type, str):
         content_type = ""
 
-    agent_loop = request.app["agent_loop"]
-    timeout_s: float = request.app.get("request_timeout", 120.0)
-    model_name: str = request.app.get("model_name", "nanobot")
+    agent_loop = _app_value(request.app, _AGENT_LOOP_KEY, "agent_loop")
+    timeout_s: float = _app_value(
+        request.app,
+        _REQUEST_TIMEOUT_KEY,
+        "request_timeout",
+        120.0,
+    )
+    model_name: str = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
 
     stream = False
     try:
@@ -238,7 +263,11 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
-    session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
+    session_locks: dict[str, asyncio.Lock] = _app_value(
+        request.app,
+        _SESSION_LOCKS_KEY,
+        "session_locks",
+    )
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
     logger.info(
@@ -366,7 +395,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models"""
-    model_name = request.app.get("model_name", "nanobot")
+    model_name = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
     return web.json_response(
         {
             "object": "list",
@@ -407,10 +436,10 @@ def create_app(
         api_key: Optional API key for Bearer-token authentication on API routes.
     """
     app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
-    app["agent_loop"] = agent_loop
-    app["model_name"] = model_name
-    app["request_timeout"] = request_timeout
-    app["session_locks"] = {}  # per-user locks, keyed by session_key
+    app[_AGENT_LOOP_KEY] = agent_loop
+    app[_MODEL_NAME_KEY] = model_name
+    app[_REQUEST_TIMEOUT_KEY] = request_timeout
+    app[_SESSION_LOCKS_KEY] = {}  # per-user locks, keyed by session_key
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler) -> web.StreamResponse:

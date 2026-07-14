@@ -21,6 +21,7 @@ import { AttachmentTile } from "@/components/AttachmentTile";
 import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   Tooltip,
   TooltipContent,
@@ -31,9 +32,11 @@ import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatTurnLatency } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
+import { matchingSlashCommand } from "@/lib/slash-command";
 import type {
   CliAppInfo,
   McpPresetInfo,
+  SlashCommand,
   UICliAppAttachment,
   UIMcpPresetAttachment,
   UIImage,
@@ -47,6 +50,7 @@ interface MessageBubbleProps {
   showCopyAction?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
 }
@@ -138,6 +142,7 @@ export function MessageBubble({
   showCopyAction = true,
   cliApps = [],
   mcpPresets = [],
+  slashCommands = [],
   onOpenFilePreview,
   onForkFromHere,
 }: MessageBubbleProps) {
@@ -162,6 +167,23 @@ export function MessageBubble({
     const hasImages = images.length > 0;
     const hasMedia = media.length > 0;
     const hasText = message.content.trim().length > 0;
+    const slashCommand = matchingSlashCommand(message.content, slashCommands);
+    const messageText = slashCommand ? (
+      <>
+        <SlashCommandText command={slashCommand.command} />
+        <CliAppMentionText
+          text={message.content.slice(slashCommand.command.length)}
+          cliApps={mentionCliApps}
+          mcpPresets={mentionMcpPresets}
+        />
+      </>
+    ) : (
+      <CliAppMentionText
+        text={message.content}
+        cliApps={mentionCliApps}
+        mcpPresets={mentionMcpPresets}
+      />
+    );
     return (
       <div
         className={cn(
@@ -180,11 +202,7 @@ export function MessageBubble({
               "text-left text-[16px]/[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]",
             )}
           >
-            <CliAppMentionText
-              text={message.content}
-              cliApps={mentionCliApps}
-              mcpPresets={mentionMcpPresets}
-            />
+            {messageText}
           </p>
         ) : null}
         {hasText && showCopyAction ? (

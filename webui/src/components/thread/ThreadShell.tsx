@@ -247,7 +247,7 @@ function useInstalledSettingItems<Payload, Item>({
       const payload = await fetchPayload(token);
       if (!isCancelled?.()) setItems(selectItems(payload));
     } catch {
-      if (!isCancelled?.()) setItems([]);
+      // Keep the last successful catalog during transient focus/visibility refresh failures.
     }
   }, [fetchPayload, selectItems, token]);
 
@@ -896,6 +896,7 @@ export function ThreadShell({
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
+            slashCommands={slashCommands}
             forkBoundaryMessageCount={forkBoundaryMessageCount}
             hasMoreBefore={hasMoreBefore}
             loadingOlder={loadingOlder}

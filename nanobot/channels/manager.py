@@ -28,7 +28,11 @@ from nanobot.channels._feishu_instances import ChannelInstanceSpec, feishu_insta
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
-from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
+from nanobot.utils.restart import (
+    RestartNotice,
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+)
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -46,6 +50,8 @@ def _default_webui_dist() -> Path | None:
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
+_RESTART_NOTICE_START_TIMEOUT_S = 30.0
+_RESTART_NOTICE_START_POLL_S = 0.25
 
 _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_progress": "sendProgress",
@@ -476,15 +482,40 @@ class ChannelManager:
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _notify_restart_done_if_needed(self) -> None:
-        """Send restart completion message when runtime env markers are present."""
+    def _notify_restart_done_if_needed(self) -> asyncio.Task[None] | None:
+        """Schedule restart completion after the target channel starts."""
         notice = consume_restart_notice_from_env()
         if not notice:
-            return
+            return None
+        return asyncio.create_task(self._send_restart_notice_when_started(notice))
+
+    async def _send_restart_notice_when_started(
+        self,
+        notice: RestartNotice,
+        *,
+        timeout_s: float = _RESTART_NOTICE_START_TIMEOUT_S,
+        poll_s: float = _RESTART_NOTICE_START_POLL_S,
+    ) -> None:
+        """Deliver a restart notice after the target channel starts."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
         target = self.channels.get(notice.channel)
-        if not target:
+        if target is None:
+            logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
             return
-        asyncio.create_task(self._send_with_retry(
+
+        while not target.is_running:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                logger.warning(
+                    "Restart notice target did not start: {}:{}",
+                    notice.channel,
+                    notice.chat_id,
+                )
+                return
+            await asyncio.sleep(min(poll_s, remaining))
+
+        await self._send_with_retry(
             target,
             OutboundMessage(
                 channel=notice.channel,
@@ -492,7 +523,8 @@ class ChannelManager:
                 content=format_restart_completed_message(notice.started_at_raw),
                 metadata=dict(notice.metadata or {}),
             ),
-        ))
+            deadline=deadline,
+        )
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
@@ -791,30 +823,52 @@ class ChannelManager:
         merged = replace_outbound_event(first_msg, final_event, content=combined_content)
         return merged, non_matching
 
-    async def _send_with_retry(self, channel: BaseChannel, msg: OutboundMessage) -> None:
+    async def _send_with_retry(
+        self,
+        channel: BaseChannel,
+        msg: OutboundMessage,
+        *,
+        deadline: float | None = None,
+    ) -> None:
         """Send a message with retry on failure using exponential backoff.
+
+        When deadline is provided, retry until that monotonic time instead of
+        stopping at the configured attempt limit.
 
         Note: CancelledError is re-raised to allow graceful shutdown.
         """
         max_attempts = max(self.config.channels.send_max_retries, 1)
+        attempt = 0
 
-        for attempt in range(max_attempts):
+        while True:
+            attempt += 1
             try:
                 await self._send_once(channel, msg)
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
-                if attempt == max_attempts - 1:
+                loop = asyncio.get_running_loop()
+                exhausted = (
+                    attempt >= max_attempts
+                    if deadline is None
+                    else loop.time() >= deadline
+                )
+                if exhausted:
                     logger.exception(
                         "Failed to send to {} after {} attempts",
-                        msg.channel, max_attempts
+                        msg.channel, attempt,
                     )
                     return
-                delay = _SEND_RETRY_DELAYS[min(attempt, len(_SEND_RETRY_DELAYS) - 1)]
+                delay = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
+                if deadline is not None:
+                    delay = min(delay, max(0.0, deadline - loop.time()))
+                attempt_label = str(attempt)
+                if deadline is None:
+                    attempt_label = f"{attempt}/{max_attempts}"
                 logger.warning(
-                    "Send to {} failed (attempt {}/{}): {}, retrying in {}s",
-                    msg.channel, attempt + 1, max_attempts, type(e).__name__, delay
+                    "Send to {} failed (attempt {}): {}, retrying in {}s",
+                    msg.channel, attempt_label, type(e).__name__, delay,
                 )
                 try:
                     await asyncio.sleep(delay)
