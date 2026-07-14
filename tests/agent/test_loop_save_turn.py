@@ -29,6 +29,10 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.keys import (
+    LAST_CHANNEL_METADATA_KEY,
+    UNIFIED_SESSION_KEY,
+)
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
@@ -679,6 +683,28 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     assert persisted.messages[0]["content"] == "persist me"
     assert persisted.metadata.get(AgentLoop._PENDING_USER_TURN_KEY) is True
     assert persisted.updated_at >= persisted.created_at
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_unified_session_delivery_route(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._unified_session = True
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="feishu",
+        sender_id="u1",
+        chat_id="oc_123",
+        content="persist my route",
+        session_key_override=UNIFIED_SESSION_KEY,
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate(UNIFIED_SESSION_KEY)
+    persisted = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
 
 
 # 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs
