@@ -12,6 +12,7 @@ import hmac
 import json as _json
 import time
 import uuid
+import weakref
 from typing import Any
 
 from aiohttp import web
@@ -90,6 +91,16 @@ def _response_text(value: Any) -> str:
     if hasattr(value, "content"):
         return str(getattr(value, "content") or "")
     return str(value)
+
+
+def _get_session_lock(app: web.Application, session_key: str) -> asyncio.Lock:
+    session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = app["session_locks"]
+    session_lock = session_locks.get(session_key)
+    if session_lock is None:
+        session_lock = asyncio.Lock()
+        session_locks[session_key] = session_lock
+    return session_lock
+
 
 # ---------------------------------------------------------------------------
 # SSE helpers
@@ -238,12 +249,14 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
-    session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
-    session_lock = session_locks.setdefault(session_key, asyncio.Lock())
+    session_lock = _get_session_lock(request.app, session_key)
 
     logger.info(
         "API request session_key={} media={} text={} stream={}",
-        session_key, len(media_paths), text[:80], stream,
+        session_key,
+        len(media_paths),
+        text[:80],
+        stream,
     )
     # -- streaming path --
     if stream:
@@ -360,7 +373,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(
-        _chat_completion_response(response_text, model_name, getattr(agent_loop, "_last_usage", None))
+        _chat_completion_response(
+            response_text, model_name, getattr(agent_loop, "_last_usage", None)
+        )
     )
 
 
@@ -410,7 +425,7 @@ def create_app(
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
-    app["session_locks"] = {}  # per-user locks, keyed by session_key
+    app["session_locks"] = weakref.WeakValueDictionary()
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler) -> web.StreamResponse:
@@ -422,7 +437,7 @@ def create_app(
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return _error_json(401, "Missing Authorization header. Use: Bearer <api_key>")
-        if not hmac.compare_digest(auth[len("Bearer "):], api_key):
+        if not hmac.compare_digest(auth[len("Bearer ") :], api_key):
             return _error_json(401, "Invalid API key")
         return await handler(request)
 
