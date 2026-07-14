@@ -179,12 +179,13 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     # Also drain pending queue to prevent mid-turn injection deadlock
     pending = loop._pending_queues.pop(ctx.key, None)
     if pending is not None:
-        while not pending.empty():
+        while True:
             try:
-                pending.get_nowait()
-                total += 1
-            except Exception:
+                item = pending.get_nowait()
+            except asyncio.QueueEmpty:
                 break
+            await loop.bus.publish_inbound(item)
+            total += 1
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
