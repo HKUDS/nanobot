@@ -1019,6 +1019,7 @@
         "magic_mismatch": "El archivo no parece una imagen real",
         "decode_failed": "No se pudo decodificar esta imagen",
         "too_large": "Archivo demasiado grande — prueba uno más pequeño",
+        "total_too_large": "Los archivos adjuntos son demasiado grandes en conjunto; elimina algunos o usa archivos más pequeños",
         "io": "No se pudo leer este archivo"
       },
       "mentions": {

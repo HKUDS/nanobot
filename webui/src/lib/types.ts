@@ -308,6 +308,7 @@ export interface BootstrapResponse {
   ws_path: string;
   ws_url?: string | null;
   expires_in: number;
+  max_message_bytes?: number;
   model_name?: string | null;
   runtime_surface?: RuntimeSurface;
   runtime_capabilities?: RuntimeCapabilities;

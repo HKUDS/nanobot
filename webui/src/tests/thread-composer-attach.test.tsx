@@ -24,8 +24,8 @@ function pngFile(name = "a.png", size = 10) {
   return new File([new Uint8Array(size)], name, { type: "image/png" });
 }
 
-function pdfFile(name = "report.pdf") {
-  return new File(["%PDF-1.4"], name, { type: "application/pdf" });
+function pdfFile(name = "report.pdf", size = 8) {
+  return new File([new Uint8Array(size)], name, { type: "application/pdf" });
 }
 
 function csvFile(name = "report.csv", type = "application/vnd.ms-excel") {
@@ -173,6 +173,47 @@ describe("ThreadComposer — attachments", () => {
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
     expect(encodeImage).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized document before adding a chip", async () => {
+    const file = pdfFile("oversized.pdf", 6 * 1024 * 1024 + 1);
+
+    render(<ThreadComposer onSend={vi.fn()} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("File is too large");
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+  });
+
+  it("rejects a file immediately when attachments would exceed the server frame limit", async () => {
+    const first = pdfFile("first.pdf", 400 * 1024);
+    const second = pdfFile("second.pdf", 400 * 1024);
+
+    render(<ThreadComposer onSend={vi.fn()} maxMessageBytes={1024 * 1024} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [first, second] } });
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Attachments are too large together",
+    );
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+    expect(screen.getByText("first.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("second.pdf")).not.toBeInTheDocument();
   });
 
   it("accepts supported documents from paste and drop", async () => {

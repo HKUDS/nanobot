@@ -1041,6 +1041,7 @@
         "magic_mismatch": "文件看起来不像真实的图片",
         "decode_failed": "无法解码这张图片",
         "too_large": "文件太大，请换一个小一点的",
+        "total_too_large": "附件总大小过大，请移除部分文件或使用更小的文件",
         "io": "无法读取该文件"
       },
       "goalStateCloseAria": "关闭目标",

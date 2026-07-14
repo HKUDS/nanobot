@@ -1018,6 +1018,7 @@
         "magic_mismatch": "Tệp này không phải là một ảnh thực",
         "decode_failed": "Không thể giải mã ảnh này",
         "too_large": "Tệp quá lớn — hãy thử tệp nhỏ hơn",
+        "total_too_large": "Tổng dung lượng tệp đính kèm quá lớn — hãy xóa bớt hoặc dùng tệp nhỏ hơn",
         "io": "Không thể đọc tệp này"
       },
       "mentions": {

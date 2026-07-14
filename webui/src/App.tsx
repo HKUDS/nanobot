@@ -71,6 +71,7 @@ type BootState =
       token: string;
       tokenExpiresAt: number;
       modelName: string | null;
+      maxMessageBytes: number | null;
       runtimeSurface: RuntimeSurface;
     };
 
@@ -801,6 +802,7 @@ export default function App() {
               token: boot.api_token,
               tokenExpiresAt,
               modelName: boot.model_name ?? current.modelName,
+              maxMessageBytes: boot.max_message_bytes ?? current.maxMessageBytes,
               runtimeSurface,
             }
           : current,
@@ -842,6 +844,7 @@ export default function App() {
             token: boot.api_token,
             tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
             modelName: boot.model_name ?? null,
+            maxMessageBytes: boot.max_message_bytes ?? null,
             runtimeSurface,
           });
         } catch (e) {
@@ -964,6 +967,7 @@ export default function App() {
       client={state.client}
       token={state.token}
       modelName={state.modelName}
+      maxMessageBytes={state.maxMessageBytes}
     >
       <Shell
         runtimeSurface={state.runtimeSurface}

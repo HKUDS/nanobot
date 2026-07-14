@@ -1018,6 +1018,7 @@
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
         "decode_failed": "Tidak dapat mendekode gambar ini",
         "too_large": "File terlalu besar — coba yang lebih kecil",
+        "total_too_large": "Total lampiran terlalu besar — hapus beberapa atau gunakan file yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {

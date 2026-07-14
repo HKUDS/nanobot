@@ -1042,6 +1042,7 @@
         "magic_mismatch": "File doesn't look like a real image",
         "decode_failed": "Couldn't decode this image",
         "too_large": "File is too large — try a smaller one",
+        "total_too_large": "Attachments are too large together — remove some or use smaller files",
         "io": "Couldn't read this file"
       },
       "workspace": {

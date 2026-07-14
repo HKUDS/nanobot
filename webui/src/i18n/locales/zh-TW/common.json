@@ -1018,6 +1018,7 @@
         "magic_mismatch": "檔案看起來不像真正的圖片",
         "decode_failed": "無法解碼這張圖片",
         "too_large": "檔案太大，請換一個小一點的",
+        "total_too_large": "附件總大小過大，請移除部分檔案或使用更小的檔案",
         "io": "無法讀取這個檔案"
       },
       "mentions": {

@@ -340,6 +340,7 @@ class GatewayHTTPHandler:
             "ws_path": expected_path,
             "ws_url": ws_url,
             "expires_in": self.config.token_ttl_s,
+            "max_message_bytes": self.config.max_message_bytes,
             "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
             "runtime_surface": self._runtime_surface,
             "runtime_capabilities": self._capabilities,

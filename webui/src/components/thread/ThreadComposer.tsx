@@ -220,6 +220,7 @@ interface ThreadComposerProps {
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
   transcriptionProvider?: string | null;
+  maxMessageBytes?: number | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -846,6 +847,7 @@ export function ThreadComposer({
   onWorkspaceScopeChange,
   pendingQueueKey = null,
   transcriptionProvider = null,
+  maxMessageBytes = null,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -902,7 +904,7 @@ export function ThreadComposer({
     : placeholder ?? t("thread.composer.placeholderThread");
 
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
-    useAttachedImages();
+    useAttachedImages({ maxMessageBytes });
 
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
@@ -911,6 +913,8 @@ export function ThreadComposer({
         ? `Max ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`
         : reason === "empty_file"
           ? "Empty files cannot be attached"
+          : reason === "total_too_large"
+            ? "Attachments are too large together — remove some or use smaller files"
         : "Unsupported file type";
       return t(key, { max: MAX_ATTACHMENTS_PER_MESSAGE, defaultValue: fallback });
     },

@@ -46,6 +46,7 @@ export type AttachmentError =
   | "unsupported_type"   // server whitelist excludes this MIME
   | "empty_file"         // backend data-URL decoder rejects empty payloads
   | "too_many_attachments" // per-message cap (4) reached before enqueue
+  | "total_too_large"    // combined base64 payload would exceed the WS frame limit
   | "magic_mismatch"     // extension lies about the real content
   | "decode_failed"      // Worker couldn't decode / re-encode
   | "too_large"          // even after normalization we exceed the budget
@@ -54,6 +55,8 @@ export type AttachmentError =
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
 export const MAX_IMAGES_PER_MESSAGE = MAX_ATTACHMENTS_PER_MESSAGE;
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
+/** Keep room for message text, IDs, mention metadata, filenames, and JSON framing. */
+const MESSAGE_ENVELOPE_RESERVE_BYTES = 64 * 1024;
 
 /** MIME whitelist — mirrors the server's and the ``<input accept>`` attr. */
 const ACCEPTED_IMAGE_MIMES: ReadonlySet<string> = new Set([
@@ -103,6 +106,22 @@ function mimeForFile(file: File): string {
     return "application/octet-stream";
   }
   return file.type;
+}
+
+function projectedDataUrlBytes(file: File): number {
+  const prefixBytes = `data:${mimeForFile(file)};base64,`.length;
+  return prefixBytes + 4 * Math.ceil(file.size / 3);
+}
+
+function attachmentPayloadBudget(maxMessageBytes: number | null | undefined): number | null {
+  if (
+    typeof maxMessageBytes !== "number"
+    || !Number.isFinite(maxMessageBytes)
+    || maxMessageBytes <= 0
+  ) {
+    return null;
+  }
+  return Math.max(0, Math.floor(maxMessageBytes) - MESSAGE_ENVELOPE_RESERVE_BYTES);
 }
 
 export function acceptedAttachmentKind(file: File): AttachmentKind | null {
@@ -218,6 +237,10 @@ export interface UseAttachedImagesApi {
   full: boolean;
 }
 
+interface UseAttachedImagesOptions {
+  maxMessageBytes?: number | null;
+}
+
 /** Manage the lifecycle of attachments in the Composer.
  *
  * Responsibilities in one place:
@@ -226,7 +249,9 @@ export interface UseAttachedImagesApi {
  *   - Worker orchestration
  *   - focus bookkeeping so keyboard delete doesn't strand the user
  */
-export function useAttachedImages(): UseAttachedImagesApi {
+export function useAttachedImages({
+  maxMessageBytes = null,
+}: UseAttachedImagesOptions = {}): UseAttachedImagesApi {
   const [images, setImages] = useState<AttachedAttachment[]>([]);
   // Ref mirror so ``enqueue`` can see the authoritative length when invoked
   // multiple times in a single tick (rapid file selection, drag of many
@@ -247,6 +272,11 @@ export function useAttachedImages(): UseAttachedImagesApi {
       const rejected: Array<{ file: File; reason: AttachmentError }> = [];
       const toAdd: AttachedAttachment[] = [];
       let slot = MAX_ATTACHMENTS_PER_MESSAGE - imagesRef.current.length;
+      const payloadBudget = attachmentPayloadBudget(maxMessageBytes);
+      let projectedBytes = imagesRef.current.reduce(
+        (total, image) => total + (image.dataUrl?.length ?? projectedDataUrlBytes(image.file)),
+        0,
+      );
 
       for (const file of files) {
         const kind = acceptedAttachmentKind(file);
@@ -258,11 +288,21 @@ export function useAttachedImages(): UseAttachedImagesApi {
           rejected.push({ file, reason: "empty_file" });
           continue;
         }
+        if (kind === "file" && file.size > MAX_FILE_BYTES) {
+          rejected.push({ file, reason: "too_large" });
+          continue;
+        }
         if (slot <= 0) {
           rejected.push({ file, reason: "too_many_attachments" });
           continue;
         }
+        const nextBytes = projectedDataUrlBytes(file);
+        if (payloadBudget !== null && projectedBytes + nextBytes > payloadBudget) {
+          rejected.push({ file, reason: "total_too_large" });
+          continue;
+        }
         slot -= 1;
+        projectedBytes += nextBytes;
         toAdd.push({
           id: uuid(),
           kind,
@@ -310,7 +350,7 @@ export function useAttachedImages(): UseAttachedImagesApi {
       }
       return { rejected };
     },
-    [setEntry],
+    [maxMessageBytes, setEntry],
   );
 
   const remove = useCallback((id: string) => {

@@ -204,7 +204,12 @@ async def test_bootstrap_returns_token_for_localhost(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path)
-    channel = _ch(bus, session_manager=sm, port=29901)
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        port=29901,
+        maxMessageBytes=1_048_576,
+    )
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
@@ -217,6 +222,7 @@ async def test_bootstrap_returns_token_for_localhost(
         assert body["ws_path"] == "/"
         assert body["ws_url"] == "ws://127.0.0.1:29901/"
         assert body["expires_in"] > 0
+        assert body["max_message_bytes"] == 1_048_576
         assert isinstance(body.get("model_name"), str)
     finally:
         await channel.stop()
