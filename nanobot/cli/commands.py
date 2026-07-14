@@ -1843,37 +1843,45 @@ def _run_gateway(
                 + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
             )
 
-            # Internal check: funnel all output through the post-run gate so the
-            # turn can't deliver directly via the message tool and skip it.
-            suppress_token = None
-            if isinstance(message_tool, MessageTool):
-                suppress_token = message_tool.set_suppress_delivery(True)
+            # Allow a cheaper/dedicated model for routine heartbeat checks.
+            hb_model = hb_cfg.model_override.strip() if hb_cfg.model_override else ""
+            saved_model = agent.model
+            if hb_model:
+                agent.model = hb_model
             try:
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key="heartbeat",
-                    channel=channel,
-                    chat_id=chat_id,
-                    on_progress=_silent,
+                # Internal check: funnel all output through the post-run gate so
+                # the turn can't deliver directly via the message tool and skip it.
+                suppress_token = None
+                if isinstance(message_tool, MessageTool):
+                    suppress_token = message_tool.set_suppress_delivery(True)
+                try:
+                    resp = await agent.process_direct(
+                        prompt,
+                        session_key="heartbeat",
+                        channel=channel,
+                        chat_id=chat_id,
+                        on_progress=_silent,
+                    )
+                finally:
+                    if isinstance(message_tool, MessageTool) and suppress_token is not None:
+                        message_tool.reset_suppress_delivery(suppress_token)
+                response = resp.content if resp else ""
+
+                # Keep a small tail of heartbeat history so the loop stays bounded.
+                session = agent.sessions.get_or_create("heartbeat")
+                session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+                agent.sessions.save(session)
+
+                if not response:
+                    return None
+
+                # Fail closed: stay silent on evaluator failure instead of notifying.
+                should_notify = await evaluate_response(
+                    response, prompt, agent.provider, agent.model,
+                    default_notify=False,
                 )
             finally:
-                if isinstance(message_tool, MessageTool) and suppress_token is not None:
-                    message_tool.reset_suppress_delivery(suppress_token)
-            response = resp.content if resp else ""
-
-            # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
-
-            if not response:
-                return None
-
-            # Fail closed: stay silent on evaluator failure instead of notifying.
-            should_notify = await evaluate_response(
-                response, prompt, agent.provider, agent.model,
-                default_notify=False,
-            )
+                agent.model = saved_model
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
                 await _deliver_to_channel(
