@@ -185,7 +185,7 @@ These variables are process-level switches. Set them in the same terminal, servi
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NANOBOT_MAX_CONCURRENT_REQUESTS` | `3` | Maximum concurrently running inbound agent requests. Must be an integer; set `0` or a negative value for unlimited. |
-| `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds, around ordinary LLM requests. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
+| `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds. Ordinary requests use this value; streaming requests use the greater of 300 seconds or twice this value. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
 | `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Streaming idle timeout, in seconds, used by streaming providers. Invalid or non-positive values are ignored; values above `3600` are clamped. |
 | `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for OpenAI-compatible providers. Invalid or non-positive values are ignored. |
 | `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` | unset | Marks that an external workspace sandbox is already enforced. Truthy values (`1`, `true`, `yes`, `on`, `enabled`) use `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` as the label; any other non-false value is treated as the provider name. |

@@ -824,16 +824,17 @@ class AgentRunner:
             )
         except asyncio.TimeoutError:
             if outer_timeout_s is None:
-                return LLMResponse(
+                response = LLMResponse(
                     content="Error calling LLM: stream stalled",
                     finish_reason="error",
                     error_kind="timeout",
                 )
-            return LLMResponse(
-                content=f"Error calling LLM: timed out after {outer_timeout_s:g}s",
-                finish_reason="error",
-                error_kind="timeout",
-            )
+            else:
+                response = LLMResponse(
+                    content=f"Error calling LLM: timed out after {outer_timeout_s:g}s",
+                    finish_reason="error",
+                    error_kind="timeout",
+                )
         if progress_state and progress_state.get("reasoning_open"):
             await hook.emit_reasoning_end()
         dropped, all_dropped, original_finish_reason = (

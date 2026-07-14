@@ -281,6 +281,65 @@ async def test_runner_times_out_never_ending_streaming_request():
 
 
 @pytest.mark.asyncio
+async def test_runner_closes_progress_reasoning_on_streaming_wall_timeout():
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.supports_progress_deltas = True
+    events: list[tuple[str, str | None]] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        try:
+            await on_content_delta("<think>working...</think>")
+            await asyncio.sleep(3600)
+        finally:
+            events.append(("provider_cancelled", None))
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class ProgressReasoningHook(AgentHook):
+        async def emit_reasoning(self, reasoning_content: str | None) -> None:
+            if reasoning_content:
+                events.append(("reasoning", reasoning_content))
+
+        async def emit_reasoning_end(self) -> None:
+            events.append(("reasoning_end", None))
+
+    real_wait_for = asyncio.wait_for
+
+    async def fake_wait_for(coro, *, timeout):
+        assert timeout == 300.0
+        return await real_wait_for(coro, timeout=0.01)
+
+    runner = AgentRunner()
+    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
+        result = await runner.run(make_run_spec(provider,
+            initial_messages=[{"role": "user", "content": "think forever"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=ProgressReasoningHook(),
+            progress_callback=AsyncMock(),
+            stream_progress_deltas=True,
+            llm_timeout_s=1,
+        ))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == "Error calling LLM: timed out after 300s"
+    assert events == [
+        ("reasoning", "working..."),
+        ("provider_cancelled", None),
+        ("reasoning_end", None),
+    ]
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_runner_replaces_empty_tool_result_with_marker():
     from nanobot.agent.runner import AgentRunner
 
