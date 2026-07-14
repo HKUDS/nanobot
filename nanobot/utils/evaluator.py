@@ -6,14 +6,57 @@ LLM call to decide whether the result warrants notifying the user.
 
 from __future__ import annotations
 
+from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.utils.helpers import truncate_text
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
+
+# Cap for a workspace-local heartbeat evaluator prompt override.
+EVALUATOR_PROMPT_MAX_CHARS = 32_000
+
+
+def evaluator_prompt_file(workspace: Path) -> Path:
+    """Path to the workspace-local heartbeat evaluator prompt override."""
+    return workspace / "prompts" / "evaluator.md"
+
+
+def has_evaluator_prompt_override(workspace: Path) -> bool:
+    """True when the workspace defines a non-empty evaluator prompt override."""
+    with suppress(OSError):
+        path = evaluator_prompt_file(workspace)
+        return path.is_file() and bool(path.read_text(encoding="utf-8").strip())
+    return False
+
+
+def default_evaluator_prompt() -> str:
+    """The built-in heartbeat notification-gate system prompt."""
+    return render_template("agent/evaluator.md", part="system", strip=True)
+
+
+def resolve_evaluator_prompt(workspace: Path) -> str:
+    """Return the active evaluator prompt: workspace override or built-in default.
+
+    Oversized overrides are truncated so a runaway file cannot blow up the
+    evaluator call.
+    """
+    with suppress(OSError):
+        text = evaluator_prompt_file(workspace).read_text(encoding="utf-8").rstrip()
+        if text:
+            if len(text) > EVALUATOR_PROMPT_MAX_CHARS:
+                logger.warning(
+                    "Workspace heartbeat evaluator prompt exceeds {} chars ({}); truncating.",
+                    EVALUATOR_PROMPT_MAX_CHARS, len(text),
+                )
+                return truncate_text(text, EVALUATOR_PROMPT_MAX_CHARS)
+            return text
+    return default_evaluator_prompt()
 
 _EVALUATE_TOOL = [
     {
@@ -44,17 +87,19 @@ async def evaluate_response(
     task_context: str,
     provider: LLMProvider,
     model: str,
-    default_notify: bool = True,
+    evaluator_prompt: str,
+    default_notify: bool = False,
 ) -> bool:
     """Decide whether a heartbeat result should be delivered to the user.
 
     On any failure, falls back to ``default_notify``. Heartbeat passes
     ``False`` to fail closed.
     """
+
     try:
         llm_response = await provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": render_template("agent/evaluator.md", part="system")},
+                {"role": "system", "content": evaluator_prompt},
                 {"role": "user", "content": render_template(
                     "agent/evaluator.md",
                     part="user",
@@ -64,7 +109,7 @@ async def evaluate_response(
             ],
             tools=_EVALUATE_TOOL,
             model=model,
-            max_tokens=256,
+            max_tokens=4096,
             temperature=0.0,
         )
 
