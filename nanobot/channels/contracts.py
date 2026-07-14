@@ -24,6 +24,7 @@ __all__ = [
     "channel_instance_specs",
     "channel_runtime_name",
     "channel_set_config_enabled",
+    "channel_supports_multiple_instances",
     "channel_update_instance_config",
     "channel_value_present",
     "refresh_channel_feature_metadata",
@@ -243,6 +244,18 @@ def channel_instance_specs(
         instance_ids.add(spec.instance_id)
         runtime_names.add(runtime_name)
     return specs
+
+
+def channel_supports_multiple_instances(channel_cls: type[Any]) -> bool:
+    """Return whether a channel opted into instance expansion.
+
+    The base implementation is the stable single-instance contract. Plugins
+    opt into multi-instance management by overriding ``instance_specs()``;
+    inherited overrides retain that opt-in.
+    """
+    from nanobot.channels.base import BaseChannel
+
+    return channel_cls.instance_specs.__func__ is not BaseChannel.instance_specs.__func__
 
 
 def channel_instance_config(

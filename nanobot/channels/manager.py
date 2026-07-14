@@ -30,6 +30,7 @@ from nanobot.channels.contracts import (
     ChannelActivation,
     channel_instance_specs,
     channel_runtime_name,
+    channel_supports_multiple_instances,
     external_channel_enabled,
 )
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
@@ -392,6 +393,8 @@ class ChannelManager:
                 "requires_restart": True,
                 "message": f"{name} channel could not be loaded.",
             }
+        if instance_id is None and not channel_supports_multiple_instances(cls):
+            instance_id = "default"
 
         if action == "disable":
             if instance_id is not None:

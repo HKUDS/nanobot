@@ -21,6 +21,7 @@ from nanobot.channels.contracts import (
     channel_instance_specs,
     channel_runtime_name,
     channel_set_config_enabled,
+    channel_supports_multiple_instances,
     channel_update_instance_config,
 )
 from nanobot.channels.registry import discover_channel_names
@@ -74,6 +75,20 @@ def test_management_contract_is_explicit_on_runtime_base_class() -> None:
     }
 
     assert management_hooks <= BaseChannel.__dict__.keys()
+
+
+def test_multi_instance_support_follows_instance_specs_override() -> None:
+    class _MultiChannel(_SingleChannel):
+        @classmethod
+        def instance_specs(cls, section, *, enabled_only=True):
+            return []
+
+    class _InheritedMultiChannel(_MultiChannel):
+        pass
+
+    assert channel_supports_multiple_instances(_SingleChannel) is False
+    assert channel_supports_multiple_instances(_MultiChannel) is True
+    assert channel_supports_multiple_instances(_InheritedMultiChannel) is True
 
 
 def test_contract_module_is_not_discovered_as_a_channel() -> None:

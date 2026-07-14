@@ -370,6 +370,71 @@ def test_external_multi_plugin_action_distinguishes_global_and_default_targets(
     assert explicit["features"][0]["enabled"] is True
 
 
+async def test_external_single_plugin_enable_applies_defaults_before_hot_reload(
+    monkeypatch,
+    tmp_path,
+):
+    from nanobot.config import loader
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    class _SingleDefaultsPlugin(_FakePlugin):
+        name = "singleplugin"
+
+        @classmethod
+        def default_config(cls):
+            return {
+                "enabled": False,
+                "endpoint": "https://plugin.example/api",
+                "retries": 3,
+            }
+
+        def __init__(self, config, bus):
+            super().__init__(config, bus)
+            self.endpoint = config["endpoint"]
+            self.retries = config["retries"]
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"singleplugin": {"enabled": False}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda enabled_names=None: {"singleplugin": _SingleDefaultsPlugin},
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_enabled",
+        lambda enabled_names, **_kwargs: (
+            {"singleplugin": _SingleDefaultsPlugin}
+            if "singleplugin" in enabled_names
+            else {}
+        ),
+    )
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    manager = ChannelManager(
+        Config.model_validate({"channels": {"singleplugin": {"enabled": False}}}),
+        MessageBus(),
+    )
+
+    payload = nanobot_features_action("enable", {"name": ["singleplugin"]})
+    hot_reload = await manager.apply_channel_feature_action("enable", "singleplugin")
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))["channels"]["singleplugin"]
+    assert saved == {
+        "enabled": True,
+        "endpoint": "https://plugin.example/api",
+        "retries": 3,
+    }
+    assert payload["features"][0]["enabled"] is True
+    assert hot_reload["ok"] is True
+    assert hot_reload["requires_restart"] is False
+    assert set(manager.channels) == {"singleplugin"}
+    assert manager.channels["singleplugin"].endpoint == "https://plugin.example/api"
+    assert manager.channels["singleplugin"].retries == 3
+
+
 def test_channel_manager_preserves_single_instance_plugin_owned_instances(monkeypatch):
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
     monkeypatch.setattr(
