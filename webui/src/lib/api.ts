@@ -200,6 +200,24 @@ export async function fetchFilePreview(
   );
 }
 
+export async function fetchFilePreviewAvailability(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<boolean> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  query.set("probe", "1");
+  const payload = await request<{ available?: boolean }>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+  return payload.available !== false;
+}
+
 export async function fetchSessionAutomations(
   token: string,
   key: string,

@@ -3002,6 +3002,81 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["truncated"] is False
 
 
+def test_handle_file_preview_probe_checks_availability_without_content(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "notes" / "ready.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("ready\n", encoding="utf-8")
+
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    path = quote("notes/ready.md", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path={path}&probe=1",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body.decode()) == {"available": True}
+
+
+def test_handle_file_preview_probe_reports_missing_file_as_unavailable(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=notes%2Fmissing.md&probe=1",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body.decode()) == {"available": False}
+
+
+def test_handle_file_preview_probe_reports_binary_file_as_unavailable(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "image.png"
+    workspace.mkdir()
+    source.write_bytes(b"\x89PNG\r\n\0binary")
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=image.png&probe=1",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body.decode()) == {"available": False}
+
+
 def test_file_preview_normalizes_windows_file_url() -> None:
     from nanobot.webui.file_preview import _clean_preview_path
 

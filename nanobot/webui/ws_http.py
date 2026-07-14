@@ -29,7 +29,11 @@ from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from nanobot.webui.file_preview import (
+    WebUIFilePreviewError,
+    file_preview_availability_payload,
+    file_preview_payload,
+)
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -494,13 +498,18 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        path = _query_first(_parse_query(request.path), "path")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path")
+        is_probe = _query_first(query, "probe") == "1"
         try:
-            payload = file_preview_payload(
-                path,
-                scope=self.workspaces.scope_for_session_key(decoded_key),
-            )
+            scope = self.workspaces.scope_for_session_key(decoded_key)
+            if is_probe:
+                payload = file_preview_availability_payload(path, scope=scope)
+            else:
+                payload = file_preview_payload(path, scope=scope)
         except WebUIFilePreviewError as e:
+            if is_probe and e.status in {400, 403, 404, 415}:
+                return _http_json_response({"available": False})
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
 

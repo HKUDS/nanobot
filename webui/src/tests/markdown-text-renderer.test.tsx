@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
 describe("MarkdownTextRenderer", () => {
@@ -34,22 +35,46 @@ describe("MarkdownTextRenderer", () => {
     );
   });
 
-  it("keeps inferred inline file paths non-interactive", () => {
+  it("keeps unavailable inferred inline file paths non-interactive", async () => {
     const onOpenFilePreview = vi.fn();
+    const resolve = vi.fn().mockResolvedValue(false);
     render(
-      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-        {"Future file: `notes/missing.md`"}
-      </MarkdownTextRenderer>,
+      <FilePreviewAvailabilityProvider resolve={resolve}>
+        <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+          {"Future file: `notes/missing.md`"}
+        </MarkdownTextRenderer>
+      </FilePreviewAvailabilityProvider>,
     );
 
     const reference = screen.getByTestId("inline-file-path");
     expect(reference).toHaveTextContent("missing.md");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/missing.md"));
     expect(reference).not.toHaveAttribute("role");
     expect(reference).not.toHaveAttribute("tabindex");
 
     fireEvent.click(reference);
 
     expect(onOpenFilePreview).not.toHaveBeenCalled();
+  });
+
+  it("makes available inferred inline file paths previewable", async () => {
+    const onOpenFilePreview = vi.fn();
+    const resolve = vi.fn().mockResolvedValue(true);
+    render(
+      <FilePreviewAvailabilityProvider resolve={resolve}>
+        <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+          {"Existing file: `notes/ready.md`"}
+        </MarkdownTextRenderer>
+      </FilePreviewAvailabilityProvider>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    await waitFor(() => expect(reference).toHaveAttribute("role", "button"));
+    expect(reference).toHaveAttribute("tabindex", "0");
+
+    fireEvent.click(reference);
+
+    expect(onOpenFilePreview).toHaveBeenCalledWith("notes/ready.md");
   });
 
   it("does not treat non-file hrefs as previews just because the label looks like a file", () => {

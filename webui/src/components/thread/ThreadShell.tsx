@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
+import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
@@ -12,6 +13,8 @@ import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/T
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import {
+  ApiError,
+  fetchFilePreviewAvailability,
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
@@ -108,6 +111,12 @@ const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
 const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+
+type FilePreviewAvailabilityCacheEntry = {
+  available?: boolean;
+  promise: Promise<boolean>;
+  revision: number;
+};
 
 function clampFilePreviewWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, FILE_PREVIEW_MIN_WIDTH), maxWidth);
@@ -397,6 +406,48 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  const filePreviewAvailabilityCache = useMemo(
+    () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
+    [historyKey, token],
+  );
+  const filePreviewAvailabilityRevision = displayMessages.length;
+  const resolveFilePreviewAvailability = useCallback((path: string) => {
+    if (!historyKey) return Promise.resolve(false);
+    const cached = filePreviewAvailabilityCache.get(path);
+    if (
+      cached
+      && (cached.available !== false || cached.revision === filePreviewAvailabilityRevision)
+    ) {
+      return cached.promise;
+    }
+    const pending = fetchFilePreviewAvailability(token, historyKey, path).catch(
+      (error: unknown) => {
+        if (error instanceof ApiError) {
+          if (error.status === 404 && /API route not found/i.test(error.message)) {
+            return true;
+          }
+          if ([400, 403, 404, 415].includes(error.status)) return false;
+        }
+        return true;
+      },
+    );
+    const entry: FilePreviewAvailabilityCacheEntry = {
+      promise: pending,
+      revision: filePreviewAvailabilityRevision,
+    };
+    filePreviewAvailabilityCache.set(path, entry);
+    void pending.then((available) => {
+      if (filePreviewAvailabilityCache.get(path) === entry) {
+        entry.available = available;
+      }
+    });
+    return pending;
+  }, [
+    filePreviewAvailabilityCache,
+    filePreviewAvailabilityRevision,
+    historyKey,
+    token,
+  ]);
 
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
@@ -830,26 +881,30 @@ export function ThreadShell({
             sessionInfoAction={sessionInfoAction}
           />
         ) : null}
-        <ThreadViewport
-          ref={viewportRef}
-          messages={displayMessages}
-          isStreaming={isStreaming}
-          emptyState={emptyState}
-          composer={composer}
-          scrollToBottomSignal={scrollToBottomSignal}
-          scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
-          conversationKey={historyKey}
-          showScrollToBottomButton={!!session}
-          cliApps={cliApps}
-          mcpPresets={mcpPresets}
-          forkBoundaryMessageCount={forkBoundaryMessageCount}
-          hasMoreBefore={hasMoreBefore}
-          loadingOlder={loadingOlder}
-          userMessageOffset={userMessageOffset}
-          onLoadOlder={loadOlder}
-          onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
-          onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
-        />
+        <FilePreviewAvailabilityProvider
+          resolve={historyKey ? resolveFilePreviewAvailability : undefined}
+        >
+          <ThreadViewport
+            ref={viewportRef}
+            messages={displayMessages}
+            isStreaming={isStreaming}
+            emptyState={emptyState}
+            composer={composer}
+            scrollToBottomSignal={scrollToBottomSignal}
+            scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
+            conversationKey={historyKey}
+            showScrollToBottomButton={!!session}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            forkBoundaryMessageCount={forkBoundaryMessageCount}
+            hasMoreBefore={hasMoreBefore}
+            loadingOlder={loadingOlder}
+            userMessageOffset={userMessageOffset}
+            onLoadOlder={loadOlder}
+            onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+            onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+          />
+        </FilePreviewAvailabilityProvider>
       </div>
       {filePreviewPath && historyKey ? (
         <FilePreviewPanel
