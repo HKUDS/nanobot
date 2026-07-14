@@ -1301,7 +1301,7 @@ def trigger(
     trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
     message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Deliver a local trigger message to its bound chat session."""
     from nanobot.triggers.local_store import (
@@ -2169,7 +2169,7 @@ def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
