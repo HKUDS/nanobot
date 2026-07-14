@@ -223,20 +223,30 @@ def test_payload_resolves_obsidian_agent_cli_brand(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://cdn.simpleicons.org/obsidian/7C3AED"
 
 
-def test_installed_payload_enriches_apps_from_cached_catalog(tmp_path: Path) -> None:
+def test_installed_payload_enriches_apps_from_cached_catalog(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     manager = _manager(tmp_path)
     _seed_catalog(manager)
     manager._save_installed({
         "gimp": {
-            "entry_point": "cli-anything-gimp",
+            "entry_point": "installed-gimp",
             "source": "harness",
             "strategy": "pip",
         }
     })
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry_point: "/bin/installed-gimp" if entry_point == "installed-gimp" else None,
+    )
 
     app = manager.installed_payload()["apps"][0]
 
     assert app["name"] == "gimp"
+    assert app["entry_point"] == "installed-gimp"
+    assert app["source"] == "harness"
+    assert app["status"] == "installed"
     assert app["display_name"] == "GIMP"
     assert app["category"] == "image"
     assert app["description"] == "Public duplicate entry"
