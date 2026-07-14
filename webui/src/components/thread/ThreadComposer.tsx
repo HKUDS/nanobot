@@ -12,13 +12,13 @@ import {
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
   CliAppMentionToken,
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
   McpPresetMentionToken,
   cliAppInitials,
   mcpPresetInitials,
   splitCapabilityMentionSegments,
   type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
+import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   Activity,
   ArrowUp,

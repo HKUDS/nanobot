@@ -1,5 +1,9 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
 
+import {
+  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  InlineTokenHighlight,
+} from "@/components/InlineTokenHighlight";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { CliAppInfo, McpPresetInfo } from "@/lib/types";
@@ -13,39 +17,6 @@ export type CapabilityMentionSegment =
   | CliAppMentionSegment
   | { kind: "mcp"; text: string; preset: McpPresetInfo };
 
-export const INLINE_TOKEN_HIGHLIGHT_COLOR = "hsl(var(--inline-token-highlight))";
-
-export function InlineTokenHighlight({
-  children,
-  className,
-  color,
-  testId,
-  title,
-}: {
-  children: ReactNode;
-  className?: string;
-  color: string;
-  testId?: string;
-  title?: string;
-}) {
-  return (
-    <span
-      data-testid={testId}
-      title={title}
-      className={cn(
-        "relative inline transition-[color,text-shadow] duration-150",
-        className,
-      )}
-      style={{
-        color,
-        textShadow: `0 0 10px ${alphaColor(color, 24)}`,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
 export function cliAppInitials(app: CliAppInfo): string {
   const value = app.display_name || app.name;
   return (
@@ -57,7 +28,6 @@ export function cliAppInitials(app: CliAppInfo): string {
       .join("") || app.name.slice(0, 2).toUpperCase()
   );
 }
-
 export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_name">): string {
   const value = preset.display_name || preset.name;
   return (
@@ -69,7 +39,6 @@ export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_
       .join("") || preset.name.slice(0, 2).toUpperCase()
   );
 }
-
 export function splitCapabilityMentionSegments(
   value: string,
   cliApps: CliAppInfo[],
@@ -270,12 +239,3 @@ export function McpPresetMentionToken({
   );
 }
 
-function alphaColor(color: string, percent: number): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) {
-    const alpha = Math.round((percent / 100) * 255)
-      .toString(16)
-      .padStart(2, "0");
-    return `${color}${alpha}`;
-  }
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
-}
