@@ -109,6 +109,7 @@ class ChannelManager:
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
         self.channels: dict[str, BaseChannel] = {}
+        self._channel_owners: dict[str, str] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._started = False
@@ -194,14 +195,17 @@ class ChannelManager:
 
         # Built-ins remain lazy: only dependency-free manifests may opt into
         # instance-aware activation before their runtime module is imported.
-        # Configured external plugins are loaded so their instance_specs()
-        # implementation, rather than a reserved storage envelope, owns
-        # activation and expansion.
+        # External plugins use the top-level enabled flag as their import gate;
+        # once loaded, instance_specs() owns any finer-grained activation.
         names = discover_channel_names()
         builtin_names = set(names)
         default_sections: dict[str, Any] = {}
 
-        enabled_names = self._config_extra_channel_names() - builtin_names
+        enabled_names: set[str] = set()
+        for name in self._config_extra_channel_names() - builtin_names:
+            section = self._channel_section(name)
+            if section is not None and ChannelActivation.from_config(section).resolve():
+                enabled_names.add(name)
         for name in builtin_names:
             section = self._channel_section(name, default_sections=default_sections)
             if section is None:
@@ -249,6 +253,7 @@ class ChannelManager:
                 ]
                 for runtime_name, channel in built:
                     self.channels[runtime_name] = channel
+                    self._channel_owners[runtime_name] = name
                     logger.info("{} channel enabled as {}", cls.display_name, runtime_name)
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
@@ -383,19 +388,24 @@ class ChannelManager:
             }
 
         if action == "disable":
-            runtime_names = (
-                [channel_runtime_name(cls, instance_id)]
-                if instance_id
-                else [
+            if instance_id:
+                runtime_name = channel_runtime_name(cls, instance_id)
+                runtime_names = (
+                    [runtime_name]
+                    if self._channel_owners.get(runtime_name) == name
+                    else []
+                )
+            else:
+                runtime_names = [
                     runtime_name
-                    for runtime_name, channel in self.channels.items()
-                    if isinstance(channel, cls)
+                    for runtime_name, owner in self._channel_owners.items()
+                    if owner == name
                 ]
-            )
             stopped = False
             for runtime_name in runtime_names:
                 stopped = await self._stop_channel(runtime_name) or stopped
                 self.channels.pop(runtime_name, None)
+                self._channel_owners.pop(runtime_name, None)
             return {
                 "handled": True,
                 "ok": True,
@@ -425,8 +435,8 @@ class ChannelManager:
             runtime_name
             for runtime_name, _spec in runtime_specs
             if (
-                (current := self.channels.get(runtime_name)) is not None
-                and not isinstance(current, cls)
+                runtime_name in self.channels
+                and self._channel_owners.get(runtime_name) != name
             )
         ]
         if collisions:
@@ -468,6 +478,7 @@ class ChannelManager:
 
         for runtime_name, channel in built:
             self.channels[runtime_name] = channel
+            self._channel_owners[runtime_name] = name
             if self._started:
                 self._start_channel_task(runtime_name, channel)
             logger.info("{} channel applied without restart", runtime_name)

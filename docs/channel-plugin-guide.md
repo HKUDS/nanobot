@@ -173,6 +173,12 @@ Edit `~/.nanobot/config.json`:
 }
 ```
 
+For external plugins, the top-level `enabled` field is also the runtime import
+gate. `nanobot gateway` does not load the plugin entry point while this flag is
+false or absent. A multi-instance plugin therefore keeps top-level
+`"enabled": true` while using per-instance flags to select which runtimes to
+start. Explicit plugin setup, install, and enable actions may load the plugin.
+
 ### 4. Run & Test
 
 ```bash
@@ -309,6 +315,10 @@ Multi-instance plugins additionally return `ChannelInstanceSpec` objects from
 nanobot derives its runtime name. Single-instance plugins keep ownership of
 their entire config, including a field named `instances`. Only plugins that
 override `instance_specs()` opt into instance expansion.
+
+The entry-point/config section name owns every runtime produced from that
+section. Class inheritance does not transfer runtime ownership to another
+entry point.
 
 Return a concrete iterable or generator from `instance_specs()`; nanobot
 materializes and validates it before constructing any runtime. Raise an

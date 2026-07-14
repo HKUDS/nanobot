@@ -225,6 +225,7 @@ def test_channel_manager_delegates_instance_expansion_to_channel(monkeypatch: py
     cfg = Config.model_validate({
         "channels": {
             "multi": {
+                "enabled": True,
                 "instances": [
                     {
                         "id": "default",
@@ -251,6 +252,30 @@ def test_channel_manager_delegates_instance_expansion_to_channel(monkeypatch: py
     assert set(manager.channels) == {"multi", "multi.product"}
     assert manager.channels["multi"].name == "multi"
     assert manager.channels["multi.product"].name == "multi.product"
+
+
+def test_channel_manager_does_not_load_disabled_external_plugin(monkeypatch):
+    load_calls: list[str] = []
+    entry_point = SimpleNamespace(
+        name="fakeplugin",
+        load=lambda: load_calls.append("fakeplugin") or _FakePlugin,
+    )
+    config = Config.model_validate({
+        "channels": {
+            "fakeplugin": {
+                "enabled": False,
+                "instances": [{"enabled": True}],
+            }
+        }
+    })
+
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(_EP_TARGET, lambda **_kwargs: [entry_point])
+
+    manager = ChannelManager(config, MessageBus())
+
+    assert manager.channels == {}
+    assert load_calls == []
 
 
 def test_channel_manager_preserves_single_instance_plugin_owned_instances(monkeypatch):

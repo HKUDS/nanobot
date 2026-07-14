@@ -89,6 +89,58 @@ def test_channel_manager_does_not_overwrite_an_owned_runtime_name(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_hot_reload_does_not_replace_runtime_owned_by_another_entry_point(
+    monkeypatch,
+):
+    initial = Config.model_validate({
+        "channels": {
+            "websocket": {"enabled": False},
+            "hot": {"enabled": False},
+            "alias": {"enabled": True},
+        }
+    })
+    reloaded = Config.model_validate({
+        "channels": {
+            "websocket": {"enabled": False},
+            "hot": {"enabled": True},
+            "alias": {"enabled": True},
+        }
+    })
+
+    import nanobot.channels.registry as registry
+
+    def discover_enabled(enabled_names, **_kwargs):
+        result = {}
+        if "hot" in enabled_names:
+            result["hot"] = _HotChannel
+        if "alias" in enabled_names:
+            result["alias"] = _AliasHotChannel
+        return result
+
+    monkeypatch.setattr(registry, "discover_channel_names", lambda: ["hot"])
+    monkeypatch.setattr(
+        registry,
+        "discover_plugins",
+        lambda enabled_names=None: {"alias": _AliasHotChannel},
+    )
+    monkeypatch.setattr(registry, "discover_enabled", discover_enabled)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: reloaded)
+
+    manager = ChannelManager(initial, MessageBus())
+    alias = manager.channels["hot"]
+
+    enabled = await manager.apply_channel_feature_action("enable", "hot")
+    disabled = await manager.apply_channel_feature_action("disable", "hot")
+
+    assert enabled["ok"] is False
+    assert enabled["requires_restart"] is True
+    assert disabled["ok"] is True
+    assert manager.channels["hot"] is alias
+    assert manager._channel_owners["hot"] == "alias"
+    assert not alias.stopped.is_set()
+
+
+@pytest.mark.asyncio
 async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch):
     disabled = Config.model_validate({
         "channels": {
@@ -176,6 +228,7 @@ async def test_apply_channel_feature_action_uses_channel_runtime_name(monkeypatc
         "channels": {
             "websocket": {"enabled": False},
             "multi": {
+                "enabled": True,
                 "instances": [
                     {"id": "default", "enabled": True},
                     {"id": "product", "enabled": True},
