@@ -97,6 +97,7 @@ class WecomChannel(BaseChannel):
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._generate_req_id = None
+        self._authenticated = False
         # Store frame headers for each chat to enable replies
         self._chat_frames: dict[str, Any] = {}
 
@@ -150,6 +151,7 @@ class WecomChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the WeCom bot."""
         self._running = False
+        self._authenticated = False
         if self._client:
             await self._client.disconnect()
         self.logger.info("bot stopped")
@@ -160,10 +162,12 @@ class WecomChannel(BaseChannel):
 
     async def _on_authenticated(self, frame: Any) -> None:
         """Handle authentication success event."""
+        self._authenticated = True
         self.logger.info("authenticated successfully")
 
     async def _on_disconnected(self, frame: Any) -> None:
         """Handle WebSocket disconnected event."""
+        self._authenticated = False
         reason = frame.body if hasattr(frame, 'body') else str(frame)
         self.logger.warning("WebSocket disconnected: {}", reason)
 
@@ -489,6 +493,9 @@ class WecomChannel(BaseChannel):
         except Exception:
             self.logger.exception("_upload_media_ws error for {}", file_path)
             return None, None
+
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._authenticated and self._client is not None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""

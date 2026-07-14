@@ -170,6 +170,9 @@ class NapcatChannel(BaseChannel):
             await asyncio.gather(*tasks, return_exceptions=True)
         self._background_tasks.clear()
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._ws is not None
+
     def _fail_pending(self, err: BaseException) -> None:
         for fut in self._pending.values():
             if not fut.done():

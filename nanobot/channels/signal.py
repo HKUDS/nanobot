@@ -538,6 +538,9 @@ class SignalChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._http is not None
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Signal."""
         is_progress_message = isinstance(msg.event, ProgressEvent)

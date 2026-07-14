@@ -276,5 +276,9 @@ class BaseChannel(ABC):
         return self._running
 
     def is_ready_for_outbound(self, chat_id: str) -> bool:
-        """Return whether startup-time messages can be delivered to *chat_id*."""
+        """Return whether messages can currently be delivered to *chat_id*.
+
+        Channels whose transport becomes ready after ``_running`` is set should
+        override this with their transport-specific readiness check.
+        """
         return self.is_running

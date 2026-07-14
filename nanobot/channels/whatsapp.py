@@ -364,6 +364,9 @@ class WhatsAppChannel(BaseChannel):
         if client is not None:
             await client.stop()
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._connected and self._client is not None
+
     @staticmethod
     def _fail_login_on_connect_task_done(
         connect_task: asyncio.Task[Any] | None,

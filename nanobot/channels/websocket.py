@@ -761,7 +761,7 @@ class WebSocketChannel(BaseChannel):
             raise
 
     def is_ready_for_outbound(self, chat_id: str) -> bool:
-        """Wait for the restarted WebUI to resubscribe before startup delivery."""
+        """Require a live subscription for delivery to the target chat."""
         return self.is_running and bool(self._subs.get(chat_id))
 
     async def send(self, msg: OutboundMessage) -> None:

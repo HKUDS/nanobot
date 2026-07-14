@@ -243,6 +243,13 @@ class MSTeamsChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return (
+            self.is_running
+            and self._http is not None
+            and str(chat_id) in self._conversation_refs
+        )
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a plain text reply into an existing Teams conversation."""
         if not self._http:

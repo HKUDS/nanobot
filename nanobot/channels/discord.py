@@ -462,6 +462,10 @@ class DiscordChannel(BaseChannel):
         self._running = False
         await self._reset_runtime_state(close_client=True)
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        client = self._client
+        return self.is_running and client is not None and client.is_ready()
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Discord using discord.py."""
         client = self._client

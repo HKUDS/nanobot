@@ -1058,6 +1058,9 @@ class FeishuChannel(BaseChannel):
         await self._ws_runner.stop_client(self.name)
         self.logger.info("bot stopped")
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._client is not None
+
     def _fetch_bot_open_id(self) -> str | None:
         """Fetch the bot's own open_id via GET /open-apis/bot/v3/info."""
         try:

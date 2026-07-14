@@ -629,6 +629,9 @@ class TelegramChannel(BaseChannel):
             await self._app.shutdown()
             self._app = None
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._app is not None and self._app.running
+
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""

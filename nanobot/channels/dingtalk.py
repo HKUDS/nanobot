@@ -288,6 +288,9 @@ class DingTalkChannel(BaseChannel):
             task.cancel()
         self._background_tasks.clear()
 
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        return self.is_running and self._http is not None
+
     async def _close_stream_client(self) -> None:
         client = self._client
         if client is None:

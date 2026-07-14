@@ -2662,6 +2662,13 @@ async def test_notify_restart_done_waits_until_channel_ready():
     mgr.config = fake_config
     mgr.bus = MessageBus()
     channel = _StartableChannel(fake_config, mgr.bus)
+    channel._running = True
+    outbound_ready = False
+
+    def _is_ready(_chat_id: str) -> bool:
+        return outbound_ready
+
+    channel.is_ready_for_outbound = _is_ready
     mgr.channels = {"feishu": channel}
     mgr._dispatch_task = None
     mgr._send_with_retry = AsyncMock()
@@ -2673,7 +2680,7 @@ async def test_notify_restart_done_waits_until_channel_ready():
     await asyncio.sleep(0)
     mgr._send_with_retry.assert_not_awaited()
 
-    channel._running = True
+    outbound_ready = True
     assert task is not None
     await asyncio.wait_for(task, timeout=1.0)
 
