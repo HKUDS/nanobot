@@ -76,6 +76,18 @@ def test_invalid_batch_removes_files_already_persisted(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
+def test_invalid_base64_cannot_create_an_empty_attachment(tmp_path: Path) -> None:
+    paths, rejection = store_inbound_attachments(
+        [{"data_url": "data:text/plain;base64,@@@@", "name": "empty.txt"}],
+        media_dir=tmp_path,
+        logger=MagicMock(),
+    )
+
+    assert paths == []
+    assert rejection == "decode"
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_single_file_limit_is_attachment_policy_not_transport(tmp_path: Path) -> None:
     paths, rejection = store_inbound_attachments(
         [{"data_url": _data_url("text/plain", b"12345"), "name": "large.txt"}],

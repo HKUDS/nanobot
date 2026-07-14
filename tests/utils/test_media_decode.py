@@ -79,10 +79,10 @@ def test_returns_none_for_malformed_data_url(tmp_path) -> None:
     assert save_base64_data_url("not-a-data-url", tmp_path) is None
 
 
-def test_returns_none_for_broken_base64(tmp_path) -> None:
-    # Python's b64decode strips non-alphabet chars by default, so we need a
-    # payload whose alphabet-filtered length breaks padding.
-    assert save_base64_data_url("data:image/png;base64,not-valid-base64!!!", tmp_path) is None
+@pytest.mark.parametrize("payload", ["not-valid-base64!!!", "@@@@"])
+def test_returns_none_for_broken_base64(tmp_path, payload: str) -> None:
+    assert save_base64_data_url(f"data:image/png;base64,{payload}", tmp_path) is None
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_unknown_mime_falls_back_to_bin(tmp_path) -> None:

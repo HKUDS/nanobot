@@ -76,8 +76,10 @@ def save_base64_data_url(
         return None
     mime_type, b64_payload = m.group(1).strip().lower(), m.group(2)
     try:
-        raw = base64.b64decode(b64_payload)
+        raw = base64.b64decode(b64_payload, validate=True)
     except Exception:
+        return None
+    if not raw:
         return None
     limit = DEFAULT_MAX_BYTES if max_bytes is None else max_bytes
     if len(raw) > limit:
