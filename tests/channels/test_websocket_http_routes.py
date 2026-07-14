@@ -1124,7 +1124,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
     ) -> dict[str, Any]:
         assert action == "enable"
         assert query == {"name": ["discord"]}
-        cfg = loader.load_config()
+        cfg = loader.load_raw_config()
         section = dict(getattr(cfg.channels, "discord", {}) or {})
         section["enabled"] = True
         setattr(cfg.channels, "discord", section)
@@ -1151,7 +1151,7 @@ async def test_channel_configure_route_saves_discord_config_and_hot_reloads(
 
     async def channel_feature_action(action: str, name: str) -> dict[str, Any]:
         calls.append((action, name))
-        cfg = loader.load_config()
+        cfg = loader.load_raw_config()
         assert getattr(cfg.channels, "discord")["token"] == "discord-token"
         return {
             "handled": True,

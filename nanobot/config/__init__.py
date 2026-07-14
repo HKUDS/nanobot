@@ -4,8 +4,8 @@ from nanobot.config.loader import (
     apply_config_runtime_policies,
     get_config_path,
     get_config_repository,
-    load_config,
     load_effective_config,
+    load_raw_config,
     update_config,
 )
 from nanobot.config.paths import (
@@ -37,8 +37,8 @@ __all__ = [
     "FileConfigRepository",
     "PersistedConfigSnapshot",
     "apply_config_runtime_policies",
-    "load_config",
     "load_effective_config",
+    "load_raw_config",
     "update_config",
     "get_config_path",
     "get_config_repository",

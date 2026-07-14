@@ -634,7 +634,7 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
             seen["config"] = self.config
             return True
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr("nanobot.config.loader.load_raw_config", lambda config_path=None: Config())
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
         lambda: {"fakeplugin": _LoginPlugin},
@@ -660,7 +660,7 @@ def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
         async def login(self, force: bool = False) -> bool:
             return True
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr("nanobot.config.loader.load_raw_config", lambda config_path=None: Config())
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
@@ -686,7 +686,7 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
     seen: dict[str, object] = {}
     config_path = tmp_path / "custom-config.json"
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr("nanobot.config.loader.load_raw_config", lambda config_path=None: Config())
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
@@ -707,7 +707,7 @@ def test_plugins_list_shows_available_features(monkeypatch):
 
     runner = CliRunner()
     config = Config.model_validate({"channels": {"weixin": {"enabled": True}}})
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_raw_config", lambda config_path=None: config)
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["weixin"])
     monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
     monkeypatch.setattr(

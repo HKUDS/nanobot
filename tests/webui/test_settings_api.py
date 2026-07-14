@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import load_raw_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
@@ -95,7 +95,7 @@ def test_update_api_settings_requires_key_for_network_access(
         "port": ["9900"],
         "api_key": ["secret-token"],
     })
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.api.host == "0.0.0.0"
     assert saved.api.port == 9900
     assert saved.api.api_key == "secret-token"
@@ -124,7 +124,7 @@ def test_update_api_settings_allows_alternate_loopback_without_key(
 
     update_api_settings({"host": ["127.0.0.2"], "port": ["8900"]})
 
-    assert load_config(config_path).api.host == "127.0.0.2"
+    assert load_raw_config(config_path).api.host == "127.0.0.2"
 
 
 def _dynamic_provider_config(
@@ -174,7 +174,7 @@ def test_create_model_configuration_writes_label_and_selects(
     rows = {row["name"]: row for row in payload["model_presets"]}
     assert rows["fast-writing"]["label"] == "Fast writing"
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.agents.defaults.model_preset == "fast-writing"
     assert saved.model_presets["fast-writing"].label == "Fast writing"
     assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
@@ -209,7 +209,7 @@ def test_create_model_configuration_accepts_dynamic_custom_provider(
 
     assert payload["agent"]["model_preset"] == "tenant-model"
     assert payload["agent"]["provider"] == DYNAMIC_PROVIDER_NAME
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.model_presets["tenant-model"].provider == DYNAMIC_PROVIDER_NAME
     assert saved.model_presets["tenant-model"].model == "gpt-4o-mini"
 
@@ -292,7 +292,7 @@ def test_update_model_configuration_edits_named_preset_and_selects(
 
     assert payload["agent"]["model_preset"] == "codex"
     assert payload["agent"]["model"] == "openai-codex/gpt-5.5"
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.agents.defaults.model_preset == "codex"
     assert saved.model_presets["codex"].label == "Codex"
     assert saved.model_presets["codex"].provider == "openai_codex"
@@ -318,7 +318,7 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     providers = {row["name"]: row for row in payload["providers"]}
     assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == "https://new.example/v1"
     assert providers[DYNAMIC_PROVIDER_NAME]["api_key_hint"] == "••••"
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     dynamic_provider = saved.providers.model_extra[DYNAMIC_PROVIDER_NAME]
     assert dynamic_provider.api_base == "https://new.example/v1"
     assert dynamic_provider.api_key == "sk-test"
@@ -336,7 +336,7 @@ def test_update_agent_settings_accepts_context_window_options(
     payload = update_agent_settings({"context_window_tokens": ["200000"]})
 
     assert payload["agent"]["context_window_tokens"] == 200000
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.agents.defaults.context_window_tokens == 200000
 
 
@@ -362,7 +362,7 @@ def test_update_model_configuration_accepts_context_window_options(
     )
 
     assert payload["agent"]["context_window_tokens"] == 262144
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.model_presets["codex"].context_window_tokens == 262144
 
 
@@ -555,7 +555,7 @@ def test_update_web_search_settings_accepts_keenable_without_api_key(
 
     payload = update_web_search_settings({"provider": ["keenable"]})
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.tools.web.search.provider == "keenable"
     assert saved.tools.web.search.api_key == ""
     option = next(item for item in payload["web_search"]["providers"] if item["name"] == "keenable")
@@ -575,7 +575,7 @@ def test_update_web_search_settings_can_clear_optional_api_key(
 
     update_web_search_settings({"provider": ["keenable"], "api_key": [""]})
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.tools.web.search.provider == "keenable"
     assert saved.tools.web.search.api_key == ""
 
@@ -720,7 +720,7 @@ def test_update_transcription_settings_writes_top_level_only(
         }
     )
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.channels.transcription_provider == "openai"
     assert saved.channels.transcription_language == "en"
     assert saved.transcription.enabled is True
@@ -750,7 +750,7 @@ def test_update_transcription_settings_accepts_openrouter(
         }
     )
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.transcription.provider == "openrouter"
     assert saved.transcription.model == "nvidia/parakeet-tdt-0.6b-v3"
     assert payload["transcription"]["provider"] == "openrouter"
@@ -775,7 +775,7 @@ def test_update_transcription_settings_accepts_xiaomi_mimo(
         }
     )
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.transcription.provider == "xiaomi_mimo"
     assert saved.transcription.model == "mimo-v2.5-asr"
     assert saved.transcription.language == "zh"
@@ -800,7 +800,7 @@ def test_update_transcription_settings_accepts_assemblyai(
         }
     )
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.transcription.provider == "assemblyai"
     assert saved.transcription.model == "universal-3-pro"
     assert payload["transcription"]["provider"] == "assemblyai"
@@ -881,7 +881,7 @@ def test_update_network_safety_settings_writes_local_service_flag(
         }
     )
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     saved_raw = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved.tools.webui_allow_local_service_access is False
     assert saved_raw["tools"]["webuiAllowLocalServiceAccess"] is False
@@ -917,7 +917,7 @@ def test_update_network_safety_settings_default_access_is_webui_only(
 
     payload = update_network_safety_settings({"webui_default_access_mode": ["full"]})
 
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert config_path.read_text(encoding="utf-8") == before
     assert saved.tools.restrict_to_workspace is False
     assert payload["advanced"]["webui_default_access_mode"] == "full"
@@ -1225,7 +1225,7 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
     )
 
     assert payload["agent"]["model_preset"] == "codex"
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.model_presets["codex"].provider == "openai_codex"
 
 
@@ -1312,7 +1312,7 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     )
 
     assert payload["agent"]["model_preset"] == "azure-aad"
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.model_presets["azure-aad"].provider == "azure_openai"
     assert saved.model_presets["azure-aad"].model == "my-deployment"
 

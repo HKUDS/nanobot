@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 
 QueryParams = dict[str, list[str]]
 
@@ -85,7 +85,7 @@ def _query_first(query: QueryParams, key: str) -> str | None:
 
 
 def _manager() -> CliAppManager:
-    config = load_config()
+    config = load_raw_config()
     cli_cfg = config.tools.cli_apps
     return CliAppManager(
         workspace=config.workspace_path,

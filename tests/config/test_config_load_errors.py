@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 from nanobot.config.schema import ApiConfig
 
 
 def test_load_config_missing_file_uses_defaults(tmp_path) -> None:
-    config = load_config(tmp_path / "missing.json")
+    config = load_raw_config(tmp_path / "missing.json")
 
     assert config.agents.defaults.model
 
@@ -17,7 +17,7 @@ def test_load_config_invalid_json_fails_fast(tmp_path) -> None:
     config_path.write_text("{broken json", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Failed to load config"):
-        load_config(config_path)
+        load_raw_config(config_path)
 
 
 def test_load_config_rejects_non_object_root(tmp_path) -> None:
@@ -25,7 +25,7 @@ def test_load_config_rejects_non_object_root(tmp_path) -> None:
     config_path.write_text("[]", encoding="utf-8")
 
     with pytest.raises(ValueError, match="config root must be a JSON object"):
-        load_config(config_path)
+        load_raw_config(config_path)
 
 
 def test_load_config_invalid_schema_fails_fast(tmp_path) -> None:
@@ -36,7 +36,7 @@ def test_load_config_invalid_schema_fails_fast(tmp_path) -> None:
     )
 
     with pytest.raises(ValueError, match="Failed to load config"):
-        load_config(config_path)
+        load_raw_config(config_path)
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::"])

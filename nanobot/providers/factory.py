@@ -278,9 +278,9 @@ def load_provider_snapshot(
     *,
     preset_name: str | None = None,
 ) -> ProviderSnapshot:
-    from nanobot.config.loader import load_config, resolve_config_env_vars
+    from nanobot.config.loader import load_effective_config
 
     return build_provider_snapshot(
-        resolve_config_env_vars(load_config(config_path)),
+        load_effective_config(config_path),
         preset_name=preset_name,
     )

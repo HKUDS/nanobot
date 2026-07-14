@@ -56,7 +56,7 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
     monkeypatch.setattr(registry, "discover_channel_names", lambda: ["hot"])
     monkeypatch.setattr(registry, "discover_plugins", lambda enabled_names=None: {})
     monkeypatch.setattr(registry, "discover_enabled", discover_enabled)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: next(configs))
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda: next(configs))
 
     manager = ChannelManager(disabled, MessageBus())
     manager._started = True
@@ -95,7 +95,7 @@ async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_f
         "discover_enabled",
         lambda enabled_names, **_kwargs: {"hot": _HotChannel},
     )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: enabled)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda: enabled)
 
     manager = ChannelManager(enabled, MessageBus())
     old_channel = manager.channels["hot"]

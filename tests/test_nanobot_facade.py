@@ -120,7 +120,7 @@ def test_from_config_rejects_multiple_model_selectors(tmp_path):
 def test_from_config_default_path():
     from nanobot.config.schema import Config
 
-    with patch("nanobot.config.loader.load_config") as mock_load, \
+    with patch("nanobot.config.loader.load_effective_config") as mock_load, \
          patch("nanobot.providers.factory.make_provider") as mock_prov:
         mock_load.return_value = Config()
         mock_prov.return_value = MagicMock()

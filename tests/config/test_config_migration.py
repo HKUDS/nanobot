@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.config.loader import apply_config_runtime_policies, load_config, save_config
+from nanobot.config.loader import apply_config_runtime_policies, load_raw_config, save_config
 from nanobot.security.network import validate_url_target
 
 
@@ -33,7 +33,7 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
         encoding="utf-8",
     )
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
 
     assert config.agents.defaults.max_tokens == 1234
     assert config.agents.defaults.context_window_tokens == 200_000
@@ -56,7 +56,7 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
         encoding="utf-8",
     )
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     defaults = saved["agents"]["defaults"]
@@ -103,8 +103,8 @@ def test_load_config_warns_and_ignores_legacy_max_messages(tmp_path, field_name)
         encoding="utf-8",
     )
 
-    with patch("nanobot.config.loader.logger.warning") as warning:
-        config = load_config(config_path)
+    with patch("nanobot.config.repository.logger.warning") as warning:
+        config = load_raw_config(config_path)
 
     assert config.agents.defaults.max_tokens == 1234
     assert not hasattr(config.agents.defaults, "max_messages")
@@ -121,8 +121,8 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with patch("nanobot.config.loader.logger.warning"):
-        config = load_config(config_path)
+    with patch("nanobot.config.repository.logger.warning"):
+        config = load_raw_config(config_path)
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
 
@@ -193,7 +193,7 @@ def test_load_config_migrates_legacy_my_tool_keys(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
 
     assert config.tools.my.enable is False
     assert config.tools.my.allow_set is True
@@ -213,7 +213,7 @@ def test_save_config_rewrites_legacy_my_tool_keys(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
     save_config(config, config_path)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
 
@@ -238,7 +238,7 @@ def test_new_my_tool_keys_take_precedence_over_legacy(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
 
     assert config.tools.my.enable is True
     assert config.tools.my.allow_set is True
@@ -253,12 +253,12 @@ def test_runtime_policy_application_resets_ssrf_whitelist(tmp_path) -> None:
     defaulted = tmp_path / "defaulted.json"
     defaulted.write_text(json.dumps({}), encoding="utf-8")
 
-    apply_config_runtime_policies(load_config(whitelisted))
+    apply_config_runtime_policies(load_raw_config(whitelisted))
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
         ok, err = validate_url_target("http://ts.local/api")
         assert ok, err
 
-    apply_config_runtime_policies(load_config(defaulted))
+    apply_config_runtime_policies(load_raw_config(defaulted))
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
         ok, _ = validate_url_target("http://ts.local/api")
         assert not ok
@@ -268,7 +268,7 @@ def test_load_config_defaults_local_service_access_to_enabled(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is True
 
@@ -280,7 +280,7 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is False
 
@@ -289,7 +289,7 @@ def test_load_config_defaults_remote_package_install_to_disabled(tmp_path) -> No
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
 
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
 
     assert config.tools.webui_allow_remote_package_install is False
 
@@ -306,5 +306,5 @@ def test_load_config_accepts_remote_package_install_aliases(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    assert load_config(camel_path).tools.webui_allow_remote_package_install is True
-    assert load_config(snake_path).tools.webui_allow_remote_package_install is True
+    assert load_raw_config(camel_path).tools.webui_allow_remote_package_install is True
+    assert load_raw_config(snake_path).tools.webui_allow_remote_package_install is True

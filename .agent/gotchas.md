@@ -6,7 +6,7 @@
 
 ## Config `${VAR}` References
 
-`load_config()` and `FileConfigRepository.load_raw()` preserve `${VAR}` patterns so Settings can safely edit and save the persisted representation. Runtime entry points use `load_effective_config()` / `load_effective()` to resolve them in an isolated snapshot. This is **not** a shell-like default-value syntax. If a referenced variable is missing, effective loading raises `ValueError`.
+`load_raw_config()` and `FileConfigRepository.load_raw()` preserve `${VAR}` patterns so Settings can safely edit and save the persisted representation. Runtime entry points use `load_effective_config()` / `load_effective()` to resolve them in an isolated snapshot. This is **not** a shell-like default-value syntax. If a referenced variable is missing, effective loading raises `ValueError`.
 
 Example valid usage:
 ```json

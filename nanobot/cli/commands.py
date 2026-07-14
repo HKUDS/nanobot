@@ -640,7 +640,7 @@ def onboard(
     non_interactive_refresh: bool = typer.Option(False, "--refresh", help="Refresh config, preserving existing settings without prompting"),
 ):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.loader import get_config_path, load_raw_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
     if config:
@@ -658,7 +658,7 @@ def onboard(
     # Create or update config
     if config_path.exists():
         if wizard:
-            config = _apply_workspace_override(load_config(config_path))
+            config = _apply_workspace_override(load_raw_config(config_path))
         else:
             should_refresh = non_interactive_refresh
             if not non_interactive_refresh:
@@ -677,7 +677,7 @@ def onboard(
                     should_refresh = True
 
             if should_refresh:
-                config = _apply_workspace_override(load_config(config_path))
+                config = _apply_workspace_override(load_raw_config(config_path))
                 save_config(config, config_path)
                 console.print(
                     f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
@@ -861,7 +861,7 @@ def _load_inspection_config(
     workspace: str | None = None,
 ) -> tuple[Path, Config]:
     """Load config for diagnostic commands without resolving secret env refs."""
-    from nanobot.config.loader import get_config_path, load_config, set_config_path
+    from nanobot.config.loader import get_config_path, load_raw_config, set_config_path
 
     config_path = None
     if config:
@@ -871,7 +871,7 @@ def _load_inspection_config(
 
     display_path = config_path or get_config_path()
     try:
-        loaded = load_config(config_path)
+        loaded = load_raw_config(config_path)
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -923,10 +923,10 @@ def _resolve_webui_config_path(config: str | None) -> Path:
 
 def _load_webui_setup_config(config_path: Path) -> Config:
     """Load config for first-run mutation without resolving env-var placeholders."""
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_raw_config
 
     try:
-        return load_config(config_path)
+        return load_raw_config(config_path)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from e
@@ -934,7 +934,7 @@ def _load_webui_setup_config(config_path: Path) -> Config:
 
 def _provider_setup_error(config: Config) -> str | None:
     """Return the provider setup error, or None when the current model can start."""
-    from nanobot.config.loader import resolve_config_env_vars
+    from nanobot.config.repository import resolve_config_env_vars
     from nanobot.providers.factory import build_provider_snapshot
 
     try:
@@ -2520,7 +2520,7 @@ def plugins_list(
 ):
     """List optional nanobot features."""
     from nanobot.channels.registry import discover_channel_names, discover_plugins
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import load_raw_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -2530,7 +2530,7 @@ def plugins_list(
         feature_support.optional_dependency_groups(),
         set(discover_channel_names()),
         discover_plugins(),
-        load_config(resolved_config_path),
+        load_raw_config(resolved_config_path),
     )
 
 
@@ -2767,11 +2767,11 @@ def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
 
-        from nanobot.config.loader import load_config, resolve_config_env_vars
+        from nanobot.config.loader import load_effective_config
 
         proxy = None
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+            proxy = load_effective_config().providers.openai_codex.proxy or None
         except ValueError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1) from e

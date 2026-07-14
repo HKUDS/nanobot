@@ -107,8 +107,8 @@ def _decode_api_key(raw_key: str) -> str | None:
 
 def _default_model_name_from_config() -> str | None:
     try:
-        from nanobot.config.loader import load_config
-        model = load_config().resolve_preset().model.strip()
+        from nanobot.config.loader import load_raw_config
+        model = load_raw_config().resolve_preset().model.strip()
         return model or None
     except Exception as e:
         logger.debug("bootstrap model_name could not load from config: {}", e)

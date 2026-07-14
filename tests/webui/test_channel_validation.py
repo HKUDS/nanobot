@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import load_raw_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui import channel_validation
 from nanobot.webui.channel_validation import validate_channel_config
@@ -35,7 +35,7 @@ def test_validate_channel_does_not_write_config(tmp_path, monkeypatch: pytest.Mo
     )
 
     assert payload["status"] == "connected"
-    saved = load_config(config_path)
+    saved = load_raw_config(config_path)
     assert saved.channels.slack["appToken"] == "xapp-old"
     assert saved.channels.slack["botToken"] == "xoxb-old"
 
@@ -101,7 +101,7 @@ def test_validate_email_presets_are_checked_without_saving(
 
     assert payload["status"] == "connected"
     assert payload["can_enable"] is True
-    assert not hasattr(load_config(config_path).channels, "email")
+    assert not hasattr(load_raw_config(config_path).channels, "email")
 
 
 def test_validate_email_blocks_private_targets_when_local_access_is_disabled(

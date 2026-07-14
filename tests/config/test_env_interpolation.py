@@ -2,54 +2,31 @@ import json
 
 import pytest
 
-from nanobot.config.loader import (
-    _resolve_env_vars,
-    load_config,
-    resolve_config_env_vars,
-    save_config,
-)
+from nanobot.config.loader import load_raw_config, save_config
+from nanobot.config.repository import resolve_config_env_vars
 from nanobot.config.schema import Config
 
 
-class TestResolveEnvVars:
-    def test_replaces_string_value(self, monkeypatch):
-        monkeypatch.setenv("MY_SECRET", "hunter2")
-        assert _resolve_env_vars("${MY_SECRET}") == "hunter2"
+class TestResolveConfig:
+    def test_resolves_multiple_refs_inside_a_value(self, monkeypatch):
+        monkeypatch.setenv("TEST_USER", "alice")
+        monkeypatch.setenv("TEST_PASSWORD", "secret")
+        config = Config.model_validate(
+            {"providers": {"groq": {"apiKey": "${TEST_USER}:${TEST_PASSWORD}"}}}
+        )
 
-    def test_partial_replacement(self, monkeypatch):
-        monkeypatch.setenv("HOST", "example.com")
-        assert _resolve_env_vars("https://${HOST}/api") == "https://example.com/api"
+        resolved = resolve_config_env_vars(config)
 
-    def test_multiple_vars_in_one_string(self, monkeypatch):
-        monkeypatch.setenv("USER", "alice")
-        monkeypatch.setenv("PASS", "secret")
-        assert _resolve_env_vars("${USER}:${PASS}") == "alice:secret"
-
-    def test_nested_dicts(self, monkeypatch):
-        monkeypatch.setenv("TOKEN", "abc123")
-        data = {"channels": {"telegram": {"token": "${TOKEN}"}}}
-        result = _resolve_env_vars(data)
-        assert result["channels"]["telegram"]["token"] == "abc123"
-
-    def test_lists(self, monkeypatch):
-        monkeypatch.setenv("VAL", "x")
-        assert _resolve_env_vars(["${VAL}", "plain"]) == ["x", "plain"]
-
-    def test_ignores_non_strings(self):
-        assert _resolve_env_vars(42) == 42
-        assert _resolve_env_vars(True) is True
-        assert _resolve_env_vars(None) is None
-        assert _resolve_env_vars(3.14) == 3.14
-
-    def test_plain_strings_unchanged(self):
-        assert _resolve_env_vars("no vars here") == "no vars here"
+        assert resolved.providers.groq.api_key == "alice:secret"
 
     def test_missing_var_raises(self):
+        config = Config.model_validate(
+            {"providers": {"groq": {"apiKey": "${DOES_NOT_EXIST}"}}}
+        )
+
         with pytest.raises(ValueError, match="DOES_NOT_EXIST"):
-            _resolve_env_vars("${DOES_NOT_EXIST}")
+            resolve_config_env_vars(config)
 
-
-class TestResolveConfig:
     def test_resolves_env_vars_in_config(self, tmp_path, monkeypatch):
         monkeypatch.setenv("TEST_API_KEY", "resolved-key")
         config_path = tmp_path / "config.json"
@@ -60,7 +37,7 @@ class TestResolveConfig:
             encoding="utf-8",
         )
 
-        raw = load_config(config_path)
+        raw = load_raw_config(config_path)
         assert raw.providers.groq.api_key == "${TEST_API_KEY}"
 
         resolved = resolve_config_env_vars(raw)
@@ -76,7 +53,7 @@ class TestResolveConfig:
             encoding="utf-8",
         )
 
-        raw = load_config(config_path)
+        raw = load_raw_config(config_path)
         save_config(raw, config_path)
 
         saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -91,14 +68,14 @@ class TestResolveConfig:
             encoding="utf-8",
         )
 
-        config = load_config(config_path)
+        config = load_raw_config(config_path)
         config.agents.defaults.max_tokens = 1234
         save_config(config, config_path)
 
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["agents"]["defaults"]["dream"]["cron"] == "0 */4 * * *"
 
-        reloaded = load_config(config_path)
+        reloaded = load_raw_config(config_path)
         schedule = reloaded.agents.defaults.dream.build_schedule("UTC")
         assert schedule.kind == "cron"
         assert schedule.expr == "0 */4 * * *"
@@ -119,7 +96,7 @@ class TestResolveConfig:
             encoding="utf-8",
         )
 
-        config = load_config(config_path)
+        config = load_raw_config(config_path)
         save_config(config, config_path)
 
         saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -149,7 +126,7 @@ class TestResolveConfig:
         assert saved["providers"]["openaiCodex"] == {"proxy": proxy}
         assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
 
-        reloaded = load_config(config_path)
+        reloaded = load_raw_config(config_path)
         assert reloaded.providers.openai_codex.proxy == proxy
         assert reloaded.providers.openai_codex.api_key is None
 
@@ -166,7 +143,7 @@ class TestResolveConfig:
             encoding="utf-8",
         )
 
-        raw = load_config(config_path)
+        raw = load_raw_config(config_path)
         assert raw.providers.openai_codex.api_key == "secret"
 
         resolved = resolve_config_env_vars(raw)
@@ -190,7 +167,7 @@ class TestResolveConfig:
             encoding="utf-8",
         )
 
-        raw = load_config(config_path)
+        raw = load_raw_config(config_path)
         resolved = resolve_config_env_vars(raw)
 
         assert resolved.providers.groq.api_key == "resolved-key"

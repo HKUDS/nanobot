@@ -224,7 +224,7 @@ def mock_paths():
     """Mock config/workspace paths for test isolation."""
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
+         patch("nanobot.config.loader.load_raw_config") as mock_lc, \
          patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
@@ -681,7 +681,7 @@ def test_provider_login_model_implies_set_main_provider(tmp_path):
 def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
-        "nanobot.config.loader.load_config",
+        "nanobot.config.loader.load_effective_config",
         lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
     )
 
@@ -706,13 +706,12 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     assert captured["proxy"] == proxy
 
 
-def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
+def test_provider_login_openai_codex_uses_resolved_proxy_from_effective_config(monkeypatch):
     proxy = "http://127.0.0.1:23458"
-    monkeypatch.setenv("CODEX_PROXY_FOR_TEST", proxy)
     monkeypatch.setattr(
-        "nanobot.config.loader.load_config",
+        "nanobot.config.loader.load_effective_config",
         lambda: Config.model_validate(
-            {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
+            {"providers": {"openaiCodex": {"proxy": proxy}}}
         ),
     )
 
@@ -1278,8 +1277,9 @@ def mock_agent_runtime(tmp_path):
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "default-workspace")
 
-    with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
-         patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
+    with patch(
+        "nanobot.config.loader.load_effective_config", return_value=config
+    ) as mock_load_effective_config, \
          patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
          patch("nanobot.providers.factory.make_provider", return_value=_fake_provider()), \
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
@@ -1296,7 +1296,7 @@ def mock_agent_runtime(tmp_path):
 
         yield {
             "config": config,
-            "load_config": mock_load_config,
+            "load_effective_config": mock_load_effective_config,
             "sync_templates": mock_sync_templates,
             "from_config": mock_from_config,
             "agent_loop": agent_loop,
@@ -1319,7 +1319,7 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     result = runner.invoke(app, ["agent", "-m", "hello"])
 
     assert result.exit_code == 0
-    assert mock_agent_runtime["load_config"].call_args.args == (None,)
+    assert mock_agent_runtime["load_effective_config"].call_args.args == (None,)
     assert mock_agent_runtime["sync_templates"].call_args.args == (
         mock_agent_runtime["config"].workspace_path,
     )
@@ -1338,7 +1338,9 @@ def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_path)])
 
     assert result.exit_code == 0
-    assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
+    assert mock_agent_runtime["load_effective_config"].call_args.args == (
+        config_path.resolve(),
+    )
 
 
 def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
@@ -1353,7 +1355,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
     )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
@@ -1391,7 +1393,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     seen: dict[str, Path] = {}
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
@@ -1440,7 +1442,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     seen: dict[str, Path] = {}
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
@@ -1496,7 +1498,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     seen: dict[str, Path] = {}
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
@@ -1556,7 +1558,9 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     )
 
     assert result.exit_code == 0
-    assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
+    assert mock_agent_runtime["load_effective_config"].call_args.args == (
+        config_path.resolve(),
+    )
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
@@ -1675,8 +1679,7 @@ def _patch_cli_command_runtime(
         "nanobot.config.loader.set_config_path",
         set_config_path or (lambda _path: None),
     )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
         sync_templates or (lambda _path: None),
@@ -2194,7 +2197,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     seen: dict[str, object] = {}
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
     _patch_gateway_ports_free(monkeypatch)
@@ -2321,7 +2324,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     seen: dict[str, object] = {"run_records": []}
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.load_effective_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
     _patch_gateway_ports_free(monkeypatch)

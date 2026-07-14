@@ -740,9 +740,9 @@ def refresh_saved_feishu_identities(config: Any | None = None) -> bool:
     if not FEISHU_AVAILABLE:
         return False
 
-    from nanobot.config.loader import load_config, update_config
+    from nanobot.config.loader import load_raw_config, update_config
 
-    source_config = config or load_config()
+    source_config = config or load_raw_config()
     feishu_cfg = getattr(source_config.channels, "feishu", None)
     defaults = FeishuChannel.default_config()
     specs = feishu_instance_specs(feishu_cfg, defaults)

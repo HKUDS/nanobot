@@ -440,16 +440,16 @@ def optional_features_payload(
     last_action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import discover_channel_names, discover_plugins
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_raw_config
 
     config_provided = config is not None
-    config = config or load_config()
+    config = config or load_raw_config()
     if not config_provided:
         with suppress(Exception):
             from nanobot.channels.feishu import refresh_saved_feishu_identities
 
             if refresh_saved_feishu_identities(config):
-                config = load_config()
+                config = load_raw_config()
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
     plugin_channels = discover_plugins()

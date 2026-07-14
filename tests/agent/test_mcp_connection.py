@@ -20,7 +20,7 @@ from nanobot.agent.tools import mcp as mcp_runtime
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.mcp import MCPResourceWrapper, MCPToolWrapper
 from nanobot.bus.queue import MessageBus
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import load_raw_config, save_config
 from nanobot.config.schema import MCPServerConfig
 
 
@@ -201,7 +201,7 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
 ):
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    config = load_config()
+    config = load_raw_config()
     config.tools.mcp_servers["browserbase"] = MCPServerConfig(
         type="stdio",
         command="browserbase-mcp",
@@ -233,7 +233,7 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     assert loop.tools.has("mcp_browserbase_navigate")
     assert "browserbase" in loop._mcp_stacks
 
-    config = load_config()
+    config = load_raw_config()
     del config.tools.mcp_servers["browserbase"]
     save_config(config)
 
@@ -253,7 +253,7 @@ async def test_request_mcp_reload_reaches_runtime_control_without_restart(
 ):
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    config = load_config()
+    config = load_raw_config()
     config.tools.mcp_servers["browserbase"] = MCPServerConfig(
         type="stdio",
         command="browserbase-mcp",
@@ -292,7 +292,7 @@ async def test_request_mcp_reload_reaches_runtime_control_without_restart(
     assert result["requires_restart"] is False
     assert loop.tools.has("mcp_browserbase_navigate")
 
-    config = load_config()
+    config = load_raw_config()
     del config.tools.mcp_servers["browserbase"]
     save_config(config)
 
@@ -314,7 +314,7 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
 ):
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    config = load_config()
+    config = load_raw_config()
     config.tools.mcp_servers["browserbase"] = MCPServerConfig(
         type="stdio",
         command="browserbase-mcp",

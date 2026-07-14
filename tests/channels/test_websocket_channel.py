@@ -32,7 +32,7 @@ from nanobot.channels.websocket import (
     _parse_inbound_payload,
     publish_runtime_model_update,
 )
-from nanobot.config.loader import load_config, save_config
+from nanobot.config.loader import load_raw_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
@@ -2131,7 +2131,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         )
         assert bad_image.status_code == 400
 
-        saved = load_config(config_path)
+        saved = load_raw_config(config_path)
         assert saved.agents.defaults.model == "atomic_chat/test"
         assert saved.agents.defaults.provider == "atomic_chat"
         assert saved.agents.defaults.model_preset == "fast-writing"
@@ -2320,7 +2320,7 @@ def test_update_provider_settings_ignores_api_type_for_non_openai(monkeypatch, t
     })
 
     assert body["providers"]
-    config = load_config(config_path)
+    config = load_raw_config(config_path)
     assert config.providers.custom.api_base == "https://example.test/v1"
     assert config.providers.custom.api_type == "auto"
 

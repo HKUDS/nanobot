@@ -364,9 +364,9 @@ class ChannelManager:
                 "message": "WebSocket hosts the WebUI and is applied on restart.",
             }
 
-        from nanobot.config.loader import load_config
+        from nanobot.config.loader import load_effective_config
 
-        self.config = load_config()
+        self.config = load_effective_config()
         section = self._channel_section(name)
         if action == "disable":
             runtime_names = [name if not instance_id else f"{name}.{instance_id}"]

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 from nanobot.config.repository import ConfigConflictError, FileConfigRepository
 from nanobot.security.network import configure_ssrf_whitelist, validate_url_target
 
@@ -24,6 +24,16 @@ def _fake_resolve(host: str, results: list[str]):
         raise socket.gaierror(f"cannot resolve {hostname}")
 
     return _resolver
+
+
+def test_public_api_exposes_explicit_loaders_without_legacy_alias() -> None:
+    import nanobot.config as config_api
+    from nanobot.config import loader
+
+    assert config_api.load_raw_config is loader.load_raw_config
+    assert config_api.load_effective_config is loader.load_effective_config
+    assert not hasattr(config_api, "load_config")
+    assert not hasattr(loader, "load_config")
 
 
 def test_raw_and_effective_snapshots_keep_secret_templates_separate(
@@ -213,7 +223,7 @@ def test_loading_config_does_not_change_process_network_policy(tmp_path: Path) -
     path.write_text(json.dumps({"tools": {"ssrfWhitelist": []}}), encoding="utf-8")
     configure_ssrf_whitelist(["100.64.0.0/10"])
     try:
-        load_config(path)
+        load_raw_config(path)
 
         with patch(
             "nanobot.security.network.socket.getaddrinfo",

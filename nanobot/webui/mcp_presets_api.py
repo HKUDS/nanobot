@@ -18,7 +18,7 @@ from typing import Any, Literal, Mapping
 
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.protocol import app_manifest, compact_dict
-from nanobot.config.loader import load_config, resolve_config_env_vars, update_config
+from nanobot.config.loader import load_effective_config, load_raw_config, update_config
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import Config, MCPServerConfig
 from nanobot.utils.helpers import ensure_dir
@@ -416,7 +416,7 @@ def _known_preset_names() -> set[str]:
 def _known_mcp_names() -> set[str]:
     names = _known_preset_names()
     with suppress(Exception):
-        names.update(load_config().tools.mcp_servers)
+        names.update(load_raw_config().tools.mcp_servers)
     return names
 
 
@@ -822,7 +822,7 @@ def mcp_presets_payload(
     last_action: dict[str, Any] | None = None,
     tool_preview: Mapping[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    config = load_config()
+    config = load_raw_config()
     known = _known_preset_names()
     preset_rows = [
         _preset_payload(preset, config.tools.mcp_servers)
@@ -921,7 +921,7 @@ async def mcp_presets_test_action(query: QueryParams) -> dict[str, Any]:
     display_name = _display_name_for(name, preset)
 
     try:
-        config = resolve_config_env_vars(load_config())
+        config = load_effective_config()
     except ValueError as exc:
         return mcp_presets_payload(last_action={
             "ok": False,

@@ -21,7 +21,7 @@ from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels._setup import channel_setup_spec
-from nanobot.config.loader import get_config_path, load_config, update_config
+from nanobot.config.loader import get_config_path, load_raw_config, update_config
 from nanobot.optional_features import (
     OptionalFeatureError,
     extra_installed,
@@ -397,7 +397,7 @@ class WebUISettingsRouter:
                 allow_install=self._allow_feature_package_install(connection, request),
             )
             update_api_settings(self._parse_api_service_settings_query(request))
-            config = load_config()
+            config = load_raw_config()
             runtime = self._api_runtime()
             options = ApiStartOptions(
                 host=config.api.host,
@@ -465,7 +465,7 @@ class WebUISettingsRouter:
         return ApiRuntime(paths=api_runtime_paths(config_path))
 
     def _api_service_payload(self, *, last_action: str | None = None) -> dict[str, Any]:
-        config = load_config()
+        config = load_raw_config()
         status = self._api_runtime().status()
         extras = optional_dependency_groups()
         connect_host = "127.0.0.1" if config.api.host in {"0.0.0.0", "::"} else config.api.host
@@ -1063,7 +1063,7 @@ class WebUISettingsRouter:
         if _is_local_browser_request(connection, request.headers):
             return True
         try:
-            return bool(load_config().tools.webui_allow_remote_package_install)
+            return bool(load_raw_config().tools.webui_allow_remote_package_install)
         except Exception:
             self.logger.exception("failed to load remote package install policy")
             return False

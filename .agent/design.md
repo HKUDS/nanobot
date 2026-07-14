@@ -30,6 +30,6 @@ Configuration must be declared explicitly in `config/schema.py` Pydantic models.
 
 ## Configuration has an explicit owner
 
-`FileConfigRepository` owns config-file reads, validation, revisions, and atomic writes. Runtime code may use the compatibility helpers in `config/loader.py`, but new components with an explicit config path should keep their own repository instance instead of importing a mutable global config object.
+`FileConfigRepository` owns config-file reads, validation, revisions, and atomic writes. Process entry points may use the explicit functions in `config/loader.py`; components with an explicit config path should keep their own repository instance instead of importing a mutable global config object.
 
-Persisted and runtime views are separate: `load_raw()` preserves `${VAR}` references for editing, while `load_effective()` returns an isolated snapshot with references resolved. Read-modify-write flows must use `update()` / `update_config()` so a stale object cannot silently overwrite a newer change. Loading config is side-effect free; process-wide policies are applied explicitly during runtime startup.
+Persisted and runtime views are separate: `load_raw_config()` / `load_raw()` preserve `${VAR}` references for editing, while `load_effective_config()` / `load_effective()` return an isolated snapshot with references resolved. Read-modify-write flows must use `update()` / `update_config()` so a stale object cannot silently overwrite a newer change. Loading config is side-effect free; process-wide policies are applied explicitly during runtime startup.

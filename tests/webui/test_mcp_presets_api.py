@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
@@ -76,7 +76,7 @@ def test_enable_browserbase_writes_scrubbed_config_payload(
     assert preset["installed"] is True
     assert preset["configured"] is True
     assert "bb_live_secret" not in str(payload)
-    config = load_config()
+    config = load_raw_config()
     assert "browserbaseApiKey=bb_live_secret" in config.tools.mcp_servers["browserbase"].url
 
 
@@ -107,7 +107,7 @@ def test_enable_context7_optional_api_key_appends_arg(
     assert "ctx7_secret" not in str(payload)
     row = next(item for item in payload["presets"] if item["name"] == "context7")
     assert row["configured"] is True
-    config = load_config()
+    config = load_raw_config()
     assert config.tools.mcp_servers["context7"].args == [
         "-y",
         "@upstash/context7-mcp@latest",
@@ -124,7 +124,7 @@ def test_enable_stdio_preset_uses_config_scoped_cwd(
 
     mcp_presets_action("enable", {"name": ["playwright"]})
 
-    config = load_config()
+    config = load_raw_config()
     cwd = config.tools.mcp_servers["playwright"].cwd
     assert cwd == str(tmp_path / "mcp" / "playwright")
     assert (tmp_path / "mcp" / "playwright").is_dir()
@@ -137,7 +137,7 @@ def test_enable_no_auth_remote_presets_write_url(tmp_path, monkeypatch: pytest.M
     mcp_presets_action("enable", {"name": ["exa"]})
     mcp_presets_action("enable", {"name": ["firecrawl"]})
 
-    config = load_config()
+    config = load_raw_config()
     assert config.tools.mcp_servers["microsoft-learn"].url == "https://learn.microsoft.com/api/mcp"
     assert config.tools.mcp_servers["exa"].url == "https://mcp.exa.ai/mcp"
     assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
@@ -154,7 +154,7 @@ def test_firecrawl_preset_is_keyless(tmp_path, monkeypatch: pytest.MonkeyPatch) 
     assert row["required_fields"] == []
     assert row["configured"] is True
     assert "Keyless" in row["note"]
-    config = load_config()
+    config = load_raw_config()
     assert config.tools.mcp_servers["firecrawl"].type == "streamableHttp"
     assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
     assert config.tools.mcp_servers["firecrawl"].env == {}
@@ -173,7 +173,7 @@ def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPa
     assert payload["last_action"]["removed"] is True
     assert payload["last_action"]["managed_paths_removed"] == ["runtime:mcp/playwright"]
     assert not managed_cwd.exists()
-    config = load_config()
+    config = load_raw_config()
     assert "playwright" not in config.tools.mcp_servers
 
 
@@ -196,7 +196,7 @@ def test_remove_custom_mcp_server_preserves_user_cwd(tmp_path, monkeypatch: pyte
 
     assert payload["last_action"]["ok"] is True
     assert user_cwd.exists()
-    config = load_config()
+    config = load_raw_config()
     assert "internal-docs" not in config.tools.mcp_servers
 
 
@@ -330,7 +330,7 @@ def test_custom_mcp_server_writes_config_and_catalog_row(
     assert row["manifest"]["capabilities"][0]["command"] == "node"
     assert "server.js" not in str(row["manifest"])
     assert "docs-secret-value" not in str(payload)
-    config = load_config()
+    config = load_raw_config()
     assert config.tools.mcp_servers["internal-docs"].args == ["server.js"]
     assert config.tools.mcp_servers["internal-docs"].env["DOCS_TOKEN"] == "docs-secret-value"
 
@@ -356,7 +356,7 @@ def test_import_mcp_config_and_tool_allowlist(
     )
 
     assert payload["last_action"]["message"] == "Imported 2 MCP server(s)."
-    config = load_config()
+    config = load_raw_config()
     assert config.tools.mcp_servers["docs"].command == "npx"
     assert config.tools.mcp_servers["docs"].args == ["-y", "docs-mcp"]
     assert config.tools.mcp_servers["remote-docs"].type == "sse"
@@ -374,7 +374,7 @@ def test_import_mcp_config_and_tool_allowlist(
 
     row = next(item for item in payload["presets"] if item["name"] == "docs")
     assert row["enabled_tools"] == ["mcp_docs_search"]
-    assert load_config().tools.mcp_servers["docs"].enabled_tools == ["mcp_docs_search"]
+    assert load_raw_config().tools.mcp_servers["docs"].enabled_tools == ["mcp_docs_search"]
 
     payload = custom_mcp_action(
         "tools",
@@ -386,7 +386,7 @@ def test_import_mcp_config_and_tool_allowlist(
 
     row = next(item for item in payload["presets"] if item["name"] == "docs")
     assert row["enabled_tools"] == []
-    assert load_config().tools.mcp_servers["docs"].enabled_tools == []
+    assert load_raw_config().tools.mcp_servers["docs"].enabled_tools == []
 
 
 def test_normalize_mcp_preset_mentions_accepts_configured_custom_server(

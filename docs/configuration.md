@@ -13,6 +13,46 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
 
+## Python Configuration API
+
+> [!WARNING]
+> `nanobot.config.load_config` and `nanobot.config.loader.load_config` have been
+> removed. There is intentionally no compatibility alias because the old name
+> did not distinguish the persisted representation from the runtime view.
+
+Python embedders and plugins must choose the view they need explicitly:
+
+```python
+from pathlib import Path
+
+from nanobot.config import (
+    apply_config_runtime_policies,
+    load_effective_config,
+    load_raw_config,
+)
+
+path = Path.home() / ".nanobot" / "config.json"
+
+# For settings editors and persistence flows: preserves ${VAR} placeholders.
+persisted = load_raw_config(path)
+
+# For agents, providers, channels, and tools: resolves ${VAR} placeholders.
+runtime = load_effective_config(path)
+apply_config_runtime_policies(runtime)
+```
+
+Use this migration mapping:
+
+| Previous call | Replacement |
+|---|---|
+| `load_config(path)` used to inspect or edit persisted values | `load_raw_config(path)` |
+| `resolve_config_env_vars(load_config(path))` used at runtime | `load_effective_config(path)` |
+| Loading followed by implicit process-policy setup | `load_effective_config(path)`, then `apply_config_runtime_policies(config)` at the runtime boundary |
+
+This is a Python API breaking change for embedders and plugins that import the
+old function. The `config.json` format is unchanged, and the bundled CLI,
+gateway, and WebUI already use the explicit APIs.
+
 ## Configuration Guides
 
 This page is the complete configuration reference. For task-oriented setup, use

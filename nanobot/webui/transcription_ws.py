@@ -13,7 +13,7 @@ from nanobot.audio.transcription import (
     resolve_transcription_config,
     transcribe_audio_data_url,
 )
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 
 _MAX_REQUEST_ID_LENGTH = 80
 
@@ -38,7 +38,7 @@ async def webui_transcription_event(envelope: dict[str, Any]) -> tuple[str, dict
     try:
         text = await transcribe_audio_data_url(
             envelope.get("data_url"),
-            resolve_transcription_config(load_config()),
+            resolve_transcription_config(load_raw_config()),
             duration_ms=envelope.get("duration_ms"),
         )
     except TranscriptionIngressError as exc:

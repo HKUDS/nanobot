@@ -1162,9 +1162,9 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
                 "requires_restart": True,
             }
         try:
-            from nanobot.config.loader import load_config, resolve_config_env_vars
+            from nanobot.config.loader import load_effective_config
 
-            config = resolve_config_env_vars(load_config())
+            config = load_effective_config()
             next_servers = dict(config.tools.mcp_servers)
         except Exception as exc:
             logger.warning("MCP hot reload could not read config: {}", exc)

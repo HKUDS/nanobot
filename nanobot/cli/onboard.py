@@ -22,7 +22,7 @@ from nanobot.cli.models import (
     get_model_context_limit,
     get_model_suggestions,
 )
-from nanobot.config.loader import get_config_path, load_config
+from nanobot.config.loader import get_config_path, load_raw_config
 from nanobot.config.schema import Config, ModelPresetConfig
 
 console = Console()
@@ -1940,7 +1940,7 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
     else:
         config_path = get_config_path()
         if config_path.exists():
-            base_config = load_config()
+            base_config = load_raw_config()
         else:
             base_config = Config()
 

@@ -1,4 +1,4 @@
-"""Compatibility helpers for configuration loading and persistence."""
+"""Configuration loading and persistence entry points."""
 
 from __future__ import annotations
 
@@ -6,28 +6,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from loguru import logger as logger  # compatibility: callers patch loader.logger
-
 from nanobot.config.repository import (
     ConfigCommit,
     FileConfigRepository,
-    resolve_config_env_vars,
-)
-from nanobot.config.repository import (
-    _migrate_config as _migrate_config,
-)
-from nanobot.config.repository import (
-    _resolve_env_vars as _resolve_env_vars,
 )
 from nanobot.config.schema import Config
 
-# Legacy default-instance path. Runtime code should prefer an explicitly scoped
-# FileConfigRepository; these helpers remain for CLI and plugin compatibility.
+# Default path for process entry points that do not receive an explicit path.
 _current_config_path: Path | None = None
 
 
 def set_config_path(path: Path) -> None:
-    """Set the default config path used by compatibility helpers."""
+    """Set the default configuration path for subsequent entry-point calls."""
     global _current_config_path
     _current_config_path = path
 
@@ -44,18 +34,14 @@ def get_config_repository(config_path: Path | None = None) -> FileConfigReposito
     return FileConfigRepository(config_path or get_config_path())
 
 
-def load_config(config_path: Path | None = None) -> Config:
+def load_raw_config(config_path: Path | None = None) -> Config:
     """Load raw persisted config without applying process runtime policy."""
     return get_config_repository(config_path).load_raw().config
 
 
 def load_effective_config(config_path: Path | None = None) -> Config:
-    """Load a fresh runtime config with environment references resolved.
-
-    Route through ``load_config`` so existing embedders that replace the legacy
-    loader hook keep working during the repository migration.
-    """
-    return resolve_config_env_vars(load_config(config_path))
+    """Load a fresh runtime config with environment references resolved."""
+    return get_config_repository(config_path).load_effective().config
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -102,14 +88,12 @@ def merge_missing_defaults(existing: Any, defaults: Any) -> Any:
 
 
 __all__ = [
-    "FileConfigRepository",
     "apply_config_runtime_policies",
     "get_config_path",
     "get_config_repository",
-    "load_config",
+    "load_raw_config",
     "load_effective_config",
     "merge_missing_defaults",
-    "resolve_config_env_vars",
     "save_config",
     "set_config_path",
     "update_config",

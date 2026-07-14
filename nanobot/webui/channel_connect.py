@@ -13,7 +13,7 @@ import httpx
 
 from nanobot.channels import feishu
 from nanobot.channels._feishu_instances import DEFAULT_INSTANCE_ID, validate_instance_id
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 
 
 class ChannelConnectError(Exception):
@@ -394,7 +394,7 @@ class WeixinConnectStore:
         from nanobot.bus.queue import MessageBus
         from nanobot.channels.weixin import WeixinChannel
 
-        section = getattr(load_config().channels, "weixin", None)
+        section = getattr(load_raw_config().channels, "weixin", None)
         if hasattr(section, "model_dump"):
             config = section.model_dump(mode="json", by_alias=True)
         elif isinstance(section, dict):

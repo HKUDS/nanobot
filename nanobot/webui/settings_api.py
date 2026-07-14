@@ -24,8 +24,8 @@ from nanobot.audio.transcription_registry import (
 )
 from nanobot.config.loader import (
     get_config_path,
-    load_config,
-    resolve_config_env_vars,
+    load_effective_config,
+    load_raw_config,
     update_config,
 )
 from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
@@ -517,7 +517,7 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
     if not provider_name:
         raise WebUISettingsError("provider is required")
 
-    config = load_config()
+    config = load_raw_config()
     resolved_provider = _resolve_settings_provider(config, provider_name)
     if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
@@ -754,7 +754,7 @@ def settings_payload(
     restart_required_sections: list[str] | None = None,
     apply_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    config = load_config()
+    config = load_raw_config()
     defaults = config.agents.defaults
     active_preset_name = defaults.model_preset or "default"
     try:
@@ -961,7 +961,7 @@ def settings_payload(
 
 def settings_usage_payload() -> dict[str, Any]:
     """Return the lightweight token usage slice for Overview refreshes."""
-    config = load_config()
+    config = load_raw_config()
     return token_usage_payload(timezone_name=config.agents.defaults.timezone)
 
 
@@ -1188,7 +1188,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             ) from None
 
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+            proxy = load_effective_config().providers.openai_codex.proxy or None
         except ValueError as e:
             raise WebUISettingsError(str(e), status=400) from e
         token = None

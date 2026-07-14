@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 
 from nanobot.channels._setup import channel_setup_spec
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_raw_config
 from nanobot.security.network import resolve_url_target
 
 CheckStatus = str
@@ -42,7 +42,7 @@ def validate_channel_config(
     if not channel:
         return _payload("unknown", "unsupported", [_check("channel", "Channel", "fail", "Missing channel name")])
 
-    config = load_config()
+    config = load_raw_config()
     section = getattr(config.channels, channel, None)
     values = _channel_config(channel, section, instance_id=instance_id)
     values = _merge_form_values(channel, values, raw_values or {})

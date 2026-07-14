@@ -315,8 +315,9 @@ class WebSearchTool(Tool):
         config_loader = None
         if ctx.provider_snapshot_loader is not None:
             def config_loader():
-                from nanobot.config.loader import load_config, resolve_config_env_vars
-                return resolve_config_env_vars(load_config()).tools.web.search
+                from nanobot.config.loader import load_effective_config
+
+                return load_effective_config().tools.web.search
         return cls(
             config=ctx.config.web.search,
             proxy=ctx.config.web.proxy,
