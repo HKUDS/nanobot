@@ -61,13 +61,6 @@ def feishu_app_identity_key(app_id: Any, domain: Any = "feishu") -> str:
     return f"{normalized_domain}:{app_id}"
 
 
-def _feishu_instance_identity(config: dict[str, Any]) -> str:
-    return feishu_app_identity_key(
-        config.get("appId") or config.get("app_id"),
-        config.get("domain"),
-    )
-
-
 def _feishu_instance_inputs(
     section: Any,
     defaults: dict[str, Any],
@@ -117,7 +110,10 @@ def feishu_instance_specs(
             logger.warning("Skipping duplicate Feishu instance id '{}'", instance_id)
             continue
 
-        identity = _feishu_instance_identity(config)
+        identity = feishu_app_identity_key(
+            config.get("appId") or config.get("app_id"),
+            config.get("domain"),
+        )
         if identity and identity in identity_owners:
             logger.warning(
                 "Skipping Feishu instance '{}' because it uses the same app as instance '{}'",

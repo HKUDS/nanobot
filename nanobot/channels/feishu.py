@@ -599,10 +599,6 @@ def poll_registration_once(
     }
 
 
-def _feishu_app_identity_key(app_id: str, domain: str) -> str:
-    return feishu_app_identity_key(app_id, domain)
-
-
 def _saved_feishu_instance_identity_key(
     feishu_cfg: Any,
     defaults: dict[str, Any],
@@ -610,7 +606,7 @@ def _saved_feishu_instance_identity_key(
 ) -> str:
     for spec in feishu_instance_specs(feishu_cfg, defaults):
         if spec.instance_id == instance_id:
-            return _feishu_app_identity_key(
+            return feishu_app_identity_key(
                 str(spec.config.get("appId") or spec.config.get("app_id") or ""),
                 str(spec.config.get("domain") or "feishu"),
             )
@@ -623,11 +619,11 @@ def _saved_feishu_instance_for_identity(
     app_id: str,
     domain: str,
 ) -> ChannelInstanceSpec | None:
-    identity_key = _feishu_app_identity_key(app_id, domain)
+    identity_key = feishu_app_identity_key(app_id, domain)
     if not identity_key:
         return None
     for spec in feishu_instance_specs(feishu_cfg, defaults):
-        saved_identity = _feishu_app_identity_key(
+        saved_identity = feishu_app_identity_key(
             str(spec.config.get("appId") or spec.config.get("app_id") or ""),
             str(spec.config.get("domain") or "feishu"),
         )
@@ -648,7 +644,7 @@ def sync_saved_feishu_identity_boundary(
     manual config edits so approved users do not accidentally carry over to a
     different Feishu/Lark app in the same local instance slot.
     """
-    current_identity_key = _feishu_app_identity_key(app_id, domain)
+    current_identity_key = feishu_app_identity_key(app_id, domain)
     if not current_identity_key:
         return False
 
@@ -712,7 +708,7 @@ def save_registration_result(
         defaults,
         effective_instance_id,
     )
-    next_identity_key = _feishu_app_identity_key(app_id, domain)
+    next_identity_key = feishu_app_identity_key(app_id, domain)
     identity_changed = bool(previous_identity_key and previous_identity_key != next_identity_key)
     identity: dict[str, str] = {}
     with suppress(Exception):
@@ -1094,7 +1090,7 @@ class FeishuChannel(BaseChannel):
             app_id=self.config.app_id,
             domain=self.config.domain,
         ):
-            self.config.identity_key = _feishu_app_identity_key(self.config.app_id, self.config.domain)
+            self.config.identity_key = feishu_app_identity_key(self.config.app_id, self.config.domain)
             self.config.allow_from = []
             self.logger.info(
                 "Feishu app identity changed for {}; cleared paired users for this assistant",
