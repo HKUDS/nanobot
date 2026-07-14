@@ -19,6 +19,7 @@ __all__ = [
     "SetupRequirement",
     "channel_feature_instances",
     "channel_field_value",
+    "external_channel_enabled",
     "channel_instance_config",
     "channel_instance_specs",
     "channel_runtime_name",
@@ -80,6 +81,11 @@ class ChannelActivation:
         if self.instances is None:
             return inherited
         return any(instance.resolve(default=inherited) for instance in self.instances)
+
+
+def external_channel_enabled(section: Any) -> bool:
+    """Return the explicit top-level gate shared by runtime and management surfaces."""
+    return section is not None and ChannelActivation.from_config(section).resolve()
 
 
 @dataclass(frozen=True)

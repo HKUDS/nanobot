@@ -278,6 +278,32 @@ def test_channel_manager_does_not_load_disabled_external_plugin(monkeypatch):
     assert load_calls == []
 
 
+def test_feature_payload_respects_external_plugin_top_level_gate(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    config = Config.model_validate({
+        "channels": {
+            "multi": {
+                "enabled": False,
+                "instances": [{"id": "default", "enabled": True}],
+            }
+        }
+    })
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda enabled_names=None: {"multi": _FakeMultiChannel},
+    )
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+
+    payload = optional_features_payload(config=config)
+
+    assert payload["features"][0]["enabled"] is False
+    assert payload["features"][0]["ready"] is False
+    assert payload["features"][0]["status"] == "not_enabled"
+    assert payload["enabled_count"] == 0
+
+
 def test_channel_manager_preserves_single_instance_plugin_owned_instances(monkeypatch):
     monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: [])
     monkeypatch.setattr(
@@ -449,6 +475,44 @@ def test_plugin_setup_contract_drives_save_and_validation(
     assert load_config(config_path).channels.setupplugin["token"] == "plugin-secret"
     assert validation["status"] == "connected"
     assert validation["checks"][0]["id"] == "plugin"
+
+
+def test_webui_save_rejects_duplicate_feishu_ids_without_writing(monkeypatch, tmp_path):
+    from nanobot.channels.feishu import FeishuChannel
+    from nanobot.config import loader
+    from nanobot.webui.settings_api import WebUISettingsError
+    from nanobot.webui.settings_routes import WebUISettingsRouter
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "channels": {
+                "feishu": {
+                    "instances": [
+                        {"id": "default", "enabled": True, "appId": "A"},
+                        {"id": "default", "enabled": False, "appId": "B"},
+                    ]
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    before = config_path.read_text(encoding="utf-8")
+    monkeypatch.setattr(loader, "_current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_any_channel_class",
+        lambda _name: FeishuChannel,
+    )
+    router = object.__new__(WebUISettingsRouter)
+
+    with pytest.raises(WebUISettingsError, match="duplicate Feishu instance id 'default'") as error:
+        router._save_channel_config_values(
+            "feishu",
+            {"channels.feishu.appId": "updated"},
+        )
+
+    assert error.value.status == 400
+    assert config_path.read_text(encoding="utf-8") == before
 
 
 def test_discover_plugins_skips_names_outside_enabled_set():
@@ -1310,6 +1374,32 @@ def test_disable_optional_feature_writes_channel_disabled(monkeypatch, tmp_path)
     data = json.loads(config_path.read_text(encoding="utf-8"))
     assert data["channels"]["websocket"]["enabled"] is False
     assert payload["last_action"]["message"] == "Disabled channel 'websocket'"
+
+
+def test_feishu_enable_rejects_duplicate_instance_ids_without_writing(tmp_path):
+    from nanobot.channels.feishu import FeishuChannel
+    from nanobot.optional_features import OptionalFeatureError, set_channel_config_enabled
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "channels": {
+                "feishu": {
+                    "instances": [
+                        {"id": "default", "enabled": False, "appId": "A"},
+                        {"id": "default", "enabled": True, "appId": "B"},
+                    ]
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    before = config_path.read_text(encoding="utf-8")
+
+    with pytest.raises(OptionalFeatureError, match="duplicate Feishu instance id 'default'"):
+        set_channel_config_enabled(config_path, "feishu", FeishuChannel, True)
+
+    assert config_path.read_text(encoding="utf-8") == before
 
 
 def test_optional_features_payload_counts_enabled_channel_with_missing_dependency(

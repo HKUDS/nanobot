@@ -812,16 +812,22 @@ class WebUISettingsRouter:
             self._assign_channel_config_value(channel_config, field, value)
             saved.append(raw_key)
 
-        updated_section = (
-            channel_update_instance_config(
-                channel_cls,
-                section,
-                channel_config,
-                instance_id=instance_id,
+        try:
+            updated_section = (
+                channel_update_instance_config(
+                    channel_cls,
+                    section,
+                    channel_config,
+                    instance_id=instance_id,
+                )
+                if channel_cls is not None
+                else channel_config
             )
-            if channel_cls is not None
-            else channel_config
-        )
+        except ValueError as exc:
+            raise WebUISettingsError(
+                f"Invalid {name} configuration: {exc}",
+                status=400,
+            ) from exc
         setattr(config.channels, name, updated_section)
         save_config(config)
         return saved

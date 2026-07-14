@@ -22,6 +22,7 @@ from nanobot.channels.contracts import (
     channel_instance_specs,
     channel_set_config_enabled,
     channel_value_present,
+    external_channel_enabled,
     refresh_channel_feature_metadata,
     stringify_channel_value,
 )
@@ -301,20 +302,34 @@ def set_channel_config_enabled(
         existing["enabled"] = enabled
         channels[channel_name] = existing
     else:
-        channels[channel_name] = channel_set_config_enabled(
-            channel_cls,
-            existing,
-            enabled,
-            instance_id=instance_id,
-        )
+        try:
+            channels[channel_name] = channel_set_config_enabled(
+                channel_cls,
+                existing,
+                enabled,
+                instance_id=instance_id,
+            )
+        except ValueError as exc:
+            raise OptionalFeatureError(
+                f"Invalid {channel_name} configuration: {exc}",
+                status=400,
+            ) from exc
     write_config_data(config_path, data)
 
 
-def channel_enabled(config: Config, name: str, channel_cls: Any | None = None) -> bool:
+def channel_enabled(
+    config: Config,
+    name: str,
+    channel_cls: Any | None = None,
+    *,
+    require_explicit_top_level: bool = False,
+) -> bool:
     section = getattr(config.channels, name, None)
     default_enabled = name in DEFAULT_ENABLED_CHANNELS
     if section is None:
         return default_enabled
+    if require_explicit_top_level and not external_channel_enabled(section):
+        return False
     if channel_cls is not None:
         return bool(channel_instance_specs(channel_cls, section, enabled_only=True))
     return ChannelActivation.from_config(section).resolve(default=default_enabled)
@@ -461,7 +476,12 @@ def optional_features_payload(
 
             if setup_spec is not None:
                 feature["setup"] = setup_spec.to_public_dict(name)
-            enabled = channel_enabled(config, name, channel_cls)
+            enabled = channel_enabled(
+                config,
+                name,
+                channel_cls,
+                require_explicit_top_level=name in plugin_channels and name not in builtin_channels,
+            )
             configured = channel_configured(config, name, setup_spec, channel_cls)
             ready = bool(enabled and installed)
             status = "enabled" if ready else "missing_dependency" if not installed else "not_enabled"

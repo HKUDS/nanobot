@@ -261,6 +261,40 @@ def test_feishu_instance_contract_skips_duplicate_app_identity() -> None:
     assert [spec.instance_id for spec in specs] == ["default"]
 
 
+def test_feishu_instance_write_preserves_duplicate_app_identity() -> None:
+    from nanobot.channels.feishu import FeishuChannel
+
+    section = {
+        "instances": [
+            {
+                "id": "default",
+                "enabled": True,
+                "appId": "cli_same",
+                "appSecret": "secret-a",
+            },
+            {
+                "id": "assistant-copy",
+                "enabled": True,
+                "appId": "cli_same",
+                "appSecret": "secret-b",
+            },
+        ]
+    }
+
+    updated = channel_set_config_enabled(
+        FeishuChannel,
+        section,
+        False,
+        instance_id="default",
+    )
+
+    assert [instance["id"] for instance in updated["instances"]] == [
+        "default",
+        "assistant-copy",
+    ]
+    assert updated["instances"][1]["appSecret"] == "secret-b"
+
+
 def test_channel_instance_contract_materializes_generators() -> None:
     class _GeneratedChannel(_SingleChannel):
         name = "generated"

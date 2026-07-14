@@ -30,6 +30,7 @@ from nanobot.channels.contracts import (
     ChannelActivation,
     channel_instance_specs,
     channel_runtime_name,
+    external_channel_enabled,
 )
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
@@ -204,7 +205,7 @@ class ChannelManager:
         enabled_names: set[str] = set()
         for name in self._config_extra_channel_names() - builtin_names:
             section = self._channel_section(name)
-            if section is not None and ChannelActivation.from_config(section).resolve():
+            if external_channel_enabled(section):
                 enabled_names.add(name)
         for name in builtin_names:
             section = self._channel_section(name, default_sections=default_sections)

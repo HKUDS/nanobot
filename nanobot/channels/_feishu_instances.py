@@ -68,6 +68,22 @@ def _feishu_instance_identity(config: dict[str, Any]) -> str:
     )
 
 
+def _feishu_instance_inputs(
+    section: Any,
+    defaults: dict[str, Any],
+) -> tuple[list[Any], dict[str, Any] | None]:
+    if hasattr(section, "model_dump"):
+        section = section.model_dump(mode="json", by_alias=True)
+    if not isinstance(section, dict):
+        section = {}
+
+    instances = section.get("instances")
+    if isinstance(instances, list):
+        inherited = {key: value for key, value in section.items() if key != "instances"}
+        return list(instances), inherited
+    return ([section] if section else [_base_feishu_instance_config(defaults)]), None
+
+
 def feishu_instance_specs(
     section: Any,
     defaults: dict[str, Any],
@@ -75,24 +91,15 @@ def feishu_instance_specs(
     enabled_only: bool = False,
 ) -> list[ChannelInstanceSpec]:
     """Expand legacy or canonical Feishu config into runtime instance specs."""
-    if hasattr(section, "model_dump"):
-        section = section.model_dump(mode="json", by_alias=True)
-    if not isinstance(section, dict):
-        section = {}
-
-    instances = section.get("instances")
-    raw_specs: list[dict[str, Any]]
-    inherited: dict[str, Any] | None = None
-    if isinstance(instances, list):
-        inherited = {key: value for key, value in section.items() if key != "instances"}
-        raw_specs = [item for item in instances if isinstance(item, dict)]
-    else:
-        raw_specs = [section] if section else [_base_feishu_instance_config(defaults)]
+    raw_specs, inherited = _feishu_instance_inputs(section, defaults)
 
     specs: list[ChannelInstanceSpec] = []
     instance_ids: set[str] = set()
     identity_owners: dict[str, str] = {}
     for index, raw in enumerate(raw_specs):
+        if not isinstance(raw, dict):
+            logger.warning("Skipping invalid Feishu instance at index {}: expected an object", index)
+            continue
         fallback_id = DEFAULT_INSTANCE_ID if index == 0 else f"assistant-{index + 1}"
         try:
             config = _normalize_feishu_instance(
@@ -137,9 +144,32 @@ def feishu_instance_specs(
 
 
 def canonical_feishu_section(section: Any, defaults: dict[str, Any]) -> dict[str, Any]:
-    """Return Feishu config in the canonical ``instances`` shape."""
-    specs = feishu_instance_specs(section, defaults)
-    return {"instances": [dict(spec.config) for spec in specs]}
+    """Return a canonical section, rejecting input that cannot be preserved safely."""
+    raw_specs, inherited = _feishu_instance_inputs(section, defaults)
+    instances: list[dict[str, Any]] = []
+    instance_ids: set[str] = set()
+
+    for index, raw in enumerate(raw_specs):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Feishu instance at index {index} must be an object")
+        fallback_id = DEFAULT_INSTANCE_ID if index == 0 else f"assistant-{index + 1}"
+        try:
+            config = _normalize_feishu_instance(
+                raw,
+                defaults,
+                inherited=inherited,
+                fallback_id=fallback_id,
+            )
+        except ValueError as exc:
+            raise ValueError(f"Invalid Feishu instance at index {index}: {exc}") from exc
+
+        instance_id = str(config["instanceId"])
+        if instance_id in instance_ids:
+            raise ValueError(f"duplicate Feishu instance id '{instance_id}'")
+        instance_ids.add(instance_id)
+        instances.append(config)
+
+    return {"instances": instances}
 
 
 def upsert_feishu_instance(
