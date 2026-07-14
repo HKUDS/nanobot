@@ -114,7 +114,6 @@ def _make_bot_class(channel: QQChannel) -> type[botpy.Client]:
             super().__init__(intents=intents, ext_handlers=False)
 
         async def on_ready(self):
-            channel._ready = True
             logger.info("QQ bot ready: {}", self.robot.name)
 
         async def on_c2c_message_create(self, message: C2CMessage):
@@ -165,7 +164,6 @@ class QQChannel(BaseChannel):
 
         self._client: botpy.Client | None = None
         self._http: aiohttp.ClientSession | None = None
-        self._ready = False
 
         self._processed_ids: deque[str] = deque(maxlen=1000)
         self._msg_seq: int = 1  # used to avoid QQ API dedup
@@ -214,12 +212,10 @@ class QQChannel(BaseChannel):
     async def _run_bot(self) -> None:
         """Run the bot connection with auto-reconnect."""
         while self._running:
-            self._ready = False
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
                 self.logger.warning("bot error: {}", e)
-            self._ready = False
             if self._running:
                 self.logger.info("Reconnecting bot in 5 seconds...")
                 await asyncio.sleep(5)
@@ -227,7 +223,6 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop bot and cleanup resources."""
         self._running = False
-        self._ready = False
         if self._client:
             with suppress(Exception):
                 await self._client.close()
@@ -239,9 +234,6 @@ class QQChannel(BaseChannel):
         self._http = None
 
         self.logger.info("bot stopped")
-
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        return self.is_running and self._ready and self._client is not None
 
     # ---------------------------
     # Outbound (send)

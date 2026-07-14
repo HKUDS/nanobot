@@ -760,10 +760,6 @@ class WebSocketChannel(BaseChannel):
             self.logger.exception("send failed{}", label)
             raise
 
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        """Require a live subscription for delivery to the target chat."""
-        return self.is_running and bool(self._subs.get(chat_id))
-
     async def send(self, msg: OutboundMessage) -> None:
         event = outbound_event_from_message(msg)
         progress_event = event if isinstance(event, ProgressEvent) else None

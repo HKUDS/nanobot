@@ -274,11 +274,3 @@ class BaseChannel(ABC):
     def is_running(self) -> bool:
         """Check if the channel is running."""
         return self._running
-
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        """Return whether messages can currently be delivered to *chat_id*.
-
-        Channels whose transport becomes ready after ``_running`` is set should
-        override this with their transport-specific readiness check.
-        """
-        return self.is_running

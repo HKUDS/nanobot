@@ -2651,8 +2651,8 @@ async def test_start_all_creates_dispatch_task():
 
 
 @pytest.mark.asyncio
-async def test_notify_restart_done_waits_until_channel_ready():
-    """Restart notice should not be sent before the target can accept it."""
+async def test_notify_restart_done_waits_until_channel_starts():
+    """Restart notice should not be sent before the target channel starts."""
     fake_config = SimpleNamespace(
         channels=ChannelsConfig(),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
@@ -2662,13 +2662,6 @@ async def test_notify_restart_done_waits_until_channel_ready():
     mgr.config = fake_config
     mgr.bus = MessageBus()
     channel = _StartableChannel(fake_config, mgr.bus)
-    channel._running = True
-    outbound_ready = False
-
-    def _is_ready(_chat_id: str) -> bool:
-        return outbound_ready
-
-    channel.is_ready_for_outbound = _is_ready
     mgr.channels = {"feishu": channel}
     mgr._dispatch_task = None
     mgr._send_with_retry = AsyncMock()
@@ -2680,7 +2673,7 @@ async def test_notify_restart_done_waits_until_channel_ready():
     await asyncio.sleep(0)
     mgr._send_with_retry.assert_not_awaited()
 
-    outbound_ready = True
+    channel._running = True
     assert task is not None
     await asyncio.wait_for(task, timeout=1.0)
 

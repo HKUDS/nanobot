@@ -344,9 +344,6 @@ class MochatChannel(BaseChannel):
             self._http = None
         self._ws_connected = self._ws_ready = False
 
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        return self.is_running and self._http is not None
-
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound message to session or panel."""
         if not self.config.claw_token:

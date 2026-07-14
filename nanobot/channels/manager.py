@@ -50,8 +50,8 @@ def _default_webui_dist() -> Path | None:
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
-_RESTART_NOTICE_READY_TIMEOUT_S = 30.0
-_RESTART_NOTICE_READY_POLL_S = 0.25
+_RESTART_NOTICE_START_TIMEOUT_S = 30.0
+_RESTART_NOTICE_START_POLL_S = 0.25
 
 _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_progress": "sendProgress",
@@ -483,20 +483,20 @@ class ChannelManager:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     def _notify_restart_done_if_needed(self) -> asyncio.Task[None] | None:
-        """Schedule restart completion after the target channel becomes ready."""
+        """Schedule restart completion after the target channel starts."""
         notice = consume_restart_notice_from_env()
         if not notice:
             return None
-        return asyncio.create_task(self._send_restart_notice_when_ready(notice))
+        return asyncio.create_task(self._send_restart_notice_when_started(notice))
 
-    async def _send_restart_notice_when_ready(
+    async def _send_restart_notice_when_started(
         self,
         notice: RestartNotice,
         *,
-        timeout_s: float = _RESTART_NOTICE_READY_TIMEOUT_S,
-        poll_s: float = _RESTART_NOTICE_READY_POLL_S,
+        timeout_s: float = _RESTART_NOTICE_START_TIMEOUT_S,
+        poll_s: float = _RESTART_NOTICE_START_POLL_S,
     ) -> None:
-        """Deliver a restart notice only after its target can accept outbound messages."""
+        """Deliver a restart notice after the target channel starts."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_s
         target = self.channels.get(notice.channel)
@@ -504,11 +504,11 @@ class ChannelManager:
             logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
             return
 
-        while not target.is_ready_for_outbound(notice.chat_id):
+        while not target.is_running:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 logger.warning(
-                    "Restart notice target did not become ready: {}:{}",
+                    "Restart notice target did not start: {}:{}",
                     notice.channel,
                     notice.chat_id,
                 )

@@ -525,10 +525,6 @@ class WeixinChannel(BaseChannel):
             await self._client.aclose()
             self._client = None
         self._save_state()
-
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        return self.is_running and self._client is not None and bool(self._token)
-
     # ------------------------------------------------------------------
     # Polling  (matches monitor.ts monitorWeixinProvider)
     # ------------------------------------------------------------------

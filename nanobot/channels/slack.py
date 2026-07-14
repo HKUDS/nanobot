@@ -149,9 +149,6 @@ class SlackChannel(BaseChannel):
                 self.logger.warning("socket close failed: {}", e)
             self._socket_client = None
 
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        return self.is_running and self._web_client is not None
-
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
         if not self._web_client:

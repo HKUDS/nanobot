@@ -404,9 +404,6 @@ class MatrixChannel(BaseChannel):
         if self.client:
             await self.client.close()
 
-    def is_ready_for_outbound(self, chat_id: str) -> bool:
-        return self.is_running and self.client is not None and bool(self.client.access_token)
-
     def _write_session_to_disk(self, resp: LoginResponse) -> None:
         """Save login session to disk for persistence across restarts."""
         session = {
