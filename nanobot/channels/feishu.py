@@ -2407,7 +2407,14 @@ class FeishuChannel(BaseChannel):
                         if ok:
                             return
                     # Fall back to regular send if reply fails
-                self._send_message_sync(receive_id_type, msg.chat_id, m_type, content)
+                message_id = self._send_message_sync(
+                    receive_id_type,
+                    msg.chat_id,
+                    m_type,
+                    content,
+                )
+                if not message_id:
+                    raise RuntimeError(f"Feishu {m_type} message was not delivered")
 
             for file_path in msg.media:
                 if not os.path.isfile(file_path):

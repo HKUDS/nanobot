@@ -264,7 +264,7 @@ if DISCORD_AVAILABLE:
                     channel = await self.fetch_channel(channel_id)
                 except Exception as e:
                     self._channel.logger.warning("channel {} unavailable: {}", msg.chat_id, e)
-                    return
+                    raise
 
             reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
             sent_media = False

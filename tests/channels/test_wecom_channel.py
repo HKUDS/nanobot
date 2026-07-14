@@ -412,8 +412,8 @@ async def test_send_media_file_not_found() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_exception_caught_not_raised() -> None:
-    """Exceptions inside send() must not propagate."""
+async def test_send_exception_propagates_for_manager_retry() -> None:
+    """Delivery failures must propagate to the channel manager."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
     client = _FakeWeComClient()
     channel._client = client
@@ -423,9 +423,10 @@ async def test_send_exception_caught_not_raised() -> None:
     # Make reply_stream raise
     client.reply_stream.side_effect = RuntimeError("boom")
 
-    await channel.send(
-        OutboundMessage(channel="wecom", chat_id="chat1", content="fail test")
-    )
+    with pytest.raises(RuntimeError, match="boom"):
+        await channel.send(
+            OutboundMessage(channel="wecom", chat_id="chat1", content="fail test")
+        )
     client.reply_stream.assert_called_once()
 
 

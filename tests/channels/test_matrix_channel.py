@@ -1821,6 +1821,28 @@ async def test_send_room_content_returns_room_send_response():
 
 
 @pytest.mark.asyncio
+async def test_send_raises_when_room_send_returns_error(monkeypatch) -> None:
+    class _FakeRoomSendError:
+        def __str__(self) -> str:
+            return "temporary homeserver failure"
+
+    client = _FakeAsyncClient("", "", "", None)
+    client.room_send_response = _FakeRoomSendError()
+    channel = MatrixChannel(_make_config(), MessageBus())
+    channel.client = client
+    monkeypatch.setattr(matrix_module, "RoomSendError", _FakeRoomSendError)
+
+    with pytest.raises(RuntimeError, match="temporary homeserver failure"):
+        await channel.send(
+            OutboundMessage(
+                channel="matrix",
+                chat_id="!room:matrix.org",
+                content="hello",
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_send_delta_creates_stream_buffer_and_sends_initial_message() -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
