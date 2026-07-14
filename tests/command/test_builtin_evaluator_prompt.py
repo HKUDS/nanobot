@@ -60,6 +60,23 @@ async def test_evaluator_prompt_init_does_not_overwrite_existing_prompt(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_evaluator_prompt_handles_undecodable_existing_prompt(tmp_path) -> None:
+    prompt_file = tmp_path / "prompts" / "evaluator.md"
+    prompt_file.parent.mkdir()
+    original = "custom".encode("utf-16")
+    prompt_file.write_bytes(original)
+
+    status = await cmd_evaluator_prompt(_make_ctx(tmp_path))
+    init = await cmd_evaluator_prompt(
+        _make_ctx(tmp_path, "/evaluator-prompt init", "init")
+    )
+
+    assert "Heartbeat evaluator prompt: nanobot default" in status.content
+    assert "already exists" in init.content
+    assert prompt_file.read_bytes() == original
+
+
+@pytest.mark.asyncio
 async def test_evaluator_prompt_init_recreates_empty_prompt(tmp_path) -> None:
     prompt_file = tmp_path / "prompts" / "evaluator.md"
     prompt_file.parent.mkdir()

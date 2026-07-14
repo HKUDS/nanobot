@@ -25,7 +25,7 @@ def load_workspace_prompt_override(
     Returns the loaded text and its original length. Missing, unreadable, and
     empty files return ``(None, 0)`` so callers can fall back to their default.
     """
-    with suppress(OSError):
+    with suppress(OSError, UnicodeDecodeError):
         text = path.read_text(encoding="utf-8").rstrip()
         if text:
             original_chars = len(text)
@@ -50,7 +50,7 @@ def initialize_workspace_prompt(path: Path, default_prompt: str) -> bool:
             not path.is_file() or bool(path.read_text(encoding="utf-8").strip())
         ):
             return False
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return False
 
     path.parent.mkdir(parents=True, exist_ok=True)

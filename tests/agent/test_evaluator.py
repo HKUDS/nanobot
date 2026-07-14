@@ -56,6 +56,14 @@ def test_resolve_evaluator_prompt_uses_default_for_empty_override(tmp_path) -> N
     assert resolve_evaluator_prompt(tmp_path) == default_evaluator_prompt()
 
 
+def test_resolve_evaluator_prompt_uses_default_for_undecodable_override(tmp_path) -> None:
+    path = evaluator_prompt_file(tmp_path)
+    path.parent.mkdir()
+    path.write_bytes("Custom evaluator prompt.".encode("utf-16"))
+
+    assert resolve_evaluator_prompt(tmp_path) == default_evaluator_prompt()
+
+
 def test_resolve_evaluator_prompt_caps_workspace_override(tmp_path) -> None:
     path = evaluator_prompt_file(tmp_path)
     path.parent.mkdir()
