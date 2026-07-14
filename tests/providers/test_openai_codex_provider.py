@@ -20,6 +20,12 @@ from nanobot.providers.openai_codex_provider import (
 )
 from nanobot.providers.registry import find_by_name
 
+_CODEX_DIAGNOSTIC_FORMAT = (
+    "Codex API request failed: attempt_id={} stage={} elapsed_ms={} model={} "
+    "proxy_enabled={} tls_verify={} type={} kind={} retryable={} status={} "
+    "error_type={} error_code={} retry_after={} summary={}"
+)
+
 
 def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_token(**_kwargs):
@@ -29,6 +35,15 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
         "nanobot.providers.openai_codex_provider.get_codex_token",
         fake_token,
     )
+
+
+def _mock_codex_diagnostic_context(
+    monkeypatch: pytest.MonkeyPatch,
+    *monotonic_values: float,
+) -> None:
+    clock = iter(monotonic_values)
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.token_hex", lambda _size: "deadbeef")
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.monotonic", lambda: next(clock))
 
 
 def test_codex_default_model_matches_curated_flagship() -> None:
@@ -277,8 +292,91 @@ async def test_codex_provider_passes_proxy_to_oauth_and_response_request(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_codex_remote_protocol_error_identifies_oauth_stage(monkeypatch) -> None:
+    log_capture = _capture_codex_warnings(monkeypatch)
+    _mock_codex_diagnostic_context(monkeypatch, 10.0, 10.25)
+    proxy = "http://PRIVATE_PROXY_CREDENTIAL@127.0.0.1:7890"
+
+    def fake_token(**_kwargs):
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.get_codex_token", fake_token)
+
+    provider = OpenAICodexProvider(proxy=proxy)
+    response = await provider.chat([{"role": "user", "content": "PRIVATE PROMPT"}])
+
+    assert response.error_kind == "connection"
+    assert response.error_should_retry is True
+    assert log_capture.calls == [
+        (
+            _CODEX_DIAGNOSTIC_FORMAT,
+            (
+                "deadbeef",
+                "oauth_token",
+                250,
+                "gpt-5.6-sol",
+                True,
+                None,
+                "RemoteProtocolError",
+                "connection",
+                True,
+                None,
+                None,
+                None,
+                None,
+                "RemoteProtocolError connection",
+            ),
+        )
+    ]
+    assert "PRIVATE_PROXY_CREDENTIAL" not in repr(log_capture.calls)
+    assert "PRIVATE PROMPT" not in repr(log_capture.calls)
+
+
+@pytest.mark.asyncio
+async def test_codex_remote_protocol_error_identifies_request_stage(monkeypatch) -> None:
+    log_capture = _capture_codex_warnings(monkeypatch)
+    _mock_codex_diagnostic_context(monkeypatch, 10.0, 20.0, 20.25)
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(*args: Any, **kwargs: Any):
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider(proxy="http://PRIVATE_PROXY_CREDENTIAL@127.0.0.1:7890")
+    response = await provider.chat([{"role": "user", "content": "PRIVATE PROMPT"}])
+
+    assert response.error_kind == "connection"
+    assert response.error_should_retry is True
+    assert log_capture.calls == [
+        (
+            _CODEX_DIAGNOSTIC_FORMAT,
+            (
+                "deadbeef",
+                "codex_request",
+                250,
+                "gpt-5.6-sol",
+                True,
+                True,
+                "RemoteProtocolError",
+                "connection",
+                True,
+                None,
+                None,
+                None,
+                None,
+                "RemoteProtocolError connection",
+            ),
+        )
+    ]
+    assert "PRIVATE_PROXY_CREDENTIAL" not in repr(log_capture.calls)
+    assert "PRIVATE PROMPT" not in repr(log_capture.calls)
+
+
+@pytest.mark.asyncio
 async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
     log_capture = _capture_codex_warnings(monkeypatch)
+    _mock_codex_diagnostic_context(monkeypatch, 10.0, 20.0, 20.125)
     _mock_codex_token(monkeypatch)
 
     async def fake_request(*args: Any, **kwargs: Any):
@@ -294,9 +392,14 @@ async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
     )
     assert log_capture.calls == [
         (
-            "Codex API request failed: type={} kind={} retryable={} status={} "
-            "error_type={} error_code={} retry_after={} summary={}",
+            _CODEX_DIAGNOSTIC_FORMAT,
             (
+                "deadbeef",
+                "codex_request",
+                125,
+                "gpt-5.6-sol",
+                False,
+                True,
                 "ReadTimeout",
                 "timeout",
                 True,
@@ -396,6 +499,7 @@ async def test_codex_http_error_preserves_status_and_retry_after(monkeypatch) ->
 @pytest.mark.asyncio
 async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
     log_capture = _capture_codex_warnings(monkeypatch)
+    _mock_codex_diagnostic_context(monkeypatch, 10.0, 20.0, 20.125)
     _mock_codex_token(monkeypatch)
 
     async def fake_request(*args: Any, **kwargs: Any):
@@ -414,9 +518,14 @@ async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
     assert response.content == "Error calling Codex (CodexHTTPError): HTTP 500: Codex API request failed"
     assert log_capture.calls == [
         (
-            "Codex API request failed: type={} kind={} retryable={} status={} "
-            "error_type={} error_code={} retry_after={} summary={}",
+            _CODEX_DIAGNOSTIC_FORMAT,
             (
+                "deadbeef",
+                "codex_request",
+                125,
+                "gpt-5.6-sol",
+                False,
+                True,
                 "CodexHTTPError",
                 "http",
                 True,
