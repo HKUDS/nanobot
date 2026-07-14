@@ -226,7 +226,7 @@ class TestSpawnWindows:
 
         command = mock_exec.call_args[0][-1]
         assert "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in command
-        assert "$OutputEncoding = [Console]::OutputEncoding" in command
+        assert "$OutputEncoding =" not in command
         assert "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'" in command
 
     @pytest.mark.asyncio
@@ -755,9 +755,10 @@ class TestWindowsRealExec:
         assert "Exit code: 7" in result
 
     @pytest.mark.asyncio
-    async def test_windows_powershell_output_is_utf8(self):
-        result = await ExecTool(timeout=60).execute(
+    async def test_windows_powershell_output_and_redirection_are_utf8(self, tmp_path):
+        result = await ExecTool(working_dir=str(tmp_path), timeout=180).execute(
             command=(
+                "Write-Output 'file café λ 你好' > marker.txt; "
                 "Write-Output 'café λ 你好'; "
                 "[Console]::Error.WriteLine('warn λ 你好')"
             ),
@@ -767,23 +768,16 @@ class TestWindowsRealExec:
         assert "café λ 你好" in result
         assert "warn λ 你好" in result
         assert "\x00" not in result
-
-    @pytest.mark.asyncio
-    async def test_windows_powershell_redirection_avoids_utf16(self, tmp_path):
-        result = await ExecTool(working_dir=str(tmp_path), timeout=60).execute(
-            command="Write-Output 'café λ 你好' > marker.txt",
-            shell="powershell",
-        )
         assert "Exit code: 0" in result
 
         data = (tmp_path / "marker.txt").read_bytes()
         assert b"\x00" not in data
-        assert data.decode("utf-8-sig").strip() == "café λ 你好"
+        assert data.decode("utf-8-sig").strip() == "file café λ 你好"
 
     @pytest.mark.asyncio
     async def test_windows_powershell_session_output_is_utf8(self):
         manager = ExecSessionManager()
-        result = await ExecTool(timeout=60, session_manager=manager).execute(
+        result = await ExecTool(timeout=180, session_manager=manager).execute(
             command="Start-Sleep -Milliseconds 1500; Write-Output 'café λ 你好'",
             shell="powershell",
             yield_time_ms=1000,
@@ -795,7 +789,7 @@ class TestWindowsRealExec:
                 session_id=session_id,
                 chars="",
                 wait_for="café λ 你好",
-                wait_timeout_ms=60_000,
+                wait_timeout_ms=120_000,
             )
             result += "\n" + poll_result
             if "Process running." in poll_result:

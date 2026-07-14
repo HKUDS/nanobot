@@ -537,7 +537,6 @@ class ExecTool(Tool):
             command = ExecTool._normalize_powershell_command(command)
             command = (
                 "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
-                "$OutputEncoding = [Console]::OutputEncoding\n"
                 "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
                 f"{command}\n"
                 "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
