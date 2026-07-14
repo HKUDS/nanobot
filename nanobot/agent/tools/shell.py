@@ -65,17 +65,6 @@ def _reap_pid(pid: int) -> None:
         logger.debug("_reap_pid({}): {}", pid, exc)
 
 
-def _decode_process_output(data: bytes) -> str:
-    if not data:
-        return ""
-    if _IS_WINDOWS and b"\x00" in data[:200]:
-        try:
-            return data.decode("utf-16")
-        except UnicodeDecodeError:
-            pass
-    return data.decode("utf-8", errors="replace")
-
-
 # Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
     "\n\nNote: this is a hard policy boundary, not a transient failure. "
@@ -348,10 +337,10 @@ class ExecTool(Tool):
             output_parts = []
 
             if stdout:
-                output_parts.append(_decode_process_output(stdout))
+                output_parts.append(stdout.decode("utf-8", errors="replace"))
 
             if stderr:
-                stderr_text = _decode_process_output(stderr)
+                stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
 
@@ -546,7 +535,13 @@ class ExecTool(Tool):
                     env=cmd_env,
                 )
             command = ExecTool._normalize_powershell_command(command)
-            command = f"{command}\nif ($LASTEXITCODE -ne $null) {{ exit $LASTEXITCODE }}"
+            command = (
+                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                "$OutputEncoding = [Console]::OutputEncoding\n"
+                "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
+                f"{command}\n"
+                "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
+            )
             return await asyncio.create_subprocess_exec(
                 program, "-NoProfile", "-NonInteractive", "-Command", command,
                 stdin=stdin,

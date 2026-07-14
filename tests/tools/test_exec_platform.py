@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.shell import ExecTool
 
 _WINDOWS_ENV_KEYS = {
@@ -213,6 +214,22 @@ class TestSpawnWindows:
         assert "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }" in command
 
     @pytest.mark.asyncio
+    async def test_powershell_configures_utf8_output(self):
+        """PowerShell should emit UTF-8 for captured output and redirections."""
+        env = {"PATH": ""}
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn("Write-Output 'café 你好'", r"C:\work", env)
+
+        command = mock_exec.call_args[0][-1]
+        assert "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in command
+        assert "$OutputEncoding = [Console]::OutputEncoding" in command
+        assert "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'" in command
+
+    @pytest.mark.asyncio
     async def test_powershell_invokes_quoted_windows_executable_path(self):
         """PowerShell needs & before quoted executable paths with arguments."""
         env = {"PATH": ""}
@@ -225,7 +242,7 @@ class TestSpawnWindows:
             await ExecTool._spawn(command, r"C:\work", env)
 
         powershell_command = mock_exec.call_args[0][-1]
-        assert powershell_command.startswith("& " + command)
+        assert f"\n& {command}\n" in powershell_command
 
     @pytest.mark.asyncio
     async def test_prefers_pwsh_when_available(self):
@@ -463,29 +480,6 @@ class TestExecuteEndToEnd:
             result = await tool.execute(command="echo hello world")
 
         assert "hello world" in result
-        assert "Exit code: 0" in result
-
-    @pytest.mark.asyncio
-    async def test_windows_decodes_utf16_output(self):
-        """PowerShell output may arrive as UTF-16LE on Windows."""
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (
-            "ok café\r\n".encode("utf-16-le"),
-            "warn λ\r\n".encode("utf-16-le"),
-        )
-        mock_proc.returncode = 0
-
-        with (
-            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch.object(ExecTool, "_spawn", return_value=mock_proc),
-            patch.object(ExecTool, "_guard_command", return_value=None),
-        ):
-            tool = ExecTool()
-            result = await tool.execute(command="echo ok")
-
-        assert "ok café" in result
-        assert "warn λ" in result
-        assert "\x00" not in result
         assert "Exit code: 0" in result
 
     @pytest.mark.asyncio
@@ -759,3 +753,41 @@ class TestWindowsRealExec:
         result = await ExecTool(timeout=10).execute(command="cmd /c exit 7")
 
         assert "Exit code: 7" in result
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_output_is_utf8(self):
+        result = await ExecTool(timeout=10).execute(
+            command=(
+                "Write-Output 'café λ 你好'; "
+                "[Console]::Error.WriteLine('warn λ 你好')"
+            ),
+            shell="powershell",
+        )
+
+        assert "café λ 你好" in result
+        assert "warn λ 你好" in result
+        assert "\x00" not in result
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_redirection_avoids_utf16(self, tmp_path):
+        result = await ExecTool(working_dir=str(tmp_path), timeout=10).execute(
+            command="Write-Output 'café λ 你好' > marker.txt",
+            shell="powershell",
+        )
+        data = (tmp_path / "marker.txt").read_bytes()
+
+        assert "Exit code: 0" in result
+        assert b"\x00" not in data
+        assert data.decode("utf-8-sig").strip() == "café λ 你好"
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_session_output_is_utf8(self):
+        manager = ExecSessionManager()
+        result = await ExecTool(timeout=10, session_manager=manager).execute(
+            command="Write-Output 'café λ 你好'",
+            shell="powershell",
+            yield_time_ms=1000,
+        )
+
+        assert "café λ 你好" in result
+        assert "\x00" not in result
