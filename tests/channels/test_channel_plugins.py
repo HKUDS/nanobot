@@ -2651,8 +2651,8 @@ async def test_start_all_creates_dispatch_task():
 
 
 @pytest.mark.asyncio
-async def test_notify_restart_done_enqueues_outbound_message():
-    """Restart notice should schedule send_with_retry for target channel."""
+async def test_notify_restart_done_waits_until_channel_ready():
+    """Restart notice should not be sent before the target can accept it."""
     fake_config = SimpleNamespace(
         channels=ChannelsConfig(),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
@@ -2661,18 +2661,25 @@ async def test_notify_restart_done_enqueues_outbound_message():
     mgr = ChannelManager.__new__(ChannelManager)
     mgr.config = fake_config
     mgr.bus = MessageBus()
-    mgr.channels = {"feishu": _StartableChannel(fake_config, mgr.bus)}
+    channel = _StartableChannel(fake_config, mgr.bus)
+    mgr.channels = {"feishu": channel}
     mgr._dispatch_task = None
     mgr._send_with_retry = AsyncMock()
 
     notice = RestartNotice(channel="feishu", chat_id="oc_123", started_at_raw="100.0")
     with patch("nanobot.channels.manager.consume_restart_notice_from_env", return_value=notice):
-        mgr._notify_restart_done_if_needed()
+        task = mgr._notify_restart_done_if_needed()
 
     await asyncio.sleep(0)
+    mgr._send_with_retry.assert_not_awaited()
+
+    channel._running = True
+    assert task is not None
+    await asyncio.wait_for(task, timeout=1.0)
+
     mgr._send_with_retry.assert_awaited_once()
     sent_channel, sent_msg = mgr._send_with_retry.await_args.args
-    assert sent_channel is mgr.channels["feishu"]
+    assert sent_channel is channel
     assert sent_msg.channel == "feishu"
     assert sent_msg.chat_id == "oc_123"
     assert sent_msg.content.startswith("Restart completed")

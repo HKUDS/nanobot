@@ -28,7 +28,11 @@ from nanobot.channels._feishu_instances import ChannelInstanceSpec, feishu_insta
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
 from nanobot.config.schema import Config
-from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
+from nanobot.utils.restart import (
+    RestartNotice,
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+)
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -46,6 +50,8 @@ def _default_webui_dist() -> Path | None:
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
+_RESTART_NOTICE_READY_TIMEOUT_S = 30.0
+_RESTART_NOTICE_READY_POLL_S = 0.25
 
 _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_progress": "sendProgress",
@@ -476,15 +482,40 @@ class ChannelManager:
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _notify_restart_done_if_needed(self) -> None:
-        """Send restart completion message when runtime env markers are present."""
+    def _notify_restart_done_if_needed(self) -> asyncio.Task[None] | None:
+        """Schedule restart completion after the target channel becomes ready."""
         notice = consume_restart_notice_from_env()
         if not notice:
-            return
+            return None
+        return asyncio.create_task(self._send_restart_notice_when_ready(notice))
+
+    async def _send_restart_notice_when_ready(
+        self,
+        notice: RestartNotice,
+        *,
+        timeout_s: float = _RESTART_NOTICE_READY_TIMEOUT_S,
+        poll_s: float = _RESTART_NOTICE_READY_POLL_S,
+    ) -> None:
+        """Deliver a restart notice only after its target can accept outbound messages."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
         target = self.channels.get(notice.channel)
-        if not target:
+        if target is None:
+            logger.warning("Restart notice target channel is not enabled: {}", notice.channel)
             return
-        asyncio.create_task(self._send_with_retry(
+
+        while not target.is_ready_for_outbound(notice.chat_id):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                logger.warning(
+                    "Restart notice target did not become ready: {}:{}",
+                    notice.channel,
+                    notice.chat_id,
+                )
+                return
+            await asyncio.sleep(min(poll_s, remaining))
+
+        await self._send_with_retry(
             target,
             OutboundMessage(
                 channel=notice.channel,
@@ -492,7 +523,7 @@ class ChannelManager:
                 content=format_restart_completed_message(notice.started_at_raw),
                 metadata=dict(notice.metadata or {}),
             ),
-        ))
+        )
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""

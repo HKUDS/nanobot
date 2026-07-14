@@ -274,3 +274,7 @@ class BaseChannel(ABC):
     def is_running(self) -> bool:
         """Check if the channel is running."""
         return self._running
+
+    def is_ready_for_outbound(self, chat_id: str) -> bool:
+        """Return whether startup-time messages can be delivered to *chat_id*."""
+        return self.is_running

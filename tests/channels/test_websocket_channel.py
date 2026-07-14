@@ -102,6 +102,19 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
     )
 
 
+def test_restart_delivery_ready_requires_target_subscription() -> None:
+    channel = _ch(MessageBus())
+    channel._running = True
+
+    assert channel.is_ready_for_outbound("chat-1") is False
+
+    connection = object()
+    channel._attach(connection, "chat-1")
+
+    assert channel.is_ready_for_outbound("chat-1") is True
+    assert channel.is_ready_for_outbound("chat-2") is False
+
+
 @pytest.mark.asyncio
 async def test_stop_treats_cancelled_server_task_as_shutdown() -> None:
     channel = _ch(MessageBus())
