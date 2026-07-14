@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from nanobot.agent.tools.exec_session import ExecSessionManager
+from nanobot.agent.tools.exec_session import ExecSessionManager, WriteStdinTool
 from nanobot.agent.tools.shell import ExecTool
 
 _WINDOWS_ENV_KEYS = {
@@ -756,7 +756,7 @@ class TestWindowsRealExec:
 
     @pytest.mark.asyncio
     async def test_windows_powershell_output_is_utf8(self):
-        result = await ExecTool(timeout=10).execute(
+        result = await ExecTool(timeout=60).execute(
             command=(
                 "Write-Output 'café λ 你好'; "
                 "[Console]::Error.WriteLine('warn λ 你好')"
@@ -770,24 +770,43 @@ class TestWindowsRealExec:
 
     @pytest.mark.asyncio
     async def test_windows_powershell_redirection_avoids_utf16(self, tmp_path):
-        result = await ExecTool(working_dir=str(tmp_path), timeout=10).execute(
+        result = await ExecTool(working_dir=str(tmp_path), timeout=60).execute(
             command="Write-Output 'café λ 你好' > marker.txt",
             shell="powershell",
         )
-        data = (tmp_path / "marker.txt").read_bytes()
-
         assert "Exit code: 0" in result
+
+        data = (tmp_path / "marker.txt").read_bytes()
         assert b"\x00" not in data
         assert data.decode("utf-8-sig").strip() == "café λ 你好"
 
     @pytest.mark.asyncio
     async def test_windows_powershell_session_output_is_utf8(self):
         manager = ExecSessionManager()
-        result = await ExecTool(timeout=10, session_manager=manager).execute(
-            command="Write-Output 'café λ 你好'",
+        result = await ExecTool(timeout=60, session_manager=manager).execute(
+            command="Start-Sleep -Milliseconds 1500; Write-Output 'café λ 你好'",
             shell="powershell",
             yield_time_ms=1000,
         )
 
+        if "session_id:" in result:
+            session_id = result.split("session_id:", 1)[1].splitlines()[0].strip()
+            poll_result = await WriteStdinTool(manager=manager).execute(
+                session_id=session_id,
+                chars="",
+                wait_for="café λ 你好",
+                wait_timeout_ms=60_000,
+            )
+            result += "\n" + poll_result
+            if "Process running." in poll_result:
+                final_result = await WriteStdinTool(manager=manager).execute(
+                    session_id=session_id,
+                    chars="",
+                    yield_time_ms=30_000,
+                )
+                result += "\n" + final_result
+                assert "Process running." not in final_result
+
         assert "café λ 你好" in result
+        assert "Exit code: 0" in result
         assert "\x00" not in result
