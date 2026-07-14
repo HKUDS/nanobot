@@ -46,6 +46,13 @@
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
+| Deploy to the cloud in one click | [Deploy to Render](#deploy-to-render) |
+
+## Deploy to Render
+
+Deploy nanobot's gateway and bundled WebUI as a single web service with persistent memory. Render reads [`render.yaml`](./render.yaml) and prompts for two secrets on deploy: `ANTHROPIC_API_KEY` and `NANOBOT_WEB_TOKEN` (the password that gates the public WebUI — generate a strong random value, e.g. `openssl rand -hex 32`).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
 
 ## What can nanobot do?
 

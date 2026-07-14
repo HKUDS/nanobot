@@ -1,0 +1,42 @@
+# Render Blueprint — deploys nanobot's gateway + bundled WebUI as one web
+# service. Secrets are provided at deploy time as env vars (sync: false) and
+# resolved at runtime via the ${VAR} placeholders in render-config.json.
+# Nothing secret is stored in this repo.
+services:
+  - type: web
+    name: nanobot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Render's Docker Command REPLACES the Dockerfile ENTRYPOINT (it is not
+    # appended to it), so invoke the entrypoint explicitly. When RENDER=true the
+    # entrypoint copies render-config.json onto the mounted disk at
+    # $HOME/.nanobot/config.json (so the runtime data_dir lands on the persistent
+    # disk), chowns the root-owned mount, drops to the non-root nanobot user, and
+    # appends the --config flag itself — so pass only `gateway` here.
+    dockerCommand: /usr/local/bin/entrypoint.sh gateway
+    plan: starter
+    healthCheckPath: /
+    envVars:
+      # Anthropic API key — powers the agent's LLM calls. Get one at
+      # https://console.anthropic.com/settings/keys
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # WebUI access secret — the gate for the public WebUI. Generate a strong
+      # random value (e.g. `openssl rand -hex 32`) and keep it private.
+      - key: NANOBOT_WEB_TOKEN
+        sync: false
+      # Port Render routes public traffic to; matches channels.websocket.port
+      # in render-config.json.
+      - key: PORT
+        value: 8765
+    # Persist sessions, memory, and the WebUI display transcripts across deploys.
+    # The entrypoint copies the config onto this mount, so nanobot's runtime
+    # data_dir (config_path.parent) resolves here too — keeping webui/ (chat
+    # history the UI renders), cron, media, and logs durable, not just session
+    # files. Starter / 1 GB is the lean default; history persistence needs this
+    # disk, not a bigger plan.
+    disk:
+      name: nanobot-data
+      mountPath: /home/nanobot/.nanobot
+      sizeGB: 1
