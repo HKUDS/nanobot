@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 
 from nanobot.webui.build import ensure_webui_bundle, inspect_webui_bundle
@@ -54,6 +55,28 @@ def test_inspect_webui_bundle_detects_source_newer_than_dist(tmp_path: Path) -> 
     assert status.stale is True
     assert status.reason == "source_newer"
     assert status.newest_source == source / "src" / "App.tsx"
+
+
+def test_inspect_webui_bundle_detects_channel_owned_ui_source(tmp_path: Path) -> None:
+    source = tmp_path / "webui"
+    dist = tmp_path / "nanobot" / "web" / "dist"
+    channel_ui = tmp_path / "nanobot" / "channels" / "example" / "webui" / "index.tsx"
+    _touch(source / "package.json", mtime_ns=10)
+    _touch(dist / "index.html", mtime_ns=20)
+    _touch(channel_ui, mtime_ns=30)
+
+    status = inspect_webui_bundle(source_dir=source, dist_dir=dist)
+
+    assert status.needs_build is True
+    assert status.reason == "source_newer"
+    assert status.newest_source == channel_ui
+
+
+def test_channel_owned_ui_sources_are_included_in_distributions() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "nanobot/channels/*/webui/**/*" in pyproject["tool"]["hatch"]["build"]["include"]
 
 
 def test_inspect_webui_bundle_accepts_fresh_dist(tmp_path: Path) -> None:

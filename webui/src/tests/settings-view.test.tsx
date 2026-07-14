@@ -710,6 +710,7 @@ describe("SettingsView Apps catalog", () => {
           features: [{
             name: "feishu",
             display_name: "Feishu",
+            webui: "webui/index.tsx",
             type: "channel",
             enabled: false,
             configured: false,
@@ -767,6 +768,7 @@ describe("SettingsView Apps catalog", () => {
           features: [{
             name: "feishu",
             display_name: "Feishu",
+            webui: "webui/index.tsx",
             type: "channel",
             enabled: false,
             configured: false,
@@ -822,6 +824,7 @@ describe("SettingsView Apps catalog", () => {
           features: [{
             name: "feishu",
             display_name: "Feishu",
+            webui: "webui/index.tsx",
             type: "channel",
             enabled: false,
             configured: true,
@@ -839,6 +842,7 @@ describe("SettingsView Apps catalog", () => {
           features: [{
             name: "feishu",
             display_name: "Feishu",
+            webui: "webui/index.tsx",
             type: "channel",
             enabled: true,
             configured: true,
@@ -906,6 +910,7 @@ describe("SettingsView Apps catalog", () => {
             features: [{
               name: "feishu",
               display_name: "Feishu",
+              webui: "webui/index.tsx",
               type: "channel",
               enabled: true,
               configured: true,
@@ -1064,6 +1069,7 @@ describe("SettingsView Apps catalog", () => {
       features: [{
         name: "feishu",
         display_name: "Feishu",
+        webui: "webui/index.tsx",
         type: "channel",
         enabled: true,
         configured: true,
@@ -1501,6 +1507,7 @@ describe("SettingsView Apps catalog", () => {
             features: channels.map(([name, displayName]) => ({
               name,
               display_name: displayName,
+              webui: ["feishu", "weixin"].includes(name) ? "webui/index.tsx" : undefined,
               type: "channel",
               enabled: name === "websocket",
               installed: true,
@@ -1553,6 +1560,7 @@ describe("SettingsView Apps catalog", () => {
             features: ["email", "feishu", "matrix", "qq"].map((name) => ({
               name,
               display_name: name === "qq" ? "QQ" : name[0].toUpperCase() + name.slice(1),
+              webui: name === "feishu" ? "webui/index.tsx" : undefined,
               type: "channel",
               enabled: true,
               installed: true,

@@ -691,6 +691,8 @@ export interface CliAppsPayload {
 export interface NanobotFeatureInfo {
   name: string;
   display_name: string;
+  capabilities?: string[];
+  webui?: string;
   type: "channel" | "feature" | string;
   enabled: boolean;
   configured?: boolean;

@@ -31,6 +31,7 @@ from nanobot.channels.contracts import (
     SetupRequirement,
 )
 from nanobot.channels.manager import ChannelManager
+from nanobot.channels.plugin import ChannelPlugin
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import ChannelsConfig, Config
 from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
@@ -1615,6 +1616,47 @@ def test_optional_features_payload_counts_enabled_channel_with_missing_dependenc
     assert payload["enabled_count"] == 1
 
 
+def test_package_manifest_metadata_drives_optional_feature_payload(monkeypatch):
+    from nanobot.optional_features import optional_features_payload
+
+    plugin = ChannelPlugin(
+        name="demo",
+        display_name="Demo Chat",
+        runtime="demo.runtime:DemoChannel",
+        optional_extra="demo-sdk",
+        default_enabled=True,
+        capabilities=frozenset({"qr_connect"}),
+        webui="webui/entry.tsx",
+    )
+    config = Config.model_validate({"channels": {"demo": {"enabled": False}}})
+    checked_extras: list[tuple[str, list[str] | None]] = []
+
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["demo"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr(
+        "nanobot.optional_features.load_builtin_channel_plugin",
+        lambda name: plugin if name == "demo" else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.optional_features.optional_dependency_groups",
+        lambda: {"demo-sdk": ["demo-sdk>=1"]},
+    )
+
+    def record_extra(extra: str, deps: list[str] | None) -> bool:
+        checked_extras.append((extra, deps))
+        return True
+
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", record_extra)
+
+    payload = optional_features_payload(config=config)
+
+    demo = next(feature for feature in payload["features"] if feature["name"] == "demo")
+    assert checked_extras == [("demo-sdk", ["demo-sdk>=1"])]
+    assert demo["display_name"] == "Demo Chat"
+    assert demo["capabilities"] == ["qr_connect"]
+    assert demo["webui"] == "webui/entry.tsx"
+
+
 def test_optional_features_payload_reflects_saved_channel_config(monkeypatch):
     from nanobot.optional_features import optional_features_payload
 
@@ -1866,7 +1908,7 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
 
 
 def test_optional_features_payload_does_not_refresh_saved_feishu_identity(monkeypatch, tmp_path):
-    from nanobot.channels import feishu as feishu_module
+    from nanobot.channels.feishu import runtime as feishu_module
     from nanobot.config import loader
     from nanobot.optional_features import optional_features_payload
 
@@ -1910,7 +1952,7 @@ def test_enable_optional_feature_refreshes_feishu_identity(
     monkeypatch,
     tmp_path,
 ):
-    from nanobot.channels import feishu as feishu_module
+    from nanobot.channels.feishu import runtime as feishu_module
     from nanobot.config import loader
     from nanobot.optional_features import enable_optional_feature
 
@@ -1960,7 +2002,7 @@ def test_enable_optional_feature_refreshes_feishu_identity(
 
 
 def test_optional_features_payload_preserves_legacy_flat_feishu_config(monkeypatch, tmp_path):
-    from nanobot.channels import feishu as feishu_module
+    from nanobot.channels.feishu import runtime as feishu_module
     from nanobot.config import loader
     from nanobot.optional_features import optional_features_payload
 

@@ -918,7 +918,7 @@ async def test_feishu_connect_routes_write_config_and_hot_reload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nanobot.channels import feishu as feishu_module
+    from nanobot.channels.feishu import runtime as feishu_module
     from nanobot.config import loader
     from nanobot.config.schema import Config
 
@@ -1040,7 +1040,7 @@ def test_feishu_connect_create_appends_instance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nanobot.channels import feishu as feishu_module
+    from nanobot.channels.feishu import runtime as feishu_module
     from nanobot.config import loader
     from nanobot.webui.channel_connect import FeishuConnectStore
 

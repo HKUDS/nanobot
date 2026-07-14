@@ -497,9 +497,9 @@ export async function runPairingAction(
 
 export async function startChannelConnect(
   token: string,
-  channel: "feishu" | "weixin",
+  channel: string,
   options: {
-    domain?: "feishu" | "lark";
+    domain?: string;
     instanceId?: string;
     mode?: "replace" | "create";
     force?: boolean;
@@ -520,7 +520,7 @@ export async function startChannelConnect(
 
 export async function pollChannelConnect(
   token: string,
-  channel: "feishu" | "weixin",
+  channel: string,
   sessionId: string,
   base: string = "",
 ): Promise<ChannelConnectPayload> {
@@ -534,7 +534,7 @@ export async function pollChannelConnect(
 
 export async function cancelChannelConnect(
   token: string,
-  channel: "feishu" | "weixin",
+  channel: string,
   sessionId: string,
   base: string = "",
 ): Promise<ChannelConnectPayload> {

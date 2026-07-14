@@ -33,7 +33,7 @@ from nanobot.channels.contracts import (
     external_channel_enabled,
     resolve_channel_action_target,
 )
-from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
+from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 from nanobot.utils.restart import (
     RestartNotice,
@@ -67,11 +67,11 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
 }
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
-    if name != "websocket":
+    if not channel_default_enabled(name):
         return None
-    from nanobot.channels.websocket import WebSocketChannel
+    from nanobot.channels.registry import load_channel_class
 
-    return WebSocketChannel.default_config()
+    return load_channel_class(name).default_config()
 
 
 class ChannelManager:
@@ -132,7 +132,7 @@ class ChannelManager:
     ) -> Any:
         config = config or self.config
         section = getattr(config.channels, name, None)
-        if section is not None or name not in DEFAULT_ENABLED_CHANNELS:
+        if section is not None or not channel_default_enabled(name):
             return section
         if default_sections is None:
             return _default_channel_config(name)
@@ -217,7 +217,7 @@ class ChannelManager:
                 section,
                 include_instances=bool(setup_spec and setup_spec.multi_instance),
             )
-            if activation.resolve(default=name in DEFAULT_ENABLED_CHANNELS):
+            if activation.resolve(default=channel_default_enabled(name)):
                 enabled_names.add(name)
 
         for name, cls in discover_enabled(

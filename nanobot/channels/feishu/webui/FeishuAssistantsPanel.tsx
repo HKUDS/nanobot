@@ -2,8 +2,8 @@ import { useState } from "react";
 import { Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
-import { FeishuConnectFlow } from "@/components/settings/channels/ChannelQrConnectFlow";
 import { Button } from "@/components/ui/button";
 import { enableNanobotFeature } from "@/lib/api";
 import type {
@@ -12,19 +12,15 @@ import type {
   NanobotFeaturesPayload,
 } from "@/lib/types";
 
+import { FeishuConnectFlow } from "./FeishuConnectFlow";
+
 export function FeishuAssistantsPanel({
   token,
   feature,
   showBrandLogos,
   chatAppsDocsUrl,
   onFeaturesUpdate,
-}: {
-  token: string;
-  feature: NanobotFeatureInfo;
-  showBrandLogos: boolean;
-  chatAppsDocsUrl?: string;
-  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
-}) {
+}: ChannelPluginPanelProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const instances = feature.instances?.length

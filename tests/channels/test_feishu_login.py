@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
-from nanobot.channels import feishu as feishu_module
 from nanobot.channels.feishu import FeishuChannel
+from nanobot.channels.feishu import runtime as feishu_module
 from nanobot.config import loader
 from nanobot.config.schema import Config
 from nanobot.pairing import store as pairing_store

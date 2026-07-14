@@ -43,6 +43,9 @@ export default defineConfig(({ mode }) => {
       alias: {
         "@": path.resolve(__dirname, "./src"),
       },
+      // Channel-owned UI lives beside the Python package, outside webui/.
+      // Resolve its shared frontend dependencies from this app's root.
+      dedupe: ["react", "react-dom", "lucide-react", "react-i18next", "qrcode"],
     },
     optimizeDeps: {
       // Keep dev reloads stable for dependencies that can rewrite generated
@@ -70,6 +73,9 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1",
       port: 5173,
       strictPort: true,
+      fs: {
+        allow: [path.resolve(__dirname, "..")],
+      },
       // Keep Vite's HMR socket on a dedicated path. Nanobot's app WebSocket is
       // opened directly from the browser to the gateway, so the dev server
       // should never proxy WebSocket upgrades.

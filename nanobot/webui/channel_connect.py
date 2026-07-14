@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from nanobot.channels import feishu
-from nanobot.channels._feishu_instances import DEFAULT_INSTANCE_ID, validate_instance_id
+from nanobot.channels.feishu.instances import DEFAULT_INSTANCE_ID, validate_instance_id
 from nanobot.config.loader import load_config
 
 

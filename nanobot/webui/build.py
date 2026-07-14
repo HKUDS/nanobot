@@ -90,6 +90,10 @@ def iter_webui_source_files(source_dir: Path) -> list[Path]:
         if not root.is_dir():
             continue
         files.extend(path for path in root.rglob("*") if path.is_file())
+    channel_root = source_dir.parent / "nanobot" / "channels"
+    if channel_root.is_dir():
+        for channel_webui in channel_root.glob("*/webui"):
+            files.extend(path for path in channel_webui.rglob("*") if path.is_file())
     return files
 
 

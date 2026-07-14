@@ -1,10 +1,15 @@
 import ast
 import pkgutil
+import subprocess
+import sys
 from pathlib import Path
 
 import nanobot.channels._setup as channel_setup_module
 import nanobot.channels.manifests as manifest_package
 from nanobot.channels._setup import channel_setup_spec
+from nanobot.channels.manifests import load_builtin_channel_plugin
+from nanobot.channels.plugin import ChannelPlugin
+from nanobot.channels.registry import channel_default_enabled
 
 EXPECTED_SETUP_CHANNELS = {
     "dingtalk",
@@ -87,13 +92,19 @@ def test_webui_forms_have_writable_mattermost_and_whatsapp_contracts() -> None:
 
 
 def test_all_builtin_setup_contracts_are_dependency_free_manifests() -> None:
-    manifest_names = {
+    legacy_manifest_names = {
         name
         for _, name, ispkg in pkgutil.iter_modules(
             [str(Path(manifest_package.__file__).parent)]
         )
         if not name.startswith("_") and not ispkg
     }
+    channel_dir = Path(channel_setup_module.__file__).parent
+    package_manifest_names = {
+        path.parent.name
+        for path in channel_dir.glob("*/manifest.py")
+    }
+    manifest_names = legacy_manifest_names | package_manifest_names
 
     assert not hasattr(channel_setup_module, "CHANNEL_SETUP_SPECS")
     assert manifest_names == EXPECTED_SETUP_CHANNELS
@@ -106,13 +117,17 @@ def test_all_builtin_setup_contracts_are_dependency_free_manifests() -> None:
 
 def test_builtin_setup_manifests_only_import_contract_modules() -> None:
     manifest_dir = Path(manifest_package.__file__).parent
+    channel_dir = Path(channel_setup_module.__file__).parent
     allowed_imports = {
         "nanobot.channels.contracts",
         "nanobot.channels.manifests._shared",
+        "nanobot.channels.plugin",
     }
 
     for name in EXPECTED_SETUP_CHANNELS:
-        tree = ast.parse((manifest_dir / f"{name}.py").read_text(encoding="utf-8"))
+        package_manifest = channel_dir / name / "manifest.py"
+        manifest_path = package_manifest if package_manifest.is_file() else manifest_dir / f"{name}.py"
+        tree = ast.parse(manifest_path.read_text(encoding="utf-8"))
         imports: set[str] = set()
         for node in tree.body:
             if isinstance(node, ast.Import):
@@ -131,7 +146,9 @@ def test_builtin_multi_instance_manifests_match_runtime_declarations() -> None:
     }
     runtime_multi: set[str] = set()
     for name in EXPECTED_SETUP_CHANNELS:
-        tree = ast.parse((channel_dir / f"{name}.py").read_text(encoding="utf-8"))
+        package_runtime = channel_dir / name / "runtime.py"
+        runtime_path = package_runtime if package_runtime.is_file() else channel_dir / f"{name}.py"
+        tree = ast.parse(runtime_path.read_text(encoding="utf-8"))
         if any(
             isinstance(node, ast.ClassDef)
             and any(
@@ -144,3 +161,79 @@ def test_builtin_multi_instance_manifests_match_runtime_declarations() -> None:
             runtime_multi.add(name)
 
     assert manifest_multi == runtime_multi
+
+
+def test_feishu_package_manifest_owns_runtime_and_webui_metadata() -> None:
+    plugin = load_builtin_channel_plugin("feishu")
+    package_dir = Path(channel_setup_module.__file__).parent / "feishu"
+
+    assert plugin is not None
+    assert plugin.runtime == "nanobot.channels.feishu.runtime:FeishuChannel"
+    assert plugin.setup is channel_setup_spec("feishu")
+    assert plugin.optional_extra == "feishu"
+    assert plugin.capabilities == {"multi_instance", "qr_connect"}
+    assert plugin.webui == "webui/index.tsx"
+    assert (package_dir / plugin.webui).is_file()
+
+
+def test_weixin_package_manifest_owns_runtime_and_webui_metadata() -> None:
+    plugin = load_builtin_channel_plugin("weixin")
+    package_dir = Path(channel_setup_module.__file__).parent / "weixin"
+
+    assert plugin is not None
+    assert plugin.runtime == "nanobot.channels.weixin.runtime:WeixinChannel"
+    assert plugin.setup is channel_setup_spec("weixin")
+    assert plugin.optional_extra == "weixin"
+    assert plugin.capabilities == {"qr_connect"}
+    assert plugin.webui == "webui/index.tsx"
+    assert (package_dir / plugin.webui).is_file()
+
+
+def test_package_manifests_do_not_import_runtimes() -> None:
+    code = """
+import sys
+from nanobot.channels.manifests import load_builtin_channel_plugin
+
+for name in ("feishu", "weixin"):
+    plugin = load_builtin_channel_plugin(name)
+    assert plugin is not None
+assert "nanobot.channels.feishu.runtime" not in sys.modules
+assert "nanobot.channels.weixin.runtime" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_channel_plugin_normalizes_webui_entry() -> None:
+    plugin = ChannelPlugin(
+        name="demo",
+        display_name="Demo",
+        runtime="demo.runtime:DemoChannel",
+        webui="webui\\index.tsx",
+    )
+
+    assert plugin.webui == "webui/index.tsx"
+
+
+def test_channel_default_enabled_uses_package_manifest(monkeypatch) -> None:
+    plugin = ChannelPlugin(
+        name="demo",
+        display_name="Demo",
+        runtime="demo.runtime:DemoChannel",
+        default_enabled=True,
+    )
+    monkeypatch.setattr(
+        manifest_package,
+        "load_builtin_channel_plugin",
+        lambda name: plugin if name == "demo" else None,
+    )
+
+    assert channel_default_enabled("demo") is True
+    assert channel_default_enabled("websocket") is True
+    assert channel_default_enabled("missing") is False

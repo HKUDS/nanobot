@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-import nanobot.channels.weixin as weixin_mod
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.weixin import (
@@ -22,6 +21,7 @@ from nanobot.channels.weixin import (
     _decrypt_aes_ecb,
     _encrypt_aes_ecb,
 )
+from nanobot.channels.weixin import runtime as weixin_mod
 
 
 def _make_channel() -> tuple[WeixinChannel, MessageBus]:

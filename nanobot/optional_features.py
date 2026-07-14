@@ -27,7 +27,8 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
     stringify_channel_value,
 )
-from nanobot.channels.registry import DEFAULT_ENABLED_CHANNELS
+from nanobot.channels.manifests import load_builtin_channel_plugin
+from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 
 
@@ -329,7 +330,7 @@ def channel_enabled(
     require_explicit_top_level: bool = False,
 ) -> bool:
     section = getattr(config.channels, name, None)
-    default_enabled = name in DEFAULT_ENABLED_CHANNELS
+    default_enabled = channel_default_enabled(name)
     if section is None:
         return default_enabled
     if require_explicit_top_level and not external_channel_enabled(section):
@@ -442,19 +443,40 @@ def optional_features_payload(
     extras = optional_dependency_groups()
     builtin_channels = set(discover_channel_names())
     plugin_channels = discover_plugins()
+    channel_plugins = {
+        name: load_builtin_channel_plugin(name)
+        for name in builtin_channels
+    }
+    claimed_extras = {
+        plugin.optional_extra
+        for plugin in channel_plugins.values()
+        if plugin is not None and plugin.optional_extra is not None
+    }
     features: list[dict[str, Any]] = []
 
-    for name in sorted(builtin_channels | set(plugin_channels) | set(extras)):
+    feature_names = builtin_channels | set(plugin_channels) | (set(extras) - claimed_extras)
+    for name in sorted(feature_names):
         is_channel = name in builtin_channels or name in plugin_channels
-        installed = extra_installed(name, extras[name]) if name in extras else True
+        channel_plugin = channel_plugins.get(name)
+        extra_name = channel_plugin.optional_extra if channel_plugin else name
+        has_extra = bool(extra_name and extra_name in extras)
+        installed = extra_installed(extra_name, extras[extra_name]) if has_extra else True
         feature = {
             "name": name,
-            "display_name": name.replace("_", " ").title(),
+            "display_name": (
+                channel_plugin.display_name
+                if channel_plugin is not None
+                else name.replace("_", " ").title()
+            ),
             "type": "channel" if is_channel else "feature",
             "installed": installed,
-            "install_supported": name in extras or is_channel,
+            "install_supported": has_extra or is_channel,
             "requires_restart": _feature_requires_restart(name, is_channel=is_channel),
         }
+        if channel_plugin is not None:
+            feature["capabilities"] = sorted(channel_plugin.capabilities)
+            if channel_plugin.webui is not None:
+                feature["webui"] = channel_plugin.webui
 
         if not is_channel:
             feature.update({
@@ -567,7 +589,9 @@ def enable_optional_feature(
         available = ", ".join(sorted(known))
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
 
-    if name in extras and not extra_installed(name, extras[name]):
+    channel_plugin = load_builtin_channel_plugin(name) if name in builtin_channels else None
+    extra_name = channel_plugin.optional_extra if channel_plugin else name
+    if extra_name in extras and not extra_installed(extra_name, extras[extra_name]):
         if not allow_install:
             raise OptionalFeatureError(
                 "Installing optional features from a remote WebUI is disabled. "
@@ -575,8 +599,8 @@ def enable_optional_feature(
                 status=403,
             )
         result = install_extra(
-            name,
-            extras[name],
+            extra_name,
+            extras[extra_name],
             runner=runner,
         )
         if not result.ok:

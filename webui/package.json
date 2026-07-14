@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src --max-warnings 0"
+    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" --max-warnings 0"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",

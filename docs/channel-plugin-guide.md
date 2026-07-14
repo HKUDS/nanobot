@@ -334,13 +334,26 @@ exception for malformed persisted data rather than silently changing instance
 identity. Keep metadata refresh behind `refresh_feature_metadata()` so feature
 GET requests remain read-only.
 
-Built-in channels use the same setup types but declare them in
-`nanobot/channels/manifests/<channel>.py`. These modules must stay free of
-optional platform SDK imports so settings discovery remains lazy. `_setup.py`
-only resolves manifests and external plugin hooks; do not add a central
-per-channel fallback table there. Shared declarative constructors live in
-`nanobot/channels/manifests/_shared.py`. A built-in manifest's `multi_instance`
-value must match whether its runtime channel overrides `instance_specs()`.
+Self-contained built-in channels live in `nanobot/channels/<channel>/`. Their
+dependency-free `manifest.py` exports a typed `ChannelPlugin` with the lazy
+runtime import target, setup contract, optional dependency name, capabilities,
+and optional WebUI entry path. Runtime code and platform SDKs must not be
+imported while this manifest is discovered. The package `__init__.py` must
+remain lightweight for the same reason. Channel-owned WebUI source is part of
+the Python distribution and is compiled into the shared WebUI bundle during
+release builds. The manifest path is authoritative: candidate TypeScript
+modules are bundled from the channel package, but the WebUI activates only the
+entry named by the backend feature payload. The entry exports a default
+`ChannelUiContribution`; its channel identity is derived from the package
+directory and must not be declared a second time in TypeScript.
+
+Legacy single-file built-ins keep their setup declarations in
+`nanobot/channels/manifests/<channel>.py` during migration. `_setup.py` resolves
+package manifests first and then this compatibility layout; do not add a
+central per-channel fallback table there. Shared declarative constructors live
+in `nanobot/channels/manifests/_shared.py`. A built-in manifest's
+`multi_instance` value must match whether its runtime channel overrides
+`instance_specs()`.
 
 ### Optional (streaming)
 

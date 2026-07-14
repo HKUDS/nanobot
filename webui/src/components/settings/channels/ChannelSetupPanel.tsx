@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Check,
   ChevronDown,
@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { channelUiContribution } from "@/channel-plugins/registry";
+import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   type ChannelProviderPreset,
@@ -29,10 +31,6 @@ import {
   channelStatusLabel,
 } from "@/components/settings/channels/ChannelIdentity";
 import {
-  FeishuConnectFlow,
-  WeixinConnectFlow,
-} from "@/components/settings/channels/ChannelQrConnectFlow";
-import {
   ChannelProviderPresets,
   ChannelSetupActions,
   ChannelSetupLinks,
@@ -42,7 +40,6 @@ import {
   ChannelValidationDetails,
 } from "@/components/settings/channels/ChannelSetupParts";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
-import { FeishuAssistantsPanel } from "@/components/settings/channels/FeishuAssistantsPanel";
 import { Button } from "@/components/ui/button";
 import {
   configureChannel,
@@ -129,13 +126,17 @@ export function ChannelSetupPanel({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [connectRequestId, setConnectRequestId] = useState(0);
-  if (feature.name === "feishu") {
+  const uiContribution = channelUiContribution(feature.name, feature.webui);
+  const PluginPanel = uiContribution?.Panel;
+  if (PluginPanel) {
     return (
-      <FeishuAssistantsPanel
+      <PluginPanel
         token={token}
         feature={feature}
+        actionKey={actionKey}
         showBrandLogos={showBrandLogos}
         chatAppsDocsUrl={chatAppsDocsUrl}
+        onAction={onAction}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     );
@@ -163,7 +164,7 @@ export function ChannelSetupPanel({
   const needsSetupBeforeEnable =
     !channelChecked
     && feature.configured === false
-    && !(feature.name === "weixin" && setup.mode === "connect");
+    && !(uiContribution?.canConnectBeforeConfigured && setup.mode === "connect");
   const channelToggleDisabled =
     requiredWebui
     || channelBusy
@@ -218,7 +219,7 @@ export function ChannelSetupPanel({
             label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             onChange={(checked) => {
               if (
-                feature.name === "weixin"
+                uiContribution?.canConnectBeforeConfigured
                 && checked
                 && !channelChecked
                 && feature.configured === false
@@ -238,6 +239,7 @@ export function ChannelSetupPanel({
         setup={setup}
         chatAppsDocsUrl={chatAppsDocsUrl}
         connectRequestId={connectRequestId}
+        ConnectFlow={uiContribution?.ConnectFlow}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     </aside>
@@ -250,6 +252,7 @@ function ChannelSetupSurface({
   setup,
   chatAppsDocsUrl,
   connectRequestId,
+  ConnectFlow,
   onFeaturesUpdate,
 }: {
   token: string;
@@ -257,6 +260,7 @@ function ChannelSetupSurface({
   setup: ChannelSetupPresentation;
   chatAppsDocsUrl?: string;
   connectRequestId: number;
+  ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const { t } = useTranslation();
@@ -424,15 +428,10 @@ function ChannelSetupSurface({
         <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-        {mode === "connect" && feature.name === "feishu" ? (
-          <FeishuConnectFlow
+        {mode === "connect" && ConnectFlow ? (
+          <ConnectFlow
             token={token}
-            connectRequestId={connectRequestId}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
-        ) : mode === "connect" && feature.name === "weixin" ? (
-          <WeixinConnectFlow
-            token={token}
+            feature={feature}
             idleLabel={t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
               defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
             })}

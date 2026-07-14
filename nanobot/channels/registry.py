@@ -14,24 +14,47 @@ _INTERNAL = frozenset({
     "base",
     "contracts",
     "manager",
+    "manifests",
+    "plugin",
     "registry",
 })
 DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
 
 
+def channel_default_enabled(name: str) -> bool:
+    """Return the package manifest default or the legacy built-in default."""
+    from nanobot.channels.manifests import load_builtin_channel_plugin
+
+    plugin = load_builtin_channel_plugin(name)
+    if plugin is not None:
+        return plugin.default_enabled
+    return name in DEFAULT_ENABLED_CHANNELS
+
+
 def discover_channel_names() -> list[str]:
-    """Return all built-in channel module names by scanning the package (zero imports)."""
+    """Return legacy channel modules and self-contained channel packages."""
     import nanobot.channels as pkg
+    from nanobot.channels.manifests import has_builtin_channel_package
 
     return [
         name
         for _, name, ispkg in pkgutil.iter_modules(pkg.__path__)
-        if name not in _INTERNAL and not name.startswith("_") and not ispkg
+        if (
+            name not in _INTERNAL
+            and not name.startswith("_")
+            and (not ispkg or has_builtin_channel_package(name))
+        )
     ]
 
 
 def load_channel_class(module_name: str) -> type[BaseChannel]:
-    """Import *module_name* and return the first BaseChannel subclass found."""
+    """Load a package manifest runtime or inspect one legacy channel module."""
+    from nanobot.channels.manifests import load_builtin_channel_plugin
+
+    plugin = load_builtin_channel_plugin(module_name)
+    if plugin is not None:
+        return plugin.load_channel_class()
+
     from nanobot.channels.base import BaseChannel as _Base
 
     mod = importlib.import_module(f"nanobot.channels.{module_name}")

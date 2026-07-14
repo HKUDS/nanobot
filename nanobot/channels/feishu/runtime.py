@@ -26,7 +26,9 @@ from rich.text import Text
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
-from nanobot.channels._feishu_instances import (
+from nanobot.channels.base import BaseChannel
+from nanobot.channels.contracts import ChannelInstanceSpec
+from nanobot.channels.feishu.instances import (
     DEFAULT_INSTANCE_ID,
     feishu_app_identity_key,
     feishu_instance_specs,
@@ -34,9 +36,7 @@ from nanobot.channels._feishu_instances import (
     update_feishu_instance_preserving_shape,
     upsert_feishu_instance,
 )
-from nanobot.channels._feishu_ws import get_feishu_ws_runner
-from nanobot.channels.base import BaseChannel
-from nanobot.channels.contracts import ChannelInstanceSpec
+from nanobot.channels.feishu.websocket import get_feishu_ws_runner
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
@@ -943,7 +943,7 @@ class FeishuChannel(BaseChannel):
         *,
         instance_id: str = DEFAULT_INSTANCE_ID,
     ) -> dict[str, Any]:
-        from nanobot.channels._feishu_instances import upsert_feishu_instance
+        from nanobot.channels.feishu.instances import upsert_feishu_instance
 
         existing = section if isinstance(section, dict) else {}
         return upsert_feishu_instance(

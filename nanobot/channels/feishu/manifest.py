@@ -2,6 +2,7 @@
 
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.manifests._shared import DIRECT_GROUP_POLICIES, field, required_fields
+from nanobot.channels.plugin import ChannelPlugin
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
@@ -25,4 +26,14 @@ SETUP_SPEC = ChannelSetupSpec(
     required=required_fields("appId", "appSecret"),
     official_url="https://open.feishu.cn/app",
     multi_instance=True,
+)
+
+PLUGIN = ChannelPlugin(
+    name="feishu",
+    display_name="Feishu",
+    runtime="nanobot.channels.feishu.runtime:FeishuChannel",
+    setup=SETUP_SPEC,
+    optional_extra="feishu",
+    capabilities=frozenset({"multi_instance", "qr_connect"}),
+    webui="webui/index.tsx",
 )
