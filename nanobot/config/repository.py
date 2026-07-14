@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import threading
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
@@ -22,6 +23,11 @@ from nanobot.config.schema import Config
 ConfigMutator = Callable[[Config], None]
 
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+# Several WebUI config actions run in worker threads via asyncio.to_thread().
+# Repository instances for the same path therefore share a process-local lock.
+_path_locks_guard = threading.Lock()
+_path_locks: dict[Path, threading.RLock] = {}
 
 
 class ConfigConflictError(RuntimeError):
@@ -53,6 +59,12 @@ class ConfigCommit:
     before: PersistedConfigSnapshot
     after: PersistedConfigSnapshot
     changed_paths: frozenset[str]
+
+
+def _lock_for_path(path: Path) -> threading.RLock:
+    key = path.expanduser().resolve(strict=False)
+    with _path_locks_guard:
+        return _path_locks.setdefault(key, threading.RLock())
 
 
 def _revision_for_bytes(raw: bytes | None) -> str:
@@ -100,10 +112,13 @@ def _write_config_atomic(path: Path, data: dict[str, Any]) -> None:
     existing_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
     try:
         with open(tmp, "w", encoding="utf-8") as handle:
-            handle.write(content)
             if existing_mode is not None:
-                with suppress(OSError):
+                try:
                     os.chmod(tmp, existing_mode)
+                except OSError:
+                    if os.name != "nt":
+                        raise
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
@@ -140,10 +155,12 @@ class FileConfigRepository:
 
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser().resolve(strict=False)
+        self._lock = _lock_for_path(self.path)
 
     def load_raw(self) -> PersistedConfigSnapshot:
         """Load the persisted form without resolving secret references."""
-        return _read_snapshot(self.path)
+        with self._lock:
+            return _read_snapshot(self.path)
 
     def load_effective(self) -> EffectiveConfigSnapshot:
         """Load an isolated runtime snapshot with ``${VAR}`` references resolved."""
@@ -158,16 +175,17 @@ class FileConfigRepository:
         expected_revision: str | None = None,
     ) -> PersistedConfigSnapshot:
         """Atomically save a complete config, optionally rejecting stale writes."""
-        current = _read_snapshot(self.path)
-        if expected_revision is not None and current.revision != expected_revision:
-            raise ConfigConflictError(
-                f"Config changed since revision {expected_revision}; "
-                f"current revision is {current.revision}"
-            )
-        data = _config_data(config)
-        _validate_config_data(data, self.path)
-        _write_config_atomic(self.path, data)
-        return _read_snapshot(self.path)
+        with self._lock:
+            current = _read_snapshot(self.path)
+            if expected_revision is not None and current.revision != expected_revision:
+                raise ConfigConflictError(
+                    f"Config changed since revision {expected_revision}; "
+                    f"current revision is {current.revision}"
+                )
+            data = _config_data(config)
+            _validate_config_data(data, self.path)
+            _write_config_atomic(self.path, data)
+            return _read_snapshot(self.path)
 
     def update(
         self,
@@ -176,25 +194,26 @@ class FileConfigRepository:
         expected_revision: str | None = None,
     ) -> ConfigCommit:
         """Atomically apply a mutation to the latest persisted config."""
-        before = _read_snapshot(self.path)
-        if expected_revision is not None and before.revision != expected_revision:
-            raise ConfigConflictError(
-                f"Config changed since revision {expected_revision}; "
-                f"current revision is {before.revision}"
-            )
+        with self._lock:
+            before = _read_snapshot(self.path)
+            if expected_revision is not None and before.revision != expected_revision:
+                raise ConfigConflictError(
+                    f"Config changed since revision {expected_revision}; "
+                    f"current revision is {before.revision}"
+                )
 
-        before_data = _config_data(before.config)
-        draft = before.config.model_copy(deep=True)
-        mutator(draft)
-        after_data = _config_data(draft)
-        changed = frozenset(_changed_paths(before_data, after_data))
-        if not changed:
-            return ConfigCommit(before, before, changed)
+            before_data = _config_data(before.config)
+            draft = before.config.model_copy(deep=True)
+            mutator(draft)
+            after_data = _config_data(draft)
+            changed = frozenset(_changed_paths(before_data, after_data))
+            if not changed:
+                return ConfigCommit(before, before, changed)
 
-        _validate_config_data(after_data, self.path)
-        _write_config_atomic(self.path, after_data)
-        after = _read_snapshot(self.path)
-        return ConfigCommit(before, after, changed)
+            _validate_config_data(after_data, self.path)
+            _write_config_atomic(self.path, after_data)
+            after = _read_snapshot(self.path)
+            return ConfigCommit(before, after, changed)
 
 
 def resolve_config_env_vars(config: Config) -> Config:

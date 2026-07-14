@@ -2,6 +2,8 @@ import json
 import os
 import socket
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -83,15 +85,37 @@ def test_update_rejects_stale_expected_revision(tmp_path: Path) -> None:
     assert repository.load_raw().config.api.port == 9001
 
 
-def test_repositories_for_same_path_read_latest_config(tmp_path: Path) -> None:
+def test_repositories_for_same_path_serialize_threaded_updates(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     first = FileConfigRepository(path)
     second = FileConfigRepository(path)
+    first_mutator_entered = threading.Event()
+    release_first = threading.Event()
+    second_mutator_entered = threading.Event()
 
-    first.update(lambda config: setattr(config.api, "port", 9001))
-    second.update(
-        lambda config: setattr(config.agents.defaults, "timezone", "Asia/Shanghai")
-    )
+    def update_first() -> None:
+        def mutate(config):
+            first_mutator_entered.set()
+            assert release_first.wait(timeout=5)
+            config.api.port = 9001
+
+        first.update(mutate)
+
+    def update_second() -> None:
+        def mutate(config):
+            second_mutator_entered.set()
+            config.agents.defaults.timezone = "Asia/Shanghai"
+
+        second.update(mutate)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(update_first)
+        assert first_mutator_entered.wait(timeout=5)
+        second_future = pool.submit(update_second)
+        assert not second_mutator_entered.wait(timeout=0.1)
+        release_first.set()
+        first_future.result(timeout=5)
+        second_future.result(timeout=5)
 
     config = first.load_raw().config
     assert config.api.port == 9001
@@ -148,6 +172,40 @@ def test_atomic_save_preserves_existing_file_mode(tmp_path: Path) -> None:
     FileConfigRepository(path).update(lambda config: setattr(config.api, "port", 9001))
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_atomic_save_restores_mode_before_writing(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "config.json"
+    path.write_text('{"api": {"port": 9000}}', encoding="utf-8")
+    path.chmod(0o600)
+    observed_sizes: list[int] = []
+    real_chmod = os.chmod
+
+    def capture_size_before_chmod(target: str | bytes | Path, mode: int) -> None:
+        observed_sizes.append(Path(target).stat().st_size)
+        real_chmod(target, mode)
+
+    monkeypatch.setattr("nanobot.config.repository.os.chmod", capture_size_before_chmod)
+
+    FileConfigRepository(path).update(lambda config: setattr(config.api, "port", 9001))
+
+    assert observed_sizes == [0]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows handles chmod differently")
+def test_atomic_save_keeps_previous_file_when_mode_restore_fails(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text('{"api": {"port": 9000}}', encoding="utf-8")
+    path.chmod(0o600)
+
+    with patch("nanobot.config.repository.os.chmod", side_effect=OSError("chmod failed")):
+        with pytest.raises(OSError, match="chmod failed"):
+            FileConfigRepository(path).update(
+                lambda config: setattr(config.api, "port", 9001)
+            )
+
+    assert json.loads(path.read_text(encoding="utf-8"))["api"]["port"] == 9000
+    assert list(tmp_path.glob(".config.json.*.tmp")) == []
 
 
 def test_loading_config_does_not_change_process_network_policy(tmp_path: Path) -> None:
