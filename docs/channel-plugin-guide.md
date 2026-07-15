@@ -1,6 +1,6 @@
 # Channel Plugin Guide
 
-Build a custom nanobot channel in three steps: subclass, package, install.
+Use this guide to build an external channel plugin or contribute a self-contained built-in channel to the nanobot repository.
 
 > **Note:** We recommend developing channel plugins against a source checkout of nanobot (`python -m pip install -e .`) rather than a PyPI release, so you always have access to the latest base-channel features and APIs.
 
@@ -13,7 +13,29 @@ nanobot discovers channel plugins via Python [entry points](https://packaging.py
 
 If a matching config section has `"enabled": true`, the channel is instantiated and started.
 
-## Quick Start
+## Choose the Right Extension Path
+
+| Goal | Extension path | Primary contract |
+|------|----------------|------------------|
+| Ship a separately installed Python package | External plugin registered under `nanobot.channels` | `BaseChannel` subclass and optional `setup_spec()` |
+| Add a channel to the nanobot repository and release bundle | Built-in package at `nanobot/channels/<channel>/` | Dependency-free `ChannelPlugin` manifest, lazy runtime, package-local tests, and optional package-local WebUI |
+
+External plugins can expose generic settings through `setup_spec()`. Custom TSX and locale JSON are compiled into nanobot's WebUI at build time, so a separately installed Python wheel cannot inject a new custom WebUI into an already-built frontend bundle.
+
+## Ownership and Sources of Truth
+
+| Concern | Owner and source of truth |
+|---------|---------------------------|
+| Runtime behavior and platform SDK use | `runtime.py` and package-local helpers |
+| Writable settings fields, types, defaults, requirements, secret handling, and validation | `ChannelSetupSpec` in `manifest.py` for built-ins, or `setup_spec()` for external plugins |
+| Built-in discovery metadata and lazy runtime target | `PLUGIN` in `manifest.py` |
+| Built-in WebUI structure, components, URLs, field keys, actions, and preset values | `webui/index.ts` or `webui/index.tsx` |
+| Channel-specific user-facing copy | `webui/locales/<locale>.json` |
+| Generic settings-shell copy shared by every channel | `webui/src/i18n/locales/<locale>/common.json` |
+
+Keep one source of truth for each concern. In particular, the backend setup contract decides what may be written, the TypeScript contribution decides how those fields are presented, and locale JSON supplies the channel-specific words shown to users.
+
+## External Plugin Quick Start
 
 We'll build a minimal webhook channel that receives messages via HTTP POST and sends replies back.
 
@@ -173,11 +195,7 @@ Edit `~/.nanobot/config.json`:
 }
 ```
 
-For external plugins, the top-level `enabled` field is also the runtime import
-gate. `nanobot gateway` does not load the plugin entry point while this flag is
-false or absent. A multi-instance plugin therefore keeps top-level
-`"enabled": true` while using per-instance flags to select which runtimes to
-start. Explicit plugin setup, install, and enable actions may load the plugin.
+For external plugins, the top-level `enabled` field is also the runtime import gate. `nanobot gateway` does not load the plugin entry point while this flag is false or absent. A multi-instance plugin therefore keeps top-level `"enabled": true` while using per-instance flags to select which runtimes to start. Explicit plugin setup, install, and enable actions may load the plugin.
 
 ### 4. Run & Test
 
@@ -195,6 +213,119 @@ curl -X POST http://localhost:9000/message \
 
 The agent receives the message and processes it. Replies arrive in your `send()` method.
 
+## Built-in Channel Packages
+
+Use this section when changing the nanobot repository itself. Every built-in channel is a self-contained package at `nanobot/channels/<channel>/`; channel-specific runtime code, setup metadata, tests, WebUI structure, components, and translations stay under that directory.
+
+### Package Layout
+
+```text
+nanobot/channels/<channel>/
+├── __init__.py                 # lazy compatibility exports; no eager platform SDK import
+├── manifest.py                 # dependency-free ChannelPlugin and ChannelSetupSpec
+├── runtime.py                  # BaseChannel implementation and platform SDK imports
+├── tests/                      # channel-specific Python tests
+└── webui/                      # optional, compiled into the shared WebUI
+    ├── index.ts or index.tsx   # structure and optional React components
+    └── locales/
+        ├── en.json             # canonical locale shape
+        └── <locale>.json       # one file for every supported WebUI locale
+```
+
+Do not add a built-in runtime module directly under `nanobot/channels/`, create a parallel manifest tree, or add a central per-channel UI catalog. If existing channel files move, use `git mv` so history remains traceable.
+
+### Manifest and Runtime Boundary
+
+`manifest.py` exports a typed `ChannelPlugin` whose `runtime` target is package-relative, such as `runtime:TelegramChannel`. Discovery imports the manifest before it knows whether the optional platform dependency is installed, so `manifest.py` must not import `runtime.py` or any platform SDK. Keep historical package imports lazy in `__init__.py` for the same reason.
+
+The manifest owns the channel name, display name, setup contract, optional dependency extra, capabilities, default activation, and optional WebUI entry path. Its `multi_instance` setup value must agree with whether the runtime overrides `instance_specs()`.
+
+Use the small constructors in [`nanobot/channels/_manifest.py`](../nanobot/channels/_manifest.py) for declarative field and requirement definitions. Use [`nanobot/channels/dingtalk/manifest.py`](../nanobot/channels/dingtalk/manifest.py) as a compact single-instance example and [`nanobot/channels/feishu/`](../nanobot/channels/feishu/) as a multi-instance example.
+
+### Built-in WebUI
+
+Set `webui="webui/index.ts"` or `webui="webui/index.tsx"` in the channel manifest. Candidate modules are bundled from channel packages, but the settings UI activates only the exact path returned by the backend feature payload.
+
+The entry module exports one default `ChannelUiContribution`. Channel identity comes from the package directory, so do not repeat a `channel` field in TypeScript. Keep only structure and executable UI data in this module: presentation metadata, icons or logo URLs, docs URLs, config field keys, action payloads, preset values, aliases, and optional `Panel` or `ConnectFlow` components.
+
+Do not put static descriptions, setup steps, labels, placeholders, help text, action labels, or preset labels in TSX. Those strings belong in the channel's locale JSON. TSX remains appropriate for dynamic rendering, interpolation, conditions, and rich component composition.
+
+### Channel-owned i18n
+
+Create `webui/locales/<locale>.json` for every locale code declared in [`webui/src/i18n/config.ts`](../webui/src/i18n/config.ts). Treat `en.json` as the canonical shape; every other locale must contain the same message keys and the same interpolation variables. `displayName` may be omitted when the product name should remain unchanged.
+
+```json
+{
+  "description": "Use nanobot from Example chats.",
+  "requirements": "Example app credentials and gateway",
+  "setup": {
+    "docsLabel": "Open Example setup",
+    "officialLabel": "Open Example console",
+    "summary": "Example needs app credentials.",
+    "tryIt": "Send a test message.",
+    "steps": [
+      "Create an Example app.",
+      "Add the credentials.",
+      "Save, enable, and test the channel."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "Example client ID",
+        "help": "Copy it from the Example console."
+      }
+    },
+    "actions": {
+      "copyManifest": "Copy manifest"
+    },
+    "presets": {
+      "default": "Default"
+    }
+  },
+  "custom": {
+    "connected": "{{name}} is connected."
+  }
+}
+```
+
+Field messages are keyed by the config path after `channels.<channel>.`, with remaining punctuation converted to underscores. For example, `channels.signal.dm.allowFrom` maps to `setup.fields.dm_allowFrom`. Action and preset messages use the IDs declared in the TypeScript contribution.
+
+Custom channel components should read dynamic copy with `channelTranslator(t, "<channel>")`; keep the English fallback adjacent to the call so an incomplete third-party translation still renders useful text. Aliases reuse the owning channel's locale namespace rather than duplicating translations.
+
+The dependency direction is intentional:
+
+- [`webui/src/i18n/index.ts`](../webui/src/i18n/index.ts) imports the pure JSON [`channel-plugins/locale-registry.ts`](../webui/src/channel-plugins/locale-registry.ts).
+- The locale registry discovers only `nanobot/channels/*/webui/locales/*.json` and must not import the UI registry, React, or TSX.
+- Settings components may consume both the UI registry and locale registry.
+- Channel UI code may use shared types and generic settings components, but core settings code must not add `if (feature.name === "...")` branches for individual channels.
+
+This separation prevents i18n initialization from eagerly loading every channel React component and keeps channel-specific ownership below the channel package.
+
+### Tests and Definition of Done
+
+Put channel-specific Python tests in `nanobot/channels/<channel>/tests/`. Keep only shared registry, manager, base-class, and cross-channel contract tests in `tests/channels/`. Release builds exclude package-local tests while the repository test configuration discovers both trees.
+
+For a focused built-in channel change, run the smallest relevant set:
+
+```bash
+uv run pytest nanobot/channels/<channel>/tests -q
+
+cd webui
+bun run test -- src/tests/channel-locale-registry.test.ts src/tests/channel-ui-registry.test.ts src/tests/channel-identity.test.ts
+bun run lint
+bun run build
+```
+
+Before considering the change complete, verify all of the following:
+
+- The manifest can be discovered without importing the runtime or optional platform SDK.
+- `ChannelSetupSpec` contains every writable field and rejects unknown fields.
+- The TypeScript field, action, and preset IDs have matching English locale messages.
+- Every supported locale matches the English key shape and interpolation variables.
+- Generic settings copy remains in core `common.json`; channel-specific copy remains inside the channel package.
+- User-facing WebUI changes work through the built frontend served by a real gateway, including language switching and refresh persistence.
+- Markdown prose paragraphs and individual list items remain on one source line; let the renderer handle visual wrapping.
+
 ## BaseChannel API
 
 ### Required (abstract)
@@ -207,15 +338,9 @@ The agent receives the message and processes it. Replies arrive in your `send()`
 
 #### Outbound delivery contract
 
-A normal return from `send()` means either the visible payload was accepted by the
-platform transport/API, or the channel deliberately had nothing to deliver (for example,
-an empty progress event). Do not log and return when the client is disconnected, still
-starting, or the platform rejects the request. Raise an exception so `ChannelManager` can
-apply the shared retry policy.
+A normal return from `send()` means either the visible payload was accepted by the platform transport/API, or the channel deliberately had nothing to deliver, such as an empty progress event. Do not log and return when the client is disconnected, still starting, or the platform rejects the request. Raise an exception so `ChannelManager` can apply the shared retry policy.
 
-`send()` may run as soon as `is_running` becomes true. If a channel sets `_running` before
-its transport is ready, it must keep raising until delivery can be attempted safely. Small
-platform-specific retries are fine, but the final failure must still reach the manager.
+`send()` may run as soon as `is_running` becomes true. If a channel sets `_running` before its transport is ready, it must keep raising until delivery can be attempted safely. Small platform-specific retries are fine, but the final failure must still reach the manager.
 
 ### Interactive Login
 
@@ -269,9 +394,7 @@ nanobot channels login <channel_name> --force  # re-authenticate
 
 ### Optional management contract
 
-Management hooks are declared on `BaseChannel`; plugins do not need to discover
-private method names or duplicate WebUI routing logic. Most single-instance
-plugins only need `setup_spec()`:
+Management hooks are declared on `BaseChannel`; plugins do not need to discover private method names or duplicate WebUI routing logic. Most single-instance external plugins only need `setup_spec()`; built-ins declare the equivalent `ChannelSetupSpec` in `manifest.py`:
 
 ```python
 from nanobot.channels.contracts import (
@@ -296,75 +419,23 @@ class WebhookChannel(BaseChannel):
         )
 ```
 
-`ChannelSetupSpec` is authoritative for writable field names, field types,
-choices, defaults, required setup, secret redaction, and optional backend validation.
-The settings API rejects fields outside this contract.
+`ChannelSetupSpec` is authoritative for writable field names, field types, choices, defaults, required setup, secret redaction, and optional backend validation. The settings API rejects fields outside this contract.
 
-Multi-instance plugins additionally return `ChannelInstanceSpec` objects from
-`instance_specs()` and preserve their persisted envelope in
-`update_instance_config()`. When they expose a setup contract, they must also
-set `ChannelSetupSpec(multi_instance=True)`; nanobot rejects a setup/runtime
-instance-mode mismatch. The shared contract enforces these invariants:
+Multi-instance plugins additionally return `ChannelInstanceSpec` objects from `instance_specs()` and preserve their persisted envelope in `update_instance_config()`. When they expose a setup contract, they must also set `ChannelSetupSpec(multi_instance=True)`; nanobot rejects a setup/runtime instance-mode mismatch. The shared contract enforces these invariants:
 
 - every `instance_id` is non-empty and unique;
-- `runtime_name(instance_id)` is the single source of routing names, and every
-  derived name is unique and is either the channel name or starts with
-  `<channel-name>.`;
+- `runtime_name(instance_id)` is the single source of routing names, and every derived name is unique and is either the channel name or starts with `<channel-name>.`;
 - runtime names cannot overwrite a runtime already owned by another channel;
-- settings instance summaries are generated from `instance_specs()` and
-  `setup_spec()`. They contain the authoritative `enabled` and `configured`
-  state plus secret-safe `config_values` and `configured_fields` for the
-  generic instance editor;
-- `feature_instances()` may return `None` or presentation overrides containing
-  an `id` plus `name`, `display_name`, or `avatar_url`. It cannot override
-  runtime state or the configuration snapshot.
+- settings instance summaries are generated from `instance_specs()` and `setup_spec()`. They contain the authoritative `enabled` and `configured` state plus secret-safe `config_values` and `configured_fields` for the generic instance editor;
+- `feature_instances()` may return `None` or presentation overrides containing an `id` plus `name`, `display_name`, or `avatar_url`. It cannot override runtime state or the configuration snapshot.
 
-`ChannelInstanceSpec` contains only `instance_id` and the instance config;
-nanobot derives its runtime name. Single-instance plugins keep ownership of
-their entire config, including a field named `instances`. Only plugins that
-override `instance_specs()` opt into instance expansion.
+`ChannelInstanceSpec` contains only `instance_id` and the instance config; nanobot derives its runtime name. Single-instance plugins keep ownership of their entire config, including a field named `instances`. Only plugins that override `instance_specs()` opt into instance expansion.
 
-The entry-point/config section name owns every runtime produced from that
-section. Class inheritance does not transfer runtime ownership to another
-entry point.
+The entry-point/config section name owns every runtime produced from that section. Class inheritance does not transfer runtime ownership to another entry point.
 
-Return a concrete iterable or generator from `instance_specs()`; nanobot
-materializes and validates it before constructing any runtime. Raise an
-exception for malformed persisted data rather than silently changing instance
-identity. Keep metadata refresh behind `refresh_feature_metadata()` so feature
-GET requests remain read-only.
+Return a concrete iterable or generator from `instance_specs()`; nanobot materializes and validates it before constructing any runtime. Raise an exception for malformed persisted data rather than silently changing instance identity. Keep metadata refresh behind `refresh_feature_metadata()` so feature GET requests remain read-only.
 
-Every built-in channel is a self-contained package at
-`nanobot/channels/<channel>/`. At minimum it owns `__init__.py`, `manifest.py`,
-and `runtime.py`; channel-specific helpers, tests, and WebUI files stay below
-that same directory. Do not add built-in runtime modules directly under
-`nanobot/channels/`, a parallel manifest tree, or a central per-channel UI
-catalog.
-
-Put channel-specific Python tests in `nanobot/channels/<channel>/tests/`.
-Keep only shared registry, manager, base-class, and cross-channel contract tests
-in `tests/channels/`. The repository test configuration discovers both trees,
-while release builds exclude the package-local test directories.
-
-The dependency-free `manifest.py` exports a typed `ChannelPlugin` with a
-package-relative lazy runtime target such as `runtime:TelegramChannel`, its
-setup contract, optional dependency name, capabilities, default activation,
-and optional WebUI entry path. Runtime code and platform SDKs must not be
-imported while this manifest is discovered. The package `__init__.py` keeps the
-historical import surface through lazy runtime exports for the same reason.
-
-Channel-owned WebUI source is part of the Python distribution and is compiled
-into the shared WebUI bundle during release builds. The manifest path is
-authoritative: candidate TypeScript modules are bundled from channel packages,
-but the WebUI activates only the entry named by the backend feature payload.
-The entry exports one default `ChannelUiContribution` containing the channel's
-presentation metadata and any custom panel or connection flow. Its channel
-identity is derived from the package directory and must not be declared a
-second time in TypeScript.
-
-Shared declarative manifest constructors live in
-`nanobot/channels/_manifest.py`. A built-in manifest's `multi_instance` value
-must match whether its runtime channel overrides `instance_specs()`.
+For repository-owned package layout, WebUI ownership, and localization rules, see [Built-in Channel Packages](#built-in-channel-packages).
 
 ### Optional (streaming)
 
