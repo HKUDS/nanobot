@@ -3235,6 +3235,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     config = Config()
     config.gateway.port = 18791
     seen: dict[str, object] = {}
+    shutdown_order: list[str] = []
 
     class _FakeSessionManager:
         def flush_all(self) -> int:
@@ -3274,9 +3275,11 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
                 await asyncio.Event().wait()
             finally:
                 seen["channel_task_cleaned_up"] = True
+                shutdown_order.append("channel_task_cleaned_up")
 
         async def stop_all(self) -> None:
             seen["channels_stopped"] = True
+            shutdown_order.append("channels_stopped")
 
     class _FakeCronService:
         def __init__(self, _store_path: Path) -> None:
@@ -3343,6 +3346,9 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
     assert seen["shutdown_handlers_restored"] is True
+    # Channel cleanup must run before cancellation drains the manager task.
+    # DingTalk's stream SDK can otherwise swallow cancellation and reconnect.
+    assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]
 
 
 def test_serve_uses_api_config_defaults_and_workspace_override(

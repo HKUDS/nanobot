@@ -2119,6 +2119,9 @@ def _run_gateway(
                         await shutdown_task
                 cron.stop()
                 agent.stop()
+                # Some SDKs swallow task cancellation while attempting to reconnect.
+                # Close channel transports before waiting for their runners to exit.
+                await channels.stop_all()
                 for task in tasks:
                     if not task.done():
                         task.cancel()
@@ -2127,7 +2130,6 @@ def _run_gateway(
                 if runtime_tasks is not None and not runtime_tasks_drained:
                     with suppress(asyncio.CancelledError, Exception):
                         await runtime_tasks
-                await channels.stop_all()
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
