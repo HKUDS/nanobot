@@ -19,14 +19,25 @@ permissions:
 
 jobs:
   test:
+    name: Python (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON('["ubuntu-latest","windows-latest"]') }}
-        # CI concentrates on newer runtimes (3.11/3.12 still supported per pyproject requires-python).
-        python-version: ${{ fromJSON('["3.13","3.14"]') }}
+        include:
+          - name: minimum, 3.11
+            os: ubuntu-latest
+            python-version: "3.11"
+            coverage: false
+          - name: latest, 3.14 + coverage
+            os: ubuntu-latest
+            python-version: "3.14"
+            coverage: true
+          - name: Windows, 3.14
+            os: windows-latest
+            python-version: "3.14"
+            coverage: false
 
     steps:
       - uses: actions/checkout@v4
@@ -47,10 +58,21 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Lint with ruff
-        run: uv run ruff check nanobot --select F
+        if: matrix.coverage
+        run: uv run ruff check nanobot tests
 
-      - name: Run tests
-        run: uv run python -m pytest tests/ --cov=nanobot --cov-report=term-missing:skip-covered
+      - name: Run tests with coverage
+        if: matrix.coverage
+        run: >-
+          uv run python -m pytest tests/
+          --cov=nanobot --cov-report=term-missing:skip-covered
+          --durations=25 --durations-min=1.0
+
+      - name: Run compatibility tests
+        if: ${{ !matrix.coverage }}
+        run: >-
+          uv run python -m pytest tests/
+          --durations=25 --durations-min=1.0
 
   webui:
     runs-on: ubuntu-latest
@@ -64,9 +86,13 @@ jobs:
         with:
           bun-version: 1.3.6
 
+      - name: Verify npm lockfile
+        working-directory: webui
+        run: npm ci --ignore-scripts --dry-run
+
       - name: Install WebUI dependencies
         working-directory: webui
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Lint WebUI
         working-directory: webui

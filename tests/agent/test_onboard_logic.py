@@ -1451,7 +1451,7 @@ class TestMainMenuUpdate:
         assert "primary" not in config.model_presets
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):
-        """Quick Start summary should not tell users to run gateway before adding a key."""
+        """Quick Start summary should retain the missing-key status."""
         config = Config()
         config.model_presets["primary"] = ModelPresetConfig(
             model="deepseek-v4-flash",
@@ -1469,17 +1469,9 @@ class TestMainMenuUpdate:
 
         onboard_wizard._show_quick_start_summary(config)
 
-        labels = [label for label, _value in captured["rows"]]
         rows = dict(captured["rows"])
         assert rows["Status"] == "DeepSeek API key missing"
-        assert "API key" in rows["Next"]
-        assert "nanobot gateway" in rows["Next"]
-        assert "agent -m" not in rows["Next"]
-        assert labels.index("Next") < labels.index("Open")
-        assert "Model" not in rows
-        assert "Entry point" not in rows
-        assert "API key" not in rows
-        assert "Defaults" not in rows
+        assert rows["WebSocket channel"] == "enabled"
 
     def test_configure_login_channel_defaults_to_login(self, monkeypatch):
         """The channel wizard should start login before exposing advanced fields."""

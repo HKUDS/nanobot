@@ -21,6 +21,58 @@ from typing import Any
 import httpx
 import websockets
 from websockets.asyncio.client import ClientConnection
+from websockets.datastructures import Headers
+from websockets.http11 import Request as WsRequest
+
+from nanobot.channels.websocket import WebSocketChannel
+from nanobot.webui.http_utils import http_response
+
+_IN_PROCESS_HTTP_CHANNELS: dict[int, InProcessHttpChannel] = {}
+
+
+class _HttpConnection:
+    remote_address = ("127.0.0.1", 12345)
+
+    @staticmethod
+    def respond(status: int, body: str) -> object:
+        return http_response(body.encode("utf-8"), status=status)
+
+
+class InProcessHttpChannel(WebSocketChannel):
+    """Exercise gateway HTTP dispatch without booting a socket per route test."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._test_stop_event = asyncio.Event()
+        _IN_PROCESS_HTTP_CHANNELS[self.config.port] = self
+
+    async def start(self) -> None:
+        self._running = True
+        await self._test_stop_event.wait()
+        self._running = False
+
+    async def stop(self) -> None:
+        self._test_stop_event.set()
+        if _IN_PROCESS_HTTP_CHANNELS.get(self.config.port) is self:
+            _IN_PROCESS_HTTP_CHANNELS.pop(self.config.port, None)
+
+
+async def _in_process_http_get(
+    channel: InProcessHttpChannel,
+    request: httpx.Request,
+) -> httpx.Response:
+    ws_request = WsRequest(
+        request.url.raw_path.decode("ascii"),
+        Headers(list(request.headers.multi_items())),
+    )
+    response = await channel._dispatch_http(_HttpConnection(), ws_request)
+    assert response is not None
+    return httpx.Response(
+        response.status_code,
+        headers=list(response.headers.raw_items()),
+        content=response.body,
+        request=request,
+    )
 
 
 @dataclass
@@ -89,11 +141,19 @@ class WsTestClient:
         self._extra_headers = extra_headers
         self._ws: ClientConnection | None = None
 
-    async def connect(self) -> None:
-        self._ws = await websockets.connect(
-            self._uri,
-            additional_headers=self._extra_headers,
-        )
+    async def connect(self, timeout: float = 2.0) -> None:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            try:
+                self._ws = await websockets.connect(
+                    self._uri,
+                    additional_headers=self._extra_headers,
+                )
+                return
+            except OSError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.01)
 
     async def close(self) -> None:
         if self._ws:
@@ -186,6 +246,31 @@ class WsTestClient:
 # -- Token issuance helpers -----------------------------------------------
 
 
+async def http_get(
+    url: str,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """GET a local test server without loading an unused TLS trust store."""
+    request = httpx.Request("GET", url, headers=headers or {})
+    channel = _IN_PROCESS_HTTP_CHANNELS.get(request.url.port)
+    if channel is not None:
+        return await _in_process_http_get(channel, request)
+
+    deadline = asyncio.get_running_loop().time() + 2.0
+    while True:
+        try:
+            async with httpx.AsyncClient(
+                timeout=5.0,
+                trust_env=False,
+                verify=False,
+            ) as client:
+                return await client.get(url, headers=headers or {})
+        except httpx.ConnectError:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise
+            await asyncio.sleep(0.01)
+
+
 async def issue_token(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -201,10 +286,7 @@ async def issue_token(
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
 
-    loop = asyncio.get_running_loop()
-    resp = await loop.run_in_executor(
-        None, lambda: httpx.get(url, headers=headers, timeout=5.0)
-    )
+    resp = await http_get(url, headers)
     try:
         data = resp.json()
     except Exception:

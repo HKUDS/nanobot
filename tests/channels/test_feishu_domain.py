@@ -1,8 +1,6 @@
 """Tests for Feishu/Lark domain configuration."""
 from unittest.mock import MagicMock
 
-import pytest
-
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig
 

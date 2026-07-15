@@ -2651,8 +2651,8 @@ async def test_start_all_creates_dispatch_task():
 
 
 @pytest.mark.asyncio
-async def test_notify_restart_done_enqueues_outbound_message():
-    """Restart notice should schedule send_with_retry for target channel."""
+async def test_notify_restart_done_waits_until_channel_starts():
+    """Restart notice should not be sent before the target channel starts."""
     fake_config = SimpleNamespace(
         channels=ChannelsConfig(),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
@@ -2661,18 +2661,61 @@ async def test_notify_restart_done_enqueues_outbound_message():
     mgr = ChannelManager.__new__(ChannelManager)
     mgr.config = fake_config
     mgr.bus = MessageBus()
-    mgr.channels = {"feishu": _StartableChannel(fake_config, mgr.bus)}
+    channel = _StartableChannel(fake_config, mgr.bus)
+    mgr.channels = {"feishu": channel}
     mgr._dispatch_task = None
     mgr._send_with_retry = AsyncMock()
 
     notice = RestartNotice(channel="feishu", chat_id="oc_123", started_at_raw="100.0")
     with patch("nanobot.channels.manager.consume_restart_notice_from_env", return_value=notice):
-        mgr._notify_restart_done_if_needed()
+        task = mgr._notify_restart_done_if_needed()
 
     await asyncio.sleep(0)
+    mgr._send_with_retry.assert_not_awaited()
+
+    channel._running = True
+    assert task is not None
+    await asyncio.wait_for(task, timeout=1.0)
+
     mgr._send_with_retry.assert_awaited_once()
     sent_channel, sent_msg = mgr._send_with_retry.await_args.args
-    assert sent_channel is mgr.channels["feishu"]
+    assert sent_channel is channel
     assert sent_msg.channel == "feishu"
     assert sent_msg.chat_id == "oc_123"
     assert sent_msg.content.startswith("Restart completed")
+
+
+@pytest.mark.asyncio
+async def test_restart_notice_retries_until_running_channel_accepts_delivery():
+    """A running flag must not make an early transport failure final."""
+
+    class _EventuallyDeliverableChannel(_StartableChannel):
+        def __init__(self, config, bus):
+            super().__init__(config, bus)
+            self.attempts = 0
+            self.sent: OutboundMessage | None = None
+
+        async def send(self, msg: OutboundMessage) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("transport not ready")
+            self.sent = msg
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=1),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    channel = _EventuallyDeliverableChannel(fake_config, mgr.bus)
+    channel._running = True
+    mgr.channels = {"discord": channel}
+
+    notice = RestartNotice(channel="discord", chat_id="123", started_at_raw="")
+    with patch("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,)):
+        await mgr._send_restart_notice_when_started(notice, timeout_s=0.1, poll_s=0.01)
+
+    assert channel.attempts == 2
+    assert channel.sent is not None
+    assert channel.sent.content == "Restart completed."

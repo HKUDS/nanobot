@@ -18,6 +18,7 @@ import {
   splitCapabilityMentionSegments,
   type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
+import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   Activity,
   ArrowUp,
@@ -88,55 +89,15 @@ import {
   logoFallbackUrls,
   providerBrand,
 } from "@/lib/provider-brand";
+import {
+  isSideChannelLifecycle,
+  slashCommandLifecycle,
+} from "@/lib/slash-command";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
 type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
-type ResolvedSlashCommandLifecycle =
-  | "side_channel"
-  | "finalize_active_turn"
-  | "stop_active_turn"
-  | "agent_turn";
-
-function slashCommandName(content: string): string {
-  return content.split(/\s+/, 1)[0];
-}
-
-function slashCommandArgs(content: string, commandName: string): string {
-  return content.slice(commandName.length).trim();
-}
-
-function matchingSlashCommand(content: string, slashCommands: SlashCommand[]): SlashCommand | null {
-  const commandName = slashCommandName(content);
-  if (!commandName.startsWith("/")) return null;
-  const command = slashCommands.find((item) => item.command === commandName);
-  if (!command) return null;
-  if (slashCommandArgs(content, command.command).length > 0 && !command.acceptsArgs) return null;
-  return command;
-}
-
-function slashCommandLifecycle(
-  content: string,
-  slashCommands: SlashCommand[],
-): ResolvedSlashCommandLifecycle | null {
-  const command = matchingSlashCommand(content, slashCommands);
-  if (!command) return null;
-  if (command.lifecycle === "agent_turn_with_args") {
-    return slashCommandArgs(content, command.command).length > 0
-      ? "agent_turn"
-      : "side_channel";
-  }
-  return command.lifecycle;
-}
-
-function isSideChannelLifecycle(lifecycle: ResolvedSlashCommandLifecycle | null): boolean {
-  return (
-    lifecycle === "side_channel"
-    || lifecycle === "finalize_active_turn"
-    || lifecycle === "stop_active_turn"
-  );
-}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -2553,7 +2514,7 @@ function MentionCandidateLogo({
 }) {
   const color = (candidate.kind === "cli"
     ? candidate.app.brand_color
-    : candidate.preset.brand_color) || "hsl(var(--primary))";
+    : candidate.preset.brand_color) || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const rawLogoUrl = candidate.kind === "cli" ? candidate.app.logo_url : candidate.preset.logo_url;
   const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);

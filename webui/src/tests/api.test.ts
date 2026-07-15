@@ -5,6 +5,7 @@ import {
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
+  fetchFilePreviewAvailability,
   fetchAutomations,
   fetchApiService,
   fetchCliApps,
@@ -100,6 +101,32 @@ describe("webui API helpers", () => {
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("probes file preview availability without requesting contents", async () => {
+    await expect(
+      fetchFilePreviewAvailability("tok", "websocket:chat-1", "notes/ready.md"),
+    ).resolves.toBe(true);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/file-preview?path=notes%2Fready.md&probe=1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("returns false when a file preview probe is unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ available: false }),
+    } as Response);
+
+    await expect(
+      fetchFilePreviewAvailability("tok", "websocket:chat-1", "notes/missing.md"),
+    ).resolves.toBe(false);
   });
 
   it("percent-encodes websocket keys when fetching session automations", async () => {

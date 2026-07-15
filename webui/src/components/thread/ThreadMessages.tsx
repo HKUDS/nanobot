@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -12,6 +12,7 @@ interface ThreadMessagesProps {
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
@@ -51,6 +52,7 @@ export function ThreadMessages({
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
+  slashCommands = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
@@ -102,6 +104,7 @@ export function ThreadMessages({
                   isTurnStreaming={liveActivityClusterIndices.has(index)}
                   hasBodyBelow={hasBodyBelow}
                   turnLatencyMs={unit.turnLatencyMs}
+                  startedAtMs={unit.startedAtMs}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   onOpenFilePreview={onOpenFilePreview}
@@ -109,13 +112,14 @@ export function ThreadMessages({
               ) : (
                 <MessageBubble
                   message={unit.message}
-                  showAssistantCopyAction={
+                  showCopyAction={
                     unit.message.role === "assistant"
                       ? copyFlags[index]
                       : true
                   }
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  slashCommands={slashCommands}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromHere={
                     onForkFromMessage && forkIndex !== undefined

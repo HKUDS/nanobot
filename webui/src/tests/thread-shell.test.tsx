@@ -231,6 +231,59 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
+    const client = makeClient();
+    let resolveProbe!: (value: Response) => void;
+    const probe = new Promise<Response>((resolve) => {
+      resolveProbe = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("websocket%3Apreview-error/webui-thread")) {
+        return Promise.resolve(httpJson(transcriptFromSimpleMessages([
+          { role: "assistant", content: "Unreadable file: `prompts/dream.md`" },
+        ])));
+      }
+      if (url.includes("websocket%3Apreview-error/file-preview?")) return probe;
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("preview-error")}
+        title="Preview error"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const reference = await screen.findByTestId("inline-file-path");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("file-preview?path=prompts%2Fdream.md&probe=1"),
+      expect.anything(),
+    ));
+    await act(async () => {
+      resolveProbe({
+        ok: false,
+        status: 500,
+        text: async () => "failed to read file",
+        json: async () => ({}),
+      } as Response);
+      await probe;
+      await Promise.resolve();
+    });
+
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).not.toHaveAttribute("tabindex");
+    fireEvent.click(reference);
+    expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
+  });
+
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
     const onGoHome = vi.fn();
@@ -1586,5 +1639,68 @@ describe("ThreadShell", () => {
 
     expect(screen.getByRole("listbox", { name: "Apps" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
+  });
+
+  it("keeps installed app mentions available during transient catalog refresh failures", async () => {
+    const client = makeClient();
+    const payload: CliAppsPayload = {
+      apps: [{
+        name: "obsidian-agent-cli",
+        display_name: "Obsidian",
+        category: "productivity",
+        description: "Obsidian automation",
+        requires: "",
+        source: "harness",
+        entry_point: "cli-anything-obsidian",
+        install_supported: true,
+        installed: true,
+        available: true,
+        status: "installed",
+        logo_url: null,
+        brand_color: "#7C3AED",
+        skill_installed: true,
+      }],
+      installed_count: 1,
+      catalog_updated_at: "2026-07-14",
+    };
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input).includes("/api/settings/cli-apps?installed_only=1")) {
+        throw new Error("temporary catalog failure");
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as Response;
+    });
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-cli-refresh")}
+        title="Chat chat-cli-refresh"
+        onToggleSidebar={() => {}}
+        onGoHome={() => {}}
+        onNewChat={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(CLI_APPS_CHANGED_EVENT, { detail: payload }));
+    });
+    const mention = "@obsidian-agent-cli";
+    fireEvent.change(input, { target: { value: mention, selectionStart: mention.length } });
+    expect(screen.getByRole("option", { name: /@obsidian-agent-cli/i })).toBeInTheDocument();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("option", { name: /@obsidian-agent-cli/i })).toBeInTheDocument();
+    expect(screen.getByTestId("composer-cli-mention-obsidian-agent-cli")).toHaveTextContent(
+      "@obsidian-agent-cli",
+    );
   });
 });

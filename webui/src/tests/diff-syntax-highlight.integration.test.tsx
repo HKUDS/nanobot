@@ -40,7 +40,13 @@ describe("DiffSyntaxHighlight with Prism", () => {
       </ThemeProvider>,
     );
 
-    const highlighted = await screen.findByTestId("syntax-highlighted-diff-hunk");
+    // Full-suite workers can keep the first Prism grammar import busy for more
+    // than Testing Library's one-second default, especially on Windows.
+    const highlighted = await screen.findByTestId(
+      "syntax-highlighted-diff-hunk",
+      {},
+      { timeout: 10_000 },
+    );
     await waitFor(
       () => {
         const tokens = highlighted.querySelectorAll<HTMLElement>(

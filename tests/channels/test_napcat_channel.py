@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.napcat import NapcatChannel, NapcatConfig
 
@@ -50,6 +51,16 @@ class _FakeHttp:
 
 def _channel(config: NapcatConfig | None = None) -> NapcatChannel:
     return NapcatChannel(config or NapcatConfig(allow_from=["*"]), MessageBus())
+
+
+@pytest.mark.asyncio
+async def test_send_raises_while_websocket_is_not_connected() -> None:
+    channel = _channel()
+
+    with pytest.raises(RuntimeError, match="not connected"):
+        await channel.send(
+            OutboundMessage(channel="napcat", chat_id="private:123", content="hello")
+        )
 
 
 @pytest.mark.asyncio

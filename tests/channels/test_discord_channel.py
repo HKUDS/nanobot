@@ -659,18 +659,19 @@ async def test_on_message_marks_failed_attachment_download(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_send_warns_when_client_not_ready() -> None:
-    # Sending without a running/ready client should be a safe no-op.
+async def test_send_raises_when_client_not_ready() -> None:
+    # The manager must be able to retry while Discord is still connecting.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
-    await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+    with pytest.raises(RuntimeError, match="client is not ready"):
+        await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
 
     assert channel._typing_tasks == {}
 
 
 @pytest.mark.asyncio
-async def test_send_skips_when_channel_not_cached() -> None:
-    # Outbound sends should be skipped when the destination channel is not resolvable.
+async def test_send_raises_when_channel_cannot_be_resolved() -> None:
+    # The manager must be able to retry transient channel-resolution failures.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = DiscordBotClient(owner, intents=discord.Intents.none())
     fetch_calls: list[int] = []
@@ -681,7 +682,10 @@ async def test_send_skips_when_channel_not_cached() -> None:
 
     client.fetch_channel = fetch_channel  # type: ignore[method-assign]
 
-    await client.send_outbound(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+    with pytest.raises(RuntimeError, match="not found"):
+        await client.send_outbound(
+            OutboundMessage(channel="discord", chat_id="123", content="hello")
+        )
 
     assert client.get_channel(123) is None
     assert fetch_calls == [123]

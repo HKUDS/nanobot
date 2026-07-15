@@ -75,10 +75,12 @@ class OpenAICodexProvider(LLMProvider):
         if tools:
             body["tools"] = convert_tools(tools)
 
+        stage = "oauth_token"
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(token.account_id, token.access)
 
+            stage = "codex_request"
             try:
                 content, tool_calls, finish_reason, usage, reasoning_content = await _request_codex(
                     DEFAULT_CODEX_URL, headers, body, verify=True,
@@ -109,8 +111,9 @@ class OpenAICodexProvider(LLMProvider):
             response = _codex_error_response(e)
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
             logger.warning(
-                "Codex API request failed: type={} kind={} retryable={} status={} "
+                "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
                 "error_type={} error_code={} retry_after={} summary={}",
+                stage,
                 exc_type,
                 response.error_kind,
                 response.error_should_retry,

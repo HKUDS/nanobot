@@ -1,7 +1,9 @@
 import {
   Children,
   isValidElement,
+  useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
@@ -14,6 +16,10 @@ import remarkMath from "remark-math";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
+import {
+  useFilePreviewAvailabilityResolver,
+  type FilePreviewAvailabilityResolver,
+} from "@/components/FilePreviewAvailabilityContext";
 import {
   FileReferenceChip,
   isFilePatternReference,
@@ -49,6 +55,50 @@ type InlineLinkPreview = {
   prefix?: string;
   title: string;
 };
+
+type AvailabilityResult = {
+  available: boolean;
+  path: string;
+  resolve: FilePreviewAvailabilityResolver;
+};
+
+function InferredFileReferenceChip({
+  path,
+  onOpen,
+}: {
+  path: string;
+  onOpen?: (path: string) => void;
+}) {
+  const resolve = useFilePreviewAvailabilityResolver();
+  const [result, setResult] = useState<AvailabilityResult | null>(null);
+
+  useEffect(() => {
+    if (!resolve || !onOpen) return;
+    let cancelled = false;
+    resolve(path)
+      .then((available) => {
+        if (!cancelled) setResult({ available, path, resolve });
+      })
+      .catch(() => {
+        if (!cancelled) setResult({ available: false, path, resolve });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onOpen, path, resolve]);
+
+  const resolvedAvailable = !resolve || (
+    result?.resolve === resolve
+    && result.path === path
+    && result.available
+  );
+  return (
+    <FileReferenceChip
+      path={path}
+      onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
+    />
+  );
+}
 
 const SAFE_INLINE_HTML_TAGS = new Set(["mark", "sub", "sup"]);
 
@@ -402,7 +452,12 @@ export default function MarkdownTextRenderer({
         }
         const raw = String(kids).replace(/\n$/, "");
         if (isLikelyFilePath(raw)) {
-          return <FileReferenceChip path={raw} onOpen={onOpenFilePreview} />;
+          return (
+            <InferredFileReferenceChip
+              path={raw}
+              onOpen={onOpenFilePreview}
+            />
+          );
         }
         /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
         const widePlainBlock = raw.includes("\n") || raw.length > 120;
