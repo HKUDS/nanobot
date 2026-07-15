@@ -1,10 +1,15 @@
 """Tests for document text extraction utilities."""
 
 from pathlib import Path
+from zipfile import ZipFile
+
+import pytest
 
 from nanobot.utils.document import (
     SUPPORTED_EXTENSIONS,
+    PdfSafetyError,
     _is_text_extension,
+    extract_pdf_pages,
     extract_text,
 )
 
@@ -251,6 +256,76 @@ class TestExtractText:
         result = extract_text(pptx_file)
         assert result is not None
         assert "Inside group" in result
+
+    def test_extract_text_rejects_oversized_office_archive(self, tmp_path, monkeypatch):
+        office_file = tmp_path / "oversized.docx"
+        with ZipFile(office_file, "w") as archive:
+            archive.writestr("word/document.xml", "x" * 32)
+
+        monkeypatch.setattr("nanobot.utils.document._MAX_OFFICE_UNCOMPRESSED_SIZE", 16)
+
+        assert "Office document expands beyond" in (extract_text(office_file) or "")
+
+    def test_extract_text_stops_streaming_xlsx_at_text_limit(self, tmp_path, monkeypatch):
+        from openpyxl import Workbook, load_workbook
+
+        xlsx_file = tmp_path / "large.xlsx"
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet()
+        for index in range(100):
+            ws.append([f"row-{index}-" + "x" * 20])
+        wb.save(xlsx_file)
+
+        visited = 0
+        real_load_workbook = load_workbook
+
+        def tracked_load_workbook(*args, **kwargs):
+            workbook = real_load_workbook(*args, **kwargs)
+            worksheet = workbook[workbook.sheetnames[0]]
+            original_iter_rows = worksheet.iter_rows
+
+            def tracked_rows(*row_args, **row_kwargs):
+                nonlocal visited
+                for row in original_iter_rows(*row_args, **row_kwargs):
+                    visited += 1
+                    yield row
+
+            worksheet.iter_rows = tracked_rows
+            return workbook
+
+        monkeypatch.setattr("openpyxl.load_workbook", tracked_load_workbook)
+        monkeypatch.setattr("nanobot.utils.document._MAX_TEXT_LENGTH", 80)
+
+        result = extract_text(xlsx_file)
+
+        assert result is not None
+        assert "truncated at 80 chars" in result
+        assert visited < 100
+
+    def test_extract_pdf_pages_rejects_large_content_stream(self, tmp_path, monkeypatch):
+        class _Contents:
+            @staticmethod
+            def get_data():
+                return b"x" * 17
+
+        class _Page:
+            @staticmethod
+            def get_contents():
+                return _Contents()
+
+            @staticmethod
+            def extract_text():
+                return "should not be reached"
+
+        class _Reader:
+            def __init__(self, *_args, **_kwargs):
+                self.pages = [_Page()]
+
+        monkeypatch.setattr("pypdf.PdfReader", _Reader)
+        monkeypatch.setattr("nanobot.utils.document._MAX_PDF_CONTENT_STREAM_SIZE", 16)
+
+        with pytest.raises(PdfSafetyError, match="content stream exceeds"):
+            extract_pdf_pages(tmp_path / "large.pdf")
 
     def test_extract_text_pdf_not_found(self, tmp_path: Path):
         """Test that missing PDF files return error string."""

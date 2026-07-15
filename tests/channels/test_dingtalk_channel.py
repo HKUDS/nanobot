@@ -2,6 +2,7 @@ import asyncio
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -17,6 +18,7 @@ if not DINGTALK_AVAILABLE:
     pytest.skip("DingTalk dependencies not installed (dingtalk-stream)", allow_module_level=True)
 
 import nanobot.channels.dingtalk as dingtalk_module
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.dingtalk import DingTalkChannel, DingTalkConfig, NanobotDingTalkHandler
 
@@ -862,6 +864,35 @@ async def test_send_batch_message_returns_false_on_api_error() -> None:
         "token", "user123", "sampleMarkdown", {"text": "hello"}
     )
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_access_token_is_unavailable(monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    monkeypatch.setattr(channel, "_get_access_token", AsyncMock(return_value=None))
+
+    with pytest.raises(RuntimeError, match="access token unavailable"):
+        await channel.send(
+            OutboundMessage(channel="dingtalk", chat_id="user123", content="hello")
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_text_is_not_delivered(monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    monkeypatch.setattr(channel, "_get_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(channel, "_send_markdown_text", AsyncMock(return_value=False))
+
+    with pytest.raises(RuntimeError, match="text message was not delivered"):
+        await channel.send(
+            OutboundMessage(channel="dingtalk", chat_id="user123", content="hello")
+        )
 
 
 @pytest.mark.asyncio

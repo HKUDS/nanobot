@@ -188,6 +188,8 @@ _BRAND_ALIASES: dict[str, str] = {
     "lark-cli": "feishu",
     "minimax-cli": "minimax",
     "obsidian-cli": "obsidian",
+    "obsidian-agent": "obsidian",
+    "obsidian-agent-cli": "obsidian",
     "slay-the-spire-2": "slay-the-spire-ii",
     "slay-the-spire-ii": "slay-the-spire-ii",
     "unimol-tools": "unimol-tools",
@@ -761,19 +763,30 @@ class CliAppManager:
 
     def installed_payload(self) -> dict[str, Any]:
         installed = self._load_installed()
+        cached_apps, _ = self.catalog(cache_only=True)
+        cached_by_name = {
+            str(app.get("name") or "").lower(): app
+            for app in cached_apps
+            if app.get("name")
+        }
         rows = []
         for name, raw_entry in sorted(installed.items()):
             entry = raw_entry if isinstance(raw_entry, dict) else {}
             strategy = str(entry.get("strategy") or "bundled")
+            cached_app = cached_by_name.get(str(name).lower(), {})
             app = {
                 "name": str(name),
-                "display_name": str(entry.get("display_name") or name),
-                "category": str(entry.get("category") or "installed"),
-                "description": str(entry.get("description") or ""),
-                "requires": str(entry.get("requires") or ""),
+                "display_name": str(
+                    cached_app.get("display_name") or entry.get("display_name") or name
+                ),
+                "category": str(cached_app.get("category") or entry.get("category") or "installed"),
+                "description": str(cached_app.get("description") or entry.get("description") or ""),
+                "requires": str(cached_app.get("requires") or entry.get("requires") or ""),
                 "_source": str(entry.get("source") or "local"),
                 "entry_point": str(entry.get("entry_point") or ""),
                 "package_manager": strategy,
+                "logo_url": cached_app.get("logo_url") or entry.get("logo_url"),
+                "brand_color": cached_app.get("brand_color") or entry.get("brand_color"),
             }
             rows.append(self._app_payload(app, installed))
         return {
@@ -966,6 +979,17 @@ class CliAppManager:
             "strategy": strategy,
             "installed_at": int(_now()),
         }
+        for field in (
+            "display_name",
+            "category",
+            "description",
+            "requires",
+            "logo_url",
+            "brand_color",
+        ):
+            value = app.get(field)
+            if value not in (None, ""):
+                entry[field] = value
         resolved = shutil.which(entry_point) if entry_point else None
         if resolved:
             entry["entry_point_path"] = resolved

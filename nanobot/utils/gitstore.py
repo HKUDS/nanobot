@@ -214,8 +214,16 @@ class GitStore:
 
     # -- query -----------------------------------------------------------------
 
-    def log(self, max_entries: int = 20) -> list[CommitInfo]:
-        """Return simplified commit log."""
+    def log(
+        self,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> list[CommitInfo]:
+        """Return simplified commit log, optionally filtered by message prefix.
+
+        When filtering, *max_entries* counts matching commits rather than every
+        commit traversed in the repository.
+        """
         if not self.is_initialized():
             return []
 
@@ -239,11 +247,12 @@ class GitStore:
                         time.localtime(commit.commit_time),
                     )
                     msg = commit.message.decode("utf-8", errors="replace").strip()
-                    entries.append(CommitInfo(
-                        sha=sha.hex()[:8],
-                        message=msg,
-                        timestamp=ts,
-                    ))
+                    if message_prefix is None or msg.startswith(message_prefix):
+                        entries.append(CommitInfo(
+                            sha=sha.hex()[:8],
+                            message=msg,
+                            timestamp=ts,
+                        ))
                     sha = commit.parents[0] if commit.parents else None
 
             return entries
@@ -356,7 +365,7 @@ class GitStore:
                     wt_path = self._workspace / path
                     try:
                         wt_text = (
-                            wt_path.read_text(encoding="utf-8")
+                            wt_path.read_bytes().decode("utf-8")
                             if wt_path.exists()
                             else ""
                         )
@@ -368,12 +377,16 @@ class GitStore:
                         changed += 1
                         summary_lines.append(f"{path}: binary or non-UTF-8 file changed")
                         continue
-                    if head_text == wt_text:
+                    # Treat CRLF and LF as equivalent without hiding other
+                    # newline changes, such as a missing final newline.
+                    if head_text.replace("\r\n", "\n") == wt_text.replace("\r\n", "\n"):
                         continue
+                    head_lines = head_text.splitlines()
+                    wt_lines = wt_text.splitlines()
                     changed += 1
                     hunks = list(difflib.unified_diff(
-                        head_text.splitlines(),
-                        wt_text.splitlines(),
+                        head_lines,
+                        wt_lines,
                         fromfile=path,
                         tofile=path,
                         lineterm="",
@@ -424,25 +437,41 @@ class GitStore:
                 return c
         return None
 
-    def show_commit_diff(self, short_sha: str, max_entries: int = 20) -> tuple[CommitInfo, str] | None:
-        """Find a commit and return it with its diff vs the parent."""
-        commits = self.log(max_entries=max_entries)
-        for i, c in enumerate(commits):
-            if c.sha.startswith(short_sha):
-                if i + 1 < len(commits):
-                    diff = self.diff_commits(commits[i + 1].sha, c.sha)
-                else:
-                    diff = ""
-                return c, diff
-        return None
+    def show_commit_diff(
+        self,
+        short_sha: str,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> tuple[CommitInfo, str] | None:
+        """Find a commit and return it with its diff vs its actual parent."""
+        try:
+            from dulwich.repo import Repo
+
+            commits = self.log(max_entries=max_entries, message_prefix=message_prefix)
+            for c in commits:
+                if c.sha.startswith(short_sha):
+                    full_sha = self._resolve_sha(c.sha)
+                    if not full_sha:
+                        return None
+                    with Repo(str(self._workspace)) as repo:
+                        commit = repo[full_sha]
+                        parent = commit.parents[0] if commit.parents else None
+                    diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
+                    return c, diff
+            return None
+        except Exception:
+            logger.exception("Git show_commit_diff failed")
+            return None
 
     # -- restore ---------------------------------------------------------------
 
-    def revert(self, commit: str) -> str | None:
+    def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.
 
         Restores all tracked memory files to the state at the commit's parent,
-        then creates a new commit recording the revert.
+        then creates a new commit recording the revert. When *message_prefix*
+        is provided, commits outside that history are rejected before any files
+        are changed.
 
         Returns the new commit SHA, or None on failure.
         """
@@ -460,6 +489,15 @@ class GitStore:
             with Repo(str(self._workspace)) as repo:
                 commit_obj = repo[full_sha]
                 if commit_obj.type_name != b"commit":
+                    return None
+
+                commit_message = commit_obj.message.decode("utf-8", errors="replace").strip()
+                if message_prefix is not None and not commit_message.startswith(message_prefix):
+                    logger.warning(
+                        "Git revert: commit {} does not match message prefix {!r}",
+                        commit,
+                        message_prefix,
+                    )
                     return None
 
                 if not commit_obj.parents:

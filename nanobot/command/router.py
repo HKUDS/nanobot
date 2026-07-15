@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 if TYPE_CHECKING:
@@ -45,6 +46,8 @@ class CommandContext:
     args: str = ""
     loop: Any = None
     runtime: LLMRuntime | None = None
+    is_user_turn: bool = False
+    turn_scopes: list[AbstractContextManager[Any]] = field(default_factory=list)
 
 
 class CommandRouter:

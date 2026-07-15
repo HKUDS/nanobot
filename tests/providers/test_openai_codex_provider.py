@@ -18,6 +18,7 @@ from nanobot.providers.openai_codex_provider import (
     _request_codex,
     _should_retry_status,
 )
+from nanobot.providers.registry import find_by_name
 
 
 def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -28,6 +29,14 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
         "nanobot.providers.openai_codex_provider.get_codex_token",
         fake_token,
     )
+
+
+def test_codex_default_model_matches_curated_flagship() -> None:
+    spec = find_by_name("openai_codex")
+
+    assert spec is not None
+    assert spec.builtin_models
+    assert OpenAICodexProvider().get_default_model() == spec.builtin_models[0].id
 
 
 class _WarningCaptureLogger:
@@ -285,9 +294,10 @@ async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
     )
     assert log_capture.calls == [
         (
-            "Codex API request failed: type={} kind={} retryable={} status={} "
+            "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
             "error_type={} error_code={} retry_after={} summary={}",
             (
+                "codex_request",
                 "ReadTimeout",
                 "timeout",
                 True,
@@ -405,9 +415,10 @@ async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
     assert response.content == "Error calling Codex (CodexHTTPError): HTTP 500: Codex API request failed"
     assert log_capture.calls == [
         (
-            "Codex API request failed: type={} kind={} retryable={} status={} "
+            "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
             "error_type={} error_code={} retry_after={} summary={}",
             (
+                "codex_request",
                 "CodexHTTPError",
                 "http",
                 True,

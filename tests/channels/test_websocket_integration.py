@@ -60,7 +60,6 @@ def bus() -> MagicMock:
 async def test_ready_event_fields(bus: MagicMock) -> None:
     ch = _ch(bus, 29901)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29901/", client_id="c1") as c:
             r = await c.recv_ready()
@@ -76,7 +75,6 @@ async def test_ready_event_fields(bus: MagicMock) -> None:
 async def test_anonymous_client_gets_generated_id(bus: MagicMock) -> None:
     ch = _ch(bus, 29902)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29902/", client_id="") as c:
             r = await c.recv_ready()
@@ -90,7 +88,6 @@ async def test_anonymous_client_gets_generated_id(bus: MagicMock) -> None:
 async def test_each_connection_unique_chat_id(bus: MagicMock) -> None:
     ch = _ch(bus, 29903)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29903/", client_id="a") as c1:
             async with WsTestClient("ws://127.0.0.1:29903/", client_id="b") as c2:
@@ -107,7 +104,6 @@ async def test_each_connection_unique_chat_id(bus: MagicMock) -> None:
 async def test_plain_text(bus: MagicMock) -> None:
     ch = _ch(bus, 29904)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29904/", client_id="p") as c:
             await c.recv_ready()
@@ -125,7 +121,6 @@ async def test_plain_text(bus: MagicMock) -> None:
 async def test_json_content_field(bus: MagicMock) -> None:
     ch = _ch(bus, 29905)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29905/", client_id="j") as c:
             await c.recv_ready()
@@ -141,7 +136,6 @@ async def test_json_content_field(bus: MagicMock) -> None:
 async def test_json_text_and_message_fields(bus: MagicMock) -> None:
     ch = _ch(bus, 29906)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29906/", client_id="x") as c:
             await c.recv_ready()
@@ -160,7 +154,6 @@ async def test_json_text_and_message_fields(bus: MagicMock) -> None:
 async def test_empty_payload_ignored(bus: MagicMock) -> None:
     ch = _ch(bus, 29907)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29907/", client_id="e") as c:
             await c.recv_ready()
@@ -177,7 +170,6 @@ async def test_empty_payload_ignored(bus: MagicMock) -> None:
 async def test_messages_preserve_order(bus: MagicMock) -> None:
     ch = _ch(bus, 29908)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29908/", client_id="o") as c:
             await c.recv_ready()
@@ -198,7 +190,6 @@ async def test_messages_preserve_order(bus: MagicMock) -> None:
 async def test_server_send_message(bus: MagicMock) -> None:
     ch = _ch(bus, 29909)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29909/", client_id="r") as c:
             ready = await c.recv_ready()
@@ -217,7 +208,6 @@ async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
     """Tool-hint progress events surface as ``kind: "tool_hint"``."""
     ch = _ch(bus, 29919)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29919/", client_id="h") as c:
             ready = await c.recv_ready()
@@ -255,7 +245,6 @@ async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
 async def test_server_send_with_media_and_reply(bus: MagicMock) -> None:
     ch = _ch(bus, 29910)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29910/", client_id="m") as c:
             ready = await c.recv_ready()
@@ -279,7 +268,6 @@ async def test_server_send_with_media_and_reply(bus: MagicMock) -> None:
 async def test_streaming_deltas_and_end(bus: MagicMock) -> None:
     ch = _ch(bus, 29911, streaming=True)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29911/", client_id="s") as c:
             cid = (await c.recv_ready()).chat_id
@@ -301,7 +289,6 @@ async def test_streaming_deltas_and_end(bus: MagicMock) -> None:
 async def test_interleaved_streams(bus: MagicMock) -> None:
     ch = _ch(bus, 29912, streaming=True)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29912/", client_id="i") as c:
             cid = (await c.recv_ready()).chat_id
@@ -329,7 +316,6 @@ async def test_interleaved_streams(bus: MagicMock) -> None:
 async def test_independent_sessions(bus: MagicMock) -> None:
     ch = _ch(bus, 29913)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29913/", client_id="u1") as c1:
             async with WsTestClient("ws://127.0.0.1:29913/", client_id="u2") as c2:
@@ -351,7 +337,6 @@ async def test_independent_sessions(bus: MagicMock) -> None:
 async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
     ch = _ch(bus, 29914)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29914/", client_id="tmp") as c:
             chat_id = (await c.recv_ready()).chat_id
@@ -373,7 +358,6 @@ async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
 async def test_static_token_accepted(bus: MagicMock) -> None:
     ch = _ch(bus, 29915, token="secret")
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29915/", client_id="a", token="secret") as c:
             assert (await c.recv_ready()).client_id == "a"
@@ -386,7 +370,6 @@ async def test_static_token_accepted(bus: MagicMock) -> None:
 async def test_static_token_rejected(bus: MagicMock) -> None:
     ch = _ch(bus, 29916, token="correct")
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         with pytest.raises(websockets.exceptions.InvalidStatus) as exc:
             async with WsTestClient("ws://127.0.0.1:29916/", client_id="b", token="wrong"):
@@ -403,7 +386,6 @@ async def test_token_issue_full_flow(bus: MagicMock) -> None:
              tokenIssuePath="/auth/token", tokenIssueSecret="s",
              websocketRequiresToken=True)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         # no secret -> 401
         _, status = await issue_token(port=29917, issue_path="/auth/token")
@@ -439,7 +421,6 @@ async def test_token_issue_full_flow(bus: MagicMock) -> None:
 async def test_custom_path(bus: MagicMock) -> None:
     ch = _ch(bus, 29918, path="/my-chat")
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29918/my-chat", client_id="p") as c:
             assert (await c.recv_ready()).event == "ready"
@@ -452,7 +433,6 @@ async def test_custom_path(bus: MagicMock) -> None:
 async def test_wrong_path_404(bus: MagicMock) -> None:
     ch = _ch(bus, 29919, path="/ws")
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         with pytest.raises(websockets.exceptions.InvalidStatus) as exc:
             async with WsTestClient("ws://127.0.0.1:29919/wrong", client_id="x"):
@@ -467,7 +447,6 @@ async def test_wrong_path_404(bus: MagicMock) -> None:
 async def test_trailing_slash_normalized(bus: MagicMock) -> None:
     ch = _ch(bus, 29920, path="/ws")
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29920/ws/", client_id="s") as c:
             assert (await c.recv_ready()).event == "ready"
@@ -483,7 +462,6 @@ async def test_trailing_slash_normalized(bus: MagicMock) -> None:
 async def test_large_message(bus: MagicMock) -> None:
     ch = _ch(bus, 29921)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29921/", client_id="big") as c:
             await c.recv_ready()
@@ -500,7 +478,6 @@ async def test_large_message(bus: MagicMock) -> None:
 async def test_unicode_roundtrip(bus: MagicMock) -> None:
     ch = _ch(bus, 29922)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29922/", client_id="u") as c:
             ready = await c.recv_ready()
@@ -521,7 +498,6 @@ async def test_unicode_roundtrip(bus: MagicMock) -> None:
 async def test_rapid_fire(bus: MagicMock) -> None:
     ch = _ch(bus, 29923)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29923/", client_id="r") as c:
             ready = await c.recv_ready()
@@ -544,7 +520,6 @@ async def test_rapid_fire(bus: MagicMock) -> None:
 async def test_invalid_json_as_plain_text(bus: MagicMock) -> None:
     ch = _ch(bus, 29924)
     t = asyncio.create_task(ch.start())
-    await asyncio.sleep(0.3)
     try:
         async with WsTestClient("ws://127.0.0.1:29924/", client_id="j") as c:
             await c.recv_ready()

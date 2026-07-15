@@ -9,6 +9,7 @@ from typing import Any, Callable
 from loguru import logger as default_logger
 
 from nanobot.webui.gateway_tokens import GatewayTokenStore
+from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -22,6 +23,7 @@ class GatewayServices:
     http: GatewayHTTPHandler
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
+    ingress: WebUIIngressPolicy
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
     session_manager: Any | None
@@ -47,12 +49,23 @@ def build_gateway_services(
     local_trigger_store: Any | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+    channel_feature_action: Callable[..., Any] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
+    ingress = DEFAULT_WEBUI_INGRESS_POLICY
+    minimum_frame_bytes = ingress.minimum_full_policy_frame_bytes()
+    if config.max_message_bytes < minimum_frame_bytes:
+        logger.warning(
+            "WebSocket maxMessageBytes={} is below the WebUI ingress policy capacity={}; "
+            "policy-valid messages may still hit the transport frame guard",
+            config.max_message_bytes,
+            minimum_frame_bytes,
+        )
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
+        attachment_limits=ingress.attachments,
     )
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
@@ -70,6 +83,7 @@ def build_gateway_services(
         bus=bus,
         tokens=tokens,
         media=media,
+        ingress=ingress,
         workspaces=workspaces,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
@@ -77,12 +91,14 @@ def build_gateway_services(
         local_trigger_store=local_trigger_store,
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
+        channel_feature_action=channel_feature_action,
         log=logger,
     )
     return GatewayServices(
         http=http,
         tokens=tokens,
         media=media,
+        ingress=ingress,
         transcripts=transcripts,
         workspaces=workspaces,
         session_manager=session_manager,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nanobot.channels._feishu_instances import DEFAULT_INSTANCE_ID
 from nanobot.optional_features import (
     OptionalFeatureError,
     disable_optional_feature,
@@ -25,10 +26,11 @@ def nanobot_features_action(
     allow_install: bool = True,
 ) -> dict[str, Any]:
     name = (query_first(query, "name") or "").strip()
+    instance_id = (query_first(query, "instance_id") or DEFAULT_INSTANCE_ID).strip()
     if not name:
         raise OptionalFeatureError("missing feature name")
     if action == "enable":
-        return enable_optional_feature(name, allow_install=allow_install)
+        return enable_optional_feature(name, allow_install=allow_install, instance_id=instance_id)
     if action == "disable":
         if name == "websocket":
             raise OptionalFeatureError(
@@ -36,5 +38,5 @@ def nanobot_features_action(
                 "Use `nanobot plugins disable websocket` from a terminal if you need to disable it.",
                 status=400,
             )
-        return disable_optional_feature(name)
+        return disable_optional_feature(name, instance_id=instance_id)
     raise OptionalFeatureError(f"unknown feature action '{action}'", status=404)

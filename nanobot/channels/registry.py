@@ -10,7 +10,11 @@ from loguru import logger
 if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
 
-_INTERNAL = frozenset({"base", "manager", "registry"})
+_INTERNAL = frozenset({
+    "base",
+    "manager",
+    "registry",
+})
 DEFAULT_ENABLED_CHANNELS = frozenset({"websocket"})
 
 
@@ -21,7 +25,7 @@ def discover_channel_names() -> list[str]:
     return [
         name
         for _, name, ispkg in pkgutil.iter_modules(pkg.__path__)
-        if name not in _INTERNAL and not ispkg
+        if name not in _INTERNAL and not name.startswith("_") and not ispkg
     ]
 
 

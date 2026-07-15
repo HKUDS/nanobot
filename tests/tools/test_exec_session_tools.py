@@ -22,6 +22,30 @@ def _python_command(code: str) -> str:
     return f"{shlex.quote(sys.executable)} -u -c {shlex.quote(code)}"
 
 
+def _waiting_shell_command(initial: str, *, delayed: str | None = None) -> str:
+    """Print deterministic output, then wait in the shell itself for stdin.
+
+    Long-lived Python children keep inherited pipes open after their parent
+    shell is terminated on Windows. These tests exercise exec-session control,
+    not process-tree semantics, so keep the waiter in the managed shell.
+    """
+    if sys.platform == "win32":
+        def quote(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        parts = [f"Write-Output {quote(initial)}"]
+        if delayed is not None:
+            parts.extend(("Start-Sleep -Milliseconds 100", f"Write-Output {quote(delayed)}"))
+        parts.append("$null = [Console]::In.ReadLine()")
+        return "; ".join(parts)
+
+    parts = [f"printf '%s\\n' {shlex.quote(initial)}"]
+    if delayed is not None:
+        parts.extend(("sleep 0.1", f"printf '%s\\n' {shlex.quote(delayed)}"))
+    parts.append("IFS= read -r _")
+    return "; ".join(parts)
+
+
 def _session_id(output: str) -> str:
     match = re.search(r"session_id:\s*([0-9a-f]+)", output)
     assert match, output
@@ -204,16 +228,14 @@ def test_write_stdin_can_terminate_session(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('ready', flush=True); time.sleep(30)"
-        )
+        command = _waiting_shell_command("ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="ready",
-            wait_timeout_ms=3000,
+            wait_timeout_ms=1000,
             yield_time_ms=0,
         )
         result = await stdin_tool.execute(
@@ -234,9 +256,7 @@ def test_write_stdin_accepts_max_output_tokens_alias(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('A' * 2000, flush=True); time.sleep(5)"
-        )
+        command = _waiting_shell_command("A" * 2000)
 
         initial = await exec_tool.execute(command=command, yield_time_ms=0)
         sid = _session_id(initial)
@@ -261,12 +281,12 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
         stdin_tool = WriteStdinTool(manager=manager)
         command = _python_command(
             "import time; print('ready', flush=True); "
-            "time.sleep(1.0); print('done', flush=True)"
+            "time.sleep(0.1); print('done', flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=300)
+        initial = await exec_tool.execute(command=command, yield_time_ms=50)
         sid = _session_id(initial)
-        await asyncio.sleep(1.2)
+        await asyncio.wait_for(manager._sessions[sid].process.wait(), timeout=2)
         final = await stdin_tool.execute(session_id=sid, chars="", yield_time_ms=0)
         return initial, final
 
@@ -282,17 +302,14 @@ def test_write_stdin_can_wait_for_expected_output(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('booting', flush=True); "
-            "time.sleep(0.4); print('ready', flush=True); time.sleep(5)"
-        )
+        command = _waiting_shell_command("booting", delayed="ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
         waited = await stdin_tool.execute(
             session_id=sid,
             wait_for="ready",
-            wait_timeout_ms=3000,
+            wait_timeout_ms=1000,
             yield_time_ms=0,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
@@ -312,9 +329,7 @@ def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
         manager = ExecSessionManager()
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('booting', flush=True); time.sleep(5)"
-        )
+        command = _waiting_shell_command("booting")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
@@ -365,9 +380,7 @@ def test_list_exec_sessions_reports_running_commands(tmp_path):
         exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         list_tool = ListExecSessionsTool(manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
-        command = _python_command(
-            "import time; print('ready', flush=True); time.sleep(5)"
-        )
+        command = _waiting_shell_command("ready")
 
         initial = await exec_tool.execute(command=command, yield_time_ms=500)
         sid = _session_id(initial)

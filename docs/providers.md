@@ -2,6 +2,8 @@
 
 Use this page when the first reply fails because of provider/model mismatch, or when you want to adapt the concrete setup example to a different provider. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
+For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
+
 For every setup, answer three questions:
 
 1. Which provider owns the credential or endpoint?
@@ -418,38 +420,19 @@ See [`configuration.md#providers`](./configuration.md#providers) for Bedrock-spe
 
 Some providers do not use API keys in `config.json`.
 
+For OpenAI Codex:
+
 ```bash
-nanobot provider login openai-codex
-nanobot provider login github-copilot
+nanobot provider login openai-codex --set-main
 ```
 
-Then explicitly select the provider and model in a preset. OAuth providers are not valid automatic fallbacks.
+For GitHub Copilot:
 
-For OpenAI Codex, add `providers.openai_codex.proxy` only when Codex OAuth/token refresh or Codex API requests must use a proxy:
-
-```json
-{
-  "providers": {
-    "openai_codex": {
-      "proxy": "http://127.0.0.1:7890"
-    }
-  },
-  "modelPresets": {
-    "codex": {
-      "provider": "openai_codex",
-      "model": "gpt-5.1-codex",
-      "reasoningEffort": "high"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "codex"
-    }
-  }
-}
+```bash
+nanobot provider login github-copilot --set-main
 ```
 
-If you run the login command on a remote/headless machine and open the authorization URL in a local browser, paste the final `http://localhost:1455/auth/callback?...` redirect URL back into the terminal when prompted. See [`configuration.md#providers`](./configuration.md#providers) for the full OAuth provider notes.
+Each command authenticates the selected provider and makes its current default model active. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
 ## Provider Resolution
 

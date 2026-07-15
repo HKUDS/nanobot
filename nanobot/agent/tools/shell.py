@@ -535,7 +535,12 @@ class ExecTool(Tool):
                     env=cmd_env,
                 )
             command = ExecTool._normalize_powershell_command(command)
-            command = f"{command}\nif ($LASTEXITCODE -ne $null) {{ exit $LASTEXITCODE }}"
+            command = (
+                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
+                f"{command}\n"
+                "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
+            )
             return await asyncio.create_subprocess_exec(
                 program, "-NoProfile", "-NonInteractive", "-Command", command,
                 stdin=stdin,

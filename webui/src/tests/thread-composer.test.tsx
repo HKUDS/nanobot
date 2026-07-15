@@ -336,7 +336,7 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
     expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
-    expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
+    expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
@@ -1246,6 +1246,42 @@ describe("ThreadComposer", () => {
     expect(logo.className).toContain("top-1/2");
     expect(logo.className).toContain("left-1/2");
     expect(logo.className).not.toContain("-top-");
+  });
+
+  it("uses the shared accent when an installed CLI app has no brand metadata", () => {
+    const mention = "@obsidian-agent-cli";
+    const app: CliAppInfo = {
+      name: "obsidian-agent-cli",
+      display_name: "Obsidian CLI",
+      category: "productivity",
+      description: "Obsidian automation",
+      requires: "",
+      source: "local",
+      entry_point: "obsidian-agent",
+      install_supported: true,
+      installed: true,
+      available: true,
+      status: "installed",
+      logo_url: null,
+      brand_color: null,
+      skill_installed: true,
+    };
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        cliApps={[app]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: mention, selectionStart: mention.length },
+    });
+
+    const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
+    expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(token.getAttribute("style")).not.toContain("var(--primary)");
   });
 
   it("opens the slash command palette downward when there is more room below", async () => {

@@ -264,7 +264,7 @@ if DISCORD_AVAILABLE:
                     channel = await self.fetch_channel(channel_id)
                 except Exception as e:
                     self._channel.logger.warning("channel {} unavailable: {}", msg.chat_id, e)
-                    return
+                    raise
 
             reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
             sent_media = False
@@ -466,8 +466,7 @@ class DiscordChannel(BaseChannel):
         """Send a message through Discord using discord.py."""
         client = self._client
         if client is None or not client.is_ready():
-            self.logger.warning("client not ready; dropping outbound message")
-            return
+            raise RuntimeError("Discord client is not ready")
 
         is_progress = isinstance(msg.event, ProgressEvent)
 
@@ -664,7 +663,9 @@ class DiscordChannel(BaseChannel):
         content: str,
     ) -> bool:
         """Check if inbound Discord message should be processed."""
-        if not self.is_allowed(sender_id):
+        # Reject unauthorized guild messages before any side effects, but let DMs
+        # reach BaseChannel._handle_message so it can issue a pairing code.
+        if message.guild is not None and not self.is_allowed(sender_id):
             return False
         # Channel-based filtering: only respond in allowed channels
         allow_channels = self.config.allow_channels

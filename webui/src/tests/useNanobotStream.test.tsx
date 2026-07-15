@@ -1520,6 +1520,37 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].turnPhase).toBe("user");
   });
 
+  it("adds optimistic user file attachments as media", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-send", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const attachment = {
+      media: {
+        data_url: "data:application/pdf;base64,JVBERi0xLjQ=",
+        name: "report.pdf",
+      },
+      preview: {
+        kind: "file" as const,
+        url: "data:application/pdf;base64,JVBERi0xLjQ=",
+        name: "report.pdf",
+      },
+    };
+
+    act(() => {
+      result.current.send("summarize", [attachment]);
+    });
+
+    expect(result.current.messages[0].media).toEqual([attachment.preview]);
+    expect(result.current.messages[0].images).toBeUndefined();
+    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+      "chat-file-send",
+      "summarize",
+      [attachment.media],
+      expect.objectContaining({ turnId: expect.any(String) }),
+    );
+  });
+
   it("attaches assistant media_urls to complete messages", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-m", EMPTY_MESSAGES), {
@@ -1638,31 +1669,6 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("image ready");
     expect(result.current.messages[0].media).toHaveLength(1);
-  });
-
-  it("passes image generation options to the websocket client", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-img", EMPTY_MESSAGES), {
-      wrapper: wrap(fake.client),
-    });
-
-    act(() => {
-      result.current.send(
-        "draw a square icon",
-        undefined,
-        { imageGeneration: { enabled: true, aspect_ratio: "1:1" } },
-      );
-    });
-
-    expect(fake.client.sendMessage).toHaveBeenCalledWith(
-      "chat-img",
-      "draw a square icon",
-      undefined,
-      expect.objectContaining({
-        imageGeneration: { enabled: true, aspect_ratio: "1:1" },
-        turnId: expect.any(String),
-      }),
-    );
   });
 
   it("stops the active turn without adding a user slash command bubble", () => {

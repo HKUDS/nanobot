@@ -254,10 +254,10 @@ class TestSpawn:
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
         sm.runner.run = _slow_run
 
-        long_task = "A" * 50
-        await sm.spawn(long_task, runtime=_runtime(), session_key="s1")
+        long_label_source = "A" * 50
+        await sm.spawn(long_label_source, runtime=_runtime(), session_key="s1")
         status = next(iter(sm._task_statuses.values()))
-        assert status.label == long_task[:30] + "..."
+        assert status.label == long_label_source[:30] + "..."
 
         block.set()
         await _drain_subagent_tasks(sm)

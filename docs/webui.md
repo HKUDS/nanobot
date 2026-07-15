@@ -53,6 +53,18 @@ WebUI beyond localhost or want a browser password:
 The WebUI is served by the WebSocket channel on port `8765` by default. The
 gateway health endpoint, `18790` by default, is not the browser UI.
 
+## First 10 Minutes
+
+Use the WebUI as the primary setup surface after Quick Start:
+
+1. Send `Hello!` in a new chat to prove the selected model works.
+2. Open **Settings → Models** and confirm the active model preset.
+3. Start a separate chat before project work, then choose the intended workspace and access mode.
+4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
+5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
+
+This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
+
 ## What It Is For
 
 | Area | Use it for |
@@ -62,6 +74,7 @@ gateway health endpoint, `18790` by default, is not the browser UI.
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for Apps or MCP presets |
+| Channels | Connect and validate chat platforms, install their optional support, and manage saved channel setup |
 | Apps | Install, test, update, and use local CLI App adapters and MCP presets |
 | Skills | Inspect available built-in and workspace skills before relying on them |
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
@@ -98,6 +111,10 @@ chat. It does not bypass your gateway, provider, shell sandbox, or operating
 system configuration; it only selects among the capabilities that are already
 available to this WebUI session.
 
+Remote WebUI sessions may reduce access for the current workspace. Selecting a
+different workspace or enabling Full Access remains limited to local and native
+clients.
+
 ## Composer
 
 The composer supports plain messages, image attachments, voice input when
@@ -109,23 +126,38 @@ For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)
 for provider setup and output behavior.
 
+## Channels
+
+Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
+
+- install missing optional channel support when the WebUI is running locally;
+- collect platform credentials while preserving previously saved values;
+- handle supported QR-based login flows;
+- validate the connection and show actionable setup errors;
+- tell you when the gateway needs to restart.
+
+The platform itself may still require you to create a bot, enable event permissions, copy a token, or configure a webhook. Use [`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for manual JSON/reference options.
+
+Test a new channel with a private DM. When a supported channel sends a pairing code, the WebUI surfaces the pending request so you can approve the sender. Keep access narrow; do not use a wildcard allowlist unless public access is intentional.
+
 ## Apps
 
-Open Apps from the sidebar or settings navigation to manage integrations that
-nanobot can call from a chat. Nanobot features can enable built-in channels and
-optional capabilities such as `bedrock` or `documents`. CLI Apps install local
-adapters that nanobot runs on your machine; they do not modify the native apps
-themselves. MCP presets add predefined MCP server configurations.
+Open Apps from the sidebar to manage tools that nanobot can attach to a chat
+turn. The default **Ready** view shows only tools that can be used immediately:
 
-Enabling a Nanobot feature may install Python packages into the environment
-running nanobot. By default, the WebUI can install missing packages only when
-you open it on the same machine as nanobot. If you open the WebUI from another
-device, a domain name, a tunnel, or a reverse proxy, package install is blocked
-unless you explicitly allow it with `tools.webuiAllowRemotePackageInstall`.
+- **Apps** are local command-line adapters that nanobot runs on your machine.
+  Installing an adapter does not modify the native desktop or web app it
+  connects to.
+- **Integrations** are MCP servers. Presets provide known configurations, and
+  the custom integration panel accepts stdio, HTTP, and SSE servers.
 
-Optional feature installs use your existing pip download settings. If PyPI is
-slow or unavailable from your network, configure pip or set `PIP_INDEX_URL`
-before starting nanobot.
+Apps intentionally does not list nanobot runtime support packages such as
+`api` or `bedrock`. Those packages enable providers, servers, or channels; they
+are not tools that can be attached to a turn with `@`. Manage them from
+**System**, **Models**, or **Web**. PDF and common Office document readers are
+included in nanobot and activate automatically when a file is attached. The
+equivalent CLI for optional integrations remains `nanobot plugins`. See
+[`cli-reference.md`](./cli-reference.md#optional-features).
 
 Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
 preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
@@ -133,8 +165,8 @@ extraction tools without requiring an API key. This does not replace nanobot's
 built-in web search provider; mention the Firecrawl MCP preset with `@` when a
 turn needs Firecrawl's richer web data tools.
 
-After an App or MCP preset is available, mention it from the composer with `@`
-to attach that capability to the next message.
+After an App or integration is available, mention it from the composer with
+`@` to attach that tool to the next message.
 
 ## Skills
 
@@ -189,9 +221,9 @@ with the content that should be delivered.
 ## Settings
 
 Settings is the control surface for the browser session and gateway-backed
-runtime configuration. Use it to review or adjust model presets, provider
-visibility, image generation, voice transcription, web tools, Apps, Automations,
-Skills, runtime identity, and advanced safety controls.
+runtime configuration. Use it to review or adjust model presets, providers,
+image generation, voice transcription, web tools, chat channels, Apps,
+Automations, Skills, runtime identity, and advanced safety controls.
 
 Some settings take effect immediately. Runtime settings that affect the gateway
 or agent process may require a restart; the WebUI shows that requirement next to
@@ -222,10 +254,10 @@ The gateway refuses to start with `host` set to `"0.0.0.0"` unless `token` or
 `http://<your-ip>:8765` from the other device and enter the secret in the login
 form.
 
-Remote WebUI clients can view Apps and toggle already-installed features with a
-valid token, but they cannot install missing Python packages by default. To allow
-trusted remote admins to install optional feature dependencies from the WebUI,
-opt in explicitly:
+Remote WebUI clients with a valid token can view and use Apps. Actions that
+install missing nanobot support packages, such as adding a channel dependency,
+are blocked by default. To let trusted remote administrators change the Python
+environment through the WebUI, opt in explicitly:
 
 ```json
 {

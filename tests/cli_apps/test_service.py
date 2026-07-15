@@ -197,6 +197,63 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
 
 
+def test_payload_resolves_obsidian_agent_cli_brand(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-07-14"},
+            "clis": [
+                {
+                    "name": "obsidian-agent-cli",
+                    "display_name": "Obsidian CLI",
+                    "description": "Obsidian automation",
+                    "category": "productivity",
+                    "entry_point": "obsidian-agent",
+                }
+            ],
+        },
+    )
+    _write_cache(manager._cache_path("public"), {"meta": {}, "clis": []})
+    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
+
+    app = manager.payload()["apps"][0]
+
+    assert app["brand_color"] == "#7C3AED"
+    assert app["logo_url"] == "https://cdn.simpleicons.org/obsidian/7C3AED"
+
+
+def test_installed_payload_enriches_apps_from_cached_catalog(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({
+        "gimp": {
+            "entry_point": "installed-gimp",
+            "source": "harness",
+            "strategy": "pip",
+        }
+    })
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry_point: "/bin/installed-gimp" if entry_point == "installed-gimp" else None,
+    )
+
+    app = manager.installed_payload()["apps"][0]
+
+    assert app["name"] == "gimp"
+    assert app["entry_point"] == "installed-gimp"
+    assert app["source"] == "harness"
+    assert app["status"] == "installed"
+    assert app["display_name"] == "GIMP"
+    assert app["category"] == "image"
+    assert app["description"] == "Public duplicate entry"
+    assert app["brand_color"] == "#5C5543"
+    assert app["logo_url"] == "https://cdn.simpleicons.org/gimp/5C5543"
+
+
 def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
@@ -520,6 +577,9 @@ def test_install_records_entry_point_path_and_pip_distribution(
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["gimp"]["entry_point_path"] == str(resolved)
     assert installed["gimp"]["pip_distribution"] == "cli-anything-gimp"
+    assert installed["gimp"]["display_name"] == "GIMP"
+    assert installed["gimp"]["category"] == "image"
+    assert installed["gimp"]["description"] == "Public duplicate entry"
 
 
 def test_installed_state_writes_atomically_without_temp_leftovers(tmp_path: Path) -> None:

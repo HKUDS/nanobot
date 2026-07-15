@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
@@ -583,9 +584,30 @@ def _append_to_active_transcript(session_key: str, obj: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _valid_created_at_ms(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value >= 0 and value < 10_000_000_000_000_000:
+        return int(value)
+    return None
+
+
+def _record_for_append(obj: dict[str, Any]) -> dict[str, Any]:
+    if _valid_created_at_ms(obj.get("created_at_ms")) is not None:
+        return obj
+    record = dict(obj)
+    record["created_at_ms"] = _now_ms()
+    return record
+
+
 def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
-    _append_to_active_transcript(session_key, obj)
-    if obj.get("event") == "turn_end":
+    record = _record_for_append(obj)
+    _append_to_active_transcript(session_key, record)
+    if record.get("event") == "turn_end":
         _rotate_active_transcript_if_needed(session_key)
 
 
@@ -785,6 +807,7 @@ def write_session_messages_as_transcript(
     for msg in messages:
         if is_hidden_history_message(msg):
             continue
+        msg = public_history_message(msg)
         role = msg.get("role")
         content = msg.get("content")
         text = content if isinstance(content, str) else ""
@@ -876,6 +899,7 @@ def _session_user_event(
         return None
     if is_hidden_history_message(message):
         return None
+    message = public_history_message(message)
     if _is_legacy_raw_subagent_result(message):
         return None
     content = message.get("content")
@@ -1254,12 +1278,18 @@ def replay_transcript_to_ui_messages(
     active_activity_segment_id: str | None = None
     active_file_edit_segment_id: str | None = None
     activity_segment_counter = 0
-    _ts_base = int(time.time() * 1000)
+    _ts_base = _now_ms()
     closed_turn_ids: set[str] = set()
     replay_turn_aliases: dict[str, str] = {}
 
     def _new_id(prefix: str, idx: int) -> str:
         return f"{prefix}-{idx}-{uuid.uuid4().hex[:8]}"
+
+    def _created_at_ms(rec: dict[str, Any], idx: int) -> int:
+        created_at_ms = _valid_created_at_ms(rec.get("created_at_ms"))
+        if created_at_ms is not None:
+            return created_at_ms
+        return _ts_base + idx
 
     def _new_activity_segment(*, activate: bool = True) -> str:
         nonlocal active_activity_segment_id, activity_segment_counter
@@ -1327,6 +1357,7 @@ def replay_transcript_to_ui_messages(
         chunk: str,
         idx: int,
         turn_fields: dict[str, Any] | None = None,
+        created_at_ms: int | None = None,
     ) -> None:
         turn_fields = turn_fields or {}
         for i in range(len(prev) - 1, -1, -1):
@@ -1376,7 +1407,7 @@ def replay_transcript_to_ui_messages(
                 "reasoningStreaming": True,
                 "activitySegmentId": segment,
                 **turn_fields,
-                "createdAt": _ts_base + idx,
+                "createdAt": created_at_ms if created_at_ms is not None else _ts_base + idx,
             },
         )
 
@@ -1471,7 +1502,7 @@ def replay_transcript_to_ui_messages(
                 }
                 return
 
-    def absorb_complete(extra: dict[str, Any], idx: int) -> None:
+    def absorb_complete(extra: dict[str, Any], idx: int, created_at_ms: int) -> None:
         nonlocal active_activity_segment_id, active_file_edit_segment_id
         last = messages[-1] if messages else None
         if last and is_reasoning_only_placeholder(last) and _same_turn(last, extra):
@@ -1486,7 +1517,7 @@ def replay_transcript_to_ui_messages(
                 {
                     "id": _new_id("as", idx),
                     "role": "assistant",
-                    "createdAt": _ts_base + idx,
+                    "createdAt": created_at_ms,
                     **extra,
                 },
             )
@@ -1573,6 +1604,7 @@ def replay_transcript_to_ui_messages(
         edits: list[dict[str, Any]],
         idx: int,
         turn_fields: dict[str, Any] | None = None,
+        created_at_ms: int | None = None,
     ) -> None:
         nonlocal active_file_edit_segment_id
         turn_fields = turn_fields or {}
@@ -1603,7 +1635,7 @@ def replay_transcript_to_ui_messages(
                     "fileEdits": [],
                     "activitySegmentId": segment,
                     **turn_fields,
-                    "createdAt": _ts_base + idx,
+                    "createdAt": created_at_ms if created_at_ms is not None else _ts_base + idx,
                 },
             )
             target_index = len(messages) - 1
@@ -1668,7 +1700,7 @@ def replay_transcript_to_ui_messages(
                 "role": "user",
                 "content": text_s,
                 **_turn_fields(rec, "user"),
-                "createdAt": _ts_base + idx,
+                "createdAt": _created_at_ms(rec, idx),
             }
             if media_att:
                 row["media"] = media_att
@@ -1692,6 +1724,7 @@ def replay_transcript_to_ui_messages(
                     [e for e in raw_edits if isinstance(e, dict)],
                     idx,
                     _turn_fields(rec, "activity"),
+                    _created_at_ms(rec, idx),
                 )
             continue
 
@@ -1716,7 +1749,7 @@ def replay_transcript_to_ui_messages(
                             "content": "",
                             "isStreaming": True,
                             **_turn_fields(rec, "answer"),
-                            "createdAt": _ts_base + idx,
+                            "createdAt": _created_at_ms(rec, idx),
                         },
                     )
             buffer_parts.append(chunk)
@@ -1748,7 +1781,7 @@ def replay_transcript_to_ui_messages(
                             "content": final_text,
                             "isStreaming": True,
                             **_turn_fields(rec, "answer"),
-                            "createdAt": _ts_base + idx,
+                            "createdAt": _created_at_ms(rec, idx),
                         },
                     )
                 else:
@@ -1772,7 +1805,13 @@ def replay_transcript_to_ui_messages(
             if not isinstance(chunk, str) or not chunk:
                 continue
             close_file_edit_phase_before_activity()
-            attach_reasoning_chunk(messages, chunk, idx, _turn_fields(rec, "reasoning"))
+            attach_reasoning_chunk(
+                messages,
+                chunk,
+                idx,
+                _turn_fields(rec, "reasoning"),
+                _created_at_ms(rec, idx),
+            )
             continue
 
         if ev == "reasoning_end":
@@ -1794,7 +1833,13 @@ def replay_transcript_to_ui_messages(
                 if not isinstance(line, str) or not line:
                     continue
                 close_file_edit_phase_before_activity()
-                attach_reasoning_chunk(messages, line, idx, _turn_fields(rec, "reasoning"))
+                attach_reasoning_chunk(
+                    messages,
+                    line,
+                    idx,
+                    _turn_fields(rec, "reasoning"),
+                    _created_at_ms(rec, idx),
+                )
                 close_reasoning(messages)
                 continue
             if kind in ("tool_hint", "progress"):
@@ -1850,7 +1895,7 @@ def replay_transcript_to_ui_messages(
                             **({"toolEvents": visible_structured_events} if visible_structured_events else {}),
                             "activitySegmentId": segment,
                             **_turn_fields(rec, "activity"),
-                            "createdAt": _ts_base + idx,
+                            "createdAt": _created_at_ms(rec, idx),
                         },
                     )
                 continue
@@ -1875,7 +1920,7 @@ def replay_transcript_to_ui_messages(
                 extra["latencyMs"] = int(lat)
             extra.update(_turn_fields(rec, "answer"))
             extra.update(_source_fields(rec))
-            absorb_complete(extra, idx)
+            absorb_complete(extra, idx, _created_at_ms(rec, idx))
             if media:
                 suppress_until_turn_end = True
             continue

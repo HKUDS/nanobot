@@ -1,18 +1,17 @@
 """Unit and lightweight integration tests for the WebSocket channel."""
 
 import asyncio
-import functools
 import json
 import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
+from ws_test_client import http_get as _http_get
 
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -166,13 +165,6 @@ def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "nanobot.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",
-    )
-
-
-async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Response:
-    """Run GET in a thread to avoid blocking the asyncio loop shared with websockets."""
-    return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
     )
 
 
@@ -401,14 +393,23 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
     assert msg.metadata["webui_turn_id"] == "turn-1"
     assert msg.metadata["_wants_stream"] is True
     lines = read_transcript_lines("websocket:chat-1")
-    assert lines == [{
+    assert len(lines) == 1
+    assert {key: lines[0].get(key) for key in (
+        "event",
+        "chat_id",
+        "text",
+        "turn_id",
+        "turn_phase",
+        "turn_seq",
+    )} == {
         "event": "user",
         "chat_id": "chat-1",
         "text": "hello",
         "turn_id": "turn-1",
         "turn_phase": "user",
         "turn_seq": 1,
-    }]
+    }
+    assert isinstance(lines[0].get("created_at_ms"), int)
 
 
 @pytest.mark.asyncio
@@ -746,6 +747,117 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
 
 
 @pytest.mark.asyncio
+async def test_remote_webui_scope_allows_access_reduction(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default_workspace = tmp_path / "default"
+    default_workspace.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("203.0.113.8", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-remote",
+            "workspace_scope": {
+                "project_path": str(default_workspace),
+                "access_mode": "restricted",
+            },
+        },
+    )
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "session_updated"
+    assert payload["workspace_scope"]["access_mode"] == "restricted"
+    saved = sessions.read_session_file("websocket:chat-remote")
+    assert saved["metadata"]["workspace_scope"] == {
+        "project_path": str(default_workspace.resolve()),
+        "access_mode": "restricted",
+    }
+
+
+@pytest.mark.asyncio
+async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default_workspace = tmp_path / "default"
+    default_workspace.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
+    )
+    hydrate_started = asyncio.Event()
+    release_hydrate = asyncio.Event()
+
+    async def blocked_hydrate(_chat_id: str) -> None:
+        hydrate_started.set()
+        await release_hydrate.wait()
+
+    channel._hydrate_after_subscribe = blocked_hydrate
+    message_conn = AsyncMock()
+    message_conn.remote_address = ("203.0.113.8", 50123)
+    settings_conn = AsyncMock()
+    settings_conn.remote_address = ("203.0.113.8", 50124)
+    chat_id = "race-chat"
+
+    message_task = asyncio.create_task(
+        channel._dispatch_envelope(
+            message_conn,
+            "remote-message",
+            {
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "hello",
+                "webui": True,
+                "workspace_scope": {
+                    "project_path": str(default_workspace),
+                    "access_mode": "full",
+                },
+            },
+        )
+    )
+    await hydrate_started.wait()
+
+    await channel._dispatch_envelope(
+        settings_conn,
+        "remote-settings",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": chat_id,
+            "workspace_scope": {
+                "project_path": str(default_workspace),
+                "access_mode": "restricted",
+            },
+        },
+    )
+    release_hydrate.set()
+    await message_task
+
+    saved = sessions.read_session_file(f"websocket:{chat_id}")
+    assert saved["metadata"]["workspace_scope"]["access_mode"] == "restricted"
+    payload = json.loads(message_conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "workspace_scope_rejected"
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp_path) -> None:
     default_workspace = tmp_path / "default"
     project = tmp_path / "project"
@@ -907,7 +1019,6 @@ async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -
     def fake_media_dir(channel: str | None = None):
         return ws_media if channel == "websocket" else media_root
 
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
     monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
@@ -1152,7 +1263,6 @@ async def test_send_delta_stream_end_rewrites_local_markdown_image(monkeypatch, 
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
     monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
@@ -1185,7 +1295,6 @@ async def test_send_delta_stream_end_rewrites_inline_final_text(monkeypatch, tmp
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
     monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
@@ -2602,6 +2711,7 @@ async def test_webui_message_envelope_appends_user_transcript(
     assert isinstance(line.get("turn_id"), str)
     assert line.get("turn_phase") == "user"
     assert line.get("turn_seq") == 1
+    assert isinstance(line.get("created_at_ms"), int)
     inbound = bus.publish_inbound.await_args.args[0]
     assert inbound.chat_id == "source"
     assert inbound.content == "round1"
@@ -2892,6 +3002,81 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
+
+
+def test_handle_file_preview_probe_checks_availability_without_content(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "notes" / "ready.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("ready\n", encoding="utf-8")
+
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    path = quote("notes/ready.md", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path={path}&probe=1",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body.decode()) == {"available": True}
+
+
+def test_handle_file_preview_probe_reports_missing_file_as_unavailable(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=notes%2Fmissing.md&probe=1",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body.decode()) == {"available": False}
+
+
+def test_handle_file_preview_probe_reports_binary_file_as_unavailable(tmp_path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "image.png"
+    workspace.mkdir()
+    source.write_bytes(b"\x89PNG\r\n\0binary")
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    key = "websocket:file-preview"
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=image.png&probe=1",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_file_preview(req, enc)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body.decode()) == {"available": False}
 
 
 def test_file_preview_normalizes_windows_file_url() -> None:

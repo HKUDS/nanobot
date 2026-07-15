@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -59,6 +60,7 @@ def _ctx_session(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
     return CommandContext(
         msg=msg, session=MagicMock(), key=msg.session_key, raw=raw, args=args, loop=loop,
+        is_user_turn=True,
     )
 
 
@@ -183,16 +185,20 @@ async def test_goal_command_rejects_mid_turn_without_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_command_rewrites_to_agent_prompt(tmp_path) -> None:
+async def test_goal_command_marks_turn_and_preserves_explicit_request(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal audit the repo", args="audit the repo")
     out = await cmd_goal(ctx)
     assert out is None
-    assert "audit the repo" in ctx.msg.content
-    assert "long_task" in ctx.msg.content
+    assert ctx.msg.content == "/goal audit the repo"
     assert ctx.msg.metadata.get("original_command") == "/goal"
     assert ctx.msg.metadata.get("original_content") == "/goal audit the repo"
+    assert ctx.msg.metadata.get("goal_requested") is True
     assert isinstance(ctx.msg.metadata.get("goal_started_at"), int | float)
+    assert len(ctx.turn_scopes) == 1
+    with ctx.turn_scopes[0]:
+        assert goal_mutation_allowed() is True
+    assert goal_mutation_allowed() is False
 
 
 @pytest.mark.asyncio
@@ -204,6 +210,35 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     out = await router.dispatch(ctx)
     assert out is None
     assert "ship it" in ctx.msg.content
+    assert len(ctx.turn_scopes) == 1
+    with ctx.turn_scopes[0]:
+        assert goal_mutation_allowed() is True
+    assert goal_mutation_allowed() is False
+
+
+@pytest.mark.asyncio
+async def test_goal_command_does_not_allow_internal_turn(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    ctx = CommandContext(
+        msg=InboundMessage(
+            channel="cli",
+            sender_id="system",
+            chat_id="direct",
+            content="/goal internal work",
+        ),
+        session=MagicMock(),
+        key="cli:direct",
+        raw="/goal internal work",
+        args="internal work",
+        loop=loop,
+        is_user_turn=False,
+    )
+
+    out = await cmd_goal(ctx)
+
+    assert out is not None
+    assert "only be started by a user" in out.content
+    assert ctx.turn_scopes == []
 
 
 def test_goal_command_in_help_and_palette() -> None:

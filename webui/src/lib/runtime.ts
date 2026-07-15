@@ -62,7 +62,7 @@ declare global {
   }
 }
 
-export function getHostApi(): NanobotHostApi | null {
+function getHostApi(): NanobotHostApi | null {
   if (typeof window === "undefined") return null;
   return window.nanobotHost ?? null;
 }
@@ -88,11 +88,25 @@ export function createRuntimeHost(
     surface,
     capabilities: mergedCapabilities,
     socketFactory: bridge ? createHostWebSocket : undefined,
-    pickFolder: api?.pickFolder,
-    restartEngine: api?.restartEngine,
-    openLogs: api?.openLogs,
-    exportDiagnostics: api?.exportDiagnostics,
+    pickFolder: api ? () => api.pickFolder() : undefined,
+    restartEngine: api ? () => api.restartEngine() : undefined,
+    openLogs: api ? () => api.openLogs() : undefined,
+    exportDiagnostics: api ? () => api.exportDiagnostics() : undefined,
   };
+}
+
+export function getRuntimeHost(
+  surface?: string | null,
+  capabilities?: Partial<RuntimeCapabilities> | null,
+): RuntimeHost {
+  const api = getHostApi();
+  const runtimeSurface =
+    surface == null ? (api ? "native" : "browser") : toRuntimeSurface(surface);
+  return createRuntimeHost(runtimeSurface, capabilities);
+}
+
+export function isNativeRuntime(surface?: string | null): boolean {
+  return getHostApi() !== null || toRuntimeSurface(surface) === "native";
 }
 
 export function createHostWebSocket(url: string): WebSocket {
@@ -105,19 +119,20 @@ export function createHostWebSocket(url: string): WebSocket {
 
 function getHostSocketBridge(): HostSocketBridge | null {
   const api = getHostApi();
+  const { closeSocket, onSocketEvent, openSocket, sendSocket } = api ?? {};
   if (
-    !api?.openSocket
-    || !api.sendSocket
-    || !api.closeSocket
-    || !api.onSocketEvent
+    !openSocket
+    || !sendSocket
+    || !closeSocket
+    || !onSocketEvent
   ) {
     return null;
   }
   return {
-    closeSocket: api.closeSocket,
-    onSocketEvent: api.onSocketEvent,
-    openSocket: api.openSocket,
-    sendSocket: api.sendSocket,
+    closeSocket: (id) => closeSocket.call(api, id),
+    onSocketEvent: (listener) => onSocketEvent.call(api, listener),
+    openSocket: (url) => openSocket.call(api, url),
+    sendSocket: (id, data) => sendSocket.call(api, id, data),
   };
 }
 

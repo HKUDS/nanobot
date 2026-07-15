@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from nanobot.agent.tools.exec_session import ExecSessionManager, WriteStdinTool
 from nanobot.agent.tools.shell import ExecTool
 
 _WINDOWS_ENV_KEYS = {
@@ -213,6 +214,22 @@ class TestSpawnWindows:
         assert "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }" in command
 
     @pytest.mark.asyncio
+    async def test_powershell_configures_utf8_output(self):
+        """PowerShell should emit UTF-8 for captured output and redirections."""
+        env = {"PATH": ""}
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn("Write-Output 'café 你好'", r"C:\work", env)
+
+        command = mock_exec.call_args[0][-1]
+        assert "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in command
+        assert "$OutputEncoding =" not in command
+        assert "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'" in command
+
+    @pytest.mark.asyncio
     async def test_powershell_invokes_quoted_windows_executable_path(self):
         """PowerShell needs & before quoted executable paths with arguments."""
         env = {"PATH": ""}
@@ -225,7 +242,7 @@ class TestSpawnWindows:
             await ExecTool._spawn(command, r"C:\work", env)
 
         powershell_command = mock_exec.call_args[0][-1]
-        assert powershell_command.startswith("& " + command)
+        assert f"\n& {command}\n" in powershell_command
 
     @pytest.mark.asyncio
     async def test_prefers_pwsh_when_available(self):
@@ -736,3 +753,54 @@ class TestWindowsRealExec:
         result = await ExecTool(timeout=10).execute(command="cmd /c exit 7")
 
         assert "Exit code: 7" in result
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_output_and_redirection_are_utf8(self, tmp_path):
+        result = await ExecTool(working_dir=str(tmp_path), timeout=180).execute(
+            command=(
+                "Write-Output 'file café λ 你好' > marker.txt; "
+                "Write-Output 'café λ 你好'; "
+                "[Console]::Error.WriteLine('warn λ 你好')"
+            ),
+            shell="powershell",
+        )
+
+        assert "café λ 你好" in result
+        assert "warn λ 你好" in result
+        assert "\x00" not in result
+        assert "Exit code: 0" in result
+
+        data = (tmp_path / "marker.txt").read_bytes()
+        assert b"\x00" not in data
+        assert data.decode("utf-8-sig").strip() == "file café λ 你好"
+
+    @pytest.mark.asyncio
+    async def test_windows_powershell_session_output_is_utf8(self):
+        manager = ExecSessionManager()
+        result = await ExecTool(timeout=180, session_manager=manager).execute(
+            command="Start-Sleep -Milliseconds 1500; Write-Output 'café λ 你好'",
+            shell="powershell",
+            yield_time_ms=1000,
+        )
+
+        if "session_id:" in result:
+            session_id = result.split("session_id:", 1)[1].splitlines()[0].strip()
+            poll_result = await WriteStdinTool(manager=manager).execute(
+                session_id=session_id,
+                chars="",
+                wait_for="café λ 你好",
+                wait_timeout_ms=120_000,
+            )
+            result += "\n" + poll_result
+            if "Process running." in poll_result:
+                final_result = await WriteStdinTool(manager=manager).execute(
+                    session_id=session_id,
+                    chars="",
+                    yield_time_ms=30_000,
+                )
+                result += "\n" + final_result
+                assert "Process running." not in final_result
+
+        assert "café λ 你好" in result
+        assert "Exit code: 0" in result
+        assert "\x00" not in result

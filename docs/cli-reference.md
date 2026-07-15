@@ -255,6 +255,19 @@ without hand-editing JSON. Enabling may install the support package first.
 Disabling is for channels such as Telegram, Matrix, or Slack; it keeps your
 saved settings and turns the channel off.
 
+The `plugins` command name is retained for compatibility, but these entries are
+nanobot runtime support packages, not the user-invokable tools shown in WebUI
+Apps. They cannot be attached to a chat turn with `@`.
+
+| Feature name | What it enables |
+|---|---|
+| `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
+| `azure` | Azure identity support for Azure-hosted models |
+| `bedrock` | AWS Bedrock model provider support |
+| `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
+| `olostep` | Olostep web search provider support |
+| A channel name such as `telegram` or `slack` | The connector package and saved channel enablement |
+
 | Command | Description |
 |---|---|
 | `nanobot plugins list` | Show available channels and optional capabilities |
@@ -265,12 +278,16 @@ saved settings and turns the channel off.
 | `nanobot plugins enable <name> --config <path>` | Update a specific config file |
 | `nanobot plugins disable <channel> --config <path>` | Turn off a channel in a specific config file |
 
+Document and PDF reading are included in the standard installation. The old
+`nanobot plugins enable documents` and `nanobot plugins enable pdf` commands
+remain accepted as no-op compatibility aliases.
+
 ## Provider OAuth
 
 | Command | Description |
 |---|---|
-| `nanobot provider login openai-codex` | Authenticate OpenAI Codex provider |
-| `nanobot provider login github-copilot` | Authenticate GitHub Copilot provider |
+| `nanobot provider login openai-codex --set-main` | Authenticate Codex and select its current default model |
+| `nanobot provider login github-copilot --set-main` | Authenticate GitHub Copilot and select its current default model |
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |
 | `nanobot provider logout github-copilot` | Remove GitHub Copilot OAuth state |
 

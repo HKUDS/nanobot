@@ -430,8 +430,7 @@ class NapcatChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         if self._ws is None:
-            logger.warning("napcat: not connected, dropping outbound message")
-            return
+            raise RuntimeError("napcat: not connected")
 
         kind, _, target = msg.chat_id.partition(":")
         if kind not in ("private", "group") or not target:

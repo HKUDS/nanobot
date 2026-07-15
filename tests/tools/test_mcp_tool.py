@@ -811,6 +811,17 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        lambda **_kwargs: httpx.MockTransport(
+            lambda request: httpx.Response(200, request=request)
+        ),
+    )
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
     monkeypatch.setattr(
@@ -832,6 +843,17 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
 def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "mcp.example.com")
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        lambda **_kwargs: httpx.MockTransport(
+            lambda request: httpx.Response(200, request=request)
+        ),
+    )
 
     kwargs = mcp_mod._pinned_transport_kwargs()
 
@@ -989,6 +1011,11 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
         "streamable_http_client",

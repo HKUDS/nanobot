@@ -25,11 +25,13 @@ from nanobot.gateway.service import (
     GatewayServiceResult,
     ServiceManagerKind,
 )
+from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
 GatewayRunner = Callable[..., None]
 GatewayRuntimeFactory = Callable[..., Any]
 GatewayServiceFactory = Callable[[], Any]
+WebUIBundlePreparer = Callable[[Config, BuildMode], None]
 
 
 def create_gateway_app(
@@ -40,6 +42,7 @@ def create_gateway_app(
     run_gateway: GatewayRunner,
     runtime_factory: GatewayRuntimeFactory | None = None,
     service_factory: GatewayServiceFactory | None = None,
+    prepare_webui_bundle: WebUIBundlePreparer | None = None,
 ) -> typer.Typer:
     gateway_app = typer.Typer(
         help="Start and manage the nanobot gateway.",
@@ -81,14 +84,20 @@ def create_gateway_app(
     def service_installer():
         return service_factory() if service_factory is not None else GatewayServiceInstaller()
 
+    def interactive_build_mode() -> BuildMode:
+        # `nanobot gateway` is often launched by tests, supervisors, or service managers.
+        # The higher-level `nanobot webui` command owns interactive first-run guidance.
+        return "warn"
+
     def start_options(
         *,
         port: int | None,
         verbose: bool,
         workspace: str | None,
         config: str | None,
+        loaded_config: Config | None = None,
     ) -> GatewayStartOptions:
-        cfg = load_runtime_config(config, workspace)
+        cfg = loaded_config or load_runtime_config(config, workspace)
         resolved_config = str(Path(config).expanduser().resolve()) if config else None
         resolved_workspace = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
         return GatewayStartOptions(
@@ -139,6 +148,9 @@ def create_gateway_app(
             console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
             raise typer.Exit(1)
         if background:
+            cfg = load_runtime_config(config, workspace)
+            if prepare_webui_bundle is not None:
+                prepare_webui_bundle(cfg, interactive_build_mode())
             runtime = runtime_for_instance(workspace=workspace, config=config)
             result = runtime.start_background(
                 start_options(
@@ -146,6 +158,7 @@ def create_gateway_app(
                     verbose=verbose,
                     workspace=workspace,
                     config=config,
+                    loaded_config=cfg,
                 )
             )
             if result.ok:
@@ -158,7 +171,7 @@ def create_gateway_app(
 
         configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
-        run_gateway(cfg, port=port)
+        run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
 
     @gateway_app.command("status")
     def gateway_status(
@@ -211,6 +224,9 @@ def create_gateway_app(
         timeout: int = typer.Option(20, "--timeout", help="Restart timeout in seconds"),
     ) -> None:
         """Restart the background gateway."""
+        cfg = load_runtime_config(config, workspace)
+        if prepare_webui_bundle is not None:
+            prepare_webui_bundle(cfg, interactive_build_mode())
         runtime = runtime_for_instance(workspace=workspace, config=config)
         result = runtime.restart(
             start_options(
@@ -218,6 +234,7 @@ def create_gateway_app(
                 verbose=verbose,
                 workspace=workspace,
                 config=config,
+                loaded_config=cfg,
             ),
             timeout_s=timeout,
         )

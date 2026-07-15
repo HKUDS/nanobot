@@ -9,7 +9,7 @@ import shutil
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 from weakref import WeakKeyDictionary
 
 import httpx
@@ -52,6 +52,26 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+
+
+class MCPConnection(Protocol):
+    async def aclose(self) -> None: ...
+
+
+class _OwnedMCPConnection:
+    """Close an MCP transport from the task that originally opened it."""
+
+    def __init__(self, owner: asyncio.Task[None], close_requested: asyncio.Event) -> None:
+        self._owner = owner
+        self._close_requested = close_requested
+
+    async def aclose(self) -> None:
+        self._close_requested.set()
+        try:
+            await asyncio.shield(self._owner)
+        except asyncio.CancelledError:
+            if not self._owner.cancelled():
+                raise
 
 
 def _is_malformed_mcp_progress_notification(message: Any) -> bool:
@@ -814,19 +834,19 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
 async def connect_mcp_servers(
     mcp_servers: dict, registry: ToolRegistry
-) -> dict[str, AsyncExitStack]:
+) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
-    Returns a dict mapping server name -> its dedicated AsyncExitStack.
-    Each server gets its own stack to prevent cancel scope conflicts
-    when multiple MCP servers are configured.
+    Returns one connection handle per server.  Each handle keeps the task that
+    entered the MCP SDK contexts alive so reconnect and shutdown can close
+    AnyIO cancel scopes from their owning task.
     """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
-    async def connect_single_server(name: str, cfg) -> tuple[str, AsyncExitStack | None]:
+    async def open_single_server(name: str, cfg) -> tuple[str, AsyncExitStack | None]:
         server_stack = AsyncExitStack()
         await server_stack.__aenter__()
 
@@ -1045,7 +1065,43 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
             return name, None
 
-    server_stacks: dict[str, AsyncExitStack] = {}
+    async def connect_single_server(name: str, cfg) -> tuple[str, MCPConnection | None]:
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future[bool] = loop.create_future()
+        close_requested = asyncio.Event()
+
+        async def own_connection() -> None:
+            stack: AsyncExitStack | None = None
+            try:
+                _, stack = await open_single_server(name, cfg)
+                if not ready.done():
+                    ready.set_result(stack is not None)
+                if stack is not None:
+                    await close_requested.wait()
+            except BaseException as exc:
+                if not ready.done():
+                    ready.set_exception(exc)
+                raise
+            finally:
+                if stack is not None:
+                    await stack.aclose()
+
+        owner = asyncio.create_task(own_connection(), name=f"mcp:{name}")
+        connection = _OwnedMCPConnection(owner, close_requested)
+        try:
+            connected = await ready
+        except BaseException:
+            close_requested.set()
+            owner.cancel()
+            with suppress(BaseException):
+                await asyncio.shield(owner)
+            raise
+        if not connected:
+            await connection.aclose()
+            return name, None
+        return name, connection
+
+    server_stacks: dict[str, MCPConnection] = {}
 
     for name, cfg in mcp_servers.items():
         try:
@@ -1065,90 +1121,46 @@ def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"mcp_presets": mcp_presets} if isinstance(mcp_presets, list) and mcp_presets else {}
 
 
-def runtime_lines(
-    message: Any,
-    *,
-    available_server_names: set[str] | None = None,
-    configured_server_names: set[str] | None = None,
-    connected_server_names: set[str] | None = None,
-    skip: bool = False,
-) -> list[str]:
-    """Return model-visible MCP preset annotations for the current turn."""
-    if skip:
-        return []
-    if configured_server_names is None:
-        configured_server_names = available_server_names
-    if connected_server_names is None:
-        connected_server_names = available_server_names
-    metadata = message.metadata if isinstance(getattr(message, "metadata", None), Mapping) else None
-    structured = metadata.get("mcp_presets") if isinstance(metadata, Mapping) else None
-    if not isinstance(structured, list):
-        return []
-
-    lines: list[str] = []
-    for item in structured[:8]:
-        if not isinstance(item, Mapping):
-            continue
-        raw_name = str(item.get("name") or "").strip().lower()
-        if not raw_name:
-            continue
-        display = str(item.get("display_name") or raw_name).strip() or raw_name
-        transport = str(item.get("transport") or "mcp").strip() or "mcp"
-        prefix = f"mcp_{raw_name}_"
-        if configured_server_names is not None and raw_name not in configured_server_names:
-            lines.append(
-                "MCP Preset Attachment: "
-                f"@{raw_name} ({display}; transport={transport}) is configured in WebUI Settings, "
-                "but this gateway has not loaded the latest MCP settings yet. "
-                f"Tools with prefix `{prefix}` may not be available yet; if they are missing, "
-                "tell the user to restart nanobot."
-            )
-            continue
-        if connected_server_names is not None and raw_name not in connected_server_names:
-            lines.append(
-                "MCP Preset Attachment: "
-                f"@{raw_name} ({display}; transport={transport}) is configured, "
-                "but its MCP connection is not currently live. "
-                f"Tools with prefix `{prefix}` may be unavailable; tell the user to open Settings, "
-                "run the preset test, and restart nanobot only if hot reload is unavailable."
-            )
-            continue
-        lines.append(
-            "MCP Preset Attachment: "
-            f"@{raw_name} ({display}; transport={transport}; tool_prefix={prefix}). "
-            f"Prefer available tools whose names start with `{prefix}` for this request; "
-            "do not substitute shell commands for this MCP integration unless the user asks."
-        )
-    return lines
-
-
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
-    missing_servers = {
-        name: cfg for name, cfg in state._mcp_servers.items() if name not in state._mcp_stacks
-    }
-    if state._mcp_connecting or not missing_servers:
-        return
-    state._mcp_connecting = True
-    try:
-        connected = await connect_mcp_servers(missing_servers, registry)
-        state._mcp_stacks.update(connected)
-        _attach_reconnect_handlers(state, registry, connected)
-        if connected:
-            logger.info("MCP connected servers: {}", sorted(connected))
-        else:
-            logger.warning("No MCP servers connected successfully (will retry next message)")
-    except asyncio.CancelledError:
-        logger.warning("MCP connection cancelled (will retry next message)")
-    except BaseException as e:
-        logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
-    finally:
-        state._mcp_connecting = False
+    async with _reload_lock(state):
+        if getattr(state, "_mcp_closing", False):
+            return
+        missing_servers = {
+            name: cfg for name, cfg in state._mcp_servers.items() if name not in state._mcp_stacks
+        }
+        if state._mcp_connecting or not missing_servers:
+            return
+        state._mcp_connecting = True
+        try:
+            connected = await connect_mcp_servers(missing_servers, registry)
+            if getattr(state, "_mcp_closing", False):
+                for connection in connected.values():
+                    await connection.aclose()
+                return
+            state._mcp_stacks.update(connected)
+            _attach_reconnect_handlers(state, registry, connected)
+            if connected:
+                logger.info("MCP connected servers: {}", sorted(connected))
+            else:
+                logger.warning("No MCP servers connected successfully (will retry next message)")
+        except asyncio.CancelledError:
+            logger.warning("MCP connection cancelled (will retry next message)")
+        except BaseException as e:
+            logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
+        finally:
+            state._mcp_connecting = False
 
 
 async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
     """Reconcile live MCP connections with the current config file."""
     async with _reload_lock(state):
+        if getattr(state, "_mcp_closing", False):
+            return {
+                "ok": False,
+                "message": "MCP connections are shutting down.",
+                "requires_restart": True,
+            }
         try:
             from nanobot.config.loader import load_config, resolve_config_env_vars
 
@@ -1187,9 +1199,17 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         )
         to_connect_names = sorted(set(added) | set(changed) | set(retry_missing))
         to_connect = {name: next_servers[name] for name in to_connect_names}
-        connected: dict[str, AsyncExitStack] = {}
+        connected: dict[str, MCPConnection] = {}
         if to_connect:
             connected = await connect_mcp_servers(to_connect, registry)
+            if getattr(state, "_mcp_closing", False):
+                for connection in connected.values():
+                    await connection.aclose()
+                return {
+                    "ok": False,
+                    "message": "MCP connections are shutting down.",
+                    "requires_restart": True,
+                }
             state._mcp_stacks.update(connected)
             _attach_reconnect_handlers(state, registry, connected)
 
@@ -1323,6 +1343,8 @@ async def _refresh_terminated_server(
     stale_tool: Tool,
 ) -> Tool | None:
     async with _reload_lock(state):
+        if getattr(state, "_mcp_closing", False):
+            return None
         cfg = state._mcp_servers.get(server_name)
         if cfg is None:
             logger.warning(
@@ -1344,6 +1366,10 @@ async def _refresh_terminated_server(
         await _close_server(state, server_name)
 
         connected = await connect_mcp_servers({server_name: cfg}, registry)
+        if getattr(state, "_mcp_closing", False):
+            for connection in connected.values():
+                await connection.aclose()
+            return None
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         if server_name not in connected:
@@ -1384,5 +1410,26 @@ async def _close_server(state: Any, server_name: str) -> None:
         return
     try:
         await stack.aclose()
+    except asyncio.CancelledError:
+        if asyncio.current_task().cancelling() > 0:
+            raise
+        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
     except (RuntimeError, BaseExceptionGroup):
         logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+
+
+async def close_mcp_servers(state: Any) -> None:
+    """Close every MCP connection while excluding reconnect and hot reload."""
+    state._mcp_closing = True
+    async with _reload_lock(state):
+        connections = list(state._mcp_stacks.items())
+        state._mcp_stacks.clear()
+        for name, connection in connections:
+            try:
+                await connection.aclose()
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling() > 0:
+                    raise
+                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+            except (RuntimeError, BaseExceptionGroup):
+                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)

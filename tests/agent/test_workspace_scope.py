@@ -152,7 +152,12 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(command="printf ok > scoped-marker.txt")
+        result = await tool.execute(
+            command=(
+                'python -c "from pathlib import Path; '
+                "Path('scoped-marker.txt').write_text('ok')\""
+            )
+        )
     finally:
         reset_workspace_scope(token)
 
@@ -174,7 +179,13 @@ async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Pat
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(command="printf ok > outside-marker.txt", working_dir=str(outside))
+        result = await tool.execute(
+            command=(
+                'python -c "from pathlib import Path; '
+                "Path('outside-marker.txt').write_text('ok')\""
+            ),
+            working_dir=str(outside),
+        )
     finally:
         reset_workspace_scope(token)
 

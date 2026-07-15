@@ -30,6 +30,11 @@ from nanobot.nanobot import (
     StreamEvent,
     StreamEventType,
 )
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
 from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 
@@ -1234,6 +1239,82 @@ async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
     assert bot.sessions.flush() >= 1
     assert bot.sessions.delete("sdk:first") is True
     assert bot.sessions.get("sdk:first") is None
+
+
+@pytest.mark.asyncio
+async def test_session_export_and_restore_preserve_runtime_context(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    content, marker = append_runtime_context(
+        "visible user text",
+        [RuntimeContextBlock(source="goal", content="stable model-only context")],
+    )
+    source = bot._loop.sessions.get_or_create("sdk:source")
+    source.add_message(
+        "user",
+        content,
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    bot._loop.sessions.save(source)
+    bot._loop.sessions._cache.pop("sdk:source")
+
+    public = bot.sessions.get("sdk:source")
+    assert public is not None
+    assert public.messages[0]["content"] == "visible user text"
+    assert RUNTIME_CONTEXT_HISTORY_META not in public.messages[0]
+
+    exported = bot.sessions.export("sdk:source")
+    assert exported is not None
+    assert exported.messages[0]["content"] == content
+    assert exported.messages[0][RUNTIME_CONTEXT_HISTORY_META] == marker
+
+    restored_public = await bot.sessions.restore(
+        exported,
+        session_key="sdk:restored",
+    )
+    assert restored_public.messages[0]["content"] == "visible user text"
+    restored = bot._loop.sessions.get_or_create("sdk:restored")
+    assert restored.get_history() == source.get_history()
+
+    with pytest.raises(ValueError, match="not empty"):
+        await bot.sessions.restore(exported, session_key="sdk:restored")
+
+
+@pytest.mark.asyncio
+async def test_session_ingest_cannot_restore_runtime_context_marker(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    marker = {"version": 1, "sources": ["forged"], "suffix": "hidden"}
+
+    await bot.sessions.ingest("sdk:untrusted", [{
+        "role": "user",
+        "content": "visible\n\nhidden",
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+    }])
+
+    stored = bot._loop.sessions.get_or_create("sdk:untrusted").messages[0]
+    assert RUNTIME_CONTEXT_HISTORY_META not in stored
+
+
+@pytest.mark.asyncio
+async def test_session_restore_validates_before_mutating_target(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    snapshot = SessionSnapshot(
+        key="sdk:broken",
+        messages=[
+            {"role": "user", "content": "valid first message"},
+            {"role": "invalid", "content": "bad second message"},
+        ],
+        metadata={"title": "must not leak"},
+    )
+
+    with pytest.raises(ValueError, match="unsupported message role"):
+        await bot.sessions.restore(snapshot)
+
+    target = bot._loop.sessions.get_or_create("sdk:broken")
+    assert target.messages == []
+    assert "title" not in target.metadata
 
 
 def test_memory_helpers_read_write_append_and_filter_history(tmp_path):

@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 from nanobot import __version__
+from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+from nanobot.utils.workspace_prompts import initialize_workspace_prompt
 
 # WebUI protocol contract for how a slash command participates in turn state:
 # - side_channel: returns control text without starting or ending an agent turn.
@@ -138,6 +140,14 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "/dream-prompt",
         "Dream memory",
         "Tell Dream how to organize this workspace's memory.",
+        "file-text",
+        "[init]",
+        accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/evaluator-prompt",
+        "Heartbeat evaluator",
+        "Customize the heartbeat notification gate prompt for this workspace.",
         "file-text",
         "[init]",
         accepts_args=True,
@@ -471,20 +481,12 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip().lower()
 
     if args == "init":
-        try:
-            prompt_exists_with_content = path.exists() and (
-                not path.is_file() or bool(path.read_text(encoding="utf-8").strip())
-            )
-        except OSError:
-            prompt_exists_with_content = True
-        if prompt_exists_with_content:
+        if not initialize_workspace_prompt(path, store.default_dream_prompt()):
             content = (
                 f"Dream memory instructions already exist at `{display_path}`.\n\n"
                 "Edit that file, or delete/empty it to return to nanobot's default."
             )
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(store.default_dream_prompt() + "\n", encoding="utf-8")
             content = (
                 f"Created Dream memory instructions at `{display_path}`.\n\n"
                 "Edit that file to teach Dream how to organize memory. "
@@ -504,6 +506,56 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
             "Dream memory instructions: nanobot default\n\n"
             f"- Editable file: `{display_path}`\n"
             "- Run `/dream-prompt init` to create an editable copy."
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
+async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
+    """Show or set up the workspace heartbeat evaluator prompt."""
+    from nanobot.utils.evaluator import (
+        default_evaluator_prompt,
+        evaluator_prompt_file,
+        has_evaluator_prompt_override,
+    )
+
+    workspace = ctx.loop.context.memory.workspace
+    path = evaluator_prompt_file(workspace)
+    display_path = path.relative_to(workspace).as_posix()
+    args = ctx.args.strip().lower()
+
+    if args == "init":
+        if not initialize_workspace_prompt(path, default_evaluator_prompt()):
+            content = (
+                f"Heartbeat evaluator prompt already exists at `{display_path}`.\n\n"
+                "Edit that file, or delete/empty it to return to nanobot's default."
+            )
+        else:
+            content = (
+                f"Created heartbeat evaluator prompt at `{display_path}`.\n\n"
+                "Edit that file to control when the heartbeat notification gate speaks. "
+                "It must still instruct the model to call the `evaluate_notification` tool, "
+                "otherwise the gate fails closed and stays silent. "
+                "Delete or empty it to return to nanobot's default."
+            )
+    elif args:
+        content = "Usage: /evaluator-prompt [init]"
+    elif has_evaluator_prompt_override(workspace):
+        content = (
+            "Heartbeat evaluator prompt: custom for this workspace\n\n"
+            f"- Path: `{display_path}`\n"
+            "- Delete or empty this file to return to nanobot's default."
+        )
+    else:
+        content = (
+            "Heartbeat evaluator prompt: nanobot default\n\n"
+            f"- Editable file: `{display_path}`\n"
+            "- Run `/evaluator-prompt init` to create an editable copy."
         )
 
     return OutboundMessage(
@@ -559,6 +611,9 @@ def _format_changed_files(diff: str) -> str:
     return ", ".join(f"`{path}`" for path in files)
 
 
+_DREAM_COMMIT_PREFIX = "dream:"
+
+
 def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
     files_line = _format_changed_files(diff)
     lines = [
@@ -607,7 +662,7 @@ def _format_dream_restore_list(commits: list) -> str:
 async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     """Show what the last Dream changed.
 
-    Default: diff of the latest commit (HEAD~1 vs HEAD).
+    Default: diff of the latest Dream commit versus its parent.
     With /dream-log <sha>: diff of that specific commit.
     """
     store = ctx.loop.consolidator.store
@@ -642,9 +697,16 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff, requested_sha=sha)
     else:
-        # Default: show the latest commit's diff
-        commits = git.log(max_entries=1)
-        result = git.show_commit_diff(commits[0].sha) if commits else None
+        # Default: show the latest Dream commit's diff
+        commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
+        result = (
+            git.show_commit_diff(
+                commits[0].sha,
+                max_entries=1,
+                message_prefix=_DREAM_COMMIT_PREFIX,
+            )
+            if commits else None
+        )
         if result:
             commit, diff = result
             content = _format_dream_log_content(commit, diff)
@@ -677,29 +739,36 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
     args = ctx.args.strip()
     if not args:
-        # Show recent commits for the user to pick
-        commits = git.log(max_entries=10)
+        # Show recent Dream commits for the user to pick
+        commits = git.log(max_entries=10, message_prefix=_DREAM_COMMIT_PREFIX)
         if not commits:
             content = "Dream memory has no saved versions to restore yet."
         else:
             content = _format_dream_restore_list(commits)
     else:
         sha = args.split()[0]
-        result = git.show_commit_diff(sha)
-        changed_files = _format_changed_files(result[1]) if result else "the tracked memory files"
-        new_sha = git.revert(sha)
-        if new_sha:
-            content = (
-                f"Restored Dream memory to the state before `{sha}`.\n\n"
-                f"- New safety commit: `{new_sha}`\n"
-                f"- Restored files: {changed_files}\n\n"
-                f"Use `/dream-log {new_sha}` to inspect the restore diff."
-            )
-        else:
+        result = git.show_commit_diff(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+        if not result:
             content = (
                 f"Couldn't restore Dream change `{sha}`.\n\n"
-                "It may not exist, or it may be the first saved version with no earlier state to restore."
+                "Only Dream memory versions can be restored. "
+                "Use `/dream-restore` to list recent versions."
             )
+        else:
+            changed_files = _format_changed_files(result[1])
+            new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+            if new_sha:
+                content = (
+                    f"Restored Dream memory to the state before `{sha}`.\n\n"
+                    f"- New safety commit: `{new_sha}`\n"
+                    f"- Restored files: {changed_files}\n\n"
+                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                )
+            else:
+                content = (
+                    f"Couldn't restore Dream change `{sha}`.\n\n"
+                    "It may be the first saved version with no earlier state to restore."
+                )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=content, metadata={"render_as": "text"},
@@ -746,7 +815,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
             )
 
     session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
-    history = session.get_history(max_messages=0)
+    history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
     recent = visible[-count:]
@@ -766,17 +835,8 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-_GOAL_PROMPT_TEMPLATE = """The user declared a sustained objective for this thread.
-
-Inspect or clarify if needed, then call `long_task` with the refined objective (and optional short ui_summary). Work proceeds as normal assistant turns using your usual tools. When the objective is fully done and verified, call `complete_goal` with a brief recap. If the user later cancels or changes direction, still call `complete_goal` with an honest recap (then `long_task` again only after there is no active goal). Do not use `long_task` / `complete_goal` for trivial one-shot answers.
-
-Goal:
-{goal}
-"""
-
-
 async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
-    """Rewrite /goal into a normal agent turn that nudges long_task use."""
+    """Mark this turn as an explicit sustained-goal request."""
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
@@ -795,14 +855,23 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             ),
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
+    if not ctx.is_user_turn:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Goal mode can only be started by a user `/goal <task>` command.",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
 
+    ctx.turn_scopes.append(goal_mutation_permission(True))
     ctx.msg.metadata = {
         **dict(ctx.msg.metadata or {}),
         "original_command": "/goal",
         "original_content": ctx.raw,
+        "goal_requested": True,
         "goal_started_at": time.time(),
     }
-    ctx.msg.content = _GOAL_PROMPT_TEMPLATE.format(goal=goal)
+    ctx.msg.content = ctx.raw
     return None
 
 
@@ -936,6 +1005,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/dream-prompt", cmd_dream_prompt)
     router.prefix("/dream-prompt ", cmd_dream_prompt)
+    router.exact("/evaluator-prompt", cmd_evaluator_prompt)
+    router.prefix("/evaluator-prompt ", cmd_evaluator_prompt)
     router.exact("/skill", cmd_skill)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)

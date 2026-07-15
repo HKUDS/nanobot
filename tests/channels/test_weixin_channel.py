@@ -37,6 +37,23 @@ def _make_channel() -> tuple[WeixinChannel, MessageBus]:
     return channel, bus
 
 
+@pytest.fixture
+def no_qr_poll_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep QR state-machine tests event-driven without one-second polling sleeps."""
+    real_sleep = asyncio.sleep
+
+    async def yield_to_loop(_delay: float) -> None:
+        await real_sleep(0)
+
+    class AsyncioProxy:
+        sleep = staticmethod(yield_to_loop)
+
+        def __getattr__(self, name: str):
+            return getattr(asyncio, name)
+
+    monkeypatch.setattr(weixin_mod, "asyncio", AsyncioProxy())
+
+
 def test_make_headers_includes_route_tag_when_configured() -> None:
     bus = MessageBus()
     channel = WeixinChannel(
@@ -446,7 +463,9 @@ async def test_poll_once_pauses_session_on_expired_errcode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_refreshes_expired_qr_and_then_succeeds() -> None:
+async def test_qr_login_refreshes_expired_qr_and_then_succeeds(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -478,7 +497,9 @@ async def test_qr_login_refreshes_expired_qr_and_then_succeeds() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_returns_false_after_too_many_expired_qr_codes() -> None:
+async def test_qr_login_returns_false_after_too_many_expired_qr_codes(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._print_qr_code = lambda url: None
@@ -505,7 +526,9 @@ async def test_qr_login_returns_false_after_too_many_expired_qr_codes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_switches_polling_base_url_on_redirect_status() -> None:
+async def test_qr_login_switches_polling_base_url_on_redirect_status(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -537,7 +560,9 @@ async def test_qr_login_switches_polling_base_url_on_redirect_status() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qr_login_redirect_without_host_keeps_current_polling_base_url() -> None:
+async def test_qr_login_redirect_without_host_keeps_current_polling_base_url(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -569,7 +594,9 @@ async def test_qr_login_redirect_without_host_keeps_current_polling_base_url() -
 
 
 @pytest.mark.asyncio
-async def test_qr_login_resets_redirect_base_url_after_qr_refresh() -> None:
+async def test_qr_login_resets_redirect_base_url_after_qr_refresh(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -859,7 +886,9 @@ async def test_get_typing_ticket_failure_uses_backoff_and_cached_ticket(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers() -> None:
+async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None
@@ -887,7 +916,9 @@ async def test_qr_login_treats_temporary_connect_error_as_wait_and_recovers() ->
 
 
 @pytest.mark.asyncio
-async def test_qr_login_treats_5xx_gateway_response_error_as_wait_and_recovers() -> None:
+async def test_qr_login_treats_5xx_gateway_response_error_as_wait_and_recovers(
+    no_qr_poll_delay,
+) -> None:
     channel, _bus = _make_channel()
     channel._running = True
     channel._save_state = lambda: None

@@ -13,12 +13,29 @@ from nanobot.security.network import (
     contains_internal_url,
     env_proxy_applies_to_url,
     httpx_env_proxy_mounts,
+    is_loopback_host,
     pin_resolved_url_dns,
     resolve_url_target,
     validate_url_target,
 )
 
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["localhost", "LOCALHOST.", "127.0.0.1", "127.0.0.2", "::1", "[::1]"],
+)
+def test_is_loopback_host_accepts_explicit_loopback(host: str) -> None:
+    assert is_loopback_host(host)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "::", "192.168.1.10", "api.internal", "example.com"],
+)
+def test_is_loopback_host_rejects_network_targets(host: str) -> None:
+    assert not is_loopback_host(host)
 
 
 @pytest.fixture(autouse=True)

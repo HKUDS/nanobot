@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, TypeAlias
 
+from nanobot.runtime_context import public_history_messages
+
 StreamEventType: TypeAlias = Literal[
     "run.started",
     "text.delta",
@@ -77,7 +79,7 @@ class StreamEvent:
 
 @dataclass(slots=True)
 class SessionSnapshot:
-    """A durable snapshot of one nanobot session."""
+    """A serializable session snapshot; trusted exports may include internal context."""
 
     key: str
     messages: list[dict[str, Any]]
@@ -119,23 +121,41 @@ class SessionInfo:
         }
 
 
-def snapshot_from_session(session: Any) -> SessionSnapshot:
+def snapshot_from_session(
+    session: Any,
+    *,
+    include_runtime_context: bool = False,
+) -> SessionSnapshot:
+    messages = deepcopy(session.messages)
+    if not include_runtime_context:
+        messages = public_history_messages(messages)
     return SessionSnapshot(
         key=session.key,
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
         metadata=deepcopy(session.metadata),
-        messages=deepcopy(session.messages),
+        messages=messages,
     )
 
 
-def snapshot_from_payload(payload: Mapping[str, Any]) -> SessionSnapshot:
+def snapshot_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    include_runtime_context: bool = False,
+) -> SessionSnapshot:
+    messages = [
+        deepcopy(dict(message))
+        for message in list(payload.get("messages") or [])
+        if isinstance(message, Mapping)
+    ]
+    if not include_runtime_context:
+        messages = public_history_messages(messages)
     return SessionSnapshot(
         key=str(payload.get("key") or ""),
         created_at=payload.get("created_at"),
         updated_at=payload.get("updated_at"),
         metadata=deepcopy(dict(payload.get("metadata") or {})),
-        messages=deepcopy(list(payload.get("messages") or [])),
+        messages=messages,
     )
 
 

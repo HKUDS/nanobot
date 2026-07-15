@@ -11,6 +11,11 @@ from nanobot.agent.memory import (
     MemoryStore,
 )
 from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
 from nanobot.session.manager import Session
 from nanobot.utils.helpers import load_bundled_template
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -71,6 +76,31 @@ def _tool_round(call_id: str) -> list[dict]:
 
 
 class TestConsolidatorSummarize:
+    async def test_archive_excludes_model_only_runtime_context(
+        self, consolidator, mock_provider, runtime
+    ):
+        content, marker = append_runtime_context(
+            "ship the feature",
+            [RuntimeContextBlock(source="goal", content="host-only goal guidance")],
+        )
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User wants to ship the feature.",
+            finish_reason="stop",
+        )
+
+        await consolidator.archive(
+            [{
+                "role": "user",
+                "content": content,
+                RUNTIME_CONTEXT_HISTORY_META: marker,
+            }],
+            runtime=runtime,
+        )
+
+        prompt = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "ship the feature" in prompt
+        assert "host-only goal guidance" not in prompt
+
     async def test_archive_uses_captured_generation(
         self, consolidator, mock_provider, runtime
     ):
@@ -995,6 +1025,22 @@ class TestRawArchiveTruncation:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "hello" in entries[0]["content"]
+
+    def test_raw_archive_excludes_model_only_runtime_context(self, store):
+        content, marker = append_runtime_context(
+            "ship the feature",
+            [RuntimeContextBlock(source="goal", content="host-only goal guidance")],
+        )
+
+        store.raw_archive([{
+            "role": "user",
+            "content": content,
+            RUNTIME_CONTEXT_HISTORY_META: marker,
+        }])
+
+        entry = store.read_unprocessed_history(since_cursor=0)[0]["content"]
+        assert "ship the feature" in entry
+        assert "host-only goal guidance" not in entry
 
     def test_raw_archive_preserves_session_key(self, store):
         messages = [{"role": "user", "content": "hello"}]

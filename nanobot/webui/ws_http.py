@@ -26,9 +26,14 @@ from websockets.http11 import Response
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from nanobot.webui.file_preview import (
+    WebUIFilePreviewError,
+    file_preview_availability_payload,
+    file_preview_payload,
+)
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -69,6 +74,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
+from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.session_automations import (
     all_automations_payload,
@@ -154,6 +160,7 @@ class GatewayHTTPHandler:
         bus: MessageBus,
         tokens: GatewayTokenStore,
         media: WebUIMediaGateway,
+        ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
@@ -161,6 +168,7 @@ class GatewayHTTPHandler:
         local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        channel_feature_action: Callable[..., Any] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -170,6 +178,7 @@ class GatewayHTTPHandler:
         self.bus = bus
         self.tokens = tokens
         self.media = media
+        self.ingress = ingress
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
@@ -193,6 +202,7 @@ class GatewayHTTPHandler:
             error_response=_http_error,
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
+            channel_feature_action=channel_feature_action,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -337,6 +347,9 @@ class GatewayHTTPHandler:
             "ws_path": expected_path,
             "ws_url": ws_url,
             "expires_in": self.config.token_ttl_s,
+            "limits": self.ingress.bootstrap_limits(
+                max_frame_bytes=self.config.max_message_bytes,
+            ),
             "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
             "runtime_surface": self._runtime_surface,
             "runtime_capabilities": self._capabilities,
@@ -426,6 +439,9 @@ class GatewayHTTPHandler:
         messages = data.get("messages")
         if isinstance(messages, list):
             scrub_subagent_messages_for_channel(messages)
+            data["messages"] = public_history_messages(
+                message for message in messages if isinstance(message, dict)
+            )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
 
@@ -482,13 +498,18 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        path = _query_first(_parse_query(request.path), "path")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path")
+        is_probe = _query_first(query, "probe") == "1"
         try:
-            payload = file_preview_payload(
-                path,
-                scope=self.workspaces.scope_for_session_key(decoded_key),
-            )
+            scope = self.workspaces.scope_for_session_key(decoded_key)
+            if is_probe:
+                payload = file_preview_availability_payload(path, scope=scope)
+            else:
+                payload = file_preview_payload(path, scope=scope)
         except WebUIFilePreviewError as e:
+            if is_probe and e.status in {400, 403, 404, 415}:
+                return _http_json_response({"available": False})
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
 

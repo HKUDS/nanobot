@@ -5,6 +5,7 @@ import os
 import select
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
@@ -75,12 +76,18 @@ from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
-from nanobot.utils.evaluator import evaluate_response  # noqa: E402
+from nanobot.security.network import is_loopback_host  # noqa: E402
+from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt  # noqa: E402
 from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
 from nanobot.utils.restart import (  # noqa: E402
     consume_restart_notice_from_env,
     format_restart_completed_message,
     should_show_cli_restart_notice,
+)
+from nanobot.webui.build import (  # noqa: E402
+    BuildMode,
+    WebUIBuildError,
+    ensure_webui_bundle,
 )
 from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
@@ -102,8 +109,8 @@ def _signal_name(signum: int) -> str:
     return f"signal {signum}"
 
 
-def _ensure_gateway_tty_signal_mode() -> None:
-    """Keep foreground gateway Ctrl+C usable even after a raw-mode TTY leak."""
+def _ensure_interactive_tty_mode() -> None:
+    """Restore interactive line input after a raw-mode TTY leak."""
     try:
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
@@ -115,14 +122,19 @@ def _ensure_gateway_tty_signal_mode() -> None:
         import termios
 
         attrs = termios.tcgetattr(fd)
-        lflag = attrs[3]
-        required = termios.ISIG | termios.ICANON | termios.ECHO
-        if (lflag & required) == required:
+        required_lflag = termios.ISIG | termios.ICANON | termios.ECHO
+        blocked_input_flags = getattr(termios, "IGNCR", 0) | getattr(termios, "INLCR", 0)
+        if (
+            (attrs[3] & required_lflag) == required_lflag
+            and attrs[0] & termios.ICRNL
+            and not attrs[0] & blocked_input_flags
+        ):
             return
-        attrs[3] = lflag | required
+        attrs[0] = (attrs[0] | termios.ICRNL) & ~blocked_input_flags
+        attrs[3] |= required_lflag
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
         termios.tcflush(fd, termios.TCIFLUSH)
-        logger.debug("Restored foreground gateway TTY signal mode")
+        logger.debug("Restored foreground gateway TTY mode")
 
 
 def _install_gateway_shutdown_handlers(
@@ -179,6 +191,20 @@ def _advance_dream_cursor_if_behind(memory: Any) -> None:
     latest = memory.get_latest_cursor()
     if memory.get_last_dream_cursor() < latest:
         memory.set_last_dream_cursor(latest)
+
+
+def _commit_dream_changes(memory: Any) -> str | None:
+    """Commit durable Dream edits, without entering the commit path for a no-op run."""
+    if not memory.git.is_initialized():
+        return None
+    diff_body = memory.dream_content_diff()
+    if not diff_body:
+        return None
+    message = memory.build_dream_commit_message(
+        "dream: periodic memory consolidation",
+        diff_body,
+    )
+    return memory.git.auto_commit(message)
 
 
 class SafeFileHistory(FileHistory):
@@ -617,6 +643,7 @@ def onboard(
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
+    explicit_config = config is not None
     if config:
         config_path = Path(config).expanduser().resolve()
         set_config_path(config_path)
@@ -690,38 +717,11 @@ def onboard(
 
     sync_workspace_templates(workspace_path)
 
-    agent_cmd = 'nanobot agent -m "Hello!"'
-    gateway_cmd = "nanobot gateway"
-    if config:
-        agent_cmd += f" --config {config_path}"
-        gateway_cmd += f" --config {config_path}"
+    webui_cmd = "nanobot webui"
+    if explicit_config:
+        webui_cmd += f' -c "{config_path}"'
 
-    console.print(f"\n{__logo__} nanobot is ready!")
-    console.print("\nNext steps:")
-    if wizard:
-        console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
-        console.print(f"  2. Start gateway: [cyan]{gateway_cmd}[/cyan]")
-    else:
-        console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
-        console.print("     Get one at: https://openrouter.ai/keys")
-        console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
-    console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
-    )
-
-
-def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
-    """Recursively fill in missing values from defaults without overwriting user config."""
-    if not isinstance(existing, dict) or not isinstance(defaults, dict):
-        return existing
-
-    merged = dict(existing)
-    for key, value in defaults.items():
-        if key not in merged:
-            merged[key] = value
-        else:
-            merged[key] = _merge_missing_defaults(merged[key], value)
-    return merged
+    typer.echo(f"\n✓ nanobot is ready. Run: {webui_cmd}")
 
 
 def _onboard_plugins(config_path: Path) -> None:
@@ -729,6 +729,7 @@ def _onboard_plugins(config_path: Path) -> None:
     import json
 
     from nanobot.channels.registry import discover_all
+    from nanobot.config.loader import merge_missing_defaults
 
     all_channels = discover_all()
     if not all_channels:
@@ -742,7 +743,7 @@ def _onboard_plugins(config_path: Path) -> None:
         if name not in channels:
             channels[name] = cls.default_config()
         else:
-            channels[name] = _merge_missing_defaults(channels[name], cls.default_config())
+            channels[name] = merge_missing_defaults(channels[name], cls.default_config())
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -869,11 +870,7 @@ def _confirm_webui_action(message: str, *, yes: bool) -> None:
     """Confirm a WebUI first-run mutation or fail clearly in non-interactive shells."""
     if yes:
         return
-    try:
-        interactive = sys.stdin.isatty()
-    except Exception:
-        interactive = False
-    if not interactive:
+    if not _cli_can_prompt():
         console.print(
             "[red]Error: WebUI setup needs confirmation. Re-run with --yes or use "
             "`nanobot onboard --wizard`.[/red]"
@@ -882,6 +879,19 @@ def _confirm_webui_action(message: str, *, yes: bool) -> None:
     if not typer.confirm(message, default=True):
         console.print("[yellow]WebUI setup cancelled.[/yellow]")
         raise typer.Exit(1)
+
+
+def _cli_can_prompt() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _webui_build_mode_for_interactive(*, yes: bool = False) -> BuildMode:
+    if yes:
+        return "auto"
+    return "prompt" if _cli_can_prompt() else "warn"
 
 
 def _resolve_webui_config_path(config: str | None) -> Path:
@@ -928,6 +938,43 @@ def _webui_config_dict(config: Config) -> dict[str, Any]:
     return model.model_dump(by_alias=True, exclude_none=True)
 
 
+def _webui_channel_enabled(config: Config) -> bool:
+    from nanobot.channels.websocket import WebSocketConfig
+
+    current = getattr(config.channels, "websocket", None) or {}
+    return bool(WebSocketConfig.model_validate(current).enabled)
+
+
+def _prepare_webui_bundle_for_gateway(
+    config: Config,
+    *,
+    mode: BuildMode,
+    webui_static_dist: bool = True,
+) -> None:
+    """Refresh or warn about stale bundled WebUI assets before gateway startup."""
+    if not webui_static_dist or not _webui_channel_enabled(config):
+        return
+
+    def _print(message: str) -> None:
+        console.print(f"[yellow]{escape(message)}[/yellow]")
+
+    def _confirm(message: str) -> bool:
+        return typer.confirm(message, default=True)
+
+    try:
+        ensure_webui_bundle(
+            mode=mode,
+            confirm=_confirm if mode == "prompt" else None,
+            output=_print,
+        )
+    except WebUIBuildError as exc:
+        if mode == "warn":
+            console.print(f"[yellow]Warning: {escape(str(exc))}[/yellow]")
+            return
+        console.print(f"[red]Error: {escape(str(exc))}[/red]")
+        raise typer.Exit(1) from exc
+
+
 def _host_for_local_browser(host: str) -> str:
     """Map bind hosts to a browser-openable local host."""
     if host in {"0.0.0.0", ""}:
@@ -937,6 +984,36 @@ def _host_for_local_browser(host: str) -> str:
     if ":" in host and not host.startswith("["):
         return f"[{host}]"
     return host
+
+
+def _gateway_health_url(host: str, port: int) -> str:
+    """Return a health URL that can be opened from this device."""
+    return f"http://{_host_for_local_browser(host)}:{port}/health"
+
+
+def _gateway_health_bind_note(host: str) -> str:
+    """Describe a non-local bind without presenting it as a usable URL."""
+    return "" if is_loopback_host(host) else f" [dim](listening on {host})[/dim]"
+
+
+_GATEWAY_HEALTH_MAX_CONNECTIONS = 64
+_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS = 2.0
+
+
+def _print_gateway_health_endpoint(host: str, port: int) -> None:
+    """Print a usable health URL and make non-loopback binds explicit."""
+    console.print(
+        f"[green]✓[/green] Health endpoint: {_gateway_health_url(host, port)}"
+        f"{_gateway_health_bind_note(host)}"
+    )
+    if is_loopback_host(host):
+        return
+
+    console.print(
+        "[yellow]Warning: the unauthenticated health endpoint is listening beyond loopback "
+        "and may be reachable from other devices. "
+        f"Keep port {port} private or protect it with a firewall or reverse proxy.[/yellow]"
+    )
 
 
 def _webui_bootstrap_secret(config: Config) -> str:
@@ -1027,7 +1104,6 @@ def _warn_webui_bind_scope(config: Config) -> None:
 
 def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
     """Best-effort wait for the WebUI listener before opening a browser."""
-    import socket
     import time
     from urllib.parse import urlparse
 
@@ -1036,11 +1112,75 @@ def _wait_for_webui(url: str, *, timeout_s: float = 5.0) -> None:
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.2):
-                return
-        except OSError:
-            time.sleep(0.1)
+        if _tcp_endpoint_reachable(host, port, timeout_s=0.2):
+            return
+        time.sleep(0.1)
+
+
+def _tcp_endpoint_reachable(host: str, port: int, *, timeout_s: float = 0.25) -> bool:
+    """Return whether a local TCP endpoint accepts connections."""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
+def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bool:
+    """Return whether the nanobot gateway health endpoint responds OK."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    browser_host = _host_for_local_browser(host)
+    try:
+        with urllib.request.urlopen(
+            f"http://{browser_host}:{port}/health",
+            timeout=timeout_s,
+        ) as response:
+            if response.status != 200:
+                return False
+            body = response.read(1024)
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return payload.get("status") == "ok"
+
+
+def _webui_endpoint_reachable(url: str, *, timeout_s: float = 0.25) -> bool:
+    """Return whether the WebUI URL's TCP endpoint is already listening."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return _tcp_endpoint_reachable(host, port, timeout_s=timeout_s)
+
+
+def _print_foreground_port_conflict(
+    *,
+    webui_url: str,
+    gateway_host: str,
+    gateway_port: int,
+) -> None:
+    console.print(
+        "[red]Error: nanobot cannot start because one of its local ports is already in use.[/red]"
+    )
+    console.print(f"  WebUI: [cyan]{webui_url}[/cyan]")
+    console.print(
+        f"  Gateway health: [cyan]http://{_host_for_local_browser(gateway_host)}:{gateway_port}/health[/cyan]"
+    )
+    console.print()
+    console.print("If this is an existing nanobot instance, use it or stop it first:")
+    console.print("  [cyan]nanobot gateway status[/cyan]")
+    console.print("  [cyan]nanobot gateway stop[/cyan]")
+    console.print("Or choose different ports with [cyan]--port[/cyan] and [cyan]--gateway-port[/cyan].")
 
 
 def _open_webui_browser(url: str, *, wait: bool = True) -> None:
@@ -1049,11 +1189,41 @@ def _open_webui_browser(url: str, *, wait: bool = True) -> None:
 
     if wait:
         _wait_for_webui(url)
+    display_url = _webui_display_url(url)
     try:
         webbrowser.open(url)
-        console.print(f"[green]✓[/green] Opened WebUI: [cyan]{url}[/cyan]")
+        console.print(f"[green]✓[/green] Opened WebUI: [cyan]{display_url}[/cyan]")
     except Exception as exc:
-        console.print(f"[yellow]Could not open browser ({exc}); visit {url}[/yellow]")
+        console.print(f"[yellow]Could not open browser ({exc}); visit {display_url}[/yellow]")
+
+
+def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
+    """Explain how the browser and gateway lifecycles differ."""
+    console.print()
+    if attached:
+        console.print("[green]nanobot is attached to the existing gateway.[/green]")
+    else:
+        console.print("[green]nanobot is running in this terminal.[/green]")
+    console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
+    console.print("[dim]Press Ctrl+C here to stop nanobot.[/dim]")
+
+
+def _attach_to_background_gateway(runtime: Any) -> None:
+    """Keep a foreground WebUI command attached to a managed gateway."""
+    _print_webui_foreground_lifecycle(attached=True)
+    try:
+        while runtime.status().running:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopping nanobot...[/yellow]")
+        result = runtime.stop()
+        if result.ok or result.message == "gateway_not_running":
+            console.print("[green]Gateway stopped.[/green]")
+            return
+        console.print(f"[red]Gateway could not be stopped: {result.message}[/red]")
+        raise typer.Exit(1)
+
+    console.print("[yellow]Gateway stopped.[/yellow]")
 
 
 def _gateway_instance_command(
@@ -1119,7 +1289,7 @@ def trigger(
     trigger_id: str = typer.Argument(..., help="Trigger ID returned by /trigger"),
     message: str | None = typer.Argument(None, help="Message to deliver; stdin is used when omitted"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Deliver a local trigger message to its bound chat session."""
     from nanobot.triggers.local_store import (
@@ -1177,9 +1347,9 @@ def serve(
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
     api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
-    if host in {"0.0.0.0", "::"} and not api_key:
+    if not is_loopback_host(host) and not api_key:
         console.print(
-            "[red]Error: host is 0.0.0.0 (all interfaces) but api_key is not set. "
+            f"[red]Error: host {host} is available beyond this device but api_key is not set. "
             "Set api.api_key in config to prevent unauthenticated access.[/red]"
         )
         raise typer.Exit(1)
@@ -1203,9 +1373,9 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
-    if host in {"0.0.0.0", "::"}:
+    if not is_loopback_host(host):
         console.print(
-            "[yellow]API is bound to all interfaces "
+            "[yellow]API is available beyond this device "
             "(authentication required).[/yellow]"
         )
     console.print()
@@ -1242,7 +1412,11 @@ def webui(
     ),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    background: bool = typer.Option(False, "--background", help="Start gateway in the background"),
+    background: bool = typer.Option(
+        False,
+        "--background",
+        help="Keep the gateway running after this command exits",
+    ),
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser"),
     yes: bool = typer.Option(
         False,
@@ -1255,6 +1429,7 @@ def webui(
     from nanobot.config.loader import save_config
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
+    _ensure_interactive_tty_mode()
     config_path = _resolve_webui_config_path(config)
     created_config = not config_path.exists()
     if created_config:
@@ -1297,7 +1472,14 @@ def webui(
 
     console.print()
     console.print(f"WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
-    console.print(f"Gateway health: [cyan]http://{runtime_config.gateway.host}:{effective_gateway_port}/health[/cyan]")
+    gateway_health_url = _gateway_health_url(
+        runtime_config.gateway.host,
+        effective_gateway_port,
+    )
+    console.print(
+        f"Gateway health: [cyan]{gateway_health_url}[/cyan]"
+        f"{_gateway_health_bind_note(runtime_config.gateway.host)}"
+    )
     if no_open:
         console.print("[dim]Browser opening disabled by --no-open.[/dim]")
         if generated_bootstrap_secret:
@@ -1309,21 +1491,25 @@ def webui(
                 f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
             )
 
-    if background:
-        config_arg = str(config_path)
-        workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
-        runtime = GatewayRuntime(
-            paths=GatewayRuntimePaths.for_instance(
-                data_dir=config_path.parent,
-                workspace=workspace_arg,
-                config_path=config_arg,
-            )
-        )
-        start_options = GatewayStartOptions(
-            port=effective_gateway_port,
+    webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
+
+    config_arg = str(config_path)
+    workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
+    runtime = GatewayRuntime(
+        paths=GatewayRuntimePaths.for_instance(
+            data_dir=config_path.parent,
             workspace=workspace_arg,
             config_path=config_arg,
         )
+    )
+    start_options = GatewayStartOptions(
+        port=effective_gateway_port,
+        workspace=workspace_arg,
+        config_path=config_arg,
+    )
+
+    if background:
+        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
         result = runtime.start_background(start_options)
         restarted = False
         restart_attempted = False
@@ -1351,14 +1537,53 @@ def webui(
             "View logs: "
             f"[cyan]{_gateway_instance_command('logs', config_path=config_path, workspace=workspace)}[/cyan]"
         )
+        console.print("[dim]Closing the browser does not stop channels or automations.[/dim]")
+        console.print(
+            "Stop nanobot: "
+            f"[cyan]{_gateway_instance_command('stop', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
         if not no_open:
             _open_webui_browser(webui_url)
         return
 
+    gateway_ready = _gateway_health_ready(runtime_config.gateway.host, effective_gateway_port)
+    webui_ready = _webui_endpoint_reachable(webui_url)
+    if gateway_ready and webui_ready:
+        console.print("[yellow]Gateway is already running; attaching to the existing WebUI.[/yellow]")
+        console.print(
+            "Restart the gateway if you need it to pick up local source changes: "
+            f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
+        if not no_open:
+            _open_webui_browser(webui_url, wait=False)
+        if runtime.status().running:
+            _attach_to_background_gateway(runtime)
+        else:
+            console.print(
+                "[yellow]This gateway is controlled by another foreground command. "
+                "Stop it from that terminal.[/yellow]"
+            )
+        return
+
+    gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
+        _host_for_local_browser(runtime_config.gateway.host),
+        effective_gateway_port,
+    )
+    webui_port_taken = webui_ready
+    if gateway_port_taken or webui_port_taken:
+        _print_foreground_port_conflict(
+            webui_url=webui_url,
+            gateway_host=runtime_config.gateway.host,
+            gateway_port=effective_gateway_port,
+        )
+        raise typer.Exit(1)
+
+    _print_webui_foreground_lifecycle(attached=False)
     _run_gateway(
         runtime_config,
         port=effective_gateway_port,
         open_browser_url=None if no_open else webui_url,
+        webui_bundle_mode=webui_bundle_mode,
     )
 
 
@@ -1373,6 +1598,7 @@ def _run_gateway(
     port: int | None = None,
     open_browser_url: str | None = None,
     webui_static_dist: bool = True,
+    webui_bundle_mode: BuildMode = "warn",
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
@@ -1395,8 +1621,29 @@ def _run_gateway(
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
+    webui_url = _webui_browser_url(config)
+    gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
+    if health_server_enabled and _tcp_endpoint_reachable(gateway_host_for_browser, port):
+        _print_foreground_port_conflict(
+            webui_url=webui_url,
+            gateway_host=config.gateway.host,
+            gateway_port=port,
+        )
+        raise typer.Exit(1)
+    if _webui_channel_enabled(config) and _webui_endpoint_reachable(webui_url):
+        _print_foreground_port_conflict(
+            webui_url=webui_url,
+            gateway_host=config.gateway.host,
+            gateway_port=port,
+        )
+        raise typer.Exit(1)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    _prepare_webui_bundle_for_gateway(
+        config,
+        mode=webui_bundle_mode,
+        webui_static_dist=webui_static_dist,
+    )
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
@@ -1508,7 +1755,6 @@ def _run_gateway(
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
-            build_dream_commit_message = MemoryStore.build_dream_commit_message
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
@@ -1557,13 +1803,9 @@ def _run_gateway(
                     source="dream",
                     timezone_name=config.agents.defaults.timezone,
                 )
-                if store.git.is_initialized():
-                    msg = build_dream_commit_message(
-                        "dream: periodic memory consolidation", diff_body,
-                    )
-                    sha = store.git.auto_commit(msg)
-                    if sha:
-                        logger.info("Dream commit: {}", sha)
+                sha = _commit_dream_changes(store)
+                if sha:
+                    logger.info("Dream commit: {}", sha)
                 store.compact_history()
                 prune_dream_sessions(agent.sessions.sessions_dir)
             return None
@@ -1586,7 +1828,7 @@ def _run_gateway(
 
             prompt = (
                 _HEARTBEAT_PREAMBLE
-                + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
+                + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
             )
 
             # Internal check: funnel all output through the post-run gate so the
@@ -1605,21 +1847,29 @@ def _run_gateway(
             finally:
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
                     message_tool.reset_suppress_delivery(suppress_token)
-            response = resp.content if resp else ""
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
             session = agent.sessions.get_or_create("heartbeat")
             session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
             agent.sessions.save(session)
 
-            if not response:
-                return None
+            if not resp or not resp.content:
+                return
+
+            response = resp.content
+
+            evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
 
             # Fail closed: stay silent on evaluator failure instead of notifying.
             should_notify = await evaluate_response(
-                response, prompt, agent.provider, agent.model,
+                response=response,
+                task_context=prompt,
+                provider=agent.provider,
+                model=agent.model,
+                evaluator_prompt=evaluator_prompt,
                 default_notify=False,
             )
+
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
                 await _deliver_to_channel(
@@ -1699,42 +1949,52 @@ def _run_gateway(
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
 
+        connection_slots = asyncio.Semaphore(_GATEWAY_HEALTH_MAX_CONNECTIONS)
+
         async def handle(reader, writer):
-            try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except (asyncio.TimeoutError, ConnectionError):
+            if connection_slots.locked():
                 writer.close()
                 return
 
-            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
-            method, path = "", ""
-            parts = request_line.split(" ")
-            if len(parts) >= 2:
-                method, path = parts[0], parts[1]
+            async with connection_slots:
+                try:
+                    data = await asyncio.wait_for(
+                        reader.read(4096),
+                        timeout=_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS,
+                    )
+                    request_line = data.split(b"\r\n", 1)[0].decode(
+                        "utf-8", errors="replace",
+                    )
+                    method, path = "", ""
+                    parts = request_line.split(" ")
+                    if len(parts) >= 2:
+                        method, path = parts[0], parts[1]
 
-            if method == "GET" and path == "/health":
-                body = _json.dumps({"status": "ok"})
-                resp = (
-                    f"HTTP/1.0 200 OK\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-            else:
-                body = "Not Found"
-                resp = (
-                    f"HTTP/1.0 404 Not Found\r\n"
-                    f"Content-Type: text/plain\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
+                    if method == "GET" and path == "/health":
+                        body = _json.dumps({"status": "ok"})
+                        status = "200 OK"
+                        content_type = "application/json"
+                    else:
+                        body = "Not Found"
+                        status = "404 Not Found"
+                        content_type = "text/plain"
 
-            writer.write(resp.encode())
-            await writer.drain()
-            writer.close()
+                    resp = (
+                        f"HTTP/1.0 {status}\r\n"
+                        f"Content-Type: {content_type}\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        "Connection: close\r\n"
+                        f"\r\n{body}"
+                    )
+                    writer.write(resp.encode())
+                    await writer.drain()
+                except (asyncio.TimeoutError, ConnectionError):
+                    pass
+                finally:
+                    writer.close()
 
         server = await asyncio.start_server(handle, host, health_port)
-        console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
+        _print_gateway_health_endpoint(host, health_port)
         async with server:
             await server.serve_forever()
     # Register Dream system job (idempotent on restart)
@@ -1800,7 +2060,7 @@ def _run_gateway(
         runtime_tasks: asyncio.Future | None = None
         runtime_tasks_drained = False
         shutdown_event = asyncio.Event()
-        _ensure_gateway_tty_signal_mode()
+        _ensure_interactive_tty_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
             asyncio.get_running_loop(),
             shutdown_event,
@@ -1886,6 +2146,10 @@ app.add_typer(
         log_handler_id=_log_handler_id,
         load_runtime_config=_load_runtime_config,
         run_gateway=_run_gateway,
+        prepare_webui_bundle=lambda config, mode: _prepare_webui_bundle_for_gateway(
+            config,
+            mode=mode,
+        ),
     ),
     name="gateway",
 )
@@ -1901,7 +2165,7 @@ def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
@@ -2265,7 +2529,7 @@ def plugins_list(
 
 @plugins_app.command("enable")
 def plugins_enable(
-    name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, pdf)"),
+    name: str = typer.Argument(..., help="Feature name (e.g. weixin, matrix, bedrock)"),
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show optional package install logs"),
 ):
@@ -2378,7 +2642,7 @@ _PROVIDER_DISPLAY: dict[str, str] = {
 }
 
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    "openai_codex": "openai-codex/gpt-5.4-mini",
+    "openai_codex": "openai-codex/gpt-5.6-sol",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
 
@@ -2423,7 +2687,7 @@ def _set_oauth_provider_as_main(
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
+    if resolved_config_path is not None and get_config_path() != resolved_config_path:
         set_config_path(resolved_config_path)
         console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
@@ -2466,6 +2730,13 @@ def provider_login(
     if not handler:
         console.print(f"[red]Login not implemented for {spec.label}[/red]")
         raise typer.Exit(1)
+
+    if config:
+        from nanobot.config.loader import set_config_path
+
+        resolved_config_path = Path(config).expanduser().resolve()
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()

@@ -1,9 +1,7 @@
 import importlib
-import shutil
 import sys
 import zipfile
 from pathlib import Path
-
 
 SCRIPT_DIR = Path("nanobot/skills/skill-creator/scripts").resolve()
 if str(SCRIPT_DIR) not in sys.path:
