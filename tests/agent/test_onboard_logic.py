@@ -1451,7 +1451,7 @@ class TestMainMenuUpdate:
         assert "primary" not in config.model_presets
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):
-        """Quick Start summary should direct users to the one-step WebUI launcher."""
+        """Quick Start summary should flag a missing key without repeating the next step."""
         config = Config()
         config.model_presets["primary"] = ModelPresetConfig(
             model="deepseek-v4-flash",
@@ -1472,10 +1472,7 @@ class TestMainMenuUpdate:
         labels = [label for label, _value in captured["rows"]]
         rows = dict(captured["rows"])
         assert rows["Status"] == "DeepSeek API key missing"
-        assert "API key" in rows["Next"]
-        assert "nanobot webui" in rows["Next"]
-        assert "nanobot gateway" not in rows["Next"]
-        assert "agent -m" not in rows["Next"]
+        assert "Next" not in labels
         assert "Open" not in labels
         assert "Model" not in rows
         assert "Entry point" not in rows
