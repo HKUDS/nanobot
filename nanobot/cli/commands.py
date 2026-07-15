@@ -632,14 +632,6 @@ def main(
 # ============================================================================
 
 
-def _print_onboard_completion(
-    *,
-    webui_cmd: str,
-) -> None:
-    """Show the single shortest path from onboarding to a working nanobot."""
-    typer.echo(f"\n✓ nanobot is ready. Run: {webui_cmd}")
-
-
 @app.command()
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -729,9 +721,7 @@ def onboard(
     if explicit_config:
         webui_cmd += f' -c "{config_path}"'
 
-    _print_onboard_completion(
-        webui_cmd=webui_cmd,
-    )
+    typer.echo(f"\n✓ nanobot is ready. Run: {webui_cmd}")
 
 
 def _onboard_plugins(config_path: Path) -> None:

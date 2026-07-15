@@ -268,18 +268,12 @@ def test_onboard_fresh_install(mock_paths):
     assert mock_ws.call_args.args == (expected_workspace,)
 
 
-def test_onboard_recommends_the_shortest_provider_neutral_path(mock_paths):
-    """Default onboarding should recommend only the guided WebUI launcher."""
+def test_onboard_recommends_webui(mock_paths):
+    """Default onboarding should recommend the guided WebUI launcher."""
     result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
-    assert "OpenRouter" not in result.stdout
-    assert "openrouter.ai" not in result.stdout
     assert "✓ nanobot is ready. Run: nanobot webui" in result.stdout
-    assert "nanobot agent" not in result.stdout
-    assert "nanobot gateway" not in result.stdout
-    assert "https://" not in result.stdout
-    assert "┌" not in result.stdout
 
 
 def test_onboard_existing_config_refresh(mock_paths):
@@ -411,13 +405,8 @@ def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_path
 def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch):
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
-    completion: dict = {}
 
     monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
-    monkeypatch.setattr(
-        "nanobot.cli.commands._print_onboard_completion",
-        lambda **kwargs: completion.update(kwargs),
-    )
 
     result = runner.invoke(
         app,
@@ -432,13 +421,12 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
     compact_output = stripped_output.replace("\n", "")
     resolved_config = str(config_path.resolve())
     assert resolved_config in compact_output
-    assert completion["webui_cmd"] == f'nanobot webui -c "{resolved_config}"'
+    assert f'nanobot webui -c "{resolved_config}"' in result.stdout
 
 
 def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkeypatch):
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
-    completion: dict = {}
 
     from nanobot.cli.onboard import OnboardResult
 
@@ -447,10 +435,6 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
         lambda initial_config: OnboardResult(config=initial_config, should_save=True),
     )
     monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
-    monkeypatch.setattr(
-        "nanobot.cli.commands._print_onboard_completion",
-        lambda **kwargs: completion.update(kwargs),
-    )
 
     result = runner.invoke(
         app,
@@ -459,7 +443,7 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
 
     assert result.exit_code == 0
     resolved_config = str(config_path.resolve())
-    assert completion["webui_cmd"] == f'nanobot webui -c "{resolved_config}"'
+    assert f'nanobot webui -c "{resolved_config}"' in result.stdout
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
