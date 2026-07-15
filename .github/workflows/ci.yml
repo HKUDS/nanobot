@@ -59,19 +59,19 @@ jobs:
 
       - name: Lint with ruff
         if: matrix.coverage
-        run: uv run ruff check nanobot tests
+        run: uv run ruff check nanobot tests conftest.py
 
       - name: Run tests with coverage
         if: matrix.coverage
         run: >-
-          uv run python -m pytest tests/
+          uv run python -m pytest
           --cov=nanobot --cov-report=term-missing:skip-covered
           --durations=25 --durations-min=1.0
 
       - name: Run compatibility tests
         if: ${{ !matrix.coverage }}
         run: >-
-          uv run python -m pytest tests/
+          uv run python -m pytest
           --durations=25 --durations-min=1.0
 
   webui:

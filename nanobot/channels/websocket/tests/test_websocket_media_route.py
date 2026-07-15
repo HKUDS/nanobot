@@ -18,8 +18,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from ws_test_client import InProcessHttpChannel
-from ws_test_client import http_get as _http_get
 
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.session.manager import Session, SessionManager
@@ -28,6 +26,9 @@ from nanobot.webui.media_api import (
     b64url_decode,
     b64url_encode,
 )
+
+from .ws_test_client import InProcessHttpChannel
+from .ws_test_client import http_get as _http_get
 
 # PNG magic bytes + a couple of sentinel bytes so we can verify byte-for-byte
 # round-trip of the served payload. Stays under mimetype + size limits.

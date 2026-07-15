@@ -3,7 +3,7 @@
 Provides an async ``WsTestClient`` class and token-issuance helpers that
 integration tests can import and use directly::
 
-    from ws_test_client import WsTestClient
+    from nanobot.channels.websocket.tests.ws_test_client import WsTestClient
 
     async with WsTestClient("ws://127.0.0.1:8765/", client_id="t") as c:
         ready = await c.recv_ready()

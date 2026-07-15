@@ -12,8 +12,6 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote, urlencode
 
 import pytest
-from ws_test_client import InProcessHttpChannel
-from ws_test_client import http_get as _http_get
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
@@ -30,6 +28,9 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
+
+from .ws_test_client import InProcessHttpChannel
+from .ws_test_client import http_get as _http_get
 
 _PORT = 29900
 

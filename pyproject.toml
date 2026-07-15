@@ -189,6 +189,7 @@ artifacts = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["nanobot"]
+exclude = ["nanobot/channels/*/tests/**"]
 
 [tool.hatch.build.targets.wheel.sources]
 "nanobot" = "nanobot"
@@ -203,6 +204,7 @@ include = [
     "THIRD_PARTY_NOTICES.md",
     "pyproject.toml",
 ]
+exclude = ["nanobot/channels/*/tests/**"]
 
 [tool.ruff]
 line-length = 100
@@ -214,7 +216,7 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "nanobot/channels"]
 
 [tool.coverage.run]
 source = ["nanobot"]

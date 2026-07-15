@@ -295,7 +295,7 @@ async def test_start_skips_load_store_when_device_id_missing(
     )
     monkeypatch.setattr("nanobot.channels.matrix.runtime.AsyncClient", _fake_client)
     monkeypatch.setattr(
-        "nanobot.channels.matrix.runtime asyncio.create_task", _fake_create_task
+        "nanobot.channels.matrix.runtime.asyncio.create_task", _fake_create_task
     )
 
     channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=True), MessageBus())
@@ -477,7 +477,7 @@ async def test_start_disables_e2ee_when_configured(
     )
     monkeypatch.setattr("nanobot.channels.matrix.runtime.AsyncClient", _fake_client)
     monkeypatch.setattr(
-        "nanobot.channels.matrix.runtime asyncio.create_task", _fake_create_task
+        "nanobot.channels.matrix.runtime.asyncio.create_task", _fake_create_task
     )
 
     channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=False), MessageBus())

@@ -11,7 +11,6 @@ import pytest
 import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
-from ws_test_client import http_get as _http_get
 
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
@@ -50,6 +49,8 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 from nanobot.webui.transcript import append_transcript_object, read_transcript_lines
+
+from .ws_test_client import http_get as _http_get
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 

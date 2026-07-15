@@ -336,10 +336,15 @@ GET requests remain read-only.
 
 Every built-in channel is a self-contained package at
 `nanobot/channels/<channel>/`. At minimum it owns `__init__.py`, `manifest.py`,
-and `runtime.py`; channel-specific helpers and WebUI files stay below that same
-directory. Do not add built-in runtime modules directly under
+and `runtime.py`; channel-specific helpers, tests, and WebUI files stay below
+that same directory. Do not add built-in runtime modules directly under
 `nanobot/channels/`, a parallel manifest tree, or a central per-channel UI
 catalog.
+
+Put channel-specific Python tests in `nanobot/channels/<channel>/tests/`.
+Keep only shared registry, manager, base-class, and cross-channel contract tests
+in `tests/channels/`. The repository test configuration discovers both trees,
+while release builds exclude the package-local test directories.
 
 The dependency-free `manifest.py` exports a typed `ChannelPlugin` with a
 package-relative lazy runtime target such as `runtime:TelegramChannel`, its
