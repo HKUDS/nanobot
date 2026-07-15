@@ -2687,7 +2687,7 @@ def _set_oauth_provider_as_main(
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
+    if resolved_config_path is not None and get_config_path() != resolved_config_path:
         set_config_path(resolved_config_path)
         console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
@@ -2730,6 +2730,13 @@ def provider_login(
     if not handler:
         console.print(f"[red]Login not implemented for {spec.label}[/red]")
         raise typer.Exit(1)
+
+    if config:
+        from nanobot.config.loader import set_config_path
+
+        resolved_config_path = Path(config).expanduser().resolve()
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()

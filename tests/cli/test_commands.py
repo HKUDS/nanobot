@@ -711,6 +711,52 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     assert captured["proxy"] == proxy
 
 
+def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkeypatch):
+    from nanobot.config import loader
+
+    proxy = "http://127.0.0.1:23458"
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        encoding="utf-8",
+    )
+    active_path: dict[str, Path] = {}
+    real_load_config = loader.load_config
+
+    def fake_set_config_path(path: Path) -> None:
+        active_path["path"] = path
+
+    def fake_load_config(config_path: Path | None = None) -> Config:
+        path = config_path or active_path.get("path")
+        if path is None:
+            return Config.model_validate(
+                {"providers": {"openaiCodex": {"proxy": "http://default-proxy:8080"}}}
+            )
+        return real_load_config(path)
+
+    monkeypatch.setattr(loader, "set_config_path", fake_set_config_path)
+    monkeypatch.setattr(loader, "load_config", fake_load_config)
+
+    import oauth_cli_kit
+
+    captured: dict[str, str | None] = {}
+
+    def fake_get_token(*, proxy=None):
+        captured["proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+
+    result = runner.invoke(
+        app,
+        ["provider", "login", "openai-codex", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert active_path["path"] == config_path.resolve()
+    assert captured["proxy"] == proxy
+
+
 def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setenv("CODEX_PROXY_FOR_TEST", proxy)
