@@ -2,39 +2,40 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanobot.channels.contracts import ChannelSetupSpec
-from nanobot.channels.plugin import load_builtin_setup_spec
+
+if TYPE_CHECKING:
+    from nanobot.channels.plugin import ChannelPlugin
 
 
 def channel_setup_spec(
     name: str,
     channel_cls: type[Any] | None = None,
+    *,
+    plugin: ChannelPlugin | None = None,
 ) -> ChannelSetupSpec | None:
-    """Return the built-in manifest or external plugin setup contract."""
-    manifest = load_builtin_setup_spec(name)
-    if manifest is not None:
-        if channel_cls is not None:
-            _validate_instance_mode(channel_cls, manifest)
-        return manifest
-    if channel_cls is None:
-        return None
+    """Return the setup contract declared by one channel descriptor."""
+    if plugin is None:
+        from nanobot.channels.registry import load_channel_plugin
 
-    spec = channel_cls.setup_spec()
-    if spec is not None and not isinstance(spec, ChannelSetupSpec):
-        raise TypeError(
-            f"{channel_cls.__name__}.setup_spec() must return ChannelSetupSpec or None"
-        )
+        plugin = load_channel_plugin(name)
+    spec = plugin.setup
     if spec is not None:
         _validate_instance_mode(channel_cls, spec)
     return spec
 
 
-def _validate_instance_mode(channel_cls: type[Any], spec: ChannelSetupSpec) -> None:
+def _validate_instance_mode(
+    channel_cls: type[Any] | None,
+    spec: ChannelSetupSpec,
+) -> None:
+    if channel_cls is None:
+        return
     supports_multiple = bool(channel_cls.supports_multiple_instances())
     if spec.multi_instance != supports_multiple:
         raise TypeError(
-            f"{channel_cls.__name__}.setup_spec().multi_instance must be "
+            f"ChannelPlugin.setup.multi_instance for {channel_cls.__name__} must be "
             f"{supports_multiple} to match instance_specs()"
         )

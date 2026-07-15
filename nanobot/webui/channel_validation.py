@@ -23,7 +23,7 @@ from nanobot.channels.contracts import (
     channel_instance_config,
     channel_value_present,
 )
-from nanobot.channels.registry import load_any_channel_class
+from nanobot.channels.registry import load_channel_plugin
 from nanobot.config.loader import load_config
 from nanobot.security.network import resolve_url_target
 
@@ -42,10 +42,14 @@ def _channel_contract(
     name: str,
 ) -> tuple[type[BaseChannel] | None, ChannelSetupSpec | None]:
     try:
-        channel_cls = load_any_channel_class(name)
+        plugin = load_channel_plugin(name)
+    except ImportError:
+        return None, None
+    try:
+        channel_cls = plugin.load_channel_class()
     except (ImportError, TypeError):
         channel_cls = None
-    return channel_cls, channel_setup_spec(name, channel_cls)
+    return channel_cls, channel_setup_spec(name, channel_cls, plugin=plugin)
 
 
 def validate_channel_config(

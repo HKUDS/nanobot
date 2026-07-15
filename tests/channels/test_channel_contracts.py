@@ -25,7 +25,8 @@ from nanobot.channels.contracts import (
     channel_update_instance_config,
     resolve_channel_action_target,
 )
-from nanobot.channels.registry import discover_channel_names
+from nanobot.channels.plugin import ChannelPlugin
+from nanobot.channels.registry import discover_builtin_plugins
 
 
 class _SingleChannel(BaseChannel):
@@ -57,7 +58,7 @@ class _InheritedMultiChannel(_MultiChannel):
 
 
 class _SetupChannel(_SingleChannel):
-    name = "setup-contract"
+    name = "setup_contract"
 
     @staticmethod
     def _validate(values: dict[str, Any]) -> dict[str, Any]:
@@ -66,13 +67,18 @@ class _SetupChannel(_SingleChannel):
             "checks": [],
         }
 
-    @classmethod
-    def setup_spec(cls) -> ChannelSetupSpec:
-        return ChannelSetupSpec(
-            fields={"token": ChannelFieldSpec(kind="secret")},
-            required=(SetupRequirement((("token",),)),),
-            validator=cls._validate,
-        )
+
+
+_SETUP_PLUGIN = ChannelPlugin(
+    name=_SetupChannel.name,
+    display_name=_SetupChannel.display_name,
+    runtime=f"{__name__}:_SetupChannel",
+    setup=ChannelSetupSpec(
+        fields={"token": ChannelFieldSpec(kind="secret")},
+        required=(SetupRequirement((("token",),)),),
+        validator=_SetupChannel._validate,
+    ),
+)
 
 
 def test_management_contract_is_explicit_on_runtime_base_class() -> None:
@@ -81,7 +87,6 @@ def test_management_contract_is_explicit_on_runtime_base_class() -> None:
         "instance_specs",
         "refresh_feature_metadata",
         "runtime_name",
-        "setup_spec",
         "supports_multiple_instances",
         "update_instance_config",
     }
@@ -96,30 +101,22 @@ def test_multi_instance_support_follows_instance_specs_override() -> None:
 
 
 @pytest.mark.parametrize(
-    ("channel_cls", "requested", "allow_global", "expected"),
+    ("requested", "expected"),
     [
-        pytest.param(_SingleChannel, None, True, "default", id="external-single-default"),
-        pytest.param(_MultiChannel, None, True, None, id="external-multi-global"),
-        pytest.param(_MultiChannel, None, False, "default", id="builtin-multi-default"),
-        pytest.param(_SingleChannel, "product", True, "product", id="explicit-instance"),
+        pytest.param(None, "default", id="default-instance"),
+        pytest.param("product", "product", id="explicit-instance"),
     ],
 )
 def test_channel_action_target_contract(
-    channel_cls,
     requested,
-    allow_global,
     expected,
 ) -> None:
-    assert resolve_channel_action_target(
-        channel_cls,
-        requested,
-        allow_global_multi_instance=allow_global,
-    ) == expected
+    assert resolve_channel_action_target(requested) == expected
 
 
 def test_contract_module_is_not_discovered_as_a_channel() -> None:
-    assert "contracts" not in discover_channel_names()
-    assert "manifests" not in discover_channel_names()
+    assert "contracts" not in discover_builtin_plugins()
+    assert "manifests" not in discover_builtin_plugins()
 
 
 def test_settings_contract_import_does_not_eagerly_load_runtime_graph() -> None:
@@ -515,7 +512,11 @@ def test_channel_instance_contract_rejects_runtime_name_outside_namespace() -> N
 
 
 def test_channel_setup_contract_owns_fields_and_validation() -> None:
-    spec = channel_setup_spec(_SetupChannel.name, _SetupChannel)
+    spec = channel_setup_spec(
+        _SetupChannel.name,
+        _SetupChannel,
+        plugin=_SETUP_PLUGIN,
+    )
 
     assert spec is not None
     assert spec.route_field_types == {"token": "secret"}
@@ -524,7 +525,7 @@ def test_channel_setup_contract_owns_fields_and_validation() -> None:
     assert spec.validator({"token": "saved"})["status"] == "connected"
     assert spec.to_public_dict(_SetupChannel.name) == {
         "fields": [{
-            "key": "channels.setup-contract.token",
+            "key": "channels.setup_contract.token",
             "field": "token",
             "kind": "secret",
             "choices": [],
@@ -535,11 +536,18 @@ def test_channel_setup_contract_owns_fields_and_validation() -> None:
 
 def test_channel_setup_contract_rejects_instance_mode_drift() -> None:
     class _InvalidSetupMultiChannel(_MultiChannel):
-        name = "invalid-setup-multi"
+        name = "invalid_setup_multi"
 
-        @classmethod
-        def setup_spec(cls) -> ChannelSetupSpec:
-            return ChannelSetupSpec(fields={})
+    plugin = ChannelPlugin(
+        name=_InvalidSetupMultiChannel.name,
+        display_name=_InvalidSetupMultiChannel.display_name,
+        runtime=f"{__name__}:_InvalidSetupMultiChannel",
+        setup=ChannelSetupSpec(fields={}),
+    )
 
-    with pytest.raises(TypeError, match="multi_instance must be True"):
-        channel_setup_spec(_InvalidSetupMultiChannel.name, _InvalidSetupMultiChannel)
+    with pytest.raises(TypeError, match=r"ChannelPlugin\.setup\.multi_instance.*must be True"):
+        channel_setup_spec(
+            _InvalidSetupMultiChannel.name,
+            _InvalidSetupMultiChannel,
+            plugin=plugin,
+        )

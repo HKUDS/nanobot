@@ -25,7 +25,7 @@ from nanobot.channels.contracts import (
     channel_instance_config,
     channel_update_instance_config,
 )
-from nanobot.channels.registry import load_any_channel_class
+from nanobot.channels.registry import load_channel_plugin
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.optional_features import (
     OptionalFeatureError,
@@ -773,10 +773,14 @@ class WebUISettingsRouter:
         if not name:
             raise WebUISettingsError("missing channel name")
         try:
-            channel_cls = load_any_channel_class(name)
+            plugin = load_channel_plugin(name)
+        except ImportError:
+            raise WebUISettingsError(f"unknown channel '{name}'", status=404) from None
+        try:
+            channel_cls = plugin.load_channel_class()
         except ImportError:
             channel_cls = None
-        setup_spec = channel_setup_spec(name, channel_cls)
+        setup_spec = channel_setup_spec(name, channel_cls, plugin=plugin)
         if setup_spec is None:
             raise WebUISettingsError(f"channel '{name}' cannot be configured from WebUI", status=404)
         if channel_cls is None and setup_spec.multi_instance:

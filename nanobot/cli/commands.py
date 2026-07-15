@@ -751,8 +751,7 @@ def _onboard_plugins(config_path: Path) -> None:
 
 def _print_enable_options(
     extras: dict[str, list[str] | None],
-    builtin_channels: set[str],
-    plugin_channels: dict[str, Any],
+    channel_plugins: dict[str, Any],
     config: Config,
 ) -> None:
     table = Table(title="Available Features")
@@ -760,10 +759,15 @@ def _print_enable_options(
     table.add_column("Type")
     table.add_column("Enabled")
 
-    for item in sorted(builtin_channels | set(plugin_channels) | set(extras)):
-        is_channel = item in builtin_channels or item in plugin_channels
+    for item in sorted(set(channel_plugins) | set(extras)):
+        plugin = channel_plugins.get(item)
+        is_channel = plugin is not None
         enabled = (
-            feature_support.channel_enabled(config, item)
+            feature_support.channel_enabled(
+                config,
+                item,
+                default_enabled=plugin.default_enabled,
+            )
             if is_channel
             else feature_support.extra_installed(item, extras[item])
         )
@@ -2514,7 +2518,7 @@ def plugins_list(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """List optional nanobot features."""
-    from nanobot.channels.registry import discover_channel_names, discover_plugins
+    from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
@@ -2523,7 +2527,6 @@ def plugins_list(
 
     _print_enable_options(
         feature_support.optional_dependency_groups(),
-        set(discover_channel_names()),
         discover_plugins(),
         load_config(resolved_config_path),
     )

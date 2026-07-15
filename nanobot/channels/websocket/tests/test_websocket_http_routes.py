@@ -172,13 +172,29 @@ def _stub_matrix_feature(
     install_calls: list[str] | None = None,
     channels: list[str] | None = None,
 ) -> None:
+    from nanobot.channels.plugin import ChannelPlugin, load_builtin_channel_plugin
+
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr(
-        "nanobot.channels.registry.discover_channel_names",
-        lambda: channels or ["matrix"],
+    requested = channels or ["matrix"]
+    matrix = ChannelPlugin(
+        name="matrix",
+        display_name="Matrix",
+        runtime=f"{__name__}:_MatrixChannel",
+        optional_extra="matrix",
     )
-    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
-    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    plugins = {"matrix": matrix}
+    if "websocket" in requested:
+        websocket = load_builtin_channel_plugin("websocket")
+        assert websocket is not None
+        plugins["websocket"] = websocket
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda enabled_names=None: {
+            name: plugin
+            for name, plugin in plugins.items()
+            if enabled_names is None or name in enabled_names
+        },
+    )
     monkeypatch.setattr(
         "nanobot.optional_features.optional_dependency_groups",
         lambda: {"matrix": deps if deps is not None else []},

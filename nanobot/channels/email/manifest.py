@@ -36,7 +36,7 @@ SETUP_SPEC = ChannelSetupSpec(
 PLUGIN = ChannelPlugin(
     name="email",
     display_name="Email",
-    runtime="runtime:EmailChannel",
+    runtime=f"{__package__}.runtime:EmailChannel",
     setup=SETUP_SPEC,
     webui="webui/index.ts",
 )

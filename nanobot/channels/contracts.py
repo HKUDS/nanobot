@@ -19,7 +19,6 @@ __all__ = [
     "SetupRequirement",
     "channel_feature_instances",
     "channel_field_value",
-    "external_channel_enabled",
     "channel_instance_config",
     "channel_instance_specs",
     "channel_runtime_name",
@@ -82,11 +81,6 @@ class ChannelActivation:
         if self.instances is None:
             return inherited
         return any(instance.resolve(default=inherited) for instance in self.instances)
-
-
-def external_channel_enabled(section: Any) -> bool:
-    """Return the explicit top-level gate shared by runtime and management surfaces."""
-    return section is not None and ChannelActivation.from_config(section).resolve()
 
 
 @dataclass(frozen=True)
@@ -249,18 +243,10 @@ def channel_instance_specs(
 
 
 def resolve_channel_action_target(
-    channel_cls: type[Any],
     requested_instance_id: str | None,
-    *,
-    allow_global_multi_instance: bool,
-) -> str | None:
-    """Resolve one feature action to a concrete instance or the global gate."""
-    instance_id = (requested_instance_id or "").strip() or None
-    if instance_id is not None:
-        return instance_id
-    if allow_global_multi_instance and channel_cls.supports_multiple_instances():
-        return None
-    return "default"
+) -> str:
+    """Resolve a feature action to an explicit or default instance."""
+    return (requested_instance_id or "").strip() or "default"
 
 
 def channel_instance_config(

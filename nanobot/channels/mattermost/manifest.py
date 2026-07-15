@@ -19,7 +19,7 @@ SETUP_SPEC = ChannelSetupSpec(
 PLUGIN = ChannelPlugin(
     name="mattermost",
     display_name="Mattermost",
-    runtime="runtime:MattermostChannel",
+    runtime=f"{__package__}.runtime:MattermostChannel",
     setup=SETUP_SPEC,
     webui="webui/index.ts",
 )

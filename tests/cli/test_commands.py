@@ -480,18 +480,25 @@ def test_config_dump_excludes_oauth_provider_blocks():
 
 
 def test_plugins_list_uses_explicit_config(monkeypatch, tmp_path: Path):
+    from nanobot.channels.plugin import ChannelPlugin
+
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps({"channels": {"example": {"enabled": True}}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "nanobot.channels.registry.discover_channel_names",
-        lambda: ["example"],
+    plugin = ChannelPlugin(
+        name="example",
+        display_name="Example",
+        runtime="example.runtime:ExampleChannel",
     )
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_plugins",
-        lambda: {},
+        lambda enabled_names=None: (
+            {"example": plugin}
+            if enabled_names is None or "example" in enabled_names
+            else {}
+        ),
     )
     monkeypatch.setattr(
         "nanobot.optional_features.optional_dependency_groups",

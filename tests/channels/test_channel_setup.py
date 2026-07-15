@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 
 import nanobot.channels._setup as channel_setup_module
-import nanobot.channels.plugin as plugin_module
+import nanobot.channels.registry as registry_module
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.plugin import ChannelPlugin, load_builtin_channel_plugin
-from nanobot.channels.registry import channel_default_enabled, discover_channel_names
+from nanobot.channels.registry import channel_default_enabled, discover_builtin_plugins
 
 EXPECTED_CHANNELS = {
     "dingtalk",
@@ -98,7 +98,7 @@ def test_every_builtin_channel_is_a_self_contained_package() -> None:
 
     assert not hasattr(channel_setup_module, "CHANNEL_SETUP_SPECS")
     assert package_names == EXPECTED_CHANNELS
-    assert set(discover_channel_names()) == EXPECTED_CHANNELS
+    assert set(discover_builtin_plugins()) == EXPECTED_CHANNELS
     for name in EXPECTED_CHANNELS:
         package_dir = channel_dir / name
         assert (package_dir / "__init__.py").is_file()
@@ -109,7 +109,7 @@ def test_every_builtin_channel_is_a_self_contained_package() -> None:
         plugin = load_builtin_channel_plugin(name)
         assert plugin is not None
         assert plugin.name == name
-        assert plugin.runtime.startswith("runtime:")
+        assert plugin.runtime.startswith(f"nanobot.channels.{name}.runtime:")
         assert plugin.setup is channel_setup_spec(name)
         if plugin.webui is not None:
             assert (package_dir / plugin.webui).is_file()
@@ -164,7 +164,7 @@ def test_feishu_package_manifest_owns_runtime_and_webui_metadata() -> None:
     plugin = load_builtin_channel_plugin("feishu")
 
     assert plugin is not None
-    assert plugin.runtime == "runtime:FeishuChannel"
+    assert plugin.runtime == "nanobot.channels.feishu.runtime:FeishuChannel"
     assert plugin.optional_extra == "feishu"
     assert plugin.capabilities == {"multi_instance", "qr_connect"}
     assert plugin.webui == "webui/index.tsx"
@@ -174,7 +174,7 @@ def test_weixin_package_manifest_owns_runtime_and_webui_metadata() -> None:
     plugin = load_builtin_channel_plugin("weixin")
 
     assert plugin is not None
-    assert plugin.runtime == "runtime:WeixinChannel"
+    assert plugin.runtime == "nanobot.channels.weixin.runtime:WeixinChannel"
     assert plugin.optional_extra == "weixin"
     assert plugin.capabilities == {"qr_connect"}
     assert plugin.webui == "webui/index.tsx"
@@ -204,19 +204,19 @@ def test_channel_plugin_normalizes_webui_entry() -> None:
     plugin = ChannelPlugin(
         name="demo",
         display_name="Demo",
-        runtime="runtime:DemoChannel",
+        runtime="example.demo.runtime:DemoChannel",
         webui="webui\\index.tsx",
     )
 
     assert plugin.webui == "webui/index.tsx"
 
 
-def test_channel_plugin_rejects_runtime_outside_its_package() -> None:
-    with pytest.raises(ValueError, match="package-relative"):
+def test_channel_plugin_rejects_invalid_runtime_import_path() -> None:
+    with pytest.raises(ValueError, match="absolute import path"):
         ChannelPlugin(
             name="demo",
             display_name="Demo",
-            runtime="nanobot.channels.other.runtime:DemoChannel",
+            runtime="../runtime:DemoChannel",
         )
 
 
@@ -224,13 +224,13 @@ def test_channel_default_enabled_uses_package_manifest(monkeypatch) -> None:
     plugin = ChannelPlugin(
         name="demo",
         display_name="Demo",
-        runtime="runtime:DemoChannel",
+        runtime="example.demo.runtime:DemoChannel",
         default_enabled=True,
     )
     monkeypatch.setattr(
-        plugin_module,
-        "load_builtin_channel_plugin",
-        lambda name: plugin if name == "demo" else None,
+        registry_module,
+        "load_channel_plugin",
+        lambda name: plugin if name == "demo" else (_ for _ in ()).throw(ImportError()),
     )
 
     assert channel_default_enabled("demo") is True

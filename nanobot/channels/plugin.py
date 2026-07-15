@@ -8,17 +8,17 @@ from functools import lru_cache
 from importlib.resources import files
 from typing import TYPE_CHECKING, Any
 
+from nanobot.channels.contracts import ChannelSetupSpec
+
 if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
-    from nanobot.channels.contracts import ChannelSetupSpec
 
 
 @dataclass(frozen=True)
 class ChannelPlugin:
     """Dependency-free manifest for one built-in channel package.
 
-    ``runtime`` is relative to ``nanobot.channels.<name>`` so one manifest
-    cannot silently point at code owned by another package. Keeping it as an
+    ``runtime`` is an absolute ``module:attribute`` target. Keeping it as an
     import string lets discovery inspect metadata without importing optional
     platform SDKs.
     """
@@ -39,12 +39,12 @@ class ChannelPlugin:
         module_name, separator, attr_name = self.runtime.partition(":")
         if not separator or not module_name or not attr_name:
             raise ValueError("channel plugin runtime must use 'module:attribute' syntax")
-        if module_name.startswith("nanobot.") or not all(
-            part.isidentifier() for part in module_name.split(".")
-        ):
-            raise ValueError("channel plugin runtime module must be package-relative")
+        if not all(part.isidentifier() for part in module_name.split(".")):
+            raise ValueError("channel plugin runtime module must be an absolute import path")
         if not attr_name.isidentifier():
             raise ValueError("channel plugin runtime attribute must be a Python identifier")
+        if self.setup is not None and not isinstance(self.setup, ChannelSetupSpec):
+            raise TypeError("channel plugin setup must be a ChannelSetupSpec or None")
         if self.webui is not None:
             webui = self.webui.replace("\\", "/")
             if webui.startswith("/") or ".." in webui.split("/"):
@@ -56,7 +56,7 @@ class ChannelPlugin:
         from nanobot.channels.base import BaseChannel
 
         module_name, _, attr_name = self.runtime.partition(":")
-        module = importlib.import_module(f"nanobot.channels.{self.name}.{module_name}")
+        module = importlib.import_module(module_name)
         channel_cls: Any = getattr(module, attr_name, None)
         if (
             not isinstance(channel_cls, type)
@@ -98,7 +98,13 @@ def load_builtin_channel_plugin(name: str) -> ChannelPlugin | None:
         )
 
     runtime_module, _, _ = plugin.runtime.partition(":")
-    runtime_parts = runtime_module.split(".")
+    package_name = f"nanobot.channels.{name}"
+    if not runtime_module.startswith(f"{package_name}."):
+        raise TypeError(
+            f"{module_name}.PLUGIN runtime must stay inside {package_name}: "
+            f"{runtime_module}"
+        )
+    runtime_parts = runtime_module.removeprefix(f"{package_name}.").split(".")
     package_root = files("nanobot.channels").joinpath(name)
     runtime_file = package_root.joinpath(
         *runtime_parts[:-1],
@@ -119,16 +125,8 @@ def load_builtin_channel_plugin(name: str) -> ChannelPlugin | None:
     return plugin
 
 
-@lru_cache(maxsize=None)
-def load_builtin_setup_spec(name: str) -> ChannelSetupSpec | None:
-    """Return the setup contract owned by one built-in channel package."""
-    plugin = load_builtin_channel_plugin(name)
-    return plugin.setup if plugin is not None else None
-
-
 __all__ = [
     "ChannelPlugin",
     "has_builtin_channel_package",
     "load_builtin_channel_plugin",
-    "load_builtin_setup_spec",
 ]

@@ -6,7 +6,7 @@ Use this guide to build an external channel plugin or contribute a self-containe
 
 ## How It Works
 
-nanobot discovers channel plugins via Python [entry points](https://packaging.python.org/en/latest/specifications/entry-points/). When `nanobot gateway` starts, it scans:
+nanobot discovers dependency-free `ChannelPlugin` descriptors from two sources when `nanobot gateway` starts:
 
 1. Built-in channels in `nanobot/channels/`
 2. External packages registered under the `nanobot.channels` entry point group
@@ -17,18 +17,18 @@ If a matching config section has `"enabled": true`, the channel is instantiated 
 
 | Goal | Extension path | Primary contract |
 |------|----------------|------------------|
-| Ship a separately installed Python package | External plugin registered under `nanobot.channels` | `BaseChannel` subclass and optional `setup_spec()` |
-| Add a channel to the nanobot repository and release bundle | Built-in package at `nanobot/channels/<channel>/` | Dependency-free `ChannelPlugin` manifest, lazy runtime, package-local tests, and optional package-local WebUI |
+| Ship a separately installed Python package | External plugin registered under `nanobot.channels` | Dependency-free `ChannelPlugin` manifest and lazy `BaseChannel` runtime |
+| Add a channel to the nanobot repository and release bundle | Built-in package at `nanobot/channels/<channel>/` | The same `ChannelPlugin` manifest contract, package-local tests, and optional package-local WebUI |
 
-External plugins can expose generic settings through `setup_spec()`. Custom TSX and locale JSON are compiled into nanobot's WebUI at build time, so a separately installed Python wheel cannot inject a new custom WebUI into an already-built frontend bundle.
+Both extension paths expose generic settings through `ChannelPlugin.setup`. Custom TSX and locale JSON are compiled into nanobot's WebUI at build time, so a separately installed Python wheel cannot inject a new custom WebUI into an already-built frontend bundle.
 
 ## Ownership and Sources of Truth
 
 | Concern | Owner and source of truth |
 |---------|---------------------------|
 | Runtime behavior and platform SDK use | `runtime.py` and package-local helpers |
-| Writable settings fields, types, defaults, requirements, secret handling, and validation | `ChannelSetupSpec` in `manifest.py` for built-ins, or `setup_spec()` for external plugins |
-| Built-in discovery metadata and lazy runtime target | `PLUGIN` in `manifest.py` |
+| Writable settings fields, types, defaults, requirements, secret handling, and validation | `ChannelPlugin.setup` in `manifest.py` |
+| Discovery metadata and lazy runtime target | `PLUGIN` in `manifest.py` |
 | Built-in WebUI structure, components, URLs, field keys, actions, and preset values | `webui/index.ts` or `webui/index.tsx` |
 | Channel-specific user-facing copy | `webui/locales/<locale>.json` |
 | Generic settings-shell copy shared by every channel | `webui/src/i18n/locales/<locale>/common.json` |
@@ -44,8 +44,9 @@ We'll build a minimal webhook channel that receives messages via HTTP POST and s
 ```text
 nanobot-channel-webhook/
 ├── nanobot_channel_webhook/
-│   ├── __init__.py          # re-export WebhookChannel
-│   └── channel.py           # channel implementation
+│   ├── __init__.py          # lightweight package marker; do not import the runtime
+│   ├── manifest.py           # dependency-free ChannelPlugin descriptor
+│   └── channel.py            # channel implementation and optional SDK imports
 └── pyproject.toml
 ```
 
@@ -53,9 +54,26 @@ nanobot-channel-webhook/
 
 ```python
 # nanobot_channel_webhook/__init__.py
-from nanobot_channel_webhook.channel import WebhookChannel
+"""Webhook channel plugin package."""
+```
 
-__all__ = ["WebhookChannel"]
+```python
+# nanobot_channel_webhook/manifest.py
+from nanobot.channels.contracts import ChannelFieldSpec, ChannelSetupSpec
+from nanobot.channels.plugin import ChannelPlugin
+
+
+PLUGIN = ChannelPlugin(
+    name="webhook",
+    display_name="Webhook",
+    runtime=f"{__package__}.channel:WebhookChannel",
+    setup=ChannelSetupSpec(
+        fields={
+            "port": ChannelFieldSpec(kind="int", default=9000),
+            "allowFrom": ChannelFieldSpec(kind="list"),
+        },
+    ),
+)
 ```
 
 ```python
@@ -161,7 +179,7 @@ version = "0.1.0"
 dependencies = ["nanobot-ai", "aiohttp"]
 
 [project.entry-points."nanobot.channels"]
-webhook = "nanobot_channel_webhook:WebhookChannel"
+webhook = "nanobot_channel_webhook.manifest:PLUGIN"
 
 [build-system]
 requires = ["hatchling"]
@@ -171,7 +189,7 @@ build-backend = "hatchling.build"
 packages = ["nanobot_channel_webhook"]
 ```
 
-The key (`webhook`) becomes the config section name. The value points to your `BaseChannel` subclass.
+The key (`webhook`) becomes the config section name and must equal `PLUGIN.name`. The value must resolve to a `ChannelPlugin`; registering a `BaseChannel` class directly is not supported.
 
 ### 3. Install & Configure
 
@@ -195,7 +213,7 @@ Edit `~/.nanobot/config.json`:
 }
 ```
 
-For external plugins, the top-level `enabled` field is also the runtime import gate. `nanobot gateway` does not load the plugin entry point while this flag is false or absent. A multi-instance plugin therefore keeps top-level `"enabled": true` while using per-instance flags to select which runtimes to start. Explicit plugin setup, install, and enable actions may load the plugin.
+nanobot always loads the dependency-free descriptor during discovery but imports the runtime target only when activation or a management action needs it. Single-instance and multi-instance channels use the same activation rules regardless of whether their descriptor came from a built-in package or an entry point.
 
 ### 4. Run & Test
 
@@ -236,7 +254,7 @@ Do not add a built-in runtime module directly under `nanobot/channels/`, create 
 
 ### Manifest and Runtime Boundary
 
-`manifest.py` exports a typed `ChannelPlugin` whose `runtime` target is package-relative, such as `runtime:TelegramChannel`. Discovery imports the manifest before it knows whether the optional platform dependency is installed, so `manifest.py` must not import `runtime.py` or any platform SDK. Keep historical package imports lazy in `__init__.py` for the same reason.
+`manifest.py` exports a typed `ChannelPlugin` whose `runtime` target is an absolute import target, such as `nanobot.channels.telegram.runtime:TelegramChannel`; using `f"{__package__}.runtime:TelegramChannel"` keeps it package-owned without repeating the package path. Discovery imports the manifest before it knows whether the optional platform dependency is installed, so `manifest.py` must not import `runtime.py` or any platform SDK. Keep historical package imports lazy in `__init__.py` for the same reason.
 
 The manifest owns the channel name, display name, setup contract, optional dependency extra, capabilities, default activation, and optional WebUI entry path. Its `multi_instance` setup value must agree with whether the runtime overrides `instance_specs()`.
 
@@ -378,7 +396,6 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | `_handle_message(sender_id, chat_id, content, media?, metadata?, session_key?)` | **Call this when you receive a message.** Checks `is_allowed()`, then publishes to the bus. Automatically sets `_wants_stream` if `supports_streaming` is true. |
 | `is_allowed(sender_id)` | Checks against `config.allow_from`; `"*"` allows all, `[]` denies all. |
 | `default_config()` (classmethod) | Returns default config dict for `nanobot onboard`. Override to declare your fields. |
-| `setup_spec()` (classmethod) | Optional typed contract for WebUI-editable fields and validation. |
 | `runtime_name(instance_id)` (classmethod) | Returns the runtime routing key. Override only for multi-instance channels. |
 | `instance_specs(section, enabled_only=True)` (classmethod) | Expands persisted config into typed runtime instances. Override only for multi-instance channels. |
 | `update_instance_config(section, values, instance_id)` (classmethod) | Writes one instance while preserving the plugin-owned storage shape. |
@@ -394,39 +411,38 @@ nanobot channels login <channel_name> --force  # re-authenticate
 
 ### Optional management contract
 
-Management hooks are declared on `BaseChannel`; plugins do not need to discover private method names or duplicate WebUI routing logic. Most single-instance external plugins only need `setup_spec()`; built-ins declare the equivalent `ChannelSetupSpec` in `manifest.py`:
+Management hooks are declared on `BaseChannel`; plugins do not need to discover private method names or duplicate WebUI routing logic. Setup metadata belongs only to the descriptor, so runtime classes do not implement a parallel setup contract:
 
 ```python
-from nanobot.channels.contracts import (
-    ChannelFieldSpec,
-    ChannelSetupSpec,
-    SetupRequirement,
-)
+from nanobot.channels.contracts import ChannelFieldSpec, ChannelSetupSpec, SetupRequirement
+from nanobot.channels.plugin import ChannelPlugin
 
-class WebhookChannel(BaseChannel):
-    @classmethod
-    def setup_spec(cls) -> ChannelSetupSpec:
-        return ChannelSetupSpec(
-            fields={
-                "token": ChannelFieldSpec(kind="secret"),
-                "region": ChannelFieldSpec(
-                    kind="enum",
-                    choices=frozenset({"us", "eu"}),
-                    default="us",
-                ),
-            },
-            required=(SetupRequirement.field("token"),),
-        )
+PLUGIN = ChannelPlugin(
+    name="webhook",
+    display_name="Webhook",
+    runtime=f"{__package__}.channel:WebhookChannel",
+    setup=ChannelSetupSpec(
+        fields={
+            "token": ChannelFieldSpec(kind="secret"),
+            "region": ChannelFieldSpec(
+                kind="enum",
+                choices=frozenset({"us", "eu"}),
+                default="us",
+            ),
+        },
+        required=(SetupRequirement.field("token"),),
+    ),
+)
 ```
 
 `ChannelSetupSpec` is authoritative for writable field names, field types, choices, defaults, required setup, secret redaction, and optional backend validation. The settings API rejects fields outside this contract.
 
-Multi-instance plugins additionally return `ChannelInstanceSpec` objects from `instance_specs()` and preserve their persisted envelope in `update_instance_config()`. When they expose a setup contract, they must also set `ChannelSetupSpec(multi_instance=True)`; nanobot rejects a setup/runtime instance-mode mismatch. The shared contract enforces these invariants:
+Multi-instance plugins additionally return `ChannelInstanceSpec` objects from `instance_specs()` and preserve their persisted envelope in `update_instance_config()`. Their descriptor must set `ChannelSetupSpec(multi_instance=True)`; nanobot rejects a descriptor/runtime instance-mode mismatch. The shared contract enforces these invariants:
 
 - every `instance_id` is non-empty and unique;
 - `runtime_name(instance_id)` is the single source of routing names, and every derived name is unique and is either the channel name or starts with `<channel-name>.`;
 - runtime names cannot overwrite a runtime already owned by another channel;
-- settings instance summaries are generated from `instance_specs()` and `setup_spec()`. They contain the authoritative `enabled` and `configured` state plus secret-safe `config_values` and `configured_fields` for the generic instance editor;
+- settings instance summaries are generated from `instance_specs()` and `ChannelPlugin.setup`. They contain the authoritative `enabled` and `configured` state plus secret-safe `config_values` and `configured_fields` for the generic instance editor;
 - `feature_instances()` may return `None` or presentation overrides containing an `id` plus `name`, `display_name`, or `avatar_url`. It cannot override runtime state or the configuration snapshot.
 
 `ChannelInstanceSpec` contains only `instance_id` and the instance config; nanobot derives its runtime name. Single-instance plugins keep ownership of their entire config, including a field named `instances`. Only plugins that override `instance_specs()` opt into instance expansion.

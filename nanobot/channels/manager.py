@@ -30,7 +30,6 @@ from nanobot.channels.contracts import (
     ChannelActivation,
     channel_instance_specs,
     channel_runtime_name,
-    external_channel_enabled,
     resolve_channel_action_target,
 )
 from nanobot.channels.registry import channel_default_enabled
@@ -119,20 +118,19 @@ class ChannelManager:
 
         self._init_channels()
 
-    def _config_extra_channel_names(self, config: Config | None = None) -> set[str]:
-        extra = getattr((config or self.config).channels, "__pydantic_extra__", None) or {}
-        return set(extra.keys())
-
     def _channel_section(
         self,
         name: str,
         *,
         config: Config | None = None,
         default_sections: dict[str, Any] | None = None,
+        default_enabled: bool | None = None,
     ) -> Any:
         config = config or self.config
         section = getattr(config.channels, name, None)
-        if section is not None or not channel_default_enabled(name):
+        if default_enabled is None:
+            default_enabled = channel_default_enabled(name)
+        if section is not None or not default_enabled:
             return section
         if default_sections is None:
             return _default_channel_config(name)
@@ -192,44 +190,44 @@ class ChannelManager:
         return channel
 
     def _init_channels(self) -> None:
-        """Initialize channels discovered via pkgutil scan + entry_points plugins."""
-        from nanobot.channels.registry import discover_channel_names, discover_enabled
+        """Initialize enabled runtimes from dependency-free channel descriptors."""
+        from nanobot.channels.registry import discover_enabled, discover_plugins
 
-        # Built-ins remain lazy: only dependency-free manifests may opt into
-        # instance-aware activation before their runtime module is imported.
-        # External plugins use the top-level enabled flag as their import gate;
-        # once loaded, instance_specs() owns any finer-grained activation.
-        names = discover_channel_names()
-        builtin_names = set(names)
+        plugins = discover_plugins()
         default_sections: dict[str, Any] = {}
 
         enabled_names: set[str] = set()
-        for name in self._config_extra_channel_names() - builtin_names:
-            section = self._channel_section(name)
-            if external_channel_enabled(section):
-                enabled_names.add(name)
-        for name in builtin_names:
-            section = self._channel_section(name, default_sections=default_sections)
+        for name, plugin in plugins.items():
+            section = self._channel_section(
+                name,
+                default_sections=default_sections,
+                default_enabled=plugin.default_enabled,
+            )
             if section is None:
                 continue
-            setup_spec = channel_setup_spec(name)
+            setup_spec = channel_setup_spec(name, plugin=plugin)
             activation = ChannelActivation.from_config(
                 section,
                 include_instances=bool(setup_spec and setup_spec.multi_instance),
             )
-            if activation.resolve(default=channel_default_enabled(name)):
+            if activation.resolve(default=plugin.default_enabled):
                 enabled_names.add(name)
 
         for name, cls in discover_enabled(
             enabled_names,
-            _names=names,
+            _plugins=plugins,
             warn_import_errors=True,
         ).items():
-            section = self._channel_section(name, default_sections=default_sections)
+            plugin = plugins[name]
+            section = self._channel_section(
+                name,
+                default_sections=default_sections,
+                default_enabled=plugin.default_enabled,
+            )
             if section is None:
                 continue
             try:
-                channel_setup_spec(name, cls)
+                channel_setup_spec(name, cls, plugin=plugin)
                 specs = channel_instance_specs(cls, section)
                 runtime_specs = [
                     (channel_runtime_name(cls, spec.instance_id), spec)
@@ -342,17 +340,6 @@ class ChannelManager:
                 await task
         return True
 
-    def _is_known_channel_name(self, name: str) -> bool:
-        from nanobot.channels.registry import discover_channel_names, discover_plugins
-
-        return name in set(discover_channel_names()) or name in discover_plugins()
-
-    def _load_channel_class(self, name: str) -> type[BaseChannel] | None:
-        from nanobot.channels.registry import discover_channel_names, discover_enabled
-
-        names = discover_channel_names()
-        return discover_enabled({name}, _names=names, warn_import_errors=True).get(name)
-
     async def apply_channel_feature_action(
         self,
         action: str,
@@ -367,11 +354,14 @@ class ChannelManager:
         """
         name = name.strip()
         instance_id = (instance_id or "").strip() or None
-        if not name or not self._is_known_channel_name(name):
+        if not name:
             return {"handled": False}
-        from nanobot.channels.registry import discover_channel_names
 
-        is_builtin = name in set(discover_channel_names())
+        from nanobot.channels.registry import discover_plugins
+
+        plugin = discover_plugins({name}).get(name)
+        if plugin is None:
+            return {"handled": False}
         if name == "websocket":
             return {
                 "handled": True,
@@ -383,8 +373,11 @@ class ChannelManager:
         from nanobot.config.loader import load_config
 
         self.config = load_config()
-        section = self._channel_section(name)
-        cls = self._load_channel_class(name)
+        section = self._channel_section(name, default_enabled=plugin.default_enabled)
+        try:
+            cls = plugin.load_channel_class()
+        except ImportError:
+            cls = None
         if cls is None:
             return {
                 "handled": True,
@@ -392,27 +385,16 @@ class ChannelManager:
                 "requires_restart": True,
                 "message": f"{name} channel could not be loaded.",
             }
-        channel_setup_spec(name, cls)
-        instance_id = resolve_channel_action_target(
-            cls,
-            instance_id,
-            allow_global_multi_instance=not is_builtin,
-        )
+        channel_setup_spec(name, cls, plugin=plugin)
+        instance_id = resolve_channel_action_target(instance_id)
 
         if action == "disable":
-            if instance_id is not None:
-                runtime_name = channel_runtime_name(cls, instance_id)
-                runtime_names = (
-                    [runtime_name]
-                    if self._channel_owners.get(runtime_name) == name
-                    else []
-                )
-            else:
-                runtime_names = [
-                    runtime_name
-                    for runtime_name, owner in self._channel_owners.items()
-                    if owner == name
-                ]
+            runtime_name = channel_runtime_name(cls, instance_id)
+            runtime_names = (
+                [runtime_name]
+                if self._channel_owners.get(runtime_name) == name
+                else []
+            )
             stopped = False
             for runtime_name in runtime_names:
                 stopped = await self._stop_channel(runtime_name) or stopped
@@ -429,8 +411,7 @@ class ChannelManager:
             return {"handled": True, "ok": False, "requires_restart": True}
 
         specs = channel_instance_specs(cls, section) if section is not None else []
-        if instance_id is not None:
-            specs = [spec for spec in specs if spec.instance_id == instance_id]
+        specs = [spec for spec in specs if spec.instance_id == instance_id]
         if not specs:
             return {
                 "handled": True,
@@ -485,12 +466,6 @@ class ChannelManager:
             }
 
         runtime_names_to_replace = {runtime_name for runtime_name, _channel in built}
-        if instance_id is None:
-            runtime_names_to_replace.update(
-                runtime_name
-                for runtime_name, owner in self._channel_owners.items()
-                if owner == name
-            )
         for runtime_name in sorted(runtime_names_to_replace):
             if runtime_name not in self.channels:
                 continue

@@ -1,4 +1,5 @@
-"""Auto-discovery for built-in channel modules and external plugins."""
+"""Discover channel descriptors and load their runtimes lazily."""
+
 from __future__ import annotations
 
 import pkgutil
@@ -6,108 +7,156 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.channels.plugin import (
+    ChannelPlugin,
+    has_builtin_channel_package,
+    load_builtin_channel_plugin,
+)
+
 if TYPE_CHECKING:
     from nanobot.channels.base import BaseChannel
 
-def channel_default_enabled(name: str) -> bool:
-    """Return the default declared by a built-in package manifest."""
-    from nanobot.channels.plugin import load_builtin_channel_plugin
 
-    plugin = load_builtin_channel_plugin(name)
-    return plugin.default_enabled if plugin is not None else False
-
-
-def discover_channel_names() -> list[str]:
-    """Return self-contained built-in channel packages."""
-    import nanobot.channels as pkg
-    from nanobot.channels.plugin import has_builtin_channel_package
+def _builtin_package_names() -> list[str]:
+    import nanobot.channels as package
 
     return [
         name
-        for _, name, ispkg in pkgutil.iter_modules(pkg.__path__)
-        if ispkg and has_builtin_channel_package(name)
+        for _, name, is_package in pkgutil.iter_modules(package.__path__)
+        if is_package and has_builtin_channel_package(name)
     ]
 
 
-def load_channel_class(module_name: str) -> type[BaseChannel]:
-    """Load the runtime declared by one built-in package manifest."""
-    from nanobot.channels.plugin import load_builtin_channel_plugin
-
-    plugin = load_builtin_channel_plugin(module_name)
-    if plugin is None:
-        raise ImportError(f"No built-in channel package manifest for '{module_name}'")
-    return plugin.load_channel_class()
-
-
-def load_any_channel_class(name: str) -> type[BaseChannel]:
-    """Load one built-in or entry-point channel without central name switches."""
-    if name in discover_channel_names():
-        return load_channel_class(name)
-    plugin = discover_plugins({name}).get(name)
-    if plugin is not None:
-        return plugin
-    raise ImportError(f"Unknown channel: {name}")
-
-
-def discover_plugins(enabled_names: set[str] | None = None) -> dict[str, type[BaseChannel]]:
-    """Discover external channel plugins registered via entry_points."""
-    from importlib.metadata import entry_points
-
-    plugins: dict[str, type[BaseChannel]] = {}
-    for ep in entry_points(group="nanobot.channels"):
-        if enabled_names is not None and ep.name not in enabled_names:
+def discover_builtin_plugins(
+    enabled_names: set[str] | None = None,
+    *,
+    _names: list[str] | None = None,
+) -> dict[str, ChannelPlugin]:
+    """Load dependency-free descriptors from built-in channel packages."""
+    plugins: dict[str, ChannelPlugin] = {}
+    for name in _names if _names is not None else _builtin_package_names():
+        if enabled_names is not None and name not in enabled_names:
             continue
         try:
-            cls = ep.load()
-            plugins[ep.name] = cls
-        except Exception as e:
-            logger.warning("Failed to load channel plugin '{}': {}", ep.name, e)
+            plugin = load_builtin_channel_plugin(name)
+            if plugin is not None:
+                plugins[name] = plugin
+        except Exception as exc:
+            logger.warning("Failed to load built-in channel descriptor '{}': {}", name, exc)
     return plugins
+
+
+def discover_entrypoint_plugins(
+    enabled_names: set[str] | None = None,
+    *,
+    _reserved_names: set[str] | None = None,
+) -> dict[str, ChannelPlugin]:
+    """Load external ``ChannelPlugin`` descriptors registered via entry points."""
+    from importlib.metadata import entry_points
+
+    reserved_names = _reserved_names or set()
+    plugins: dict[str, ChannelPlugin] = {}
+    for entry_point in entry_points(group="nanobot.channels"):
+        if enabled_names is not None and entry_point.name not in enabled_names:
+            continue
+        if entry_point.name in reserved_names:
+            logger.warning(
+                "External channel descriptor '{}' is shadowed by a built-in channel",
+                entry_point.name,
+            )
+            continue
+        try:
+            plugin = entry_point.load()
+            if not isinstance(plugin, ChannelPlugin):
+                raise TypeError(
+                    "entry point must resolve to nanobot.channels.plugin.ChannelPlugin"
+                )
+            if plugin.name != entry_point.name:
+                raise TypeError(
+                    f"descriptor name '{plugin.name}' does not match entry point "
+                    f"name '{entry_point.name}'"
+                )
+            plugins[entry_point.name] = plugin
+        except Exception as exc:
+            logger.warning(
+                "Failed to load channel descriptor '{}': {}",
+                entry_point.name,
+                exc,
+            )
+    return plugins
+
+
+def discover_plugins(enabled_names: set[str] | None = None) -> dict[str, ChannelPlugin]:
+    """Return built-in and entry-point descriptors through one contract."""
+    names = _builtin_package_names()
+    builtin_names = set(names)
+    plugins = discover_builtin_plugins(enabled_names, _names=names)
+    plugins.update(
+        discover_entrypoint_plugins(
+            enabled_names,
+            _reserved_names=builtin_names,
+        )
+    )
+    return plugins
+
+
+def load_channel_plugin(name: str) -> ChannelPlugin:
+    """Load one built-in or entry-point descriptor."""
+    plugin = discover_plugins({name}).get(name)
+    if plugin is None:
+        raise ImportError(f"Unknown channel: {name}")
+    return plugin
+
+
+def channel_default_enabled(name: str) -> bool:
+    """Return the activation default declared by a channel descriptor."""
+    try:
+        return load_channel_plugin(name).default_enabled
+    except ImportError:
+        return False
+
+
+def load_channel_class(name: str) -> type[BaseChannel]:
+    """Load the runtime declared by one channel descriptor."""
+    return load_channel_plugin(name).load_channel_class()
 
 
 def discover_enabled(
     enabled_names: set[str],
     *,
-    _names: list[str] | None = None,
-    _include_all_external: bool = False,
+    _plugins: dict[str, ChannelPlugin] | None = None,
     warn_import_errors: bool = False,
 ) -> dict[str, type[BaseChannel]]:
-    """Return channels whose module names are in *enabled_names*.
-
-    Uses cheap ``pkgutil.iter_modules`` to list names, then imports only
-    those that match — skipping the heavy third-party SDK imports of
-    unneeded channels.
-    """
-    names = _names if _names is not None else discover_channel_names()
+    """Load runtime classes only for enabled descriptors."""
+    plugins = _plugins if _plugins is not None else discover_plugins(enabled_names)
     result: dict[str, type[BaseChannel]] = {}
-    for modname in names:
-        if modname not in enabled_names:
+    for name, plugin in plugins.items():
+        if name not in enabled_names:
             continue
         try:
-            result[modname] = load_channel_class(modname)
-        except ImportError as e:
-            message = "Enabled built-in channel '{}' is not available: {}"
+            result[name] = plugin.load_channel_class()
+        except Exception as exc:
+            message = "Enabled channel '{}' runtime is not available: {}"
             if warn_import_errors:
-                logger.warning(message, modname, e)
+                logger.warning(message, name, exc)
             else:
-                logger.debug(message, modname, e)
-
-    external = discover_plugins(None if _include_all_external else enabled_names)
-    shadowed = set(external) & set(names)
-    if shadowed:
-        logger.warning("Plugin(s) shadowed by built-in channels (ignored): {}", shadowed)
-    if _include_all_external:
-        result.update({k: v for k, v in external.items() if k not in shadowed})
-    else:
-        result.update({k: v for k, v in external.items() if k not in shadowed and k in enabled_names})
-
+                logger.debug(message, name, exc)
     return result
 
 
 def discover_all() -> dict[str, type[BaseChannel]]:
-    """Return all channels: built-in (pkgutil) merged with external (entry_points).
+    """Load every available channel runtime."""
+    plugins = discover_plugins()
+    return discover_enabled(set(plugins), _plugins=plugins)
 
-    Built-in channels take priority — an external plugin cannot shadow a built-in name.
-    """
-    names = discover_channel_names()
-    return discover_enabled(set(names), _names=names, _include_all_external=True)
+
+__all__ = [
+    "channel_default_enabled",
+    "discover_all",
+    "discover_builtin_plugins",
+    "discover_enabled",
+    "discover_entrypoint_plugins",
+    "discover_plugins",
+    "load_channel_class",
+    "load_channel_plugin",
+]

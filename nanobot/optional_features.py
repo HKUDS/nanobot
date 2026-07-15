@@ -22,12 +22,10 @@ from nanobot.channels.contracts import (
     channel_instance_specs,
     channel_set_config_enabled,
     channel_value_present,
-    external_channel_enabled,
     refresh_channel_feature_metadata,
     resolve_channel_action_target,
     stringify_channel_value,
 )
-from nanobot.channels.plugin import load_builtin_channel_plugin
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 
@@ -327,14 +325,13 @@ def channel_enabled(
     name: str,
     channel_cls: Any | None = None,
     *,
-    require_explicit_top_level: bool = False,
+    default_enabled: bool | None = None,
 ) -> bool:
     section = getattr(config.channels, name, None)
-    default_enabled = channel_default_enabled(name)
+    if default_enabled is None:
+        default_enabled = channel_default_enabled(name)
     if section is None:
         return default_enabled
-    if require_explicit_top_level and not external_channel_enabled(section):
-        return False
     if channel_cls is not None:
         return bool(channel_instance_specs(channel_cls, section, enabled_only=True))
     return ChannelActivation.from_config(section).resolve(default=default_enabled)
@@ -408,6 +405,8 @@ def channel_configured(
     name: str,
     spec: ChannelSetupSpec | None = None,
     channel_cls: Any | None = None,
+    *,
+    default_enabled: bool | None = None,
 ) -> bool:
     """Return whether a channel has enough saved setup to be enabled directly."""
     section = getattr(config.channels, name, None)
@@ -427,7 +426,12 @@ def channel_configured(
         )
 
     if not spec or not spec.required:
-        return channel_enabled(config, name, channel_cls)
+        return channel_enabled(
+            config,
+            name,
+            channel_cls,
+            default_enabled=default_enabled,
+        )
     return _channel_has_required_setup(section, spec)
 
 
@@ -436,17 +440,12 @@ def optional_features_payload(
     config: Config | None = None,
     last_action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from nanobot.channels.registry import discover_channel_names, discover_plugins
+    from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import load_config
 
     config = config or load_config()
     extras = optional_dependency_groups()
-    builtin_channels = set(discover_channel_names())
-    plugin_channels = discover_plugins()
-    channel_plugins = {
-        name: load_builtin_channel_plugin(name)
-        for name in builtin_channels
-    }
+    channel_plugins = discover_plugins()
     claimed_extras = {
         plugin.optional_extra
         for plugin in channel_plugins.values()
@@ -454,10 +453,10 @@ def optional_features_payload(
     }
     features: list[dict[str, Any]] = []
 
-    feature_names = builtin_channels | set(plugin_channels) | (set(extras) - claimed_extras)
+    feature_names = set(channel_plugins) | (set(extras) - claimed_extras)
     for name in sorted(feature_names):
-        is_channel = name in builtin_channels or name in plugin_channels
         channel_plugin = channel_plugins.get(name)
+        is_channel = channel_plugin is not None
         extra_name = channel_plugin.optional_extra if channel_plugin else name
         has_extra = bool(extra_name and extra_name in extras)
         installed = extra_installed(extra_name, extras[extra_name]) if has_extra else True
@@ -490,14 +489,17 @@ def optional_features_payload(
             continue
 
         try:
-            channel_cls = plugin_channels.get(name)
-            setup_spec = channel_setup_spec(name, channel_cls)
+            assert channel_plugin is not None
+            channel_cls = None
+            setup_spec = channel_setup_spec(name, plugin=channel_plugin)
             if channel_cls is None and setup_spec is not None and setup_spec.multi_instance:
                 try:
-                    from nanobot.channels.registry import load_channel_class
-
-                    channel_cls = load_channel_class(name)
-                    setup_spec = channel_setup_spec(name, channel_cls)
+                    channel_cls = channel_plugin.load_channel_class()
+                    setup_spec = channel_setup_spec(
+                        name,
+                        channel_cls,
+                        plugin=channel_plugin,
+                    )
                 except Exception:
                     channel_cls = None
 
@@ -507,9 +509,15 @@ def optional_features_payload(
                 config,
                 name,
                 channel_cls,
-                require_explicit_top_level=name in plugin_channels and name not in builtin_channels,
+                default_enabled=channel_plugin.default_enabled,
             )
-            configured = channel_configured(config, name, setup_spec, channel_cls)
+            configured = channel_configured(
+                config,
+                name,
+                setup_spec,
+                channel_cls,
+                default_enabled=channel_plugin.default_enabled,
+            )
             ready = bool(enabled and installed)
             status = "enabled" if ready else "missing_dependency" if not installed else "not_enabled"
             feature.update({
@@ -563,11 +571,7 @@ def enable_optional_feature(
     instance_id: str | None = None,
     runner: Any = run_install_command,
 ) -> dict[str, Any]:
-    from nanobot.channels.registry import (
-        discover_channel_names,
-        discover_plugins,
-        load_channel_class,
-    )
+    from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import get_config_path
 
     if name in _BUNDLED_FEATURE_ALIASES:
@@ -583,14 +587,13 @@ def enable_optional_feature(
     config_path = config_path or get_config_path()
     requested_instance_id = (instance_id or "").strip() or None
     extras = optional_dependency_groups()
-    builtin_channels = set(discover_channel_names())
-    plugin_channels = discover_plugins()
-    known = builtin_channels | set(plugin_channels) | set(extras)
+    channel_plugins = discover_plugins()
+    known = set(channel_plugins) | set(extras)
     if name not in known:
         available = ", ".join(sorted(known))
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
 
-    channel_plugin = load_builtin_channel_plugin(name) if name in builtin_channels else None
+    channel_plugin = channel_plugins.get(name)
     extra_name = channel_plugin.optional_extra if channel_plugin else name
     if extra_name in extras and not extra_installed(extra_name, extras[extra_name]):
         if not allow_install:
@@ -611,33 +614,16 @@ def enable_optional_feature(
 
     channel_cls: Any | None = None
     target_instance_id: str | None = None
-    if name in builtin_channels:
+    if channel_plugin is not None:
         try:
-            channel_cls = load_channel_class(name)
+            channel_cls = channel_plugin.load_channel_class()
         except Exception as exc:
             raise OptionalFeatureError(
                 f"Channel '{name}' is not importable after enable: {exc}",
                 status=500,
             ) from exc
         target_instance_id = resolve_channel_action_target(
-            channel_cls,
             requested_instance_id,
-            allow_global_multi_instance=False,
-        )
-        set_channel_config_enabled(
-            config_path,
-            name,
-            channel_cls,
-            True,
-            instance_id=target_instance_id,
-        )
-        message = f"Enabled channel '{name}'"
-    elif name in plugin_channels:
-        channel_cls = plugin_channels[name]
-        target_instance_id = resolve_channel_action_target(
-            channel_cls,
-            requested_instance_id,
-            allow_global_multi_instance=True,
         )
         set_channel_config_enabled(
             config_path,
@@ -668,7 +654,7 @@ def enable_optional_feature(
     )
     payload["requires_restart"] = _feature_requires_restart(
         name,
-        is_channel=name in builtin_channels or name in plugin_channels,
+        is_channel=channel_plugin is not None,
     )
     return payload
 
@@ -687,19 +673,14 @@ def disable_optional_feature(
     config_path: Path | None = None,
     instance_id: str | None = None,
 ) -> dict[str, Any]:
-    from nanobot.channels.registry import (
-        discover_channel_names,
-        discover_plugins,
-        load_channel_class,
-    )
+    from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import get_config_path, load_config
 
     config_path = config_path or get_config_path()
     requested_instance_id = (instance_id or "").strip() or None
     extras = optional_dependency_groups()
-    builtin_channels = set(discover_channel_names())
-    plugin_channels = discover_plugins()
-    known_channels = builtin_channels | set(plugin_channels)
+    channel_plugins = discover_plugins()
+    known_channels = set(channel_plugins)
     known = known_channels | set(extras)
     if name not in known:
         available = ", ".join(sorted(known))
@@ -707,14 +688,12 @@ def disable_optional_feature(
     if name not in known_channels:
         raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
     try:
-        channel_cls = load_channel_class(name) if name in builtin_channels else plugin_channels[name]
+        channel_cls = channel_plugins[name].load_channel_class()
     except ImportError:
         channel_cls = None
     target_instance_id = (
         resolve_channel_action_target(
-            channel_cls,
             requested_instance_id,
-            allow_global_multi_instance=name not in builtin_channels,
         )
         if channel_cls is not None
         else requested_instance_id or "default"
