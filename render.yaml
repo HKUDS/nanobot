@@ -8,13 +8,18 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Render's Docker Command REPLACES the Dockerfile ENTRYPOINT (it is not
-    # appended to it), so invoke the entrypoint explicitly. When RENDER=true the
-    # entrypoint copies render-config.json onto the mounted disk at
+    # Render's Docker Command REPLACES the Dockerfile CMD but keeps the
+    # ENTRYPOINT (entrypoint.sh), so pass only the command args here — otherwise
+    # the entrypoint path is reinjected as an argument and nanobot fails with
+    # "No such command /usr/local/bin/entrypoint.sh". When RENDER=true the
+    # entrypoint initializes render-config.json on the mounted disk at
     # $HOME/.nanobot/config.json (so the runtime data_dir lands on the persistent
     # disk), chowns the root-owned mount, drops to the non-root nanobot user, and
-    # appends the --config flag itself — so pass only `gateway` here.
-    dockerCommand: /usr/local/bin/entrypoint.sh gateway
+    # appends the --config flag itself.
+    dockerCommand: gateway
+    # Deploy-to-Render templates should not auto-deploy on every repo push
+    # (Render's recommendation); trigger deploys manually or via the Dashboard.
+    autoDeploy: false
     plan: starter
     healthCheckPath: /
     envVars:
@@ -35,7 +40,8 @@ services:
     # data_dir (config_path.parent) resolves here too — keeping webui/ (chat
     # history the UI renders), cron, media, and logs durable, not just session
     # files. Starter / 1 GB is the lean default; history persistence needs this
-    # disk, not a bigger plan.
+    # disk, not a bigger plan. Note: persistent disks require a paid service
+    # (they are unavailable on Render's free tier).
     disk:
       name: nanobot-data
       mountPath: /home/nanobot/.nanobot

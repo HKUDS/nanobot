@@ -42,9 +42,11 @@ RUN useradd -m -u 1000 -s /bin/bash nanobot && \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
-# Start as root so the Render entrypoint can chown the freshly-mounted
-# (root-owned) persistent disk, then drop to the non-root nanobot user via
-# setpriv (see entrypoint.sh). Local runs without a disk are unaffected.
+# Start as root so the entrypoint can chown the data dir (on Render, the
+# freshly-mounted root-owned persistent disk) before dropping to the non-root
+# nanobot user via setpriv. The entrypoint drops privileges on every root start
+# and fails closed if it cannot, so the agent never runs as root (see
+# entrypoint.sh).
 USER root
 ENV HOME=/home/nanobot
 # Ensure crash output reaches Render logs (app output is otherwise swallowed on
