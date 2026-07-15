@@ -1706,6 +1706,7 @@ def replay_transcript_to_ui_messages(
                 continue
             close_activity_for_answer()
             turn_fields = _turn_fields(rec, "answer")
+            source_fields = _source_fields(rec)
             adopted = find_active_placeholder(messages, turn_fields) if buffer_message_id is None else None
             if buffer_message_id is None:
                 if adopted:
@@ -1718,7 +1719,8 @@ def replay_transcript_to_ui_messages(
                             "role": "assistant",
                             "content": "",
                             "isStreaming": True,
-                            **_turn_fields(rec, "answer"),
+                            **turn_fields,
+                            **source_fields,
                             "createdAt": _ts_base + idx,
                         },
                     )
@@ -1730,7 +1732,8 @@ def replay_transcript_to_ui_messages(
                         **m,
                         "content": combined,
                         "isStreaming": True,
-                        **_turn_fields(rec, "answer"),
+                        **turn_fields,
+                        **source_fields,
                     }
                     break
             continue
@@ -1741,6 +1744,8 @@ def replay_transcript_to_ui_messages(
                 buffer_parts = []
                 continue
             final_text = rec.get("text")
+            turn_fields = _turn_fields(rec, "answer")
+            source_fields = _source_fields(rec)
             if isinstance(final_text, str):
                 if buffer_message_id is None:
                     buffer_message_id = _new_id("buf", idx)
@@ -1750,7 +1755,8 @@ def replay_transcript_to_ui_messages(
                             "role": "assistant",
                             "content": final_text,
                             "isStreaming": True,
-                            **_turn_fields(rec, "answer"),
+                            **turn_fields,
+                            **source_fields,
                             "createdAt": _ts_base + idx,
                         },
                     )
@@ -1761,9 +1767,19 @@ def replay_transcript_to_ui_messages(
                                 **m,
                                 "content": final_text,
                                 "isStreaming": True,
-                                **_turn_fields(rec, "answer"),
+                                **turn_fields,
+                                **source_fields,
                             }
                             break
+            elif source_fields and buffer_message_id is not None:
+                for i, m in enumerate(messages):
+                    if m.get("id") == buffer_message_id:
+                        messages[i] = {
+                            **m,
+                            **turn_fields,
+                            **source_fields,
+                        }
+                        break
             buffer_message_id = None
             buffer_parts = []
             continue

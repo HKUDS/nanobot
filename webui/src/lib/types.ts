@@ -1014,12 +1014,16 @@ export type InboundEvent =
       chat_id: string;
       text: string;
       stream_id?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** Lightweight provenance for proactive streamed assistant messages. */
+      source?: UIMessageSource;
     } & InboundTurnMetadata)
   | ({
       event: "reasoning_delta";

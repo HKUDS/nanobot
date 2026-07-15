@@ -35,7 +35,7 @@ interface ActiveAssistantCursor {
 }
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields }
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
 
 type UIMessageTurnFields = Pick<UIMessage, "turnId" | "turnPhase" | "turnSeq">;
@@ -664,7 +664,12 @@ export function useNanobotStream(
   }, []);
 
   const appendAnswerChunk = useCallback(
-    (prev: UIMessage[], chunk: string, turn: UIMessageTurnFields = {}): UIMessage[] => {
+    (
+      prev: UIMessage[],
+      chunk: string,
+      turn: UIMessageTurnFields = {},
+      source?: UIMessage["source"],
+    ): UIMessage[] => {
       let next = prev;
       let targetIndex = resolveActiveAssistantIndex(next, turn);
 
@@ -695,6 +700,7 @@ export function useNanobotStream(
         content: target.content + chunk,
         isStreaming: true,
         ...turn,
+        ...(source ? { source } : {}),
       };
       closedAssistantStreamIdsRef.current.delete(merged.id);
       activeAssistantRef.current = { id: merged.id, index: targetIndex };
@@ -709,7 +715,7 @@ export function useNanobotStream(
       let next = prev;
       for (const event of events) {
         if (event.kind === "delta") {
-          next = appendAnswerChunk(next, event.text, event.turn);
+          next = appendAnswerChunk(next, event.text, event.turn, event.source);
         } else {
           if (closeActiveAssistantStream()) clearActivitySegment();
           next = attachReasoningChunk(
@@ -729,6 +735,7 @@ export function useNanobotStream(
     closeAnswerSegment?: boolean;
     finalAnswerText?: string;
     turn?: UIMessageTurnFields;
+    source?: UIMessage["source"];
   }) => {
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
@@ -737,7 +744,8 @@ export function useNanobotStream(
     const events = pendingStreamEventsRef.current;
     const finalAnswerText = options?.finalAnswerText;
     const turn = options?.turn ?? {};
-    if (events.length === 0 && finalAnswerText === undefined) {
+    const source = options?.source;
+    if (events.length === 0 && finalAnswerText === undefined && source === undefined) {
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return;
     }
@@ -748,30 +756,44 @@ export function useNanobotStream(
         const targetIndex =
           resolveActiveAssistantIndex(next, turn)
           ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current, turn);
-          if (targetIndex !== null) {
-            const target = next[targetIndex];
-            next = replaceMessageAt(next, targetIndex, {
-              ...target,
+        if (targetIndex !== null) {
+          const target = next[targetIndex];
+          next = replaceMessageAt(next, targetIndex, {
+            ...target,
+            content: finalAnswerText,
+            isStreaming: true,
+            ...turn,
+            ...(source ? { source } : {}),
+          });
+        } else {
+          const id = crypto.randomUUID();
+          closedAssistantStreamIdsRef.current.add(id);
+          next = [
+            ...next,
+            {
+              id,
+              role: "assistant",
               content: finalAnswerText,
               isStreaming: true,
               ...turn,
-            });
-          } else {
-            const id = crypto.randomUUID();
-            closedAssistantStreamIdsRef.current.add(id);
-            next = [
-              ...next,
-              {
-                id,
-                role: "assistant",
-                content: finalAnswerText,
-                isStreaming: true,
-                ...turn,
-                createdAt: Date.now(),
-              },
-            ];
-          }
+              ...(source ? { source } : {}),
+              createdAt: Date.now(),
+            },
+          ];
         }
+      } else if (source) {
+        const targetIndex =
+          resolveActiveAssistantIndex(next, turn)
+          ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current, turn);
+        if (targetIndex !== null) {
+          const target = next[targetIndex];
+          next = replaceMessageAt(next, targetIndex, {
+            ...target,
+            ...turn,
+            source,
+          });
+        }
+      }
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return next;
     });
@@ -835,6 +857,7 @@ export function useNanobotStream(
           kind: "delta",
           text: chunk,
           turn: turnFieldsFromEvent(ev, "answer"),
+          source: ev.source,
         });
         schedulePendingStreamFlush();
         return;
@@ -861,6 +884,7 @@ export function useNanobotStream(
           closeAnswerSegment: true,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
           turn,
+          source: ev.source,
         });
         if (suppressStreamUntilTurnEndRef.current) return;
         scheduleStreamEndTimer(turn);

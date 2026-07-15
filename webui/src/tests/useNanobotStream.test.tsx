@@ -180,6 +180,63 @@ describe("useNanobotStream", () => {
     });
   });
 
+  it("preserves proactive automation source metadata on streamed assistant messages", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron-stream", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const source = { kind: "cron", label: "Repo check" };
+
+    act(() => {
+      fake.emit("chat-cron-stream", {
+        event: "delta",
+        chat_id: "chat-cron-stream",
+        text: "Repo ",
+        source,
+      });
+      fake.emit("chat-cron-stream", {
+        event: "stream_end",
+        chat_id: "chat-cron-stream",
+        source,
+      });
+      fake.emit("chat-cron-stream", {
+        event: "turn_end",
+        chat_id: "chat-cron-stream",
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Repo ",
+      isStreaming: false,
+      source,
+    });
+  });
+
+  it("preserves proactive automation source metadata on stream_end final text", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron-stream-end", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const source = { kind: "cron", label: "Repo check" };
+
+    act(() => {
+      fake.emit("chat-cron-stream-end", {
+        event: "stream_end",
+        chat_id: "chat-cron-stream-end",
+        text: "Repo clean.",
+        source,
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Repo clean.",
+      isStreaming: true,
+      source,
+    });
+  });
+
   it("does not start streaming from completed trailing activity after an answer", () => {
     const fake = fakeClient();
     const initialMessages = [

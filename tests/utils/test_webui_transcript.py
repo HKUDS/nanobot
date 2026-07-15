@@ -492,6 +492,42 @@ def test_replay_preserves_local_trigger_source_metadata(tmp_path, monkeypatch) -
     assert msgs[0]["source"] == {"kind": "local_trigger", "label": "PR review"}
 
 
+def test_replay_preserves_automation_source_metadata_on_streamed_reply(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-streamed-cron-source"
+    source = {"kind": "cron", "label": "Repo check"}
+
+    for record in (
+        {
+            "event": "delta",
+            "chat_id": "t-streamed-cron-source",
+            "text": "Repo ",
+            "source": source,
+        },
+        {
+            "event": "delta",
+            "chat_id": "t-streamed-cron-source",
+            "text": "clean.",
+            "source": source,
+        },
+        {
+            "event": "stream_end",
+            "chat_id": "t-streamed-cron-source",
+            "source": source,
+        },
+        {"event": "turn_end", "chat_id": "t-streamed-cron-source"},
+    ):
+        append_transcript_object(key, record)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert msgs[0]["content"] == "Repo clean."
+    assert msgs[0]["source"] == source
+
+
 def test_replay_preserves_legacy_trigger_source_metadata(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-trigger-source"
