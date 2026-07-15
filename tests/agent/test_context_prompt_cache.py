@@ -339,15 +339,35 @@ def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
 
     prompt = builder.build_system_prompt()
 
-    # memory skill should be in Active Skills section
+    # Always-loaded skills should be in the Active Skills section.
     assert "# Active Skills" in prompt
     assert "### Skill: memory" in prompt
+    assert "### Skill: use-nanobot" in prompt
+    assert "Own the implementation choice" in prompt
+    assert "Think in Closed Loops" in prompt
+    assert "skills/use-nanobot/references/capability-map.md" in prompt
+    assert "skills/use-nanobot/references/continuity.md" in prompt
+    assert "skills/use-nanobot/references/human-handoffs.md" in prompt
 
-    # memory skill should NOT appear in the skills index
+    # Always-loaded skills should NOT appear in the skills index.
     skills_section = prompt.split("# Skills\n", 1)
     if len(skills_section) > 1:
         index_text = skills_section[1].split("\n\n---")[0]
         assert "**memory**" not in index_text
+        assert "**use-nanobot**" not in index_text
+
+
+def test_use_nanobot_skill_is_english_only() -> None:
+    skill_dir = pkg_files("nanobot") / "skills" / "use-nanobot"
+
+    for relative_path in (
+        "SKILL.md",
+        "references/capability-map.md",
+        "references/continuity.md",
+        "references/human-handoffs.md",
+    ):
+        content = (skill_dir / relative_path).read_text(encoding="utf-8")
+        assert re.search(r"[\u3400-\u9fff]", content) is None, relative_path
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:

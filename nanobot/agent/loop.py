@@ -540,6 +540,7 @@ class AgentLoop:
             bus=self.bus,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
+            local_trigger_store=self.local_trigger_store,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,

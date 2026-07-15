@@ -116,6 +116,10 @@ class CronTool(Tool):
     def description(self) -> str:
         return (
             "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            "Each run starts a model-backed agent turn from an instruction; this tool does not "
+            "run shell commands, perform zero-model polling, or create/deliver local triggers. "
+            "For cheap external detection, use a host runner or event source that invokes "
+            "local_trigger only when agent work is needed. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 

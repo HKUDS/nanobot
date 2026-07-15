@@ -68,8 +68,11 @@ report, use heartbeat instead of a user-created scheduled automation.
 Local triggers let a local script or external service send a message into a
 specific nanobot session later.
 
-Create the trigger from the chat or WebUI session where future messages should
-arrive:
+Ask nanobot to create the trigger from the chat or WebUI session where future
+messages should arrive. When the gateway trigger service is available, the
+agent can create the session binding and return the delivery command directly.
+
+You can also create one manually with the chat command:
 
 ```text
 /trigger PR review
@@ -100,6 +103,11 @@ nanobot does not provide a built-in public webhook receiver for local triggers.
 If GitHub, CI, or another external system should wake nanobot, run your own
 small webhook service and have it call `nanobot trigger` after it builds the
 final message.
+
+The agent can list, pause, resume, or remove triggers bound to the current
+conversation. The WebUI Automations view provides the same lifecycle controls
+across the workspace. Neither control surface starts or stops the external
+script or service that invokes the trigger; manage that component separately.
 
 ## Heartbeat
 
