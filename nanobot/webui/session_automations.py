@@ -34,7 +34,10 @@ class _LocalTriggerStoreLike(Protocol):
         include_disabled: bool = True,
     ) -> list[LocalTrigger]: ...
 
-    def pending_delivery_contents(self) -> dict[str, str]: ...
+    def pending_delivery_previews(
+        self,
+        trigger_ids: Collection[str] | None = None,
+    ) -> dict[str, str]: ...
 
 
 class _SessionManagerLike(Protocol):
@@ -74,16 +77,18 @@ def session_automations_payload(
     pending_job_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Return user-created automation jobs attached to a WebUI session."""
+    jobs = session_automation_jobs(
+        cron_service,
+        session_key,
+        local_trigger_store=local_trigger_store,
+    )
+    trigger_ids = [job.id for job in jobs if isinstance(job, LocalTrigger)]
     return {
         "jobs": serialize_automation_jobs(
-            session_automation_jobs(
-                cron_service,
-                session_key,
-                local_trigger_store=local_trigger_store,
-            ),
+            jobs,
             pending_job_ids=pending_job_ids,
             pending_trigger_messages=(
-                local_trigger_store.pending_delivery_contents()
+                local_trigger_store.pending_delivery_previews(trigger_ids)
                 if local_trigger_store is not None
                 else None
             ),
@@ -102,14 +107,18 @@ def all_automations_payload(
     jobs: list[AutomationJob] = []
     if cron_service is not None:
         jobs.extend(cron_service.list_jobs(include_disabled=True))
+    triggers: list[LocalTrigger] = []
     if local_trigger_store is not None:
-        jobs.extend(local_trigger_store.list_triggers(include_disabled=True))
+        triggers = local_trigger_store.list_triggers(include_disabled=True)
+        jobs.extend(triggers)
     return {
         "jobs": serialize_automation_jobs(
             jobs,
             pending_job_ids=pending_job_ids,
             pending_trigger_messages=(
-                local_trigger_store.pending_delivery_contents()
+                local_trigger_store.pending_delivery_previews(
+                    [trigger.id for trigger in triggers]
+                )
                 if local_trigger_store is not None
                 else None
             ),

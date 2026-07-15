@@ -109,8 +109,10 @@ conversation. The WebUI Automations view provides the same lifecycle controls
 across the workspace. Neither control surface starts or stops the external
 script or service that invokes the trigger; manage that component separately.
 
-While a delivery is queued or running, the WebUI shows the next message that
-will be delivered. The `"message"` text in the copied command remains only a
+While a delivery is queued or running, the WebUI shows a bounded preview of the
+next message that will be delivered. Previews include up to 4,000 characters;
+longer payloads end with a truncation marker while the full message remains in
+the delivery queue. The `"message"` text in the copied command remains only a
 placeholder to replace at invocation time. If several messages are waiting for
 one trigger, the in-flight message is shown first, followed by the oldest queued
 message after it completes.

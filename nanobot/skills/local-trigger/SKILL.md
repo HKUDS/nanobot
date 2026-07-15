@@ -22,7 +22,8 @@ Choose the primitive by what starts the work:
    `"message"` with the event payload; pipe stdin when content is generated or multiline.
 3. Keep event detection, validation, authentication, and retry policy in that external component.
 4. Send a test delivery and verify that the turn arrives in the same conversation. While a delivery
-   is queued or running, the WebUI shows the next payload rather than the command placeholder.
+   is queued or running, the WebUI shows a bounded preview of the next payload rather than the
+   command placeholder.
 
 The external command must use the same nanobot workspace or config as the gateway. A local trigger
 ID is not a public-webhook security boundary; do not expose a raw trigger command to untrusted
