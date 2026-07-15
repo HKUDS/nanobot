@@ -25,10 +25,10 @@ import {
   ChannelLogo,
   ChannelStatusBadge,
   channelDescription,
-  channelDisplayName,
   channelRequirements,
   channelSetup,
   channelStatusLabel,
+  localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import {
   ChannelProviderPresets,
@@ -66,12 +66,13 @@ export function ChannelCatalogRow({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const displayName = localizedChannelDisplayName(feature, t);
 
   return (
     <button
       type="button"
       aria-label={t("settings.channels.selectChannel", {
-        name: channelDisplayName(feature),
+        name: displayName,
         defaultValue: "View {{name}} settings",
       })}
       aria-pressed={selected}
@@ -86,7 +87,7 @@ export function ChannelCatalogRow({
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
-          {channelDisplayName(feature)}
+          {displayName}
         </h3>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">
           {channelDescription(feature, t)}
@@ -123,8 +124,9 @@ export function ChannelSetupPanel({
   onAction: (action: "enable" | "disable", name: string) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const displayName = localizedChannelDisplayName(feature, t);
   const [connectRequestId, setConnectRequestId] = useState(0);
   const uiContribution = channelUiContribution(feature.name, feature.webui);
   const PluginPanel = uiContribution?.Panel;
@@ -160,7 +162,7 @@ export function ChannelSetupPanel({
   const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
   const channelChecked = alwaysEnabled || feature.enabled;
   const channelBusy = enableBusy || disableBusy;
-  const setup = channelSetup(feature);
+  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
   const needsSetupBeforeEnable =
     !channelChecked
     && feature.configured === false
@@ -172,7 +174,7 @@ export function ChannelSetupPanel({
     || (!feature.install_supported && !feature.installed && !feature.enabled);
   const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
   const toggleAriaLabel = t("settings.channels.toggleChannel", {
-    name: channelDisplayName(feature),
+    name: displayName,
     defaultValue: "{{name}} channel",
   });
 
@@ -183,7 +185,7 @@ export function ChannelSetupPanel({
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
-              {channelDisplayName(feature)}
+              {displayName}
             </h3>
             <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
               {channelDescription(feature, t)}
@@ -286,14 +288,10 @@ function ChannelSetupSurface({
   const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
   const hasAdvanced = advancedFields.length > 0;
   const requirements = channelRequirements(feature, t);
-  const summary = t(`settings.channels.items.${feature.name}.setup.summary`, {
-    defaultValue:
-      setup.summary ??
-      tx(
-        "settings.channels.setupSummary",
-        "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
-      ),
-  });
+  const summary = setup.summary ?? tx(
+    "settings.channels.setupSummary",
+    "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
+  );
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
@@ -432,9 +430,7 @@ function ChannelSetupSurface({
           <ConnectFlow
             token={token}
             feature={feature}
-            idleLabel={t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
-              defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
-            })}
+            idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
             connectRequestId={connectRequestId}
             onFeaturesUpdate={onFeaturesUpdate}
           />
@@ -455,9 +451,7 @@ function ChannelSetupSurface({
                   )
                 }
               >
-                {t(`settings.channels.items.${feature.name}.setup.primaryAction`, {
-                  defaultValue: setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect"),
-                })}
+                {setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
               </Button>
               {setup.command ? (
                 <Button
@@ -482,7 +476,6 @@ function ChannelSetupSurface({
           <>
             {setup.presets?.length ? (
               <ChannelProviderPresets
-                featureName={feature.name}
                 presets={setup.presets}
                 onApply={applyPreset}
               />
@@ -537,7 +530,7 @@ function ChannelSetupSurface({
       ) : null}
 
       {setup.steps.length ? (
-        <ChannelSetupSteps featureName={feature.name} steps={setup.steps} tryIt={setup.tryIt} />
+        <ChannelSetupSteps steps={setup.steps} tryIt={setup.tryIt} />
       ) : null}
 
       {validation?.checks.length ? <ChannelValidationChecks validation={validation} /> : null}

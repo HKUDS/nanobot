@@ -1,0 +1,34 @@
+{
+  "description": "Use o nanobot em conversas do WeChat.",
+  "requirements": "Configuração do canal WeChat e gateway",
+  "setup": {
+    "primaryAction": "Conectar WeChat",
+    "docsLabel": "Abrir guia do WeChat",
+    "tryIt": "Após o login por QR, envie uma DM à conta conectada.",
+    "summary": "O WeChat entra por QR code e salva o estado da conta localmente.",
+    "steps": [
+      "Clique em Conectar e escaneie o QR com o WeChat.",
+      "Mantenha o gateway local ativo enquanto o WeChat recebe mensagens.",
+      "Envie uma mensagem direta de teste para confirmar a conexão."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Salvo pelo login via QR"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "QR code de login do WeChat",
+    "scanTitle": "Escaneie com o WeChat",
+    "scanDescription": "Escaneie com o WeChat no celular. O nanobot salva o estado localmente após o login.",
+    "waiting": "Aguardando leitura do WeChat...",
+    "connected": "WeChat está conectado.",
+    "stopped": "Login do WeChat interrompido.",
+    "connecting": "Conectando..."
+  }
+}

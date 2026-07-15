@@ -1,0 +1,39 @@
+{
+  "description": "Sử dụng nanobot trong kênh và tin nhắn riêng Mattermost.",
+  "requirements": "URL máy chủ Mattermost, token bot và quyền truy cập kênh",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Mattermost",
+    "officialLabel": "Mở hướng dẫn bot Mattermost",
+    "tryIt": "Nhắc bot trong kênh Mattermost hoặc gửi tin nhắn riêng.",
+    "summary": "Mattermost kết nối qua tài khoản bot trên máy chủ và nhận tin nhắn kênh cùng tin nhắn riêng.",
+    "steps": [
+      "Tạo tài khoản bot Mattermost và sao chép token truy cập.",
+      "Nhập URL máy chủ và cấp quyền vào nhóm cùng các kênh đích.",
+      "Lưu và bật Mattermost, sau đó nhắc bot hoặc gửi tin nhắn riêng."
+    ],
+    "fields": {
+      "serverUrl": {
+        "label": "URL máy chủ",
+        "placeholder": "https://mattermost.example.com",
+        "help": "Dùng URL gốc của không gian Mattermost."
+      },
+      "token": {
+        "label": "Token bot",
+        "placeholder": "Token bot Mattermost",
+        "help": "Tạo từ tài khoản bot Mattermost."
+      },
+      "teamId": {
+        "label": "ID nhóm",
+        "placeholder": "ID nhóm tùy chọn"
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      }
+    }
+  }
+}

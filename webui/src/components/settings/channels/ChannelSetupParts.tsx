@@ -88,9 +88,7 @@ export function ChannelGuideLink({
         )}
       </span>
       <span className="truncate">
-        {t(`settings.channels.items.${feature.name}.setup.docsLabel`, {
-          defaultValue: setup.docsLabel ?? tx("settings.channels.officialGuide", "Official guide"),
-        })}
+        {setup.docsLabel ?? tx("settings.channels.officialGuide", "Official guide")}
       </span>
       <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
     </a>
@@ -216,11 +214,9 @@ export function ChannelSetupActions({
 }
 
 export function ChannelProviderPresets({
-  featureName,
   presets,
   onApply,
 }: {
-  featureName: string;
   presets: ChannelProviderPreset[];
   onApply: (preset: ChannelProviderPreset) => void;
 }) {
@@ -230,15 +226,11 @@ export function ChannelProviderPresets({
   return (
     <div className="mt-3">
       <div className="mb-1 text-[11px] font-medium text-foreground/85">
-        {t(`settings.channels.items.${featureName}.providerPreset`, {
-          defaultValue: "Provider",
-        })}
+        {t("settings.channels.providerPreset", { defaultValue: "Provider" })}
       </div>
       <div
         role="radiogroup"
-        aria-label={t(`settings.channels.items.${featureName}.providerPreset`, {
-          defaultValue: "Provider",
-        })}
+        aria-label={t("settings.channels.providerPreset", { defaultValue: "Provider" })}
         className="grid rounded-[10px] bg-muted/75 p-0.5 text-[12px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)]"
         style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
       >
@@ -347,12 +339,10 @@ export function ChannelValidationChecks({ validation }: { validation: ChannelVal
 }
 
 export function ChannelSetupSteps({
-  featureName,
   steps,
   action,
   tryIt,
 }: {
-  featureName: string;
   steps: string[];
   action?: ReactNode;
   tryIt?: string;
@@ -373,11 +363,7 @@ export function ChannelSetupSteps({
             <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-background text-[10px] font-semibold text-muted-foreground shadow-sm">
               {index + 1}
             </span>
-            <span>
-              {t(`settings.channels.items.${featureName}.setup.steps.${index}`, {
-                defaultValue: step,
-              })}
-            </span>
+            <span>{step}</span>
           </li>
         ))}
       </ol>
@@ -387,7 +373,7 @@ export function ChannelSetupSteps({
             {tx("settings.channels.tryIt", "Try it")}
           </span>
           <span className="ml-2">
-            {t(`settings.channels.items.${featureName}.setup.tryIt`, { defaultValue: tryIt })}
+            {tryIt}
           </span>
         </div>
       ) : null}

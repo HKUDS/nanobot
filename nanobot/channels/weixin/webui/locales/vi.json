@@ -1,0 +1,34 @@
+{
+  "description": "Sử dụng nanobot từ các cuộc trò chuyện WeChat.",
+  "requirements": "Cài đặt kênh WeChat và gateway",
+  "setup": {
+    "primaryAction": "Kết nối WeChat",
+    "docsLabel": "Mở hướng dẫn WeChat",
+    "tryIt": "Sau khi đăng nhập QR, gửi tin nhắn riêng đến tài khoản đã kết nối.",
+    "summary": "WeChat đăng nhập bằng mã QR và lưu trạng thái tài khoản cục bộ.",
+    "steps": [
+      "Nhấn Kết nối và quét QR bằng WeChat.",
+      "Giữ gateway cục bộ chạy khi WeChat nhận tin nhắn.",
+      "Gửi tin nhắn riêng thử để xác nhận kết nối."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Được lưu khi đăng nhập QR"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Mã QR đăng nhập WeChat",
+    "scanTitle": "Quét bằng WeChat",
+    "scanDescription": "Quét bằng WeChat trên điện thoại. nanobot lưu trạng thái cục bộ sau khi đăng nhập.",
+    "waiting": "Đang chờ quét WeChat...",
+    "connected": "WeChat đã kết nối.",
+    "stopped": "Đăng nhập WeChat đã dừng.",
+    "connecting": "Đang kết nối..."
+  }
+}

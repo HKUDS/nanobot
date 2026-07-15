@@ -1,0 +1,39 @@
+{
+  "description": "Mattermost 채널과 DM에서 nanobot을 사용합니다.",
+  "requirements": "Mattermost 서버 URL, 봇 토큰 및 채널 접근 권한",
+  "setup": {
+    "docsLabel": "Mattermost 설정 가이드 열기",
+    "officialLabel": "Mattermost 봇 가이드 열기",
+    "tryIt": "Mattermost 채널에서 봇을 멘션하거나 DM을 보내세요.",
+    "summary": "Mattermost는 서버의 봇 계정으로 연결해 채널과 DM을 수신합니다.",
+    "steps": [
+      "Mattermost 봇 계정을 만들고 액세스 토큰을 복사하세요.",
+      "서버 URL을 입력하고 대상 팀과 채널 접근 권한을 부여하세요.",
+      "저장하고 Mattermost를 활성화한 다음 봇을 멘션하거나 DM을 보내세요."
+    ],
+    "fields": {
+      "serverUrl": {
+        "label": "서버 URL",
+        "placeholder": "https://mattermost.example.com",
+        "help": "Mattermost 워크스페이스 기본 URL을 사용하세요."
+      },
+      "token": {
+        "label": "봇 토큰",
+        "placeholder": "Mattermost 봇 토큰",
+        "help": "Mattermost 봇 계정에서 생성하세요."
+      },
+      "teamId": {
+        "label": "팀 ID",
+        "placeholder": "선택적 팀 ID"
+      },
+      "groupPolicy": {
+        "label": "그룹 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      }
+    }
+  }
+}

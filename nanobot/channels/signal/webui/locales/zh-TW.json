@@ -1,0 +1,38 @@
+{
+  "description": "透過 Signal 訊息使用 nanobot。",
+  "requirements": "signal-cli HTTP 服務、電話號碼和允許清單",
+  "setup": {
+    "docsLabel": "開啟 Signal 設定指南",
+    "officialLabel": "開啟 signal-cli 指南",
+    "tryIt": "向已關聯的電話號碼傳送一則 Signal 私訊。",
+    "summary": "Signal 透過已關聯 Signal 電話號碼的 signal-cli HTTP 服務連線。",
+    "steps": [
+      "安裝 signal-cli-rest-api，並關聯或註冊一個 Signal 號碼。",
+      "填入服務主機、連接埠和已關聯的電話號碼。",
+      "儲存並啟用 Signal，然後傳送一則私訊測試。"
+    ],
+    "fields": {
+      "phoneNumber": {
+        "label": "電話號碼",
+        "placeholder": "+1234567890",
+        "help": "使用在 signal-cli 中註冊的 Signal 號碼。"
+      },
+      "daemonHost": {
+        "label": "服務主機",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "服務連接埠",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "允許的私訊",
+        "placeholder": "電話號碼或 UUID"
+      },
+      "group_allowFrom": {
+        "label": "允許的群組",
+        "placeholder": "群組 ID"
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 
+import { channelTranslator } from "@/channel-plugins/i18n";
 import { ChannelQrConnectFlow } from "@/components/settings/channels/ChannelQrConnectFlow";
 import type { NanobotFeaturesPayload } from "@/lib/types";
 
@@ -19,7 +20,7 @@ export function FeishuConnectFlow({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const tx = channelTranslator(t, "feishu");
   return (
     <ChannelQrConnectFlow
       token={token}
@@ -29,18 +30,18 @@ export function FeishuConnectFlow({
       connectRequestId={connectRequestId}
       onFeaturesUpdate={onFeaturesUpdate}
       labels={{
-        qrAlt: tx("settings.channels.feishuQrAlt", "Feishu connection QR code"),
-        scanTitle: tx("settings.channels.feishuScanTitle", "Scan with Feishu"),
+        qrAlt: tx("custom.qrAlt", "Feishu connection QR code"),
+        scanTitle: tx("custom.scanTitle", "Scan with Feishu"),
         scanDescription: tx(
-          "settings.channels.feishuScanDescription",
+          "custom.scanDescription",
           "Use Feishu or Lark on your phone to scan this code. nanobot will finish setup automatically after authorization.",
         ),
-        waiting: tx("settings.channels.feishuWaiting", "Waiting for authorization..."),
-        connected: tx("settings.channels.feishuConnected", "Feishu is connected."),
-        stopped: tx("settings.channels.feishuConnectStopped", "Connection stopped."),
-        connecting: tx("settings.channels.feishuConnecting", "Connecting..."),
-        scanAgain: tx("settings.channels.scanAgain", "Scan again"),
-        connect: tx("settings.channels.connect", "Connect"),
+        waiting: tx("custom.waiting", "Waiting for authorization..."),
+        connected: tx("custom.connected", "Feishu is connected."),
+        stopped: tx("custom.stopped", "Connection stopped."),
+        connecting: tx("custom.connecting", "Connecting..."),
+        scanAgain: t("settings.channels.scanAgain", { defaultValue: "Scan again" }),
+        connect: t("settings.channels.connect", { defaultValue: "Connect" }),
       }}
     />
   );

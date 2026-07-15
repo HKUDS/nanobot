@@ -67,9 +67,9 @@ import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettin
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
-  channelDisplayName,
   channelMatchesFilter,
   channelSearchText,
+  localizedChannelDisplayName,
   type ChannelFilter,
 } from "@/components/settings/channels/ChannelIdentity";
 import {
@@ -5363,10 +5363,12 @@ function ChannelsSettings({
   const allChannels = (nanobotFeatures?.features ?? [])
     .filter((feature) => feature.type === "channel")
     .filter((feature) => feature.settings_visible !== false)
-    .filter((feature) => !normalizedQuery || channelSearchText(feature).includes(normalizedQuery))
+    .filter((feature) => !normalizedQuery || channelSearchText(feature, t).includes(normalizedQuery))
     .sort((left, right) => {
       const rank = Number(!left.ready) - Number(!right.ready);
-      return rank || channelDisplayName(left).localeCompare(channelDisplayName(right));
+      return rank || localizedChannelDisplayName(left, t).localeCompare(
+        localizedChannelDisplayName(right, t),
+      );
     });
   const channels = allChannels.filter((feature) => channelMatchesFilter(feature, filter));
   const [selectedChannelName, setSelectedChannelName] = useState<string | null>(null);

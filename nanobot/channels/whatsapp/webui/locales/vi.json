@@ -1,0 +1,29 @@
+{
+  "description": "Sử dụng nanobot từ các cuộc trò chuyện WhatsApp.",
+  "requirements": "Cài đặt kết nối WhatsApp và gateway",
+  "setup": {
+    "primaryAction": "Kết nối WhatsApp",
+    "docsLabel": "Mở hướng dẫn WhatsApp",
+    "tryIt": "Sau khi đăng nhập terminal, gửi tin nhắn riêng đến tài khoản đã kết nối.",
+    "summary": "WhatsApp kết nối bằng cách quét mã QR từ tài khoản sẽ chạy bot.",
+    "steps": [
+      "Chạy lệnh đăng nhập WhatsApp hiển thị bên dưới.",
+      "Quét mã QR trong terminal bằng WhatsApp trên điện thoại.",
+      "Sau khi đăng nhập, quay lại đây, bật WhatsApp và gửi tin nhắn riêng thử."
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "Liên hệ được phép",
+        "placeholder": "Số điện thoại hoặc ID WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      }
+    }
+  }
+}

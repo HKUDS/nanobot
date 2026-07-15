@@ -1,0 +1,38 @@
+{
+  "description": "透過 NapCat 閘道連接 nanobot。",
+  "requirements": "NapCat WebSocket 網址和可選存取權杖",
+  "setup": {
+    "docsLabel": "開啟 NapCat 設定指南",
+    "officialLabel": "開啟 NapCat 文件",
+    "tryIt": "透過 NapCat 傳送一則 QQ 測試訊息。",
+    "summary": "NapCat 透過本機或遠端 OneBot WebSocket 網址將 nanobot 連接到 QQ。",
+    "steps": [
+      "啟動 NapCat 並啟用正向 WebSocket 服務。",
+      "將 WebSocket 網址和可選存取權杖複製到 nanobot。",
+      "儲存並啟用 NapCat，然後傳送一則 QQ 測試訊息。"
+    ],
+    "fields": {
+      "wsUrl": {
+        "label": "WebSocket 網址",
+        "placeholder": "ws://127.0.0.1:3001",
+        "help": "使用 NapCat 的正向 WebSocket 網址。"
+      },
+      "accessToken": {
+        "label": "存取權杖",
+        "placeholder": "可選權杖"
+      },
+      "groupPolicy": {
+        "label": "群組行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "QQ ID，以逗號分隔"
+      }
+    }
+  }
+}

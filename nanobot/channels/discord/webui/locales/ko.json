@@ -1,0 +1,35 @@
+{
+  "description": "Discord 서버와 DM에서 nanobot을 사용합니다.",
+  "requirements": "Discord 봇 토큰, 권한 및 게이트웨이",
+  "setup": {
+    "docsLabel": "Discord 설정 가이드 열기",
+    "officialLabel": "Discord 포털 열기",
+    "tryIt": "서버에서 봇을 멘션하거나 DM을 보내세요.",
+    "summary": "활성화하면 Discord 지원이 켜집니다. 봇 토큰과 서버 권한이 필요합니다.",
+    "steps": [
+      "Discord Developer Portal에서 봇을 만들고 토큰을 복사하세요.",
+      "메시지 읽기/보내기 및 슬래시 명령 권한으로 서버에 초대하세요.",
+      "저장하고 Discord를 활성화한 다음 봇을 멘션하거나 DM을 보내세요."
+    ],
+    "fields": {
+      "token": {
+        "label": "봇 토큰",
+        "placeholder": "Discord 봇 토큰",
+        "help": "Discord Developer Portal의 Bot 페이지에서 생성하세요."
+      },
+      "allowChannels": {
+        "label": "허용된 채널",
+        "placeholder": "채널 ID, 쉼표로 구분",
+        "help": "비워 두면 봇이 읽을 수 있는 모든 채널을 허용합니다."
+      },
+      "groupPolicy": {
+        "label": "그룹 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "Gunakan nanobot dari ruang kerja browser lokal.",
+  "requirements": "Gateway lokal dan token WebSocket",
+  "setup": {
+    "docsLabel": "Buka panduan WebSocket",
+    "officialLabel": "Buka WebUI lokal",
+    "tryIt": "Buka WebUI dan kirim pesan singkat.",
+    "summary": "Ruang kerja browser memerlukan WebSocket yang disiapkan oleh perintah nanobot webui.",
+    "steps": [
+      "Mulai nanobot dengan perintah webui.",
+      "Buka URL lokal yang ditampilkan di terminal.",
+      "Biarkan WebSocket aktif saat menggunakan ruang kerja browser."
+    ]
+  }
+}

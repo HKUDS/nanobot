@@ -1,0 +1,35 @@
+{
+  "description": "在 Discord 伺服器和私訊中使用 nanobot。",
+  "requirements": "Discord 機器人權杖、權限和閘道",
+  "setup": {
+    "docsLabel": "開啟 Discord 設定指南",
+    "officialLabel": "開啟 Discord 開發者後台",
+    "tryIt": "在伺服器中提及機器人，或向它傳送私訊。",
+    "summary": "啟用只會開啟 Discord 支援；還需要機器人權杖和伺服器權限。",
+    "steps": [
+      "在 Discord Developer Portal 中建立機器人並複製權杖。",
+      "將機器人邀請到伺服器，並授予讀取/傳送訊息及斜線指令權限。",
+      "儲存並啟用 Discord，然後提及機器人或傳送私訊。"
+    ],
+    "fields": {
+      "token": {
+        "label": "機器人權杖",
+        "placeholder": "Discord 機器人權杖",
+        "help": "從 Discord Developer Portal 的 Bot 頁面建立。"
+      },
+      "allowChannels": {
+        "label": "允許的頻道",
+        "placeholder": "頻道 ID，以逗號分隔",
+        "help": "留空則允許機器人可讀取的所有頻道。"
+      },
+      "groupPolicy": {
+        "label": "群組行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      }
+    }
+  }
+}

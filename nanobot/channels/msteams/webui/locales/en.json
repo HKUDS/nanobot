@@ -1,0 +1,39 @@
+{
+  "description": "Use nanobot from Microsoft Teams chats.",
+  "requirements": "Azure bot app credentials, public callback endpoint",
+  "setup": {
+    "docsLabel": "Open Teams setup",
+    "officialLabel": "Open Teams developer portal",
+    "tryIt": "Install the Teams app and send a test message.",
+    "summary": "Teams receives messages through the Bot Framework callback URL. It needs a reachable HTTPS endpoint in production.",
+    "steps": [
+      "Create an Azure Bot or Teams app and copy its App ID and client secret.",
+      "Expose the callback path over HTTPS and add it as the bot messaging endpoint.",
+      "Save and enable Teams, then install the app and send a test message."
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID",
+        "help": "Copy it from the Azure Bot or Teams app registration."
+      },
+      "appPassword": {
+        "label": "Client secret",
+        "placeholder": "••••••",
+        "help": "Create a client secret for the Microsoft app."
+      },
+      "tenantId": {
+        "label": "Tenant ID",
+        "placeholder": "Optional tenant ID"
+      },
+      "path": {
+        "label": "Callback path",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "Teams user IDs, comma separated"
+      }
+    }
+  }
+}

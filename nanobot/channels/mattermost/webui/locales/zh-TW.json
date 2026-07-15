@@ -1,0 +1,39 @@
+{
+  "description": "在 Mattermost 頻道和私訊中使用 nanobot。",
+  "requirements": "Mattermost 伺服器網址、機器人權杖和頻道權限",
+  "setup": {
+    "docsLabel": "開啟 Mattermost 設定指南",
+    "officialLabel": "開啟 Mattermost 機器人指南",
+    "tryIt": "在 Mattermost 頻道中提及機器人，或向它傳送私訊。",
+    "summary": "Mattermost 透過伺服器中的機器人帳戶連線，並監聽頻道和私訊。",
+    "steps": [
+      "建立 Mattermost 機器人帳戶並複製存取權杖。",
+      "填入伺服器網址，並授予機器人存取目標團隊和頻道的權限。",
+      "儲存並啟用 Mattermost，然後提及機器人或傳送私訊。"
+    ],
+    "fields": {
+      "serverUrl": {
+        "label": "伺服器網址",
+        "placeholder": "https://mattermost.example.com",
+        "help": "填入 Mattermost 工作區的基礎網址。"
+      },
+      "token": {
+        "label": "機器人權杖",
+        "placeholder": "Mattermost 機器人權杖",
+        "help": "從 Mattermost 機器人帳戶建立。"
+      },
+      "teamId": {
+        "label": "團隊 ID",
+        "placeholder": "可選的團隊 ID"
+      },
+      "groupPolicy": {
+        "label": "群組行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      }
+    }
+  }
+}

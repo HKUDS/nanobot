@@ -136,6 +136,48 @@ const LOCALIZED_WORKSPACE_COPY_KEYS = [
   "workspace.dialog.usePath",
   "workspace.dialog.absolutePathRequired",
 ];
+const LOCALIZED_CHANNEL_SHELL_KEYS = [
+  "settings.channels.advanced",
+  "settings.channels.checkAndEnable",
+  "settings.channels.checkConnection",
+  "settings.channels.checkedAndEnabled",
+  "settings.channels.checking",
+  "settings.channels.checkOnly",
+  "settings.channels.commandCopied",
+  "settings.channels.commandCopyFailed",
+  "settings.channels.configuredInstances",
+  "settings.channels.connectPreview",
+  "settings.channels.copyCommand",
+  "settings.channels.filterAll",
+  "settings.channels.filterOff",
+  "settings.channels.filterOn",
+  "settings.channels.helperCopied",
+  "settings.channels.helperCopyFailed",
+  "settings.channels.hideSecret",
+  "settings.channels.instanceConfigured",
+  "settings.channels.instanceNeedsSetup",
+  "settings.channels.managedByWebui",
+  "settings.channels.officialGuide",
+  "settings.channels.optional",
+  "settings.channels.providerPreset",
+  "settings.channels.requiredSetup",
+  "settings.channels.savedSecret",
+  "settings.channels.savedSecretPlaceholder",
+  "settings.channels.savedSettings",
+  "settings.channels.saveSettings",
+  "settings.channels.selectChannel",
+  "settings.channels.setupSteps",
+  "settings.channels.showSecret",
+  "settings.channels.toggleChannel",
+  "settings.channels.toggleInstance",
+  "settings.channels.tryIt",
+  "settings.channels.validation.connected",
+  "settings.channels.validation.configured",
+  "settings.channels.validation.invalid",
+  "settings.channels.validation.needs_setup",
+  "settings.channels.validation.unsupported",
+  "settings.channels.validationFailed",
+];
 const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
 const PREBOOT_SCRIPT = INDEX_HTML.match(
   /<script>\s*(\(function \(\) \{\s*var localeKey = "nanobot\.locale";[\s\S]*?\}\)\(\);)\s*<\/script>/,
@@ -375,7 +417,11 @@ describe("webui i18n", () => {
     for (const [locale, resource] of Object.entries(resources)) {
       if (locale === "en") continue;
       const current = flattenResource(resource.common);
-      const leaked = [...LOCALIZED_SETTINGS_COPY_KEYS, ...LOCALIZED_WORKSPACE_COPY_KEYS].filter(
+      const leaked = [
+        ...LOCALIZED_SETTINGS_COPY_KEYS,
+        ...LOCALIZED_WORKSPACE_COPY_KEYS,
+        ...LOCALIZED_CHANNEL_SHELL_KEYS,
+      ].filter(
         (key) => current.get(key) === english.get(key),
       );
 

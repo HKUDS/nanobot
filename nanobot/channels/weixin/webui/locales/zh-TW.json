@@ -1,0 +1,35 @@
+{
+  "displayName": "微信",
+  "description": "在微信對話中使用 nanobot。",
+  "requirements": "微信渠道設定和閘道",
+  "setup": {
+    "primaryAction": "連接微信",
+    "docsLabel": "開啟微信設定指南",
+    "tryIt": "二維碼登入完成後，向已連接的帳戶傳送一則微信私訊。",
+    "summary": "微信透過二維碼登入，並將帳戶狀態儲存在本機。",
+    "steps": [
+      "點擊連接，用手機微信掃描二維碼。",
+      "微信接收訊息期間請保持本機閘道執行。",
+      "傳送一則私訊測試，確認帳戶已連接。"
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "使用者 ID，以逗號分隔"
+      },
+      "token": {
+        "label": "權杖",
+        "placeholder": "二維碼登入後自動儲存"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "微信登入二維碼",
+    "scanTitle": "使用微信掃碼",
+    "scanDescription": "用手機微信掃描此二維碼。登入後，nanobot 會將帳戶狀態儲存在本機。",
+    "waiting": "正在等待微信掃碼...",
+    "connected": "微信已連接。",
+    "stopped": "微信登入已停止。",
+    "connecting": "正在連接..."
+  }
+}

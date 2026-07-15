@@ -1,0 +1,66 @@
+{
+  "description": "Sử dụng nanobot trong cuộc trò chuyện và nhóm Feishu.",
+  "requirements": "Thông tin xác thực Feishu, đăng ký sự kiện và gateway",
+  "setup": {
+    "primaryAction": "Kết nối Feishu",
+    "docsLabel": "Mở hướng dẫn Feishu",
+    "officialLabel": "Mở bảng điều khiển Feishu",
+    "tryIt": "Gửi tin nhắn riêng hoặc nhắc trợ lý trong nhóm.",
+    "summary": "Kết nối tạo hoặc liên kết ứng dụng Feishu bằng QR và lưu thông tin xác thực.",
+    "steps": [
+      "Nhấn Kết nối và quét QR bằng Feishu hoặc Lark.",
+      "Phê duyệt kết nối. nanobot tự lưu App ID và Secret.",
+      "Gửi tin nhắn riêng cho bot hoặc nhắc bot trong nhóm Feishu."
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "Để trống để giữ secret hiện tại",
+        "help": "Chỉ dán secret mới khi xoay vòng thông tin xác thực."
+      },
+      "domain": {
+        "label": "Khu vực",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "Trợ lý {{name}}",
+    "configured": "Đã kết nối",
+    "needsSetup": "Cần cấp quyền",
+    "noAppId": "Không có App ID",
+    "createAnother": "Tạo trợ lý khác",
+    "createHint": "Tạo bot Feishu riêng cho nhóm hoặc quy trình khác.",
+    "createAssistant": "Tạo trợ lý",
+    "reconnect": "Kết nối lại",
+    "countNone": "Chưa kết nối trợ lý",
+    "countOne": "Đã kết nối 1 trợ lý",
+    "countMany": "Đã kết nối {{count}} trợ lý",
+    "qrAlt": "Mã QR kết nối Feishu",
+    "scanTitle": "Quét bằng Feishu",
+    "scanDescription": "Quét bằng Feishu hoặc Lark trên điện thoại. nanobot sẽ hoàn tất cấu hình sau khi cấp quyền.",
+    "waiting": "Đang chờ cấp quyền...",
+    "connected": "Feishu đã kết nối.",
+    "stopped": "Kết nối đã dừng.",
+    "connecting": "Đang kết nối..."
+  }
+}

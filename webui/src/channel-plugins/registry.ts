@@ -17,6 +17,7 @@ const modules = import.meta.glob<ChannelUiContributionModule>(
 const registrations = new Map<string, RegisteredChannelUiContribution>();
 const registrationsByChannel = new Map<string, RegisteredChannelUiContribution>();
 const presentationsByChannel = new Map<string, ChannelUiContribution["presentation"]>();
+const translationOwners = new Map<string, string>();
 
 for (const [modulePath, module] of Object.entries(modules)) {
   const contribution = module.default;
@@ -33,6 +34,7 @@ for (const [modulePath, module] of Object.entries(modules)) {
   registrations.set(registrationKey(channel, webui), registration);
   registrationsByChannel.set(channel, registration);
   presentationsByChannel.set(channel, contribution.presentation);
+  translationOwners.set(channel, channel);
   for (const [alias, aliasPresentation] of Object.entries(contribution.aliases ?? {})) {
     if (presentationsByChannel.has(alias)) {
       throw new Error(`Channel UI alias '${alias}' is registered more than once`);
@@ -41,6 +43,7 @@ for (const [modulePath, module] of Object.entries(modules)) {
       ...contribution.presentation,
       ...aliasPresentation,
     });
+    translationOwners.set(alias, channel);
   }
 }
 
@@ -54,6 +57,10 @@ export function channelUiContribution(
 
 export function registeredChannelUiContributions(): readonly RegisteredChannelUiContribution[] {
   return [...registrations.values()];
+}
+
+export function channelUiOwner(channel: string): string {
+  return translationOwners.get(channel) ?? channel;
 }
 
 export function channelUiPresentation(

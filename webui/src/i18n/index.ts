@@ -2,6 +2,11 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
 import {
+  channelLocaleNamespaces,
+  channelLocaleResources,
+} from "@/channel-plugins/locale-registry";
+
+import {
   applyDocumentLocale,
   defaultLocale,
   fallbackLocale,
@@ -24,16 +29,16 @@ import viCommon from "./locales/vi/common.json";
 import idCommon from "./locales/id/common.json";
 
 export const resources = {
-  en: { common: enCommon },
-  "zh-CN": { common: zhCNCommon },
-  "zh-TW": { common: zhTWCommon },
-  fr: { common: frCommon },
-  ja: { common: jaCommon },
-  ko: { common: koCommon },
-  es: { common: esCommon },
-  "pt-BR": { common: ptBRCommon },
-  vi: { common: viCommon },
-  id: { common: idCommon },
+  en: { common: enCommon, ...channelLocaleResources("en") },
+  "zh-CN": { common: zhCNCommon, ...channelLocaleResources("zh-CN") },
+  "zh-TW": { common: zhTWCommon, ...channelLocaleResources("zh-TW") },
+  fr: { common: frCommon, ...channelLocaleResources("fr") },
+  ja: { common: jaCommon, ...channelLocaleResources("ja") },
+  ko: { common: koCommon, ...channelLocaleResources("ko") },
+  es: { common: esCommon, ...channelLocaleResources("es") },
+  "pt-BR": { common: ptBRCommon, ...channelLocaleResources("pt-BR") },
+  vi: { common: viCommon, ...channelLocaleResources("vi") },
+  id: { common: idCommon, ...channelLocaleResources("id") },
 } as const;
 
 export function currentLocale(): SupportedLocale {
@@ -52,7 +57,7 @@ if (!i18n.isInitialized) {
       lng: resolveInitialLocale(),
       fallbackLng: fallbackLocale,
       defaultNS: "common",
-      ns: ["common"],
+      ns: ["common", ...channelLocaleNamespaces()],
       interpolation: {
         escapeValue: false,
       },

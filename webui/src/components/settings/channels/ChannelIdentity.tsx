@@ -1,40 +1,88 @@
 import { useMemo, type ReactNode } from "react";
 import type { useTranslation } from "react-i18next";
 
-import { channelUiPresentation } from "@/channel-plugins/registry";
+import {
+  channelFieldMessageKey,
+  channelTranslator,
+} from "@/channel-plugins/i18n";
+import { channelLocaleMessages } from "@/channel-plugins/locale-registry";
+import {
+  channelUiOwner,
+  channelUiPresentation,
+} from "@/channel-plugins/registry";
 import type {
   ChannelConfigField,
   ChannelSetupPresentation,
 } from "@/components/settings/channels/catalog";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { normalizeLocale } from "@/i18n/config";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { NanobotFeatureInfo } from "@/lib/types";
 
 export type ChannelFilter = "all" | "on" | "off";
 
-export function channelSetup(feature: NanobotFeatureInfo): ChannelSetupPresentation {
-  const presentation = channelUiPresentation(feature.name, feature.webui)?.setup ?? {
+export function channelSetup(
+  feature: NanobotFeatureInfo,
+  locale = "en",
+): ChannelSetupPresentation {
+  const definition = channelUiPresentation(feature.name, feature.webui)?.setup;
+  const owner = channelUiOwner(feature.name);
+  const messages = channelLocaleMessages(owner, normalizeLocale(locale));
+  const setupMessages = messages?.setup;
+  const localizeField = (key: string): ChannelConfigField => {
+    const copy = setupMessages?.fields?.[channelFieldMessageKey(feature.name, key)];
+    return {
+      key,
+      label: copy?.label ?? fieldLabel(key.split(".").at(-1) ?? key),
+      placeholder: copy?.placeholder,
+      help: copy?.help,
+    };
+  };
+  const presentation: ChannelSetupPresentation = {
+    ...definition,
+    primaryActionLabel: setupMessages?.primaryAction,
+    docsLabel: setupMessages?.docsLabel,
+    officialLabel: setupMessages?.officialLabel,
     summary:
-      "Enable turns on this channel in nanobot, but this integration still needs platform-specific setup before it can receive messages.",
-    steps: [
+      setupMessages?.summary
+      ?? "Enable turns on this channel in nanobot, but this integration still needs platform-specific setup before it can receive messages.",
+    tryIt: setupMessages?.tryIt,
+    steps: setupMessages?.steps ?? [
       `Open ~/.nanobot/config.json and find channels.${feature.name}.`,
       "Add the credentials required by that platform, using the channel documentation as the source of truth.",
       "Restart nanobot, then send a small test message from that platform.",
     ],
+    fields: definition?.fields?.map((field) => localizeField(field.key)),
+    manualFields: definition?.manualFields?.map((field) => localizeField(field.key)),
+    actions: definition?.actions?.map((action) => ({
+      ...action,
+      label: setupMessages?.actions?.[action.id] ?? fieldLabel(action.id),
+    })),
+    presets: definition?.presets?.map((preset) => ({
+      ...preset,
+      label: setupMessages?.presets?.[preset.id] ?? fieldLabel(preset.id),
+    })),
   };
   const contract = feature.setup;
   if (!contract) return presentation;
 
-  const primaryFields = new Map((presentation.fields ?? []).map((field) => [field.key, field]));
-  const manualFields = new Map((presentation.manualFields ?? []).map((field) => [field.key, field]));
+  const primaryFields = new Map(
+    (presentation.fields ?? []).map((field) => [field.key, field]),
+  );
+  const manualFields = new Map(
+    (presentation.manualFields ?? []).map((field) => [field.key, field]),
+  );
   const authoritativeFields = contract.fields.map((field): ChannelConfigField => {
     const local = primaryFields.get(field.key) ?? manualFields.get(field.key);
-    const { choiceLabels = {}, ...copy } = local ?? {};
+    const copy = local ?? localizeField(field.key);
+    const choiceLabels = setupMessages?.fields?.[
+      channelFieldMessageKey(feature.name, field.key)
+    ]?.choices ?? {};
     const choices = field.kind === "bool" ? ["true", "false"] : field.choices;
     return {
       ...copy,
       key: field.key,
-      label: local?.label ?? fieldLabel(field.field),
+      label: copy.label,
       secret: field.kind === "secret",
       optional: !field.required,
       inputType: field.kind === "int" ? "number" : undefined,
@@ -131,18 +179,24 @@ export function channelDisplayName(feature: NanobotFeatureInfo): string {
   return channelUiPresentation(feature.name, feature.webui)?.displayName ?? feature.display_name;
 }
 
+export function localizedChannelDisplayName(
+  feature: NanobotFeatureInfo,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  const fallback = channelDisplayName(feature);
+  return channelTranslator(t, channelUiOwner(feature.name))("displayName", fallback);
+}
+
 export function channelDescription(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
   const fallback =
-    channelUiPresentation(feature.name, feature.webui)?.description ??
     `Use nanobot from ${channelDisplayName(feature)}.`;
-  return t(`settings.channels.items.${feature.name}.description`, { defaultValue: fallback });
+  return channelTranslator(t, channelUiOwner(feature.name))("description", fallback);
 }
 
 export function channelRequirements(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
   const fallback =
-    channelUiPresentation(feature.name, feature.webui)?.requirements ??
     "Channel credentials and gateway settings";
-  return t(`settings.channels.items.${feature.name}.requirements`, { defaultValue: fallback });
+  return channelTranslator(t, channelUiOwner(feature.name))("requirements", fallback);
 }
 
 export function channelMatchesFilter(feature: NanobotFeatureInfo, filter: ChannelFilter): boolean {
@@ -159,14 +213,18 @@ export function channelStatusLabel(
   return tx("settings.values.off", "Off");
 }
 
-export function channelSearchText(feature: NanobotFeatureInfo): string {
+export function channelSearchText(
+  feature: NanobotFeatureInfo,
+  t?: ReturnType<typeof useTranslation>["t"],
+): string {
   return [
+    t ? localizedChannelDisplayName(feature, t) : undefined,
     channelDisplayName(feature),
     feature.display_name,
     feature.name,
     feature.status,
-    channelUiPresentation(feature.name, feature.webui)?.description,
-    channelUiPresentation(feature.name, feature.webui)?.requirements,
+    t ? channelDescription(feature, t) : undefined,
+    t ? channelRequirements(feature, t) : undefined,
   ]
     .join(" ")
     .toLowerCase();

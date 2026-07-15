@@ -2,6 +2,10 @@ import { useState } from "react";
 import { Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import {
+  channelTranslator,
+  type ChannelTranslator,
+} from "@/channel-plugins/i18n";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
 import { Button } from "@/components/ui/button";
@@ -22,7 +26,7 @@ export function FeishuAssistantsPanel({
   onFeaturesUpdate,
 }: ChannelPluginPanelProps) {
   const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const tx = channelTranslator(t, "feishu");
   const instances = feature.instances?.length
     ? feature.instances
     : [defaultFeishuInstance(feature)];
@@ -37,15 +41,14 @@ export function FeishuAssistantsPanel({
       onFeaturesUpdate={onFeaturesUpdate}
       customization={{
         countLabel: (count) => feishuAssistantCountLabel(count, tx),
-        toggleAriaLabel: (instance) => t("settings.channels.toggleFeishuAssistant", {
+        toggleAriaLabel: (instance) => tx("custom.toggleAssistant", "{{name}} assistant", {
           name: instanceDisplayName(instance),
-          defaultValue: "{{name}} assistant",
         }),
-        configuredLabel: tx("settings.channels.feishuConfigured", "Connected"),
-        needsSetupLabel: tx("settings.channels.feishuNotConfigured", "Needs authorization"),
+        configuredLabel: tx("custom.configured", "Connected"),
+        needsSetupLabel: tx("custom.needsSetup", "Needs authorization"),
         renderInstanceSummary: (instance) => (
           maskFeishuAppId(instance.config_values?.["channels.feishu.appId"])
-          || tx("settings.channels.noAppId", "No App ID")
+          || tx("custom.noAppId", "No App ID")
         ),
         renderInstanceAction: (instance) => (
           <FeishuInstanceAction
@@ -58,11 +61,11 @@ export function FeishuAssistantsPanel({
         footer: (
           <div className="mt-4 overflow-hidden rounded-[16px] border border-border/70 bg-background px-4 py-4">
             <div className="text-[13px] font-semibold text-foreground">
-              {tx("settings.channels.createFeishuAssistant", "Create another assistant")}
+              {tx("custom.createAnother", "Create another assistant")}
             </div>
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
               {tx(
-                "settings.channels.createFeishuAssistantHint",
+                "custom.createHint",
                 "Create a separate Feishu bot for another team, space, or workflow.",
               )}
             </p>
@@ -70,7 +73,7 @@ export function FeishuAssistantsPanel({
               token={token}
               instanceId="default"
               mode="create"
-              idleLabel={tx("settings.channels.createAssistant", "Create assistant")}
+              idleLabel={tx("custom.createAssistant", "Create assistant")}
               onFeaturesUpdate={onFeaturesUpdate}
             />
           </div>
@@ -90,6 +93,7 @@ function FeishuInstanceAction({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const { t } = useTranslation();
+  const tx = channelTranslator(t, "feishu");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -135,7 +139,7 @@ function FeishuInstanceAction({
           ) : (
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
           )}
-          {t("settings.channels.reconnectAssistant", { defaultValue: "Reconnect" })}
+          {tx("custom.reconnect", "Reconnect")}
         </Button>
       </div>
       {error ? (
@@ -160,11 +164,11 @@ function defaultFeishuInstance(feature: NanobotFeatureInfo): NanobotChannelInsta
 
 function feishuAssistantCountLabel(
   count: number,
-  tx: (key: string, fallback: string) => string,
+  tx: ChannelTranslator,
 ): string {
-  if (count === 0) return tx("settings.channels.noFeishuAssistants", "No assistant connected");
-  if (count === 1) return tx("settings.channels.oneFeishuAssistant", "1 assistant connected");
-  return tx("settings.channels.manyFeishuAssistants", `${count} assistants connected`);
+  if (count === 0) return tx("custom.countNone", "No assistant connected");
+  if (count === 1) return tx("custom.countOne", "1 assistant connected");
+  return tx("custom.countMany", "{{count}} assistants connected", { count });
 }
 
 function instanceDisplayName(instance: NanobotChannelInstanceInfo): string {

@@ -2,8 +2,6 @@ import type { LucideIcon } from "lucide-react";
 
 export type ChannelPresentation = {
   displayName: string;
-  description: string;
-  requirements: string;
   initials: string;
   color: string;
   icon?: LucideIcon;
@@ -29,21 +27,24 @@ export type ChannelSetupPresentation = {
   presets?: ChannelProviderPreset[];
 };
 
-type ChannelCatalogSetupPresentation = Omit<
-  ChannelSetupPresentation,
-  "officialUrl" | "fields" | "manualFields"
-> & {
+export type ChannelCatalogSetupPresentation = {
+  mode?: "webui" | "credentials" | "connect";
+  command?: string;
+  docsUrl?: string;
+  docsLogoUrl?: string;
   fields?: ChannelFieldPresentation[];
   manualFields?: ChannelFieldPresentation[];
+  actions?: ChannelSetupActionDefinition[];
+  presets?: ChannelProviderPresetDefinition[];
 };
 
 export type ChannelFieldPresentation = {
   key: string;
-  label: string;
-  placeholder?: string;
-  help?: string;
-  choiceLabels?: Record<string, string>;
 };
+
+export type ChannelSetupActionDefinition = Omit<ChannelSetupAction, "label">;
+
+export type ChannelProviderPresetDefinition = Omit<ChannelProviderPreset, "label">;
 
 export type ChannelSetupAction = {
   id: string;
@@ -74,17 +75,6 @@ export type ChannelConfigField = {
 export type ChannelConfigOption = {
   value: string;
   label: string;
-};
-
-export const GROUP_BEHAVIOR_LABELS = {
-  mention: "Mention only",
-  open: "All messages",
-  allowlist: "Allowlist",
-};
-
-export const BOOLEAN_LABELS = {
-  true: "On",
-  false: "Off",
 };
 
 const NANOBOT_DOCS_URL = "https://nanobot.wiki/docs/latest";

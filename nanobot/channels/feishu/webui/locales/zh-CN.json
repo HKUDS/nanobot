@@ -1,0 +1,67 @@
+{
+  "displayName": "飞书",
+  "description": "在飞书会话和群组中使用 nanobot。",
+  "requirements": "飞书应用凭据、事件订阅和网关",
+  "setup": {
+    "primaryAction": "连接飞书",
+    "docsLabel": "打开飞书配置指南",
+    "officialLabel": "打开飞书开发者后台",
+    "tryIt": "向飞书助手发送私信，或在群组中提及它。",
+    "summary": "连接流程会通过二维码创建或关联飞书应用，并自动为 nanobot 保存应用凭据。",
+    "steps": [
+      "点击连接，用手机飞书或 Lark 扫描二维码。",
+      "批准应用连接，nanobot 会自动保存 App ID 和 Secret。",
+      "向机器人发送私信，或在飞书群中提及它以完成测试。"
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "留空以保留现有密钥",
+        "help": "仅在轮换凭据时粘贴新的 App Secret。"
+      },
+      "domain": {
+        "label": "区域",
+        "choices": {
+          "feishu": "飞书",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "{{name}} 助手",
+    "configured": "已连接",
+    "needsSetup": "需要授权",
+    "noAppId": "没有 App ID",
+    "createAnother": "创建另一个助手",
+    "createHint": "为其他团队、空间或工作流创建独立的飞书机器人。",
+    "createAssistant": "创建助手",
+    "reconnect": "重新连接",
+    "countNone": "尚未连接助手",
+    "countOne": "已连接 1 个助手",
+    "countMany": "已连接 {{count}} 个助手",
+    "qrAlt": "飞书连接二维码",
+    "scanTitle": "使用飞书扫码",
+    "scanDescription": "用手机上的飞书或 Lark 扫描二维码。授权完成后，nanobot 会自动完成配置。",
+    "waiting": "正在等待授权...",
+    "connected": "飞书已连接。",
+    "stopped": "连接已停止。",
+    "connecting": "正在连接..."
+  }
+}

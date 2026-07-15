@@ -1,0 +1,35 @@
+{
+  "displayName": "微信",
+  "description": "在微信会话中使用 nanobot。",
+  "requirements": "微信渠道配置和网关",
+  "setup": {
+    "primaryAction": "连接微信",
+    "docsLabel": "打开微信配置指南",
+    "tryIt": "二维码登录完成后，向已连接的账户发送一条微信私信。",
+    "summary": "微信通过二维码登录，并将账户状态保存在本地。",
+    "steps": [
+      "点击连接，用手机微信扫描二维码。",
+      "微信接收消息期间请保持本地网关运行。",
+      "发送一条私信测试，确认账户已连接。"
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      },
+      "token": {
+        "label": "令牌",
+        "placeholder": "二维码登录后自动保存"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "微信登录二维码",
+    "scanTitle": "使用微信扫码",
+    "scanDescription": "用手机微信扫描此二维码。登录后，nanobot 会将账户状态保存在本地。",
+    "waiting": "正在等待微信扫码...",
+    "connected": "微信已连接。",
+    "stopped": "微信登录已停止。",
+    "connecting": "正在连接..."
+  }
+}

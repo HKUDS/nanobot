@@ -1,0 +1,38 @@
+{
+  "description": "在 QQ 對話中使用 nanobot。",
+  "requirements": "QQ 機器人憑證和閘道",
+  "setup": {
+    "docsLabel": "開啟 QQ 設定指南",
+    "officialLabel": "開啟 QQ 機器人後台",
+    "tryIt": "從 QQ 傳送一則私聊或群聊測試訊息。",
+    "summary": "QQ 使用官方機器人憑證和 WebSocket 長連線。",
+    "steps": [
+      "在 QQ 開放平台建立機器人並複製 App ID 和 Secret。",
+      "選擇訊息格式和可選的傳送者允許清單。",
+      "儲存並啟用 QQ，然後傳送一則私聊或群聊測試訊息。"
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ 機器人 App ID",
+        "help": "從 QQ 開放平台複製。"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••",
+        "help": "離開 QQ 憑證頁面前請妥善儲存。"
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "Open ID，以逗號分隔"
+      },
+      "msgFormat": {
+        "label": "訊息格式",
+        "choices": {
+          "plain": "純文字",
+          "markdown": "Markdown"
+        }
+      }
+    }
+  }
+}

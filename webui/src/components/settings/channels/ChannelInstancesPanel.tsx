@@ -15,9 +15,9 @@ import {
 import {
   ChannelLogo,
   ChannelStatusBadge,
-  channelDisplayName,
   channelSetup,
   channelStatusLabel,
+  localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import {
   ChannelGuideLink,
@@ -69,16 +69,17 @@ export function ChannelInstancesPanel({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   customization?: ChannelInstancesPanelCustomization;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
   const setup = useMemo(
-    () => channelSetup(feature),
-    [feature.name, feature.setup],
+    () => channelSetup(feature, i18n.resolvedLanguage ?? i18n.language),
+    [feature.name, feature.setup, i18n.language, i18n.resolvedLanguage],
   );
   const instanceFields = useMemo(
     () => channelInstanceFields(feature, setup.fields, setup.manualFields),
@@ -154,7 +155,7 @@ export function ChannelInstancesPanel({
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
-              {channelDisplayName(feature)}
+              {displayName}
             </h3>
             <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
               {customization.countLabel?.(configuredCount)
@@ -176,7 +177,7 @@ export function ChannelInstancesPanel({
                 checked={feature.enabled}
                 disabled={channelBusy || feature.configured === false}
                 ariaLabel={t("settings.channels.toggleChannel", {
-                  name: channelDisplayName(feature),
+                  name: displayName,
                   defaultValue: "{{name}} channel",
                 })}
                 label={feature.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
@@ -263,7 +264,6 @@ export function ChannelInstancesPanel({
                     {customization.renderInstanceAction?.(instance)}
                   </section>
                   <ChannelSetupSteps
-                    featureName={feature.name}
                     steps={setup.steps}
                     action={
                       <ChannelGuideLink

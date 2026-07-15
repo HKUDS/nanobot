@@ -1,0 +1,92 @@
+{
+  "description": "Permita que o nanobot receba e responda e-mails.",
+  "requirements": "Caixa IMAP, envio SMTP, senha de app e consentimento explícito",
+  "setup": {
+    "docsLabel": "Abrir guia de Email",
+    "officialLabel": "Abrir guia de senhas de app",
+    "tryIt": "Envie um e-mail de teste para a caixa conectada.",
+    "summary": "Email lê mensagens por IMAP e responde por SMTP. Use uma caixa dedicada e dê consentimento antes de ativar.",
+    "steps": [
+      "Crie uma caixa dedicada e, quando necessário, uma senha de app.",
+      "Escolha um provedor ou informe IMAP e SMTP manualmente.",
+      "Dê consentimento, salve e ative Email; depois, envie uma mensagem de teste."
+    ],
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud",
+      "custom": "Personalizado"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "Consentimento concedido",
+        "help": "Controle de segurança obrigatório. Deixe desativado até decidir conectar esta caixa ao bot.",
+        "choices": {
+          "true": "Concedido",
+          "false": "Não concedido"
+        }
+      },
+      "imapHost": {
+        "label": "Host IMAP",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "Usuário IMAP",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "Senha IMAP",
+        "placeholder": "Senha de app",
+        "help": "Use uma senha de app quando o provedor exigir."
+      },
+      "smtpHost": {
+        "label": "Host SMTP",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "Usuário SMTP",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "Senha SMTP",
+        "placeholder": "Senha de app",
+        "help": "Normalmente é a mesma senha usada no IMAP."
+      },
+      "imapPort": {
+        "label": "Porta IMAP",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "Porta SMTP",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "Endereço remetente",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "Intervalo de consulta",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "Remetentes permitidos",
+        "placeholder": "E-mails separados por vírgulas",
+        "help": "Deixe vazio para exigir pareamento prévio."
+      },
+      "verifyDkim": {
+        "label": "Verificar DKIM",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      },
+      "verifySpf": {
+        "label": "Verificar SPF",
+        "choices": {
+          "true": "Ativado",
+          "false": "Desativado"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "description": "Matrix ルームから nanobot を利用します。",
+  "requirements": "ホームサーバー、アカウントトークン、ルームへのアクセス",
+  "setup": {
+    "docsLabel": "Matrix 設定ガイドを開く",
+    "officialLabel": "Matrix クライアント一覧を開く",
+    "tryIt": "Matrix アカウントをルームに招待し、テストメッセージを送信します。",
+    "summary": "Matrix にはホームサーバーのアカウントと、パスワードまたはアクセストークンが必要です。",
+    "steps": [
+      "nanobot 用の Matrix アカウントを作成または選択します。",
+      "ホームサーバー、ユーザー ID、パスワードまたはアクセストークンを入力します。",
+      "保存して Matrix を有効にし、アカウントをルームに招待してテストメッセージを送信します。"
+    ],
+    "fields": {
+      "homeserver": {
+        "label": "ホームサーバー",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ユーザー ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "パスワード",
+        "placeholder": "••••••",
+        "help": "パスワードまたはアクセストークンのどちらかを使います。"
+      },
+      "accessToken": {
+        "label": "アクセストークン",
+        "placeholder": "任意のトークンログイン",
+        "help": "Matrix クライアントでアクセストークンを取得できる場合に推奨します。"
+      },
+      "deviceId": {
+        "label": "デバイス ID",
+        "placeholder": "アクセストークン使用時に必須",
+        "help": "トークンに関連付けられたデバイス ID をコピーします。パスワードログインでは不要です。"
+      },
+      "groupPolicy": {
+        "label": "グループでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      }
+    }
+  }
+}

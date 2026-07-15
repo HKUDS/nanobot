@@ -1,0 +1,39 @@
+{
+  "description": "Use nanobot from Mattermost channels and DMs.",
+  "requirements": "Mattermost server URL, bot token, channel access",
+  "setup": {
+    "docsLabel": "Open Mattermost setup",
+    "officialLabel": "Open Mattermost bot guide",
+    "tryIt": "Mention the bot in a Mattermost channel or send it a direct message.",
+    "summary": "Mattermost connects through a bot account on your server and listens for channel and direct messages.",
+    "steps": [
+      "Create a Mattermost bot account and copy its access token.",
+      "Enter the server URL and grant the bot access to the target team and channels.",
+      "Save and enable Mattermost, then mention the bot or send a direct message."
+    ],
+    "fields": {
+      "serverUrl": {
+        "label": "Server URL",
+        "placeholder": "https://mattermost.example.com",
+        "help": "Use the base URL of your Mattermost workspace."
+      },
+      "token": {
+        "label": "Bot token",
+        "placeholder": "Mattermost bot token",
+        "help": "Create this from a Mattermost bot account."
+      },
+      "teamId": {
+        "label": "Team ID",
+        "placeholder": "Optional team ID"
+      },
+      "groupPolicy": {
+        "label": "Group behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      }
+    }
+  }
+}

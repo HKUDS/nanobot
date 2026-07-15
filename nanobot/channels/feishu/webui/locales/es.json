@@ -1,0 +1,66 @@
+{
+  "description": "Usa nanobot en chats y grupos de Feishu.",
+  "requirements": "Credenciales de Feishu, suscripción a eventos y gateway",
+  "setup": {
+    "primaryAction": "Conectar Feishu",
+    "docsLabel": "Abrir guía de Feishu",
+    "officialLabel": "Abrir consola de Feishu",
+    "tryIt": "Envía un DM o menciona al asistente en un grupo.",
+    "summary": "La conexión crea o vincula una app de Feishu por QR y guarda sus credenciales.",
+    "steps": [
+      "Haz clic en Conectar y escanea el QR con Feishu o Lark.",
+      "Aprueba la conexión. nanobot guarda el App ID y el Secret automáticamente.",
+      "Envía un DM al bot o menciónalo en un grupo de Feishu."
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "Déjalo vacío para conservar el secreto",
+        "help": "Pega uno nuevo solo al rotar credenciales."
+      },
+      "domain": {
+        "label": "Región",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "Comportamiento en grupos",
+        "choices": {
+          "mention": "Solo menciones",
+          "open": "Todos los mensajes",
+          "allowlist": "Lista permitida"
+        }
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos",
+        "placeholder": "ID de usuario separados por comas"
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "Asistente {{name}}",
+    "configured": "Conectado",
+    "needsSetup": "Necesita autorización",
+    "noAppId": "Sin App ID",
+    "createAnother": "Crear otro asistente",
+    "createHint": "Crea un bot Feishu independiente para otro equipo o flujo.",
+    "createAssistant": "Crear asistente",
+    "reconnect": "Reconectar",
+    "countNone": "Ningún asistente conectado",
+    "countOne": "1 asistente conectado",
+    "countMany": "{{count}} asistentes conectados",
+    "qrAlt": "Código QR de conexión de Feishu",
+    "scanTitle": "Escanea con Feishu",
+    "scanDescription": "Escanea con Feishu o Lark en tu teléfono. nanobot completará la configuración tras la autorización.",
+    "waiting": "Esperando autorización...",
+    "connected": "Feishu está conectado.",
+    "stopped": "Conexión detenida.",
+    "connecting": "Conectando..."
+  }
+}

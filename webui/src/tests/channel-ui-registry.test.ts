@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   channelUiContribution,
+  channelUiOwner,
   channelUiPresentation,
   registeredChannelUiContributions,
 } from "@/channel-plugins/registry";
@@ -28,6 +29,8 @@ describe("channel UI contributions", () => {
   it("keeps aliases inside the owning channel contribution", () => {
     expect(channelUiPresentation("lark")?.displayName).toBe("Lark");
     expect(channelUiPresentation("wechat")?.displayName).toBe("WeChat");
+    expect(channelUiOwner("lark")).toBe("feishu");
+    expect(channelUiOwner("wechat")).toBe("weixin");
   });
 
   it("uses the DingTalk Open Platform brand mark", () => {

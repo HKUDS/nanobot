@@ -1,0 +1,32 @@
+{
+  "displayName": "钉钉",
+  "description": "在钉钉群中使用 nanobot。",
+  "requirements": "钉钉应用凭据和网关",
+  "setup": {
+    "docsLabel": "打开钉钉配置指南",
+    "officialLabel": "打开钉钉开发者后台",
+    "tryIt": "在已安装应用的钉钉群中发送一条测试消息。",
+    "summary": "钉钉需要 Stream 模式的应用凭据。",
+    "steps": [
+      "创建或选择一个已启用 Stream 模式的钉钉应用。",
+      "填写 Client ID 和 Client Secret。",
+      "保存并启用钉钉，然后发送一条测试消息。"
+    ],
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "钉钉 Client ID",
+        "help": "从钉钉应用凭据页面复制。"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••",
+        "help": "从同一个钉钉应用凭据页面复制。"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      }
+    }
+  }
+}

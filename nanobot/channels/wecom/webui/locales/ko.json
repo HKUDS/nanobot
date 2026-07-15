@@ -1,0 +1,31 @@
+{
+  "description": "WeCom 업무 채팅에서 nanobot을 사용합니다.",
+  "requirements": "WeCom 앱 자격 증명 및 콜백 설정",
+  "setup": {
+    "docsLabel": "WeCom 설정 가이드 열기",
+    "officialLabel": "WeCom 콘솔 열기",
+    "tryIt": "WeCom 봇에 테스트 메시지를 보내세요.",
+    "summary": "WeCom 관리 콘솔의 AI 봇 ID와 Secret이 필요합니다.",
+    "steps": [
+      "WeCom에서 AI 봇을 만들고 API 모드를 선택하세요.",
+      "Bot ID와 Secret을 nanobot에 복사하세요.",
+      "저장하고 WeCom을 활성화한 다음 테스트 메시지를 보내세요."
+    ],
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "WeCom Bot ID",
+        "help": "WeCom AI 봇 API 모드 페이지에서 복사하세요."
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••",
+        "help": "WeCom 봇 Secret을 안전하게 보관하세요."
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      }
+    }
+  }
+}

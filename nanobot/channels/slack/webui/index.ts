@@ -1,8 +1,5 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import {
-  GROUP_BEHAVIOR_LABELS,
-  chatAppGuideUrl,
-} from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 const SLACK_SOCKET_MODE_MANIFEST = `display_information:
   name: nanobot
@@ -44,49 +41,23 @@ settings:
 export default {
   presentation: {
     displayName: "Slack",
-    description: "Use nanobot from Slack workspaces.",
-    requirements: "Slack app token, bot token, workspace install",
     initials: "SL",
     color: "#4A154B",
     logoUrl: "https://slack.com/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("slack"),
-      docsLabel: "Open Slack setup",
-      officialLabel: "Open Slack apps",
-      tryIt: "Mention the Slack app or send it a direct message.",
       actions: [
         {
           id: "slack-manifest",
-          label: "Copy manifest",
           copyText: SLACK_SOCKET_MODE_MANIFEST,
           logoUrl: "https://slack.com/favicon.ico",
         },
       ],
-      summary: "Slack uses Socket Mode by default, so it needs both app-level and bot-level tokens.",
-      steps: [
-        "Create a Slack app, enable Socket Mode, and install it into the workspace.",
-        "Add the app token and bot token under channels.slack.",
-        "Save and enable Slack, then mention the app or send it a direct message.",
-      ],
       fields: [
-        {
-          key: "channels.slack.appToken",
-          label: "App token",
-          placeholder: "xapp-...",
-          help: "Create this from Slack Socket Mode.",
-        },
-        {
-          key: "channels.slack.botToken",
-          label: "Bot token",
-          placeholder: "xoxb-...",
-          help: "Use the bot token after installing the Slack app.",
-        },
-        {
-          key: "channels.slack.groupPolicy",
-          label: "Group behavior",
-          choiceLabels: GROUP_BEHAVIOR_LABELS,
-        },
+        { key: "channels.slack.appToken" },
+        { key: "channels.slack.botToken" },
+        { key: "channels.slack.groupPolicy" },
       ],
     },
   },
