@@ -507,6 +507,39 @@ class SessionManager:
             return None
         return None
 
+    def _resolve_session_path(self, key: str, *, migrate: bool = False) -> Path | None:
+        """Resolve a session path, falling back to legacy storage locations."""
+        path = self._get_session_path(key)
+        if path.exists():
+            return path
+
+        fallback_paths = [
+            (self._get_legacy_lossy_path(key), "legacy lossy path"),
+            (self._get_legacy_session_path(key), "legacy path"),
+        ]
+        for fallback_path, description in fallback_paths:
+            if not fallback_path.exists():
+                continue
+            stored_key = self._stored_key_for_path(fallback_path)
+            if stored_key and stored_key != key:
+                logger.info(
+                    "Skipping session {} from {} because it belongs to {}",
+                    key,
+                    description,
+                    stored_key,
+                )
+                continue
+            if not migrate:
+                return fallback_path
+            try:
+                shutil.move(str(fallback_path), str(path))
+                logger.info("Migrated session {} from {}", key, description)
+            except Exception:
+                logger.exception("Failed to migrate session {}", key)
+                return None
+            return path
+        return None
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
@@ -530,29 +563,8 @@ class SessionManager:
 
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
-        path = self._get_session_path(key)
-        if not path.exists():
-            fallback_paths = [
-                (self._get_legacy_lossy_path(key), "legacy lossy path"),
-                (self._get_legacy_session_path(key), "legacy path"),
-            ]
-            for fallback_path, description in fallback_paths:
-                if not fallback_path.exists():
-                    continue
-                stored_key = self._stored_key_for_path(fallback_path)
-                if stored_key and stored_key != key:
-                    logger.info(
-                        "Skipping migration for {} from {} because it belongs to {}",
-                        key,
-                        description,
-                        stored_key,
-                    )
-                    continue
-                shutil.move(str(fallback_path), str(path))
-                logger.info("Migrated session {} from {}", key, description)
-                break
-
-        if not path.exists():
+        path = self._resolve_session_path(key, migrate=True)
+        if path is None:
             return None
 
         try:
@@ -831,8 +843,8 @@ class SessionManager:
         Returns ``{"key", "created_at", "updated_at", "metadata", "messages"}`` or
         ``None`` when the session file does not exist or fails to parse.
         """
-        path = self._get_session_path(key)
-        if not path.exists():
+        path = self._resolve_session_path(key)
+        if path is None:
             return None
         try:
             messages: list[dict[str, Any]] = []
@@ -862,7 +874,7 @@ class SessionManager:
             }
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session {}: {}", key, e)
-            repaired = self._repair(key)
+            repaired = self._repair(key, path=path)
             if repaired is not None:
                 logger.info("Recovered read-only session view {} from corrupt file", key)
                 return self._session_payload(repaired)
@@ -874,8 +886,8 @@ class SessionManager:
         This is used by WebUI routes that need session-level metadata but not the
         full conversation transcript.
         """
-        path = self._get_session_path(key)
-        if not path.exists():
+        path = self._resolve_session_path(key)
+        if path is None:
             return None
         try:
             with open(path, encoding="utf-8") as f:
@@ -898,7 +910,7 @@ class SessionManager:
             return None
         except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session metadata {}: {}", key, e)
-            repaired = self._repair(key)
+            repaired = self._repair(key, path=path)
             if repaired is not None:
                 logger.info("Recovered read-only session metadata {} from corrupt file", key)
                 return {
