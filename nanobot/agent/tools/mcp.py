@@ -1410,6 +1410,10 @@ async def _close_server(state: Any, server_name: str) -> None:
         return
     try:
         await stack.aclose()
+    except asyncio.CancelledError:
+        if asyncio.current_task().cancelling() > 0:
+            raise
+        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
     except (RuntimeError, BaseExceptionGroup):
         logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
 
@@ -1423,5 +1427,9 @@ async def close_mcp_servers(state: Any) -> None:
         for name, connection in connections:
             try:
                 await connection.aclose()
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling() > 0:
+                    raise
+                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
             except (RuntimeError, BaseExceptionGroup):
                 logger.debug("MCP server '{}' cleanup error (can be ignored)", name)

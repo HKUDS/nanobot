@@ -269,6 +269,14 @@ def test_onboard_fresh_install(mock_paths):
     assert mock_ws.call_args.args == (expected_workspace,)
 
 
+def test_onboard_recommends_webui(mock_paths):
+    """Default onboarding should recommend the guided WebUI launcher."""
+    result = runner.invoke(app, ["onboard"])
+
+    assert result.exit_code == 0
+    assert "✓ nanobot is ready. Run: nanobot webui" in result.stdout
+
+
 def test_onboard_existing_config_refresh(mock_paths):
     """Config exists, user declines overwrite — should refresh (load-merge-save)."""
     config_file, workspace_dir, _ = mock_paths
@@ -414,7 +422,7 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
     compact_output = stripped_output.replace("\n", "")
     resolved_config = str(config_path.resolve())
     assert resolved_config in compact_output
-    assert f"--config {resolved_config}" in compact_output
+    assert f'nanobot webui -c "{resolved_config}"' in result.stdout
 
 
 def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkeypatch):
@@ -435,11 +443,8 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     )
 
     assert result.exit_code == 0
-    stripped_output = _strip_ansi(result.stdout)
-    compact_output = stripped_output.replace("\n", "")
     resolved_config = str(config_path.resolve())
-    assert f'nanobot agent -m "Hello!" --config {resolved_config}' in compact_output
-    assert f"nanobot gateway --config {resolved_config}" in compact_output
+    assert f'nanobot webui -c "{resolved_config}"' in result.stdout
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
@@ -704,6 +709,52 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     result = runner.invoke(app, ["provider", "login", "openai-codex"])
 
     assert result.exit_code == 0
+    assert captured["proxy"] == proxy
+
+
+def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkeypatch):
+    from nanobot.config import loader
+
+    proxy = "http://127.0.0.1:23458"
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        encoding="utf-8",
+    )
+    active_path: dict[str, Path] = {}
+    real_load_config = loader.load_config
+
+    def fake_set_config_path(path: Path) -> None:
+        active_path["path"] = path
+
+    def fake_load_config(config_path: Path | None = None) -> Config:
+        path = config_path or active_path.get("path")
+        if path is None:
+            return Config.model_validate(
+                {"providers": {"openaiCodex": {"proxy": "http://default-proxy:8080"}}}
+            )
+        return real_load_config(path)
+
+    monkeypatch.setattr(loader, "set_config_path", fake_set_config_path)
+    monkeypatch.setattr(loader, "load_config", fake_load_config)
+
+    import oauth_cli_kit
+
+    captured: dict[str, str | None] = {}
+
+    def fake_get_token(*, proxy=None):
+        captured["proxy"] = proxy
+        return SimpleNamespace(access="access-token", account_id="acct-test")
+
+    monkeypatch.setattr(oauth_cli_kit, "get_token", fake_get_token)
+
+    result = runner.invoke(
+        app,
+        ["provider", "login", "openai-codex", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert active_path["path"] == config_path.resolve()
     assert captured["proxy"] == proxy
 
 
@@ -1895,6 +1946,109 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.cron.service.CronService", cron_service)
     if get_cron_dir is not None:
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
+
+
+def test_heartbeat_empty_response_still_retains_recent_messages(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.dream.enabled = True
+    config.workspace_path.mkdir(parents=True)
+    (config.workspace_path / "HEARTBEAT.md").write_text(
+        "## Active Tasks\n\n- Check repository health\n",
+        encoding="utf-8",
+    )
+
+    provider = _fake_provider()
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    class _FakeSession:
+        def retain_recent_legal_suffix(self, limit: int) -> None:
+            seen["retained_limit"] = limit
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            self.session = _FakeSession()
+            seen["heartbeat_session"] = self.session
+
+        def get_or_create(self, key: str) -> _FakeSession:
+            seen["session_key"] = key
+            return self.session
+
+        def save(self, session: _FakeSession) -> None:
+            seen["saved_session"] = session
+
+        def list_sessions(self) -> list[dict[str, str]]:
+            return [{"key": "telegram:u1"}]
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job: CronJob) -> None:
+            raise _StopGatewayError("stop")
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = kwargs.get("provider", object())
+            self.sessions = kwargs["session_manager"]
+            self.tools = {}
+
+        async def process_direct(self, *_args, **_kwargs):
+            return SimpleNamespace(content="")
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.enabled_channels = ["telegram"]
+
+    async def _unexpected_evaluator(*_args, **_kwargs) -> bool:
+        raise AssertionError("empty heartbeat response must not be evaluated")
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        make_provider=lambda _config: provider,
+        message_bus=lambda: bus,
+        session_manager=_FakeSessionManager,
+        cron_service=_FakeCron,
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cli.commands.read_webui_sidebar_state", lambda: {})
+    monkeypatch.setattr("nanobot.cli.heartbeat.evaluate_response", _unexpected_evaluator)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    cron = seen["cron"]
+    response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
+
+    assert response is None
+    assert seen["session_key"] == "heartbeat"
+    assert seen["retained_limit"] == config.gateway.heartbeat.keep_recent_messages
+    assert seen["saved_session"] is seen["heartbeat_session"]
 
 
 def test_webui_yes_creates_config_and_enables_local_websocket(

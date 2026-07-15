@@ -2,9 +2,18 @@
 
 nanobot can generate and edit images through the `generate_image` tool. Enable the tool in WebUI Settings, then ask for an image normally in chat; the agent decides when to call it and can keep iterating on generated images in the same conversation.
 
-The feature is disabled by default. Enable it in `~/.nanobot/config.json`, configure a supported image provider, then restart the gateway.
+The feature is disabled by default. Open **Settings → Image**, choose a configured provider and model, enable image generation, save, and restart when prompted. If that screen is not available in your installed version, use the manual config below.
 
 ## Quick Setup
+
+**WebUI**
+
+1. Add the image provider credential under **Settings → Models** if it is not already configured.
+2. Open **Settings → Image**.
+3. Select the provider and image model, then enable image generation.
+4. Save, restart when prompted, and ask for a simple test image.
+
+**Manual config**
 
 This snippet uses the current built-in image-generation default so the JSON has concrete names. It is not a provider recommendation; replace `provider` and `model` with any supported image provider and model you intend to use.
 

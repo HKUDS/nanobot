@@ -11,15 +11,15 @@ These tests cover the two halves end-to-end plus the adversarial edges
 from __future__ import annotations
 
 import asyncio
-import functools
 import hashlib
 import hmac
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
+from ws_test_client import InProcessHttpChannel
+from ws_test_client import http_get as _http_get
 
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.session.manager import Session, SessionManager
@@ -67,7 +67,7 @@ def _ch(
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
     )
-    return WebSocketChannel(cfg, bus, gateway=gateway)
+    return InProcessHttpChannel(cfg, bus, gateway=gateway)
 
 
 @pytest.fixture()
@@ -84,14 +84,6 @@ def _fake_media_dir(root: Path):
         return path
 
     return inner
-
-
-async def _http_get(
-    url: str, headers: dict[str, str] | None = None
-) -> httpx.Response:
-    return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +215,6 @@ async def test_media_route_serves_signed_file(
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(f"http://127.0.0.1:29920{url_path}")
         finally:
@@ -256,7 +247,6 @@ async def test_media_route_serves_video_byte_ranges(
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(
                 f"http://127.0.0.1:29927{url_path}",
@@ -288,7 +278,6 @@ async def test_media_route_serves_suffix_video_byte_ranges(
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(
                 f"http://127.0.0.1:29928{url_path}",
@@ -317,7 +306,6 @@ async def test_media_route_rejects_unsatisfiable_byte_range(
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(
                 f"http://127.0.0.1:29929{url_path}",
@@ -357,7 +345,6 @@ async def test_media_route_rejects_bad_signature(
         forged = f"/api/media/{b64url_encode(forged_mac)}/{payload}"
 
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(f"http://127.0.0.1:29921{forged}")
         finally:
@@ -391,7 +378,6 @@ async def test_media_route_rejects_path_traversal_payload(
 
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(f"http://127.0.0.1:29922{url}")
         finally:
@@ -418,7 +404,6 @@ async def test_media_route_404s_missing_file(
         assert url_path is not None
         target.unlink()  # the file vanishes between signing and fetching
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(f"http://127.0.0.1:29923{url_path}")
         finally:
@@ -448,7 +433,6 @@ async def test_media_route_degrades_non_image_to_octet_stream(
         ).digest()[:16]
         url = f"/api/media/{b64url_encode(mac)}/{payload}"
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(f"http://127.0.0.1:29924{url}")
         finally:
@@ -476,7 +460,6 @@ async def test_media_route_serves_svg_with_strict_csp(
         url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             resp = await _http_get(f"http://127.0.0.1:29928{url_path}")
         finally:
@@ -515,7 +498,6 @@ async def test_session_messages_exposes_signed_media_urls(
     channel = _ch(bus, session_manager=sm, port=29925)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             token = channel.gateway.tokens.issue_api_token(300)
             auth = {"Authorization": f"Bearer {token}"}
@@ -559,7 +541,6 @@ async def test_session_messages_skips_vanished_media(
     channel = _ch(bus, session_manager=sm, port=29926)
     with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
-        await asyncio.sleep(0.3)
         try:
             token = channel.gateway.tokens.issue_api_token(300)
             resp = await _http_get(

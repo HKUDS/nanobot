@@ -12,14 +12,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
 
 
 def _make_provider():
@@ -38,8 +36,8 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     provider = _make_provider()
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
+        mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
         return AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
 
 
@@ -110,8 +108,8 @@ async def test_dispatch_cancellation_restores_checkpoint():
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
+        mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
 
     checkpoint_key = loop._RUNTIME_CHECKPOINT_KEY

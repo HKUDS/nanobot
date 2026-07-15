@@ -1,7 +1,6 @@
 """End-to-end tests for the embedded webui's HTTP routes on the WebSocket channel."""
 
 import asyncio
-import functools
 import json
 import random
 import socket
@@ -12,8 +11,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote, urlencode
 
-import httpx
 import pytest
+from ws_test_client import InProcessHttpChannel
+from ws_test_client import http_get as _http_get
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
@@ -134,7 +134,7 @@ def _ch(
         local_trigger_pending_ids=local_trigger_pending_ids,
         channel_feature_action=channel_feature_action,
     )
-    return WebSocketChannel(cfg, bus, gateway=gateway)
+    return InProcessHttpChannel(cfg, bus, gateway=gateway)
 
 
 @pytest.fixture()
@@ -142,14 +142,6 @@ def bus() -> MagicMock:
     b = MagicMock()
     b.publish_inbound = AsyncMock()
     return b
-
-
-async def _http_get(
-    url: str, headers: dict[str, str] | None = None
-) -> httpx.Response:
-    return await asyncio.to_thread(
-        functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0, trust_env=False)
-    )
 
 
 def _seed_session(workspace: Path, key: str = "websocket:test") -> SessionManager:
@@ -204,9 +196,13 @@ async def test_bootstrap_returns_token_for_localhost(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     sm = _seed_session(tmp_path)
-    channel = _ch(bus, session_manager=sm, port=29901)
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        port=29901,
+        maxMessageBytes=1_048_576,
+    )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         resp = await _http_get("http://127.0.0.1:29901/webui/bootstrap")
         assert resp.status_code == 200
@@ -217,6 +213,19 @@ async def test_bootstrap_returns_token_for_localhost(
         assert body["ws_path"] == "/"
         assert body["ws_url"] == "ws://127.0.0.1:29901/"
         assert body["expires_in"] > 0
+        assert body["limits"] == {
+            "transport": {
+                "max_frame_bytes": 1_048_576,
+                "envelope_reserve_bytes": 65_536,
+            },
+            "message": {"max_text_bytes": 65_536},
+            "attachments": {
+                "max_count": 4,
+                "max_file_bytes": 6_291_456,
+                "max_total_bytes": 25_165_824,
+            },
+        }
+        assert "max_message_bytes" not in body
         assert isinstance(body.get("model_name"), str)
     finally:
         await channel.stop()
@@ -230,7 +239,6 @@ async def test_sessions_routes_require_bearer_token(
     sm = _seed_session(tmp_path, key="websocket:abc")
     channel = _ch(bus, session_manager=sm, port=29902)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         # Unauthenticated → 401.
         deny = await _http_get("http://127.0.0.1:29902/api/sessions")
@@ -306,7 +314,6 @@ async def test_session_automations_route_filters_by_webui_session(
         port=29914,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         deny = await _http_get(
             "http://127.0.0.1:29914/api/sessions/websocket:abc/automations"
@@ -363,7 +370,6 @@ async def test_session_automations_route_ignores_unified_owner(
         port=29917,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -409,7 +415,6 @@ async def test_session_automations_route_lists_local_triggers(
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -469,7 +474,6 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         port=29920,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         deny = await _http_get("http://127.0.0.1:29920/api/webui/skills")
         assert deny.status_code == 401
@@ -567,7 +571,6 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29912)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         deny = await _http_get("http://127.0.0.1:29912/api/settings/cli-apps")
         assert deny.status_code == 401
@@ -603,7 +606,6 @@ async def test_nanobot_feature_routes_require_token_and_enable(
     _stub_matrix_feature(monkeypatch, config_path, channels=["matrix", "websocket"])
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29916)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         deny = await _http_get("http://127.0.0.1:29916/api/settings/nanobot-features")
         assert deny.status_code == 401
@@ -1499,7 +1501,6 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", slow_payload)
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29935)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -1540,7 +1541,6 @@ async def test_cli_apps_route_supports_installed_only_payload(
     monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", payload)
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29936)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -1633,7 +1633,6 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29913)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         deny = await _http_get("http://127.0.0.1:29913/api/settings/mcp-presets")
         assert deny.status_code == 401
@@ -1725,7 +1724,6 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
     )
     channel = _ch(bus, session_manager=sm, port=29906)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -1751,7 +1749,6 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
     sm = _seed_session(tmp_path, key="websocket:sidebar")
     channel = _ch(bus, session_manager=sm, port=29911)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -1802,7 +1799,6 @@ async def test_session_delete_removes_file(
     append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -1882,7 +1878,6 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         deny = await _http_get(f"{base_url}/api/webui/automations")
         assert deny.status_code == 401, deny.text
@@ -2097,7 +2092,6 @@ async def test_webui_automations_route_manages_local_triggers(
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2175,7 +2169,6 @@ async def test_session_delete_blocks_when_bound_automation_exists(
     )
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29915)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2220,7 +2213,6 @@ async def test_session_delete_blocks_and_cascades_local_triggers(
         port=port,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2269,7 +2261,6 @@ async def test_session_delete_can_cascade_bound_automations(
     )
     channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2312,7 +2303,6 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
         port=29918,
     )
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2344,7 +2334,6 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
     sm = _seed_session(tmp_path, key="websocket:encoded-key")
     channel = _ch(bus, session_manager=sm, port=29910)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2388,7 +2377,6 @@ async def test_session_messages_hide_persisted_runtime_context(
     sm.save(session)
     channel = _ch(bus, session_manager=sm, port=29919)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         response = await _http_get(
@@ -2422,7 +2410,7 @@ async def test_webui_thread_resigns_assistant_media_urls(
     def fake_media_dir(channel: str | None = None) -> Path:
         return websocket_media if channel == "websocket" else media_root
 
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
 
     append_transcript_object(
         "websocket:video-replay",
@@ -2441,7 +2429,6 @@ async def test_webui_thread_resigns_assistant_media_urls(
 
     channel = _ch(bus, port=29914)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2479,7 +2466,6 @@ async def test_session_routes_reject_non_websocket_keys(
     )
     channel = _ch(bus, session_manager=sm, port=29909)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2512,7 +2498,6 @@ async def test_session_routes_reject_invalid_key(
     sm = _seed_session(tmp_path)
     channel = _ch(bus, session_manager=sm, port=29904)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
@@ -2540,7 +2525,6 @@ async def test_static_serves_index_when_dist_present(
     sm = _seed_session(tmp_path / "ws_state")
     channel = _ch(bus, session_manager=sm, static_dist_path=dist, port=29905)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         # Bare ``GET /`` is a browser opening the app: it must return the SPA
         # index.html, not the WS-upgrade handler's 401/426.
@@ -2570,7 +2554,6 @@ async def test_static_rejects_path_traversal(
     secret.write_text("classified")
     channel = _ch(bus, static_dist_path=dist, port=29906)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         resp = await _http_get("http://127.0.0.1:29906/../secret.txt")
         # Normalized by httpx into /secret.txt → falls back to index.html, not 'classified'.
@@ -2584,7 +2567,6 @@ async def test_static_rejects_path_traversal(
 async def test_unknown_route_returns_404(bus: MagicMock) -> None:
     channel = _ch(bus, port=29907)
     server_task = asyncio.create_task(channel.start())
-    await asyncio.sleep(0.3)
     try:
         resp = await _http_get("http://127.0.0.1:29907/api/unknown")
         assert resp.status_code == 404

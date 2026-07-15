@@ -53,6 +53,18 @@ WebUI beyond localhost or want a browser password:
 The WebUI is served by the WebSocket channel on port `8765` by default. The
 gateway health endpoint, `18790` by default, is not the browser UI.
 
+## First 10 Minutes
+
+Use the WebUI as the primary setup surface after Quick Start:
+
+1. Send `Hello!` in a new chat to prove the selected model works.
+2. Open **Settings → Models** and confirm the active model preset.
+3. Start a separate chat before project work, then choose the intended workspace and access mode.
+4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
+5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
+
+This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
+
 ## What It Is For
 
 | Area | Use it for |
@@ -62,6 +74,7 @@ gateway health endpoint, `18790` by default, is not the browser UI.
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for Apps or MCP presets |
+| Channels | Connect and validate chat platforms, install their optional support, and manage saved channel setup |
 | Apps | Install, test, update, and use local CLI App adapters and MCP presets |
 | Skills | Inspect available built-in and workspace skills before relying on them |
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
@@ -112,6 +125,20 @@ to model settings when setup is incomplete.
 For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)
 for provider setup and output behavior.
+
+## Channels
+
+Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
+
+- install missing optional channel support when the WebUI is running locally;
+- collect platform credentials while preserving previously saved values;
+- handle supported QR-based login flows;
+- validate the connection and show actionable setup errors;
+- tell you when the gateway needs to restart.
+
+The platform itself may still require you to create a bot, enable event permissions, copy a token, or configure a webhook. Use [`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for manual JSON/reference options.
+
+Test a new channel with a private DM. When a supported channel sends a pairing code, the WebUI surfaces the pending request so you can approve the sender. Keep access narrow; do not use a wildcard allowlist unless public access is intentional.
 
 ## Apps
 
@@ -194,9 +221,9 @@ with the content that should be delivered.
 ## Settings
 
 Settings is the control surface for the browser session and gateway-backed
-runtime configuration. Use it to review or adjust model presets, provider
-visibility, image generation, voice transcription, web tools, Apps, Automations,
-Skills, runtime identity, and advanced safety controls.
+runtime configuration. Use it to review or adjust model presets, providers,
+image generation, voice transcription, web tools, chat channels, Apps,
+Automations, Skills, runtime identity, and advanced safety controls.
 
 Some settings take effect immediately. Runtime settings that affect the gateway
 or agent process may require a restart; the WebUI shows that requirement next to

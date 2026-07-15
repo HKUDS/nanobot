@@ -559,7 +559,7 @@ class MatrixChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound content; clear typing for non-progress messages."""
         if not self.client:
-            return
+            raise RuntimeError("Matrix client not initialized")
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
         relates_to = self._build_thread_relates_to(msg.metadata)
@@ -582,7 +582,9 @@ class MatrixChannel(BaseChannel):
                 content = _build_matrix_text_content(text)
                 if relates_to:
                     content["m.relates_to"] = relates_to
-                await self._send_room_content(msg.chat_id, content)
+                response = await self._send_room_content(msg.chat_id, content)
+                if isinstance(response, RoomSendError):
+                    raise RuntimeError(f"Matrix message was not delivered: {response}")
         finally:
             if not is_progress:
                 await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)

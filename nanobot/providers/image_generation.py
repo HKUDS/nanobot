@@ -187,6 +187,7 @@ class ImageGenerationProvider(ABC):
         api_base: str | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
+        proxy: str | None = None,
         timeout: float | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -194,6 +195,7 @@ class ImageGenerationProvider(ABC):
         self.api_base = self._resolve_base_url(api_base)
         self.extra_headers = extra_headers or {}
         self.extra_body = extra_body or {}
+        self.proxy = proxy or None
         self.timeout = timeout if timeout is not None else self.default_timeout
         self._client = client
 
@@ -240,7 +242,11 @@ class ImageGenerationProvider(ABC):
             return await client.post(url, headers=headers, json=body)
         if self._client is not None:
             return await self._client.post(url, headers=headers, json=body)
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
+        client_kwargs: dict[str, Any] = {"timeout": self.timeout}
+        if self.proxy:
+            client_kwargs["proxy"] = self.proxy
+            client_kwargs["trust_env"] = False
+        async with httpx.AsyncClient(**client_kwargs) as c:
             return await c.post(url, headers=headers, json=body)
 
 
@@ -1233,7 +1239,8 @@ class CodexImageGenerationClient(ImageGenerationProvider):
             raise ImageGenerationError(self.missing_key_message)
 
         try:
-            token = await asyncio.to_thread(get_codex_token)
+            token_kwargs = {"proxy": self.proxy} if self.proxy else {}
+            token = await asyncio.to_thread(get_codex_token, **token_kwargs)
         except Exception as exc:
             raise ImageGenerationError(self.missing_key_message) from exc
         if not token or not token.access:

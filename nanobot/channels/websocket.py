@@ -31,7 +31,6 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
@@ -39,10 +38,6 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
-from nanobot.utils.media_decode import (
-    FileSizeExceeded,
-    save_base64_data_url,
-)
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -221,45 +216,6 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
     return data
 
 
-# Per-message media limits. The server-side guard is a touch looser than the
-# client's ``Worker`` normalization target (6 MB) — tolerate client slop, but
-# still cap total ingress at ``_MAX_IMAGES_PER_MESSAGE * _MAX_IMAGE_BYTES``
-# which fits comfortably inside ``max_message_bytes``.
-_MAX_IMAGES_PER_MESSAGE = 4
-_MAX_IMAGE_BYTES = 8 * 1024 * 1024
-_MAX_VIDEOS_PER_MESSAGE = 1
-_MAX_VIDEO_BYTES = 20 * 1024 * 1024
-
-# Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
-# explicitly excluded to avoid the XSS surface inside embedded scripts.
-_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-})
-
-_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
-    "video/mp4",
-    "video/webm",
-    "video/quicktime",
-})
-
-_UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
-
-_DATA_URL_MIME_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,", re.DOTALL)
-
-
-def _extract_data_url_mime(url: str) -> str | None:
-    """Return the MIME type of a ``data:<mime>;base64,...`` URL, else ``None``."""
-    if not isinstance(url, str):
-        return None
-    m = _DATA_URL_MIME_RE.match(url)
-    if not m:
-        return None
-    return m.group(1).strip().lower() or None
-
-
 def _is_websocket_upgrade(request: WsRequest) -> bool:
     """Detect an actual WS upgrade; plain HTTP GETs to the same path should fall through."""
     upgrade = request.headers.get("Upgrade") or request.headers.get("upgrade")
@@ -301,6 +257,7 @@ class WebSocketChannel(BaseChannel):
         self._http_router = gateway.http
         self._tokens = gateway.tokens
         self._media = gateway.media
+        self._ingress = gateway.ingress
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
 
@@ -582,74 +539,6 @@ class WebSocketChannel(BaseChannel):
 
     # -- Inbound WebSocket envelopes ---------------------------------------
 
-    def _save_envelope_media(
-        self,
-        media: list[Any],
-    ) -> tuple[list[str], str | None]:
-        """Decode and persist ``media`` items from a ``message`` envelope.
-
-        Returns ``(paths, None)`` on success or ``([], reason)`` on the first
-        failure — the caller is expected to surface ``reason`` to the client
-        and skip publishing so no half-formed message ever reaches the agent.
-        On failure, any files already written to disk earlier in the same
-        call are unlinked so partial ingress doesn't leak orphan files.
-        ``reason`` is a short, stable token suitable for UI localization.
-
-        Shape: ``list[{"data_url": str, "name"?: str | None}]``.
-        """
-        image_count = 0
-        video_count = 0
-        for item in media:
-            mime = _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
-            if mime in _VIDEO_MIME_ALLOWED:
-                video_count += 1
-            elif mime in _IMAGE_MIME_ALLOWED:
-                image_count += 1
-        if image_count > _MAX_IMAGES_PER_MESSAGE:
-            return [], "too_many_images"
-        if video_count > _MAX_VIDEOS_PER_MESSAGE:
-            return [], "too_many_videos"
-
-        media_dir = get_media_dir("websocket")
-        paths: list[str] = []
-
-        def _abort(reason: str) -> tuple[list[str], str]:
-            for p in paths:
-                try:
-                    Path(p).unlink(missing_ok=True)
-                except OSError as exc:
-                    self.logger.warning(
-                        "failed to unlink partial media {}: {}", p, exc
-                    )
-            return [], reason
-
-        for item in media:
-            if not isinstance(item, dict):
-                return _abort("malformed")
-            data_url = item.get("data_url")
-            if not isinstance(data_url, str) or not data_url:
-                return _abort("malformed")
-            mime = _extract_data_url_mime(data_url)
-            if mime is None:
-                return _abort("decode")
-            if mime not in _UPLOAD_MIME_ALLOWED:
-                return _abort("mime")
-            is_video = mime in _VIDEO_MIME_ALLOWED
-            max_bytes = _MAX_VIDEO_BYTES if is_video else _MAX_IMAGE_BYTES
-            try:
-                saved = save_base64_data_url(
-                    data_url, media_dir, max_bytes=max_bytes,
-                )
-            except FileSizeExceeded:
-                return _abort("size")
-            except Exception as exc:
-                self.logger.warning("media decode failed: {}", exc)
-                return _abort("decode")
-            if saved is None:
-                return _abort("decode")
-            paths.append(saved)
-        return paths, None
-
     async def _dispatch_envelope(
         self,
         connection: Any,
@@ -732,25 +621,39 @@ class WebSocketChannel(BaseChannel):
             if not isinstance(content, str):
                 await self._send_event(connection, "error", detail="missing content")
                 return
+            message_rejection = self._ingress.validate_text(content)
+            if message_rejection is not None:
+                await self._send_event(
+                    connection,
+                    "error",
+                    chat_id=cid,
+                    detail="message_rejected",
+                    reason=message_rejection,
+                )
+                return
 
             raw_media = envelope.get("media")
             media_paths: list[str] = []
             if raw_media is not None:
                 if not isinstance(raw_media, list):
                     await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason="malformed",
+                        connection,
+                        "error",
+                        detail="attachment_rejected",
+                        reason="malformed",
                     )
                     return
-                media_paths, reason = self._save_envelope_media(raw_media)
+                media_paths, reason = self._media.store_inbound_attachments(raw_media)
                 if reason is not None:
                     await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason=reason,
+                        connection,
+                        "error",
+                        detail="attachment_rejected",
+                        reason=reason,
                     )
                     return
 
-            # Allow image-only turns (content may be empty when media is attached).
+            # Allow media-only turns (content may be empty when attachments are present).
             if not content.strip() and not media_paths:
                 await self._send_event(connection, "error", detail="missing content")
                 return

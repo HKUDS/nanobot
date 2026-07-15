@@ -1182,6 +1182,61 @@ async def test_codex_payload_and_response(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    proxy = "http://127.0.0.1:23458"
+    captured: dict[str, Any] = {}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    def fake_get_token(*, proxy=None):
+        captured["token_proxy"] = proxy
+        return SimpleNamespace(account_id="acct-123", access="oauth-token")
+
+    fake_oauth = SimpleNamespace(get_token=fake_get_token)
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            captured["request"] = {"url": url, **kwargs}
+            return FakeResponse(
+                {},
+                sse_lines=[
+                    f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":"{PNG_DATA_URL}"}}}}',
+                    "",
+                    "data: [DONE]",
+                    "",
+                ],
+            )
+
+    monkeypatch.setattr(
+        "nanobot.providers.image_generation.httpx.AsyncClient",
+        FakeAsyncClient,
+    )
+    client = CodexImageGenerationClient(api_key=None, proxy=proxy)
+
+    response = await client.generate(prompt="draw", model="gpt-5.4")
+
+    assert response.images == [PNG_DATA_URL]
+    assert captured["token_proxy"] == proxy
+    assert captured["client_kwargs"]["proxy"] == proxy
+    assert captured["client_kwargs"]["trust_env"] is False
+
+
+@pytest.mark.asyncio
 async def test_codex_stops_reading_after_completed_event(monkeypatch) -> None:
     import sys
     from dataclasses import dataclass

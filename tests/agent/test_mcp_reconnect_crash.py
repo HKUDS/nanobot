@@ -27,7 +27,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import MCPServerConfig
 from nanobot.security import network as security_network
 
-_IDLE_TIMEOUT_SECONDS = 5
+_IDLE_TIMEOUT_SECONDS = 0.25
+_IDLE_EXPIRY_GRACE_SECONDS = 0.25
 _TOOL_TIMEOUT_SECONDS = 10
 
 
@@ -179,7 +180,7 @@ async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
     assert "Hello, first" in output
 
     # Wait for the server-side idle timeout to terminate the session.
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + 1)
+    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
 
     output = await asyncio.create_task(tool.execute(name="second"))
     assert "Hello, second" in output
@@ -207,7 +208,7 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
     assert isinstance(tool, MCPToolWrapper)
 
     await asyncio.create_task(tool.execute(name="first"))
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + 1)
+    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
 
     reconnect_started = asyncio.Event()
     finish_reconnect = asyncio.Event()

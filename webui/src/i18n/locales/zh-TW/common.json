@@ -895,7 +895,7 @@
         "edit": "編輯引導",
         "drag": "拖曳排序"
       },
-      "attachImage": "附加圖片",
+      "attachImage": "附加檔案",
       "imageMode": {
         "label": "圖片生成",
         "toggle": "切換圖片生成模式",
@@ -1010,12 +1010,17 @@
       "encoding": "處理中…",
       "remove": "移除附件",
       "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
+      "textTooLarge": "訊息文字過大（最大 {{max}}）",
       "imageRejected": {
         "unsupported_type": "不支援的檔案類型",
+        "empty_file": "無法附加空白檔案",
+        "too_many_attachments": "每則訊息最多 {{max}} 個附件",
         "too_many_images": "每則訊息最多 {{max}} 張圖片",
         "magic_mismatch": "檔案看起來不像真正的圖片",
         "decode_failed": "無法解碼這張圖片",
-        "too_large": "圖片太大，請換一張小一點的",
+        "too_large": "檔案太大，請換一個小一點的",
+        "total_too_large": "附件總大小過大，請移除部分檔案或使用更小的檔案",
+        "transport_too_large": "此附件會超過閘道的傳輸上限",
         "io": "無法讀取這個檔案"
       },
       "mentions": {

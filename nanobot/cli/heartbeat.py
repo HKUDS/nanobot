@@ -11,7 +11,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.schema import Config
-from nanobot.utils.evaluator import evaluate_response
+from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 
 HEARTBEAT_PREAMBLE = (
     "[Your response will be delivered directly to the user's messaging app. "
@@ -385,11 +385,13 @@ async def run_heartbeat_trigger(
                 chat_id=chat_id,
             )
 
+        evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
         should_notify = await evaluate_response(
-            response,
-            prompt,
-            agent.provider,
-            agent.model,
+            response=response,
+            task_context=prompt,
+            provider=agent.provider,
+            model=agent.model,
+            evaluator_prompt=evaluator_prompt,
             default_notify=False,
         )
         if should_notify and deliver_to_channel is not None:

@@ -4,6 +4,8 @@ Config file: `~/.nanobot/config.json`
 
 This is the full reference. If this is your first install, start with [`quick-start.md`](./quick-start.md). If you are trying to choose a model or fix provider/model matching, use [`providers.md`](./providers.md) first and come back here for exact fields and advanced options.
 
+For normal local use, prefer the WebUI before editing JSON: **Settings → Models** manages model choices and provider credentials, **Settings → Channels** guides chat-platform setup, other Settings pages cover built-in capabilities, and **Apps** manages CLI App and MCP integrations. Edit `config.json` directly when you need an advanced field, automate deployment, or intentionally manage configuration as code.
+
 The JSON examples below are usually partial snippets to merge into your existing config, not full replacement files. For the mental model behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
 
 The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`. snake_case keys are also accepted for compatibility, but the docs prefer camelCase because that is what nanobot writes back to disk.
@@ -11,7 +13,7 @@ The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`
 For setup and runtime failures, follow the diagnosis order in [`troubleshooting.md`](./troubleshooting.md) before changing multiple config areas at once.
 
 > [!NOTE]
-> If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
+> If your config file is older than the current schema, run `nanobot onboard --refresh`. nanobot adds missing default fields while preserving your existing values.
 
 ## Configuration Guides
 
@@ -47,9 +49,9 @@ the focused guides first and come back here for exact fields and defaults.
 | Control access and pairing | [Pairing](#pairing) |
 | Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
 
-## Where to Edit First
+## Where a Setting Lives
 
-If you are not sure where a setting belongs, start from the task you are trying to complete. Most changes touch one config section and one verification command.
+If the WebUI does not expose the option you need, start from the task below. Most advanced changes touch one config section and one verification command.
 
 | Task | First keys to check | Verify with | Deep dive |
 |---|---|---|---|
@@ -185,7 +187,7 @@ These variables are process-level switches. Set them in the same terminal, servi
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NANOBOT_MAX_CONCURRENT_REQUESTS` | `3` | Maximum concurrently running inbound agent requests. Must be an integer; set `0` or a negative value for unlimited. |
-| `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds, around ordinary LLM requests. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
+| `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds. Ordinary requests use this value; streaming requests use the greater of 300 seconds or twice this value. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
 | `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Streaming idle timeout, in seconds, used by streaming providers. Invalid or non-positive values are ignored; values above `3600` are clamped. |
 | `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for OpenAI-compatible providers. Invalid or non-positive values are ignored. |
 | `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` | unset | Marks that an external workspace sandbox is already enforced. Truthy values (`1`, `true`, `yes`, `on`, `enabled`) use `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` as the label; any other non-false value is treated as the provider name. |
@@ -2030,6 +2032,10 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
 | `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
 | `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
+
+### Custom heartbeat evaluator prompt
+
+The notification gate runs on a built-in system prompt. Advanced users can override it, but you rarely need to — it's strongly advised to first read the evaluator code and the default `evaluator.md`. To override, drop your prompt at `<workspace>/prompts/evaluator.md`. It must still instruct the model to call the `evaluate_notification` tool; otherwise the gate fails closed and stays silent.
 
 
 ## Subagent Concurrency

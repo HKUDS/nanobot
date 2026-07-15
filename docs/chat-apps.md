@@ -26,11 +26,23 @@ nanobot agent -m "Hello!"
 
 If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `nanobot gateway` to stay running after the channel is configured.
 
-Most examples below are snippets to merge into `~/.nanobot/config.json`. When a
-snippet includes `allowFrom`, it is showing a static allowlist. For
-pairing-based access on supported channels, omit `allowFrom`; Slack and
-Mattermost also need `dm.policy` set to `"allowlist"` for DMs to issue pairing
-codes.
+## Recommended Setup in the WebUI
+
+For normal local setup, let the WebUI write and validate the channel config:
+
+1. Run `nanobot webui`.
+2. Open **Settings → Channels**.
+3. Search for the platform and open its setup panel.
+4. Follow the credential fields or QR flow. The screen tells you which platform-side token, permission, account, or URL it needs.
+5. Let nanobot install the optional channel support when prompted.
+6. Restart from the WebUI if it reports that a restart is required.
+7. Send a private test message. If the channel returns a pairing code, approve the pending request in the WebUI and send the message again.
+
+If your installed stable release does not show **Settings → Channels**, continue with the [manual setup pattern](#manual-setup-pattern) below or install current source.
+
+Optional package installation is available to a same-machine WebUI by default. Remote browser clients cannot change the Python environment unless an administrator explicitly enables that capability. Run `nanobot plugins enable <channel>` locally when the guided install is unavailable.
+
+The sections below explain what each chat platform requires and provide manual config for deployments that manage `config.json` directly.
 
 > [!NOTE]
 > If you are upgrading from a version where chat app SDKs were installed by default,
@@ -47,7 +59,9 @@ codes.
 > nanobot keeps the saved settings, but stops loading that channel after the
 > next restart.
 
-## Common Setup Pattern
+## Manual Setup Pattern
+
+Most examples below are snippets to merge into `~/.nanobot/config.json`. When a snippet includes `allowFrom`, it is showing a static allowlist. For pairing-based access on supported channels, omit `allowFrom`; Slack and Mattermost also need `dm.policy` set to `"allowlist"` for DMs to issue pairing codes.
 
 Every chat app uses the same shape:
 

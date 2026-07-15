@@ -15,7 +15,7 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { getHostApi } from "@/lib/runtime";
+import { getRuntimeHost } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 import {
   isAbsoluteWorkspacePath,
@@ -55,8 +55,8 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const hostApi = getHostApi();
-  const nativeProjectPicker = !!hostApi;
+  const pickFolder = getRuntimeHost().pickFolder;
+  const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {
     if (!open) return;
@@ -90,17 +90,17 @@ export function WorkspaceProjectPicker({
   );
 
   const pickNativeFolder = useCallback(async () => {
-    if (!hostApi || disabled) return;
+    if (!pickFolder || disabled) return;
     setPickingFolder(true);
     try {
-      const picked = await hostApi.pickFolder();
+      const picked = await pickFolder();
       if (picked) applyProjectPath(picked);
     } catch (err) {
       setPathError((err as Error).message);
     } finally {
       setPickingFolder(false);
     }
-  }, [applyProjectPath, disabled, hostApi]);
+  }, [applyProjectPath, disabled, pickFolder]);
 
   if (!visible || !defaultScope || !onChange) return null;
 

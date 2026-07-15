@@ -81,8 +81,8 @@ type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
  */
 export type StreamError =
   /** Server rejected the inbound frame as too large (WS close code 1009).
-   * Typically means the user attached images whose base64 size exceeded
-   * ``maxMessageBytes`` on the server. */
+   * This is the transport fallback after text and attachment policies have
+   * already been checked independently. */
   | { kind: "message_too_big" }
   | { kind: "workspace_scope_rejected"; reason?: string; chatId?: string };
 

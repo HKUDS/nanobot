@@ -1,10 +1,9 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
+
 import pytest
-from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
-
+from nanobot.utils.gitstore import CommitInfo, GitStore
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -64,7 +63,11 @@ class TestBuildGitignore:
         content = gs._build_gitignore()
         assert "!a.md\n" in content
         assert "!b.md\n" in content
-        dir_lines = [l for l in content.split("\n") if l.startswith("!") and l.endswith("/")]
+        dir_lines = [
+            line
+            for line in content.split("\n")
+            if line.startswith("!") and line.endswith("/")
+        ]
         assert dir_lines == []
 
 

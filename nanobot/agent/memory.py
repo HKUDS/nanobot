@@ -29,6 +29,12 @@ from nanobot.utils.helpers import (
     truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
+from nanobot.utils.workspace_prompts import (
+    WORKSPACE_PROMPT_MAX_CHARS,
+    has_workspace_prompt_override,
+    load_workspace_prompt_override,
+    workspace_prompt_file,
+)
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -492,14 +498,10 @@ class MemoryStore:
 
     @property
     def dream_prompt_file(self) -> Path:
-        return self.workspace / "prompts" / "dream.md"
+        return workspace_prompt_file(self.workspace, "dream")
 
     def has_dream_prompt_override(self) -> bool:
-        with suppress(OSError):
-            return self.dream_prompt_file.is_file() and bool(
-                self.dream_prompt_file.read_text(encoding="utf-8").strip()
-            )
-        return False
+        return has_workspace_prompt_override(self.dream_prompt_file)
 
     @staticmethod
     def default_dream_prompt() -> str:
@@ -512,20 +514,19 @@ class MemoryStore:
         )
 
     def _dream_template(self) -> str:
-        with suppress(OSError):
-            text = self.dream_prompt_file.read_text(encoding="utf-8")
-            if text.strip():
-                text = text.rstrip()
-                if len(text) > _DREAM_PROMPT_MAX_CHARS:
-                    if not self._dream_prompt_oversize_logged:
-                        self._dream_prompt_oversize_logged = True
-                        logger.warning(
-                            "workspace Dream prompt exceeds {} chars ({}); truncating. "
-                            "Further occurrences suppressed.",
-                            _DREAM_PROMPT_MAX_CHARS, len(text),
-                        )
-                    return truncate_text(text, _DREAM_PROMPT_MAX_CHARS)
-                return text
+        text, original_chars = load_workspace_prompt_override(self.dream_prompt_file)
+        if text is not None:
+            if (
+                original_chars > WORKSPACE_PROMPT_MAX_CHARS
+                and not self._dream_prompt_oversize_logged
+            ):
+                self._dream_prompt_oversize_logged = True
+                logger.warning(
+                    "workspace Dream prompt exceeds {} chars ({}); truncating. "
+                    "Further occurrences suppressed.",
+                    WORKSPACE_PROMPT_MAX_CHARS, original_chars,
+                )
+            return text
         return self.default_dream_prompt()
 
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
@@ -734,7 +735,6 @@ class MemoryStore:
 # that catches any new caller that forgot to set its own cap.
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
-_DREAM_PROMPT_MAX_CHARS = 32_000      # workspace-local Dream prompt override
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
 
 

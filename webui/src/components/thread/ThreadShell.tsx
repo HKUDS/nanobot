@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
+import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
@@ -9,9 +10,11 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
-import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
+import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import {
+  ApiError,
+  fetchFilePreviewAvailability,
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
@@ -108,6 +111,12 @@ const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
 const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+
+type FilePreviewAvailabilityCacheEntry = {
+  available?: boolean;
+  promise: Promise<boolean>;
+  revision: number;
+};
 
 function clampFilePreviewWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, FILE_PREVIEW_MIN_WIDTH), maxWidth);
@@ -212,7 +221,7 @@ function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
 
 interface PendingFirstMessage {
   content: string;
-  images?: SendImage[];
+  images?: SendAttachment[];
   options?: SendOptions;
 }
 
@@ -238,7 +247,7 @@ function useInstalledSettingItems<Payload, Item>({
       const payload = await fetchPayload(token);
       if (!isCancelled?.()) setItems(selectItems(payload));
     } catch {
-      if (!isCancelled?.()) setItems([]);
+      // Keep the last successful catalog during transient focus/visibility refresh failures.
     }
   }, [fetchPayload, selectItems, token]);
 
@@ -311,7 +320,7 @@ export function ThreadShell({
     version: historyVersion,
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
-  const { client, modelName, token } = useClient();
+  const { client, ingressLimits, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const cliApps = useInstalledSettingItems({
@@ -397,6 +406,48 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  const filePreviewAvailabilityCache = useMemo(
+    () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
+    [historyKey, token],
+  );
+  const filePreviewAvailabilityRevision = displayMessages.length;
+  const resolveFilePreviewAvailability = useCallback((path: string) => {
+    if (!historyKey) return Promise.resolve(false);
+    const cached = filePreviewAvailabilityCache.get(path);
+    if (
+      cached
+      && (cached.available !== false || cached.revision === filePreviewAvailabilityRevision)
+    ) {
+      return cached.promise;
+    }
+    const pending = fetchFilePreviewAvailability(token, historyKey, path).catch(
+      (error: unknown) => {
+        if (error instanceof ApiError) {
+          if (error.status === 404 && /API route not found/i.test(error.message)) {
+            return true;
+          }
+          if ([400, 403, 404, 415].includes(error.status)) return false;
+        }
+        return false;
+      },
+    );
+    const entry: FilePreviewAvailabilityCacheEntry = {
+      promise: pending,
+      revision: filePreviewAvailabilityRevision,
+    };
+    filePreviewAvailabilityCache.set(path, entry);
+    void pending.then((available) => {
+      if (filePreviewAvailabilityCache.get(path) === entry) {
+        entry.available = available;
+      }
+    });
+    return pending;
+  }, [
+    filePreviewAvailabilityCache,
+    filePreviewAvailabilityRevision,
+    historyKey,
+    token,
+  ]);
 
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
@@ -589,7 +640,7 @@ export function ThreadShell({
   }, [token]);
 
   const handleWelcomeSend = useCallback(
-    async (content: string, images?: SendImage[], options?: SendOptions) => {
+    async (content: string, images?: SendAttachment[], options?: SendOptions) => {
       if (booting) return;
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
@@ -607,7 +658,7 @@ export function ThreadShell({
   );
 
   const handleThreadSend = useCallback(
-    (content: string, images?: SendImage[], options?: SendOptions) => {
+    (content: string, images?: SendAttachment[], options?: SendOptions) => {
       setScrollToLatestUserPromptSignal((value) => value + 1);
       send(content, images, withWorkspaceScope(options));
     },
@@ -754,6 +805,7 @@ export function ThreadShell({
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
+          ingressLimits={ingressLimits}
         />
       ) : (
         <ThreadComposer
@@ -785,6 +837,7 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
+          ingressLimits={ingressLimits}
         />
       )}
     </>
@@ -828,26 +881,31 @@ export function ThreadShell({
             sessionInfoAction={sessionInfoAction}
           />
         ) : null}
-        <ThreadViewport
-          ref={viewportRef}
-          messages={displayMessages}
-          isStreaming={isStreaming}
-          emptyState={emptyState}
-          composer={composer}
-          scrollToBottomSignal={scrollToBottomSignal}
-          scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
-          conversationKey={historyKey}
-          showScrollToBottomButton={!!session}
-          cliApps={cliApps}
-          mcpPresets={mcpPresets}
-          forkBoundaryMessageCount={forkBoundaryMessageCount}
-          hasMoreBefore={hasMoreBefore}
-          loadingOlder={loadingOlder}
-          userMessageOffset={userMessageOffset}
-          onLoadOlder={loadOlder}
-          onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
-          onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
-        />
+        <FilePreviewAvailabilityProvider
+          resolve={historyKey ? resolveFilePreviewAvailability : undefined}
+        >
+          <ThreadViewport
+            ref={viewportRef}
+            messages={displayMessages}
+            isStreaming={isStreaming}
+            emptyState={emptyState}
+            composer={composer}
+            scrollToBottomSignal={scrollToBottomSignal}
+            scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
+            conversationKey={historyKey}
+            showScrollToBottomButton={!!session}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            slashCommands={slashCommands}
+            forkBoundaryMessageCount={forkBoundaryMessageCount}
+            hasMoreBefore={hasMoreBefore}
+            loadingOlder={loadingOlder}
+            userMessageOffset={userMessageOffset}
+            onLoadOlder={loadOlder}
+            onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+            onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+          />
+        </FilePreviewAvailabilityProvider>
       </div>
       {filePreviewPath && historyKey ? (
         <FilePreviewPanel

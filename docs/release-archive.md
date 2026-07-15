@@ -6,6 +6,23 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-07-12** 🎯 Explicit `/goal` activation, safer runtime and workspace access.
+- **2026-07-11** 🛠️ Syntax-highlighted previews and diffs, queued prompts, safer edits.
+- **2026-07-10** 🧠 Stable model routing, multiline CLI input, new automation guide.
+- **2026-07-09** 📝 Live file-edit diffs, safer localhost setup, Matrix image fixes.
+- **2026-07-08** 🔐 Safer WebUI/API setup, onboard refresh, responsive prompt rail.
+- **2026-07-07** ⌨️ CLI multiline input, steadier slash commands, safer web fetching.
+- **2026-07-06** 💬 Mattermost channel, Serper search, safer Windows shells.
+- **2026-07-04** 🔌 MCP reconnects, safer Copilot refresh, Windows shutdown fixes.
+- **2026-07-03** 🧙 Guided WebUI setup, plugin controls, Claude Sonnet 4.6 default.
+- **2026-07-02** ⏰ Local triggers with recovery, audit history, WebUI pending status.
+- **2026-07-01** 🛡️ API keys for remote binds, `$skill` shortcuts, clearer tool errors.
+- **2026-06-30** 🌐 Provider proxies, Copilot Enterprise, steadier WhatsApp and Weixin.
+- **2026-06-29** 🧠 Context replay scaled to model windows, without fixed message caps.
+- **2026-06-28** 🖼️ MCP images, steadier WebUI reconnects, safer tool calls.
+- **2026-06-27** 🔒 Collision-safe sessions, safer shells, Neonize WhatsApp.
+- **2026-06-25** 🎛️ Thinking controls, MiMo voice input, opt-in Telegram rich messages.
+- **2026-06-24** 🌙 Kimi Coding and OpenCode, steadier reasoning and Anthropic tool calls.
 - **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
 - **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
 - **2026-06-20** 💬 Telegram rich messages, safer SDK concurrency, smoother Quick Start.

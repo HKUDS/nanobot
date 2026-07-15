@@ -175,6 +175,8 @@ interface AgentActivityClusterProps {
   hasBodyBelow: boolean;
   /** Persisted end-to-end turn latency from the assistant answer, used for history replay. */
   turnLatencyMs?: number;
+  /** User turn start timestamp for live activity before the first trace/reasoning row. */
+  startedAtMs?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
@@ -189,6 +191,7 @@ export function AgentActivityCluster({
   isTurnStreaming,
   hasBodyBelow,
   turnLatencyMs,
+  startedAtMs,
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
@@ -251,7 +254,13 @@ export function AgentActivityCluster({
   const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && messages.every(messageHasOnlyFileActivity);
   const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
-  const durationMs = activityDurationMs(messages, isTurnStreaming, now, turnLatencyMs);
+  const durationMs = activityDurationMs(
+    messages,
+    isTurnStreaming,
+    now,
+    turnLatencyMs,
+    startedAtMs,
+  );
   const activityDuration = formatActivityDuration(durationMs);
   const thoughtLabel = hasNonReasoningActivity
     ? isTurnStreaming
@@ -654,6 +663,7 @@ function activityDurationMs(
   active: boolean,
   now: number,
   completedLatencyMs?: number,
+  activeStartedAtMs?: number,
 ): number {
   if (!active && Number.isFinite(completedLatencyMs) && completedLatencyMs! >= 0) {
     return Math.round(completedLatencyMs!);
@@ -662,7 +672,9 @@ function activityDurationMs(
     .map((message) => message.createdAt)
     .filter((value) => Number.isFinite(value));
   if (!timestamps.length) return 0;
-  const first = Math.min(...timestamps);
+  const first = active && Number.isFinite(activeStartedAtMs)
+    ? activeStartedAtMs!
+    : Math.min(...timestamps);
   const last = active && first > 1_000_000_000_000
     ? now
     : Math.max(...timestamps);

@@ -710,10 +710,11 @@ class DingTalkChannel(BaseChannel):
         """Send a message through DingTalk."""
         token = await self._get_access_token()
         if not token:
-            return
+            raise RuntimeError("DingTalk access token unavailable")
 
         if msg.content and msg.content.strip():
-            await self._send_markdown_text(token, msg.chat_id, msg.content.strip())
+            if not await self._send_markdown_text(token, msg.chat_id, msg.content.strip()):
+                raise RuntimeError("DingTalk text message was not delivered")
 
         for media_ref in msg.media or []:
             ok = await self._send_media_ref(token, msg.chat_id, media_ref)
@@ -722,11 +723,12 @@ class DingTalkChannel(BaseChannel):
             self.logger.error("media send failed for {}", media_ref)
             # Send visible fallback so failures are observable by the user.
             filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
-            await self._send_markdown_text(
+            if not await self._send_markdown_text(
                 token,
                 msg.chat_id,
                 f"[Attachment send failed: {filename}]",
-            )
+            ):
+                raise RuntimeError("DingTalk attachment fallback was not delivered")
 
     async def _on_message(
         self,

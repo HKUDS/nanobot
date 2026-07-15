@@ -286,15 +286,17 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
-def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
-    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
-    chunks: list[str] = []
+def _split_telegram_markdown_html_chunks(
+    content: str, max_html_len: int,
+) -> list[tuple[str, str]]:
+    """Return raw Markdown and rendered HTML chunk pairs within Telegram's limit."""
+    chunks: list[tuple[str, str]] = []
     pending = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
     while pending:
         chunk = pending.pop(0)
         html = _markdown_to_telegram_html(chunk)
         if len(html) <= max_html_len:
-            chunks.append(html)
+            chunks.append((chunk, html))
             continue
 
         # Markdown can expand when rendered as HTML (tags/entities). Re-split
@@ -302,14 +304,17 @@ def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
         next_limit = max(1, int(len(chunk) * max_html_len / len(html)) - 8)
         next_limit = min(next_limit, len(chunk) - 1)
         if next_limit <= 0:
-            chunks.extend(split_message(html, max_html_len))
-            continue
+            raise ValueError("A rendered Telegram HTML token exceeds the message limit")
         parts = _split_telegram_markdown(chunk, next_limit)
         if len(parts) == 1 and parts[0] == chunk:
-            chunks.extend(split_message(html, max_html_len))
-            continue
+            raise ValueError("Unable to split Telegram Markdown within the HTML limit")
         pending = parts + pending
     return chunks
+
+
+def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
+    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
+    return [html for _, html in _split_telegram_markdown_html_chunks(content, max_html_len)]
 
 
 _SEND_MAX_RETRIES = 3
@@ -1057,31 +1062,57 @@ class TelegramChannel(BaseChannel):
         intermediate chunks as standalone messages, then opens a new message
         for the tail so subsequent deltas continue streaming into it.
         """
-        chunks = _split_telegram_markdown(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        chunks = _split_telegram_markdown_html_chunks(buf.text, TELEGRAM_HTML_MAX_LEN)
         if len(chunks) <= 1:
             return
+        first_markdown, first_html = chunks[0]
         try:
             await self._call_with_retry(
                 self._app.bot.edit_message_text,
                 chat_id=chat_id, message_id=buf.message_id,
-                text=chunks[0],
+                text=first_html,
+                parse_mode="HTML",
             )
-        except Exception as e:
+        except BadRequest as e:
             if not self._is_not_modified_error(e):
-                self.logger.warning("Stream overflow edit failed: {}", e)
-                raise
-        for chunk in chunks[1:-1]:
-            await self._call_with_retry(
-                self._app.bot.send_message,
-                chat_id=chat_id, text=chunk, **thread_kwargs,
-            )
-        tail = chunks[-1]
-        sent = await self._call_with_retry(
-            self._app.bot.send_message,
-            chat_id=chat_id, text=tail, **thread_kwargs,
-        )
+                self.logger.warning(
+                    "Stream overflow HTML edit failed, falling back to plain text: {}", e
+                )
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=chat_id, message_id=buf.message_id,
+                        text=first_markdown,
+                    )
+                except Exception as plain_error:
+                    if not self._is_not_modified_error(plain_error):
+                        self.logger.warning("Stream overflow plain edit failed: {}", plain_error)
+                        raise
+        except Exception as e:
+            self.logger.warning("Stream overflow edit failed: {}", e)
+            raise
+
+        async def send_chunk(markdown: str, html: str) -> Any:
+            try:
+                return await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=chat_id, text=html, parse_mode="HTML", **thread_kwargs,
+                )
+            except BadRequest as e:
+                self.logger.warning(
+                    "Stream overflow HTML send failed, falling back to plain text: {}", e
+                )
+                return await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=chat_id, text=markdown, **thread_kwargs,
+                )
+
+        for markdown, html in chunks[1:-1]:
+            await send_chunk(markdown, html)
+        markdown_tail, tail_html = chunks[-1]
+        sent = await send_chunk(markdown_tail, tail_html)
         buf.message_id = sent.message_id
-        buf.text = tail
+        buf.text = markdown_tail
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

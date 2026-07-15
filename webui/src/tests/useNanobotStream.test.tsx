@@ -1520,6 +1520,37 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].turnPhase).toBe("user");
   });
 
+  it("adds optimistic user file attachments as media", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-send", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const attachment = {
+      media: {
+        data_url: "data:application/pdf;base64,JVBERi0xLjQ=",
+        name: "report.pdf",
+      },
+      preview: {
+        kind: "file" as const,
+        url: "data:application/pdf;base64,JVBERi0xLjQ=",
+        name: "report.pdf",
+      },
+    };
+
+    act(() => {
+      result.current.send("summarize", [attachment]);
+    });
+
+    expect(result.current.messages[0].media).toEqual([attachment.preview]);
+    expect(result.current.messages[0].images).toBeUndefined();
+    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+      "chat-file-send",
+      "summarize",
+      [attachment.media],
+      expect.objectContaining({ turnId: expect.any(String) }),
+    );
+  });
+
   it("attaches assistant media_urls to complete messages", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-m", EMPTY_MESSAGES), {

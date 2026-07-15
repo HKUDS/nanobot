@@ -38,6 +38,7 @@ import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
+  BootstrapResponse,
   ChatSummary,
   RuntimeSurface,
   PairingRequestInfo,
@@ -56,7 +57,6 @@ import {
 } from "@/lib/api";
 import {
   createRuntimeHost,
-  getHostApi,
   toRuntimeSurface,
 } from "@/lib/runtime";
 import { projectNameFromPath } from "@/lib/workspace";
@@ -71,6 +71,7 @@ type BootState =
       token: string;
       tokenExpiresAt: number;
       modelName: string | null;
+      ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
     };
 
@@ -801,6 +802,7 @@ export default function App() {
               token: boot.api_token,
               tokenExpiresAt,
               modelName: boot.model_name ?? current.modelName,
+              ingressLimits: boot.limits ?? current.ingressLimits,
               runtimeSurface,
             }
           : current,
@@ -842,6 +844,7 @@ export default function App() {
             token: boot.api_token,
             tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
             modelName: boot.model_name ?? null,
+            ingressLimits: boot.limits ?? null,
             runtimeSurface,
           });
         } catch (e) {
@@ -935,8 +938,8 @@ export default function App() {
   };
 
   const handleNativeEngineRestart = async (): Promise<string> => {
-    const hostApi = getHostApi();
-    if (!hostApi?.restartEngine) {
+    const runtimeHost = createRuntimeHost(state.runtimeSurface);
+    if (!runtimeHost.restartEngine) {
       throw new Error("native engine restart is unavailable");
     }
     rememberRestartRoute();
@@ -946,7 +949,7 @@ export default function App() {
       // ignore storage errors
     }
     try {
-      await hostApi.restartEngine();
+      await runtimeHost.restartEngine();
       const refreshed = await refreshReadyClient(state.client, state.runtimeSurface);
       return refreshed.token;
     } finally {
@@ -964,6 +967,7 @@ export default function App() {
       client={state.client}
       token={state.token}
       modelName={state.modelName}
+      ingressLimits={state.ingressLimits}
     >
       <Shell
         runtimeSurface={state.runtimeSurface}

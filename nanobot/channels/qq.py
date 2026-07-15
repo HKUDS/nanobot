@@ -243,8 +243,7 @@ class QQChannel(BaseChannel):
         """Send attachments first, then text."""
         try:
             if not self._client:
-                self.logger.warning("client not initialized")
-                return
+                raise RuntimeError("QQ client not initialized")
 
             msg_id = msg.metadata.get("message_id")
             chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
@@ -284,6 +283,7 @@ class QQChannel(BaseChannel):
             raise
         except Exception:
             self.logger.exception("Error sending message to chat_id={}", msg.chat_id)
+            raise
 
     async def _send_text_only(
         self,

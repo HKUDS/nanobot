@@ -308,9 +308,31 @@ export interface BootstrapResponse {
   ws_path: string;
   ws_url?: string | null;
   expires_in: number;
+  limits?: WebUIIngressLimits;
   model_name?: string | null;
   runtime_surface?: RuntimeSurface;
   runtime_capabilities?: RuntimeCapabilities;
+}
+
+export interface WebUITransportLimits {
+  max_frame_bytes: number;
+  envelope_reserve_bytes: number;
+}
+
+export interface WebUIMessageLimits {
+  max_text_bytes: number;
+}
+
+export interface WebUIAttachmentLimits {
+  max_count: number;
+  max_file_bytes: number;
+  max_total_bytes: number;
+}
+
+export interface WebUIIngressLimits {
+  transport: WebUITransportLimits;
+  message: WebUIMessageLimits;
+  attachments: WebUIAttachmentLimits;
 }
 
 export type RuntimeSurface = "browser" | "native";
@@ -1050,12 +1072,11 @@ export type InboundEvent =
     }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string };
 
-/** Base64-encoded image attached to an outbound ``message`` envelope.
+/** Base64-encoded file attached to an outbound ``message`` envelope.
  *
- * ``data_url`` must be a ``data:image/<png|jpeg|webp|gif>;base64,...`` string
- * — the server whitelists those MIME types and rejects everything else
- * (including SVG, to avoid an XSS surface). ``name`` is advisory: it's
- * preserved for the file on disk and surfaced as the placeholder label when
+ * ``data_url`` must use a server-whitelisted image, video, or document MIME
+ * type. SVG remains rejected on ingress to avoid an embedded-script XSS
+ * surface. ``name`` is advisory and is surfaced as the placeholder label when
  * the session is replayed.
  */
 export interface OutboundMedia {

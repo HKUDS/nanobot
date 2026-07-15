@@ -136,7 +136,7 @@ import {
   type LocalDensity,
   type LocalPreferences,
 } from "@/lib/local-preferences";
-import { getHostApi } from "@/lib/runtime";
+import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -6695,7 +6695,11 @@ function RuntimeSettings({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const isNativeHost = getHostApi() !== null || (settings.surface ?? settings.runtime_surface) === "native";
+  const runtimeSurface = settings.surface ?? settings.runtime_surface;
+  const runtimeHost = getRuntimeHost(runtimeSurface, settings.runtime_capabilities);
+  const openLogs = runtimeHost.openLogs;
+  const exportDiagnostics = runtimeHost.exportDiagnostics;
+  const isNativeHost = isNativeRuntime(runtimeSurface);
   const restartActionLabel = isNativeHost
     ? tx("app.system.restartEngine", "Restart engine")
     : t("app.system.restart");
@@ -6709,7 +6713,6 @@ function RuntimeSettings({
   } | null>(null);
   const [hostActionBusy, setHostActionBusy] =
     useState<"logs" | "diagnostics" | null>(null);
-  const hostApi = getHostApi();
   const apiDefaults = apiService ?? {
     installed: false,
     running: false,
@@ -6741,11 +6744,11 @@ function RuntimeSettings({
       : tx("settings.values.ready", "Ready");
   const runHostAction = async (
     target: "logs" | "diagnostics",
-    action: () => Promise<string | void>,
+    action: (() => Promise<string | void>) | undefined,
     successMessage: (result: string | void) => string,
     failureMessage: string,
   ) => {
-    if (!hostApi) {
+    if (!action) {
       setHostActionMessage({
         target,
         message: tx(
@@ -6832,7 +6835,7 @@ function RuntimeSettings({
                   onClick={() =>
                     void runHostAction(
                       "logs",
-                      () => hostApi!.openLogs(),
+                      openLogs,
                       () => tx("settings.status.logsOpened", "Opened logs folder."),
                       tx("settings.status.logsOpenFailed", "Could not open logs folder."),
                     )
@@ -6863,11 +6866,11 @@ function RuntimeSettings({
                   onClick={() =>
                     void runHostAction(
                       "diagnostics",
-                      async () => {
-                        const path = await hostApi!.exportDiagnostics();
+                      exportDiagnostics ? async () => {
+                        const path = await exportDiagnostics();
                         setDiagnosticsPath(path);
                         return path;
-                      },
+                      } : undefined,
                       (path) =>
                         t("settings.status.diagnosticsExported", {
                           path: String(path ?? ""),
@@ -8308,7 +8311,7 @@ function RestartSettingsFooter({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const isNativeHost = getHostApi() !== null;
+  const isNativeHost = isNativeRuntime();
   const restartLabel = isNativeHost
     ? tx("app.system.restartEngine", "Restart engine")
     : t("app.system.restart");
