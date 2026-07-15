@@ -332,22 +332,33 @@ def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path
         assert not (left.get("role") == right.get("role") == "assistant")
 
 
-def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
-    """Always skills should appear in Active Skills but NOT in the skills index."""
+def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:
+    """Memory search guidance should be discoverable without loading its full body."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     prompt = builder.build_system_prompt()
 
-    # memory skill should be in Active Skills section
-    assert "# Active Skills" in prompt
-    assert "### Skill: memory" in prompt
+    assert "### Skill: memory" not in prompt
+    assert "**memory**" in prompt
+    assert "Search Past Events" not in prompt
+    assert "Examples (replace `keyword`)" not in prompt
 
-    # memory skill should NOT appear in the skills index
-    skills_section = prompt.split("# Skills\n", 1)
-    if len(skills_section) > 1:
-        index_text = skills_section[1].split("\n\n---")[0]
-        assert "**memory**" not in index_text
+
+def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
+    from nanobot.utils.helpers import sync_workspace_templates
+
+    workspace = _make_workspace(tmp_path)
+    sync_workspace_templates(workspace, silent=True)
+
+    prompt = ContextBuilder(workspace).build_system_prompt()
+
+    assert "## AGENTS.md" not in prompt
+    assert "## USER.md" not in prompt
+    assert "8281248569" not in prompt
+    assert "(your name)" not in prompt
+    assert "apt/brew" not in prompt
+    assert prompt.count("Do not use the 'message' tool for normal replies") == 1
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:
@@ -359,10 +370,7 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     builder = ContextBuilder(workspace)
     prompt = builder.build_system_prompt()
 
-    # The "# Memory\n\n## Long-term Memory" block is produced only by
-    # build_system_prompt() when MEMORY.md is injected.  The memory skill
-    # also contains "# Memory" but is followed by "## Structure", not
-    # "## Long-term Memory".
+    # This block is produced only when populated long-term memory is injected.
     assert "# Memory\n\n## Long-term Memory" not in prompt
     assert "This file is automatically updated by nanobot" not in prompt
 

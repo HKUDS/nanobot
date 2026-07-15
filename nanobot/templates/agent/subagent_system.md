@@ -11,7 +11,7 @@ Stay focused on the assigned task. Your final response will be reported back to 
 
 ## Skills
 
-Read SKILL.md with read_file to use a skill.
+Each group lists one absolute root and relative SKILL.md paths. Join them when using `read_file`.
 
 {{ skills_summary }}
 {% endif %}

@@ -78,6 +78,11 @@ class TestLoadBootstrapFiles:
         builder = _builder(tmp_path)
         assert builder._load_bootstrap_files() == ""
 
+    def test_empty_bootstrap_files(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("\n", encoding="utf-8")
+        builder = _builder(tmp_path)
+        assert builder._load_bootstrap_files() == ""
+
     def test_agents_md(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Be helpful.", encoding="utf-8")
         builder = _builder(tmp_path)
@@ -115,6 +120,66 @@ class TestLoadBootstrapFiles:
         builder = _builder(tmp_path)
         result = builder._load_bootstrap_files()
         assert "用中文回复" in result
+
+    def test_selected_project_supplies_only_agents_file(self, tmp_path):
+        agent_home = tmp_path / "agent-home"
+        project = tmp_path / "project"
+        agent_home.mkdir()
+        project.mkdir()
+        (agent_home / "AGENTS.md").write_text("global project rules", encoding="utf-8")
+        (agent_home / "SOUL.md").write_text("global soul", encoding="utf-8")
+        (agent_home / "USER.md").write_text("global user", encoding="utf-8")
+        (project / "AGENTS.md").write_text("selected project rules", encoding="utf-8")
+        (project / "SOUL.md").write_text("project soul collision", encoding="utf-8")
+        (project / "USER.md").write_text("project user collision", encoding="utf-8")
+
+        result = ContextBuilder(agent_home).build_system_prompt(
+            workspace=project,
+            include_memory_recent_history=False,
+        )
+
+        assert "selected project rules" in result
+        assert "global project rules" not in result
+        assert "global soul" in result
+        assert "global user" in result
+        assert "project soul collision" not in result
+        assert "project user collision" not in result
+
+    def test_selected_project_without_agents_does_not_fall_back(self, tmp_path):
+        agent_home = tmp_path / "agent-home"
+        project = tmp_path / "project"
+        agent_home.mkdir()
+        project.mkdir()
+        (agent_home / "AGENTS.md").write_text("default workspace rules", encoding="utf-8")
+
+        result = ContextBuilder(agent_home).build_system_prompt(
+            workspace=project,
+            include_memory_recent_history=False,
+        )
+
+        assert "default workspace rules" not in result
+
+    def test_unmodified_agents_and_user_templates_are_skipped(self, tmp_path):
+        from nanobot.utils.helpers import sync_workspace_templates
+
+        sync_workspace_templates(tmp_path, silent=True)
+
+        result = ContextBuilder(tmp_path)._load_bootstrap_files()
+
+        assert "## AGENTS.md" not in result
+        assert "## USER.md" not in result
+        assert "## SOUL.md" in result
+
+    def test_customized_user_template_is_loaded(self, tmp_path):
+        from nanobot.utils.helpers import sync_workspace_templates
+
+        sync_workspace_templates(tmp_path, silent=True)
+        (tmp_path / "USER.md").write_text("User prefers Chinese.", encoding="utf-8")
+
+        result = ContextBuilder(tmp_path)._load_bootstrap_files()
+
+        assert "## USER.md" in result
+        assert "User prefers Chinese." in result
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +303,19 @@ class TestBuildSystemPrompt:
         builder = _builder(tmp_path)
         result = builder.build_system_prompt()
         assert "workspace" in result.lower() or "python" in result.lower()
+
+    def test_selected_project_identity_keeps_agent_data_in_agent_workspace(self, tmp_path):
+        agent_home = tmp_path / "agent-home"
+        project = tmp_path / "project"
+        agent_home.mkdir()
+        project.mkdir()
+
+        result = ContextBuilder(agent_home)._get_identity(workspace=project)
+
+        assert f"current project workspace is at: {project.resolve()}" in result
+        assert f"agent workspace is at: {agent_home.resolve()}" in result
+        assert f"{agent_home.resolve()}/SOUL.md" in result
+        assert f"{project.resolve()}/SOUL.md" not in result
 
     def test_includes_bootstrap_files(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Be helpful and concise.", encoding="utf-8")

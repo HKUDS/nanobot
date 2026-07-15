@@ -82,6 +82,19 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
     assert file_tools.isdisjoint(tools.tool_names)
 
 
+def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+
+    prompt = manager._build_subagent_prompt()
+
+    assert "one absolute root and relative SKILL.md paths" in prompt
+    assert "Join them when using `read_file`" in prompt
+
+
 @pytest.mark.asyncio
 async def test_subagent_forwards_fail_on_tool_error_to_runner(tmp_path):
     provider = MagicMock(spec=LLMProvider)

@@ -125,21 +125,34 @@ class SkillsLoader:
         if not all_skills:
             return ""
 
-        lines: list[str] = []
-        for entry in all_skills:
-            skill_name = entry["name"]
-            if exclude and skill_name in exclude:
+        sections: list[str] = []
+        groups = (
+            ("Workspace skills", "workspace", self.workspace_skills),
+            ("Built-in skills", "builtin", self.builtin_skills),
+        )
+        for label, source, root in groups:
+            entries = [
+                entry
+                for entry in all_skills
+                if entry["source"] == source and (not exclude or entry["name"] not in exclude)
+            ]
+            if not entries:
                 continue
-            meta = self._get_skill_meta(skill_name)
-            available = self._check_requirements(meta)
-            desc = self._get_skill_description(skill_name)
-            if available:
-                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
-            else:
-                missing = self._get_missing_requirements(meta)
-                suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
-                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
-        return "\n".join(lines)
+
+            lines = [f"### {label} (`{root.expanduser().resolve()}`)"]
+            for entry in entries:
+                skill_name = entry["name"]
+                meta = self._get_skill_meta(skill_name)
+                available = self._check_requirements(meta)
+                desc = self._get_skill_description(skill_name)
+                suffix = ""
+                if not available:
+                    missing = self._get_missing_requirements(meta)
+                    suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
+                relative_path = Path(entry["path"]).relative_to(root).as_posix()
+                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{relative_path}`")
+            sections.append("\n".join(lines))
+        return "\n\n".join(sections)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""

@@ -297,6 +297,32 @@ def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> N
     assert "beta" in summary
 
 
+def test_build_skills_summary_groups_paths_by_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace_skills = workspace / "skills"
+    workspace_skills.mkdir(parents=True)
+    workspace_path = _write_skill(workspace_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    builtin_path = _write_skill(builtin, "beta", body="# Beta")
+
+    summary = SkillsLoader(workspace, builtin_skills_dir=builtin).build_skills_summary()
+
+    assert summary.count(str(workspace_skills)) == 1
+    assert summary.count(str(builtin)) == 1
+    assert str(workspace_path) not in summary
+    assert str(builtin_path) not in summary
+    assert "`alpha/SKILL.md`" in summary
+    assert "`beta/SKILL.md`" in summary
+
+
+def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:
+    metadata = SkillsLoader(tmp_path).get_skill_metadata("update-setup")
+
+    assert metadata is not None
+    assert metadata["description"].startswith("One-time setup wizard")
+    assert "Triggers:" in metadata["description"]
+
+
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"

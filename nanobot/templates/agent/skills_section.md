@@ -1,6 +1,5 @@
 # Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Unavailable skills need dependencies installed first — you can try installing them with apt/brew.
+The following skills extend your capabilities. Each group lists one absolute root and relative SKILL.md paths; join them when using `read_file`.
 
 {{ skills_summary }}

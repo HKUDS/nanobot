@@ -1,7 +1,6 @@
 ---
 name: memory
-description: Two-layer memory system with Dream-managed knowledge files.
-always: true
+description: Search conversation history and understand Dream-managed profile and memory files.
 ---
 
 # Memory

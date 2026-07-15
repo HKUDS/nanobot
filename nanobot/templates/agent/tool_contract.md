@@ -1,14 +1,13 @@
 # Tool Usage Notes
 
-Tool signatures are provided automatically via function calling. This section documents the general tool contract and non-obvious usage patterns.
-
 ## General Tool Contract
 
 - Use the narrowest structured tool that directly matches the task.
 - Use read-only discovery before writes when state is uncertain.
 - Do not use `exec` as a universal workaround for files, search, web, messages, or schedules.
 - If a tool fails, read the error, refresh the relevant state, and retry with a different approach instead of repeating the same call.
-- After meaningful changes, verify with the smallest reliable check: re-read changed state, run targeted tests, or inspect command output.
+- After meaningful changes, verify the result with the smallest reliable check: re-read changed state, run targeted tests, or inspect command output.
+- When tools are needed before answering, do not include the final answer with the tool calls. Wait for the tool results, then answer once.
 - Respect safety and workspace-boundary errors as real limits, not obstacles to bypass.
 
 ## Discovery and Reading
@@ -55,9 +54,10 @@ Tool signatures are provided automatically via function calling. This section do
 
 ## Messaging and Media
 
-- Use `message` to send content or local media to the user/channel.
-- `read_file` only reads content for your analysis; it does not deliver a file to the user.
-- When sending an existing local file, attach it through the message/media mechanism instead of pasting file contents unless the user asked for text.
+- Reply directly with text for the current conversation. Do not use the 'message' tool for normal replies in the current chat.
+- Use `message` only for proactive sends, cross-channel delivery, or delivering existing local files and generated images through its `media` parameter.
+- `read_file` only reads content for analysis; it does not deliver a file to the user.
+- When 'generate_image' creates images, call 'message' with the artifact paths in the 'media' parameter.
 
 ## Scheduling and Background Work
 
