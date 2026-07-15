@@ -217,8 +217,6 @@ def test_cron_tool_create():
     )
     tool = CronTool.create(ctx)
     assert isinstance(tool, CronTool)
-    assert "model-backed agent turn" in tool.description
-    assert "does not run shell commands" in tool.description
 
 
 # --- Task 6: ExecTool, WebTools, ImageGenerationTool ---

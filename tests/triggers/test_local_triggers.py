@@ -147,6 +147,29 @@ def test_enqueue_writes_trigger_run_record(tmp_path: Path) -> None:
     assert record["updated_at_ms"] > 0
 
 
+def test_pending_delivery_contents_prefers_next_processing_message(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    first = store.enqueue(trigger.id, "Review PR #4591\nFocus on the API contract.")
+    store.enqueue(trigger.id, "Review the next PR")
+
+    claimed = store.claim_deliveries(limit=1)
+
+    assert [delivery.id for delivery in claimed] == [first.id]
+    assert store.pending_delivery_contents() == {
+        trigger.id: "Review PR #4591\nFocus on the API contract."
+    }
+
+    store.complete_delivery(claimed[0])
+
+    assert store.pending_delivery_contents() == {trigger.id: "Review the next PR"}
+
+
 def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(

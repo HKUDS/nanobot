@@ -137,7 +137,7 @@ function AutomationRow({ job, now }: { job: SessionAutomationJob; now: number })
             ) : null}
           </div>
           <div className="mt-1 line-clamp-2 text-[12px] leading-snug text-muted-foreground">
-            {job.payload.message}
+            {automationDisplayMessage(job)}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground/80">
             <span>{schedule}</span>
@@ -199,6 +199,13 @@ function isLocalTriggerAutomation(job: SessionAutomationJob): boolean {
   return job.kind === "local_trigger"
     || job.payload.kind === "local_trigger"
     || job.schedule.kind === "local";
+}
+
+function automationDisplayMessage(job: SessionAutomationJob): string {
+  if (isLocalTriggerAutomation(job) && job.state.pending_message) {
+    return job.state.pending_message;
+  }
+  return job.payload.message;
 }
 
 function relativeTimeFrom(value: number, now: number, locale: string): string {

@@ -208,6 +208,25 @@ class LocalTriggerStore:
                 claimed.append(delivery)
         return claimed
 
+    def pending_delivery_contents(self) -> dict[str, str]:
+        """Return the next in-flight or queued message for each local trigger."""
+        self._ensure_dirs()
+        contents: dict[str, str] = {}
+        with self._lock:
+            # Claimed deliveries run before anything still in the inbox. Within
+            # each queue, filenames preserve creation order.
+            for directory in (self.processing_dir, self.inbox_dir):
+                for path in sorted(directory.glob("*.json")):
+                    try:
+                        data = json.loads(path.read_text(encoding="utf-8"))
+                        delivery = TriggerDelivery.from_dict(data.get("delivery", data), path=path)
+                    except Exception:
+                        # Queue recovery/claiming owns corrupt-file handling. This
+                        # read-only view should not mutate the delivery queue.
+                        continue
+                    contents.setdefault(delivery.trigger_id, delivery.content)
+        return contents
+
     def recover_processing_deliveries(self) -> int:
         """Requeue deliveries left in processing by an interrupted gateway."""
         self._ensure_dirs()

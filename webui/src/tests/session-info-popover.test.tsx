@@ -113,6 +113,49 @@ describe("SessionInfoPopover", () => {
     expect(screen.queryByText(/ago/i)).not.toBeInTheDocument();
   });
 
+  it("shows the pending local trigger message instead of its command template", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        automationsResponse([
+          {
+            ...automationJob(Date.now() - 1000, {
+              pending: true,
+              pending_message: "Review PR #4942 and focus on the WebUI payload",
+            }),
+            id: "trg_8K4P2Q9X",
+            name: "PR review",
+            kind: "local_trigger",
+            schedule: { kind: "local" },
+            payload: {
+              kind: "local_trigger",
+              message: 'nanobot trigger trg_8K4P2Q9X "message"',
+              command: 'nanobot trigger trg_8K4P2Q9X "message"',
+            },
+          },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <SessionInfoPopover
+        sessionKey="websocket:chat-1"
+        token="tok"
+        title="Release work"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+
+    expect(
+      await screen.findByText("Review PR #4942 and focus on the WebUI payload"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('nanobot trigger trg_8K4P2Q9X "message"'),
+    ).not.toBeInTheDocument();
+  });
+
   it("refreshes while open so completed one-shot automations disappear", async () => {
     vi.stubGlobal(
       "fetch",

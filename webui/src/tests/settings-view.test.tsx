@@ -195,7 +195,7 @@ function renderSettingsView(
     onNativeEngineRestart?: () => Promise<string>;
   } = {},
 ) {
-  render(
+  return render(
     <ClientProvider client={{} as never} token="tok">
       <SettingsView
         theme="light"
@@ -268,6 +268,41 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+  });
+
+  it("shows a pending local trigger payload instead of the command placeholder", async () => {
+    const command = 'nanobot trigger trg_8K4P2Q9X "message"';
+    const pendingMessage = "Review PR #4942 and focus on the WebUI payload";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/webui/automations") {
+        return jsonResponse({
+          jobs: [{
+            id: "trg_8K4P2Q9X",
+            name: "PR review",
+            enabled: true,
+            kind: "local_trigger",
+            schedule: { kind: "local" },
+            payload: { kind: "local_trigger", message: command, command },
+            state: { pending: true, pending_message: pendingMessage },
+            trigger: { id: "trg_8K4P2Q9X", command },
+          }],
+        });
+      }
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      return jsonResponse({});
+    }));
+
+    const view = renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    expect((await screen.findAllByText(pendingMessage)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(command)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy command" })).toBeInTheDocument();
+    view.unmount();
   });
 
   it("starts the managed API server from System", async () => {

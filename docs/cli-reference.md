@@ -15,7 +15,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Run the gateway directly | `nanobot gateway` | Service/ops command for WebUI, chat apps, cron, and heartbeat |
-| Deliver a local trigger | `nanobot trigger <id> "message"` | Ask the agent to create one, or use `/trigger <name>` manually in the target chat/session |
+| Deliver a local trigger | `nanobot trigger <id> "message"` | Replace `"message"` with the payload; ask the agent to create the trigger, or use `/trigger <name>` manually in the target session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |

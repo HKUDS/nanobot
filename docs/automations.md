@@ -109,6 +109,12 @@ conversation. The WebUI Automations view provides the same lifecycle controls
 across the workspace. Neither control surface starts or stops the external
 script or service that invokes the trigger; manage that component separately.
 
+While a delivery is queued or running, the WebUI shows the next message that
+will be delivered. The `"message"` text in the copied command remains only a
+placeholder to replace at invocation time. If several messages are waiting for
+one trigger, the in-flight message is shown first, followed by the oldest queued
+message after it completes.
+
 ## Heartbeat
 
 Heartbeat is for recurring workspace checks that should usually stay quiet. It
