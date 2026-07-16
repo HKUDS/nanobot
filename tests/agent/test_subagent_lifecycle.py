@@ -18,6 +18,7 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -484,6 +485,38 @@ class TestAnnounceResult:
         )
 
         assert published[0].metadata["origin_message_id"] == "msg-123"
+
+    @pytest.mark.asyncio
+    async def test_webui_result_starts_fresh_delivery_turn(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+
+        await sm._announce_result(
+            "t1",
+            "label",
+            "task",
+            "result",
+            {
+                "channel": "websocket",
+                "chat_id": "chat-1",
+                "session_key": "websocket:chat-1",
+                "metadata": {
+                    "webui": True,
+                    "_wants_stream": True,
+                    WEBUI_TURN_METADATA_KEY: "completed-turn",
+                    "workspace_scope": {"mode": "default"},
+                },
+            },
+            "ok",
+        )
+
+        metadata = published[0].metadata
+        assert metadata["webui"] is True
+        assert metadata["_wants_stream"] is True
+        assert metadata["workspace_scope"] == {"mode": "default"}
+        assert metadata[WEBUI_TURN_METADATA_KEY].startswith("subagent:t1:")
+        assert metadata[WEBUI_TURN_METADATA_KEY] != "completed-turn"
 
 
 # ---------------------------------------------------------------------------

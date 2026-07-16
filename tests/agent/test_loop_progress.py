@@ -20,6 +20,8 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
+from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.webui_turns import WebuiTurnCoordinator
@@ -27,6 +29,9 @@ from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
 )
+from nanobot.webui.gateway_services import build_gateway_services
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.transcript import read_transcript_lines
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
@@ -528,6 +533,174 @@ class TestToolEventProgress:
         assert len(turn_end_msgs) == 1
         assert turn_end_msgs[0].content == ""
         provider.chat_with_retry.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_late_webui_subagent_keeps_visible_turn_lifecycle(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A subagent result dispatched after its parent turn remains visible in WebUI."""
+        monkeypatch.setattr(
+            "nanobot.webui.transcript.get_webui_dir",
+            lambda: tmp_path / "webui",
+        )
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_progress_deltas = False
+        first_request_started = asyncio.Event()
+        release_first_request = asyncio.Event()
+        model_messages: list[list[dict]] = []
+        tool_call = ToolCallRequest(id="call-late", name="inspect", arguments={})
+        responses = iter([
+            LLMResponse(content="Checking", tool_calls=[tool_call]),
+            LLMResponse(content="Visible reply", tool_calls=[]),
+        ])
+
+        async def chat_stream_with_retry(*, messages, on_content_delta, **_kwargs):
+            model_messages.append(messages)
+            response = next(responses)
+            if len(model_messages) == 1:
+                first_request_started.set()
+                await release_first_request.wait()
+            await on_content_delta(response.content)
+            return response
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock()
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
+        loop.tools.execute = AsyncMock(return_value="inspection complete")
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        session = loop.sessions.get_or_create("websocket:chat-1")
+        session.metadata.update({"webui": True, "title": "Existing chat"})
+        session.add_message("user", "Start the background work")
+        session.add_message("assistant", "The subagent is running")
+        loop.sessions.save(session)
+
+        await loop.subagents._announce_result(
+            "late-1",
+            "background work",
+            "inspect the project",
+            "subagent result",
+            {
+                "channel": "websocket",
+                "chat_id": "chat-1",
+                "session_key": "websocket:chat-1",
+                "metadata": {
+                    "webui": True,
+                    "_wants_stream": True,
+                    WEBUI_TURN_METADATA_KEY: "completed-parent-turn",
+                },
+            },
+            "ok",
+        )
+        late_result = await bus.consume_inbound()
+        continuation_turn_id = late_result.metadata[WEBUI_TURN_METADATA_KEY]
+        assert continuation_turn_id != "completed-parent-turn"
+        assert "websocket:chat-1" not in loop._pending_queues
+
+        config = WebSocketConfig(websocket_requires_token=False)
+        gateway = build_gateway_services(
+            config=config,
+            bus=bus,
+            session_manager=loop.sessions,
+            static_dist_path=None,
+            workspace_path=tmp_path,
+            default_restrict_to_workspace=False,
+            runtime_model_name="test-model",
+            runtime_surface="browser",
+            runtime_capabilities_overrides=None,
+        )
+        websocket = WebSocketChannel(config, bus, gateway=gateway)
+
+        dispatch = asyncio.create_task(loop._dispatch(late_result))
+        await asyncio.wait_for(first_request_started.wait(), timeout=1)
+        pending = loop._pending_queues["websocket:chat-1"]
+        followup_metadata = {
+            "webui": True,
+            "_wants_stream": True,
+            WEBUI_TURN_METADATA_KEY: "followup-turn",
+        }
+        gateway.transcripts.append_user_message(
+            "chat-1",
+            "Is it done?",
+            metadata=followup_metadata,
+        )
+        pending.put_nowait(InboundMessage(
+            channel="websocket",
+            sender_id="user-1",
+            chat_id="chat-1",
+            content="Is it done?",
+            metadata=followup_metadata,
+        ))
+        release_first_request.set()
+        await asyncio.wait_for(dispatch, timeout=2)
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        statuses = [msg for msg in outbound if isinstance(msg.event, GoalStatusEvent)]
+        assert [msg.event.status for msg in statuses] == ["running", "idle"]
+        assert all(msg.channel == "websocket" and msg.chat_id == "chat-1" for msg in statuses)
+
+        visible = [
+            msg
+            for msg in outbound
+            if isinstance(
+                msg.event,
+                ProgressEvent
+                | StreamDeltaEvent
+                | StreamEndEvent
+                | StreamedResponseEvent
+                | TurnEndEvent,
+            )
+        ]
+        assert visible
+        assert all(msg.channel == "websocket" and msg.chat_id == "chat-1" for msg in visible)
+        assert all(
+            msg.metadata[WEBUI_TURN_METADATA_KEY] == continuation_turn_id
+            for msg in visible
+        )
+        assert any(isinstance(msg.event, ProgressEvent) for msg in visible)
+        assert [
+            msg.content for msg in visible if isinstance(msg.event, StreamDeltaEvent)
+        ] == ["Checking", "Visible reply"]
+        assert len([msg for msg in visible if isinstance(msg.event, TurnEndEvent)]) == 1
+
+        for msg in outbound:
+            if msg.channel == "websocket":
+                await ChannelManager._send_once(websocket, msg)
+
+        transcript = read_transcript_lines("websocket:chat-1")
+        continuation_rows = [
+            row for row in transcript if row.get("turn_id") == continuation_turn_id
+        ]
+        assert any(
+            row.get("event") == "user" and row.get("text") == "Is it done?"
+            for row in transcript
+        )
+        assert any(row.get("event") == "message" for row in continuation_rows)
+        assert any(
+            row.get("event") == "delta" and row.get("text") == "Visible reply"
+            for row in continuation_rows
+        )
+        assert continuation_rows[-1]["event"] == "turn_end"
+
+        loop.sessions.invalidate("websocket:chat-1")
+        persisted = loop.sessions.get_or_create("websocket:chat-1")
+        assert any(message.get("content") == "Is it done?" for message in persisted.messages)
+        assert persisted.messages[-1]["content"] == "Visible reply"
+        assert any("Is it done?" in str(message) for message in model_messages[1])
+
+        background = list(loop._background_tasks)
+        if background:
+            await asyncio.gather(*background, return_exceptions=True)
 
     @pytest.mark.asyncio
     async def test_stream_timeout_recovery_continues_in_new_segment(

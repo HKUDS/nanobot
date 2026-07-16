@@ -75,6 +75,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             origin_chat_id: str,
             session_key: str,
             origin_message_id: str | None = None,
+            origin_metadata: dict | None = None,
             temperature: float | None = None,
             workspace_scope=None,
         ) -> str:
@@ -206,6 +207,7 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            origin_metadata=None,
             temperature=None,
             workspace_scope=None,
         ):
@@ -244,6 +246,7 @@ async def test_spawn_tool_rejects_missing_request_runtime() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            origin_metadata=None,
             temperature=None,
             workspace_scope=None,
         ):

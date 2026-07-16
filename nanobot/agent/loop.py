@@ -576,6 +576,21 @@ class AgentLoop:
         """Return the chat id shown in runtime metadata for the model."""
         return str(msg.metadata.get("context_chat_id") or msg.chat_id)
 
+    @staticmethod
+    def _system_delivery_message(msg: InboundMessage) -> InboundMessage:
+        """Return the visible WebUI route carried by an internal system message."""
+        if (
+            msg.channel != "system"
+            or msg.metadata.get("webui") is not True
+            or not msg.chat_id.startswith("websocket:")
+        ):
+            return msg
+        return dataclasses.replace(
+            msg,
+            channel="websocket",
+            chat_id=msg.chat_id.split(":", 1)[1],
+        )
+
     async def _build_bus_progress_callback(
         self, msg: InboundMessage
     ) -> Callable[..., Awaitable[None]]:
@@ -1078,6 +1093,7 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
+        delivery_msg = self._system_delivery_message(msg)
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
@@ -1090,9 +1106,9 @@ class AgentLoop:
                 self._pending_queues[session_key] = pending
                 try:
                     on_stream = on_stream_end = None
-                    if msg.metadata.get("_wants_stream"):
+                    if delivery_msg.metadata.get("_wants_stream"):
                         # Split one answer into distinct stream segments.
-                        stream_base_id = f"{msg.session_key}:{time.time_ns()}"
+                        stream_base_id = f"{delivery_msg.session_key}:{time.time_ns()}"
                         stream_segment = 0
 
                         def _current_stream_id() -> str:
@@ -1101,13 +1117,13 @@ class AgentLoop:
                         async def on_stream(delta: str) -> None:
                             await self.bus.publish_outbound(
                                 outbound_message_for_event(
-                                    channel=msg.channel,
-                                    chat_id=msg.chat_id,
+                                    channel=delivery_msg.channel,
+                                    chat_id=delivery_msg.chat_id,
                                     event=StreamDeltaEvent(
                                         content=delta,
                                         stream_id=_current_stream_id(),
                                     ),
-                                    metadata=msg.metadata,
+                                    metadata=delivery_msg.metadata,
                                 )
                             )
 
@@ -1115,13 +1131,13 @@ class AgentLoop:
                             nonlocal stream_segment
                             await self.bus.publish_outbound(
                                 outbound_message_for_event(
-                                    channel=msg.channel,
-                                    chat_id=msg.chat_id,
+                                    channel=delivery_msg.channel,
+                                    chat_id=delivery_msg.chat_id,
                                     event=StreamEndEvent(
                                         stream_id=_current_stream_id(),
                                         resuming=resuming,
                                     ),
-                                    metadata=msg.metadata,
+                                    metadata=delivery_msg.metadata,
                                 )
                             )
                             stream_segment += 1
@@ -1130,16 +1146,16 @@ class AgentLoop:
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
                         pending_queue=pending,
                     )
-                    completed_channel = msg.channel
-                    completed_chat_id = msg.chat_id
+                    completed_channel = delivery_msg.channel
+                    completed_chat_id = delivery_msg.chat_id
                     if response is not None:
                         await self.bus.publish_outbound(response)
                         completed_channel = response.channel
                         completed_chat_id = response.chat_id
-                    elif msg.channel == "cli":
+                    elif delivery_msg.channel == "cli":
                         await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata=msg.metadata or {},
+                            channel=delivery_msg.channel, chat_id=delivery_msg.chat_id,
+                            content="", metadata=delivery_msg.metadata or {},
                         ))
                     continuing = turn_continuation.internal_continuation_pending(msg.metadata)
                     if not continuing:
@@ -1147,7 +1163,7 @@ class AgentLoop:
                             channel=completed_channel,
                             chat_id=completed_chat_id,
                             session_key=session_key,
-                            metadata=msg.metadata,
+                            metadata=delivery_msg.metadata,
                         )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
@@ -1182,15 +1198,16 @@ class AgentLoop:
                 except Exception as exc:
                     logger.exception("Error processing message for session {}", session_key)
                     await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
+                        channel=delivery_msg.channel, chat_id=delivery_msg.chat_id,
                         content="Sorry, I encountered an error.",
+                        metadata=delivery_msg.metadata,
                     ))
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await self._runtime_events().turn_completed(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
+                            channel=delivery_msg.channel,
+                            chat_id=delivery_msg.chat_id,
                             session_key=session_key,
-                            metadata=msg.metadata,
+                            metadata=delivery_msg.metadata,
                         )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=exc)
@@ -1221,14 +1238,14 @@ class AgentLoop:
                             )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await self._runtime_events().run_status_changed(
-                            msg, session_key, "idle"
+                            delivery_msg, session_key, "idle"
                         )
                         self._runtime_events().clear_turn(session_key)
                     await self._publish_next_deferred_automation_turn(session_key)
         finally:
             if pending is None:
                 await self._runtime_events().run_status_changed(
-                    msg, session_key, "idle"
+                    delivery_msg, session_key, "idle"
                 )
                 self._runtime_events().clear_turn(session_key)
                 await self._publish_next_deferred_automation_turn(session_key)
@@ -1264,12 +1281,18 @@ class AgentLoop:
         hook_factories: list[AgentTurnHookFactory] | None = None,
     ) -> OutboundMessage | None:
         """Process a system inbound message (e.g. subagent announce)."""
-        channel, chat_id = (
-            msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
-        )
+        delivery_msg = self._system_delivery_message(msg)
+        if delivery_msg is msg:
+            channel, chat_id = (
+                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+            )
+        else:
+            channel, chat_id = delivery_msg.channel, delivery_msg.chat_id
         logger.info("Processing system message from {}", msg.sender_id)
         key = msg.session_key_override or f"{channel}:{chat_id}"
         session = self.sessions.get_or_create(key)
+        if delivery_msg is not msg:
+            await self._runtime_events().session_turn_started(delivery_msg, key)
         self._runtime_events().record_turn_runtime(key, runtime)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
@@ -1298,7 +1321,7 @@ class AgentLoop:
             "extend_to_user": is_subagent,
         }
         history = session.get_history(**_hist_kwargs)
-        workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
+        workspace_scope = self.workspace_scopes.for_message(delivery_msg, session.metadata)
 
         messages = self.context.build_messages(
             history=history,
@@ -1314,9 +1337,24 @@ class AgentLoop:
             unified_session=self._unified_session,
         )
         t_wall = time.time()
+        on_retry_wait = None
+        if delivery_msg is not msg:
+            if on_progress is None:
+                on_progress = await self._build_bus_progress_callback(delivery_msg)
+            on_retry_wait = await self._build_retry_wait_callback(delivery_msg)
+            await self._runtime_events().run_status_changed(
+                delivery_msg,
+                key,
+                "running",
+                started_at=t_wall,
+            )
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
             runtime=runtime,
+            on_progress=on_progress,
+            on_stream=on_stream,
+            on_stream_end=on_stream_end,
+            on_retry_wait=on_retry_wait,
             message_id=msg.metadata.get("message_id"),
             metadata=msg.metadata,
             session_key=key,
@@ -1343,7 +1381,11 @@ class AgentLoop:
             )
         )
         content = final_content or "Background task completed."
-        outbound_metadata: dict[str, Any] = {}
+        outbound_metadata: dict[str, Any] = (
+            dict(delivery_msg.metadata) if delivery_msg is not msg else {}
+        )
+        if delivery_msg is not msg:
+            outbound_metadata["latency_ms"] = latency_ms
         if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
             outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
         if origin_message_id := msg.metadata.get("origin_message_id"):
@@ -1353,6 +1395,11 @@ class AgentLoop:
             chat_id=chat_id,
             content=content,
             metadata=outbound_metadata,
+            event=(
+                StreamedResponseEvent()
+                if on_stream is not None and stop_reason not in {"error", "tool_error"}
+                else None
+            ),
         )
 
     async def _process_message(

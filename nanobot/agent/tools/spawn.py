@@ -83,6 +83,7 @@ class SpawnTool(Tool):
             origin_chat_id=origin_chat_id,
             session_key=session_key,
             origin_message_id=request_ctx.message_id,
+            origin_metadata=request_ctx.metadata,
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
         )

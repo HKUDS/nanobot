@@ -34,6 +34,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
+from nanobot.webui.metadata import fresh_webui_turn_metadata
 
 
 @dataclass(slots=True)
@@ -221,6 +222,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_metadata: dict[str, Any] | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
@@ -233,7 +235,12 @@ class SubagentManager:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
+        origin: dict[str, Any] = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+            "metadata": dict(origin_metadata or {}),
+        }
 
         status = SubagentStatus(
             task_id=task_id,
@@ -277,7 +284,7 @@ class SubagentManager:
         task_id: str,
         task: str,
         label: str,
-        origin: dict[str, str],
+        origin: dict[str, Any],
         status: SubagentStatus,
         runtime: LLMRuntime,
         origin_message_id: str | None = None,
@@ -371,7 +378,7 @@ class SubagentManager:
         label: str,
         task: str,
         result: str,
-        origin: dict[str, str],
+        origin: dict[str, Any],
         status: str,
         origin_message_id: str | None = None,
     ) -> None:
@@ -392,10 +399,15 @@ class SubagentManager:
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
-        metadata: dict[str, Any] = {
+        metadata = fresh_webui_turn_metadata(
+            origin["channel"],
+            origin.get("metadata"),
+            turn_seed=f"subagent:{task_id}",
+        )
+        metadata.update({
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
-        }
+        })
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(
