@@ -69,6 +69,20 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
+The default Compose file drops all Linux capabilities and keeps Docker's default
+AppArmor/seccomp profiles enabled. If you explicitly set
+`"tools.exec.sandbox": "bwrap"` in `~/.nanobot/config.json`, add the bwrap
+override file when starting containers:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.bwrap.yml up -d nanobot-gateway
+docker compose -f docker-compose.yml -f docker-compose.bwrap.yml run --rm nanobot-cli agent -m "Hello!"
+```
+
+The override grants `CAP_SYS_ADMIN` and disables AppArmor/seccomp confinement for
+the container so bubblewrap can create its nested namespaces. Use it only when the
+bwrap sandbox is enabled.
+
 ### Docker
 
 ```bash
@@ -82,12 +96,17 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
-# Mirrors the security caps and port mappings declared in docker-compose.yml:
-#   - `--cap-drop ALL --cap-add SYS_ADMIN` + unconfined apparmor/seccomp are required
-#     when `tools.exec.sandbox: "bwrap"` is enabled (bwrap needs CAP_SYS_ADMIN for
-#     user namespaces). Without them, `bwrap` exits with `clone3: Operation not permitted`.
-#   - `-p 8765:8765` exposes the WebSocket channel / WebUI alongside the gateway health
-#     endpoint on 18790.
+# `-p 8765:8765` exposes the WebSocket channel / WebUI alongside the gateway
+# health endpoint on 18790.
+docker run \
+  --cap-drop ALL \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
+  -p 18790:18790 -p 8765:8765 \
+  nanobot gateway
+
+# If `tools.exec.sandbox: "bwrap"` is enabled, run with the extra permissions
+# bubblewrap needs for nested namespaces. Without them, `bwrap` may exit with
+# `clone3: Operation not permitted`.
 docker run \
   --cap-drop ALL --cap-add SYS_ADMIN \
   --security-opt apparmor=unconfined \
