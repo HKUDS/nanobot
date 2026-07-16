@@ -166,6 +166,12 @@ marked failed instead of retried indefinitely. Each delivery also writes an
 audit record under `<workspace>/triggers/runs`. Run one gateway consumer per
 workspace; this local queue is not a distributed multi-consumer queue.
 
+The sending command must resolve the same workspace/config as the gateway.
+Installing nanobot on another host creates a separate local environment; it
+does not make that host share this trigger store. For remote CI or webhooks,
+bridge the event to the gateway host with SSH or a trusted adapter. A hosted
+runner or cloud function still needs that authenticated second hop.
+
 Use stdin when another local process generates the message:
 
 ```bash
@@ -186,7 +192,9 @@ Triggers are managed in the WebUI Automations view instead of through separate
 rename, delete, search, and copy the command for each trigger.
 
 For webhooks or other external systems, run your own small service and have it
-call this CLI after it decides what message nanobot should receive.
+call this CLI after it authenticates and validates the event and decides what
+message nanobot should receive. Do not use the trigger ID or raw command as a
+public authentication mechanism.
 
 See [Automations](./automations.md) for the broader automation model, WebUI
 management, and delivery behavior.

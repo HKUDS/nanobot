@@ -25,7 +25,9 @@ _LOCAL_TRIGGER_PARAMETERS = tool_parameters_schema(
     required=["action"],
     description=(
         "Create and manage external-event entry points bound to the current chat session. "
-        "create requires name; enable, disable, and remove require trigger_id."
+        "The current conversation route is supplied automatically; no CLI, request-context, or "
+        "workspace discovery is required. create requires name; enable, disable, and remove "
+        "require trigger_id."
     ),
 )
 
@@ -56,7 +58,12 @@ class LocalTriggerTool(Tool):
             "conversation. A local trigger gives an external script or service a `nanobot "
             "trigger ...` command that queues an agent turn here. It does not poll, schedule, "
             "or expose a public webhook; combine it with an external event source or lightweight "
-            "watcher. Operations are limited to the current conversation."
+            "watcher. The invoking process must resolve the same workspace/config as the gateway; "
+            "a separate installation does not by itself share the trigger store. Call this tool "
+            "directly "
+            "instead of probing the CLI, request context, workspace, or source first; the current "
+            "conversation route is supplied automatically, so do not call `my`, filesystem, or "
+            "shell tools first. Operations are limited to the current conversation."
         )
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
@@ -109,8 +116,17 @@ class LocalTriggerTool(Tool):
             f"Created local trigger '{trigger.name}' (id: {trigger.id}).\n"
             "External delivery command:\n"
             f"{self._command(trigger.id)}\n"
-            "Run it with the same nanobot workspace/config as the gateway. The command queues "
-            "an agent turn in this conversation; it does not poll or schedule the event source."
+            "Use this returned command as the handoff; do not validate it against a different "
+            "nanobot installation. Run it with the same nanobot workspace/config as the gateway. "
+            "A separate host or installation does not by itself share this trigger store, so "
+            "bridge remote events to the gateway host via SSH or an authenticated adapter. Never "
+            "expose an unauthenticated HTTP adapter or put "
+            "authentication secrets in chat, the trigger command, or its payload. Do not guess a "
+            "provider's signature scheme. If the user only requested nanobot-side setup, return "
+            "this handoff now instead of inspecting or installing adapter dependencies. The "
+            "command queues an agent turn in this conversation; it does not poll or schedule the "
+            "event source. Lifecycle actions use this agent tool or the WebUI, not invented "
+            "`local_trigger ...` shell commands."
         )
 
     def _list(self, session_key: str) -> str:

@@ -30,7 +30,9 @@ def test_local_trigger_tool_only_enabled_with_store(tmp_path: Path) -> None:
         local_trigger_store=store,
     )
     assert LocalTriggerTool.enabled(with_store) is True
-    assert isinstance(LocalTriggerTool.create(with_store), LocalTriggerTool)
+    tool = LocalTriggerTool.create(with_store)
+    assert isinstance(tool, LocalTriggerTool)
+    assert "current conversation route is supplied automatically" in tool.description
 
 
 async def test_local_trigger_tool_creates_and_lists_current_session(tmp_path: Path) -> None:
@@ -47,6 +49,13 @@ async def test_local_trigger_tool_creates_and_lists_current_session(tmp_path: Pa
     assert trigger.chat_id == "chat-1"
     assert trigger.origin_metadata == {"thread": "main"}
     assert f'nanobot trigger {trigger.id} "message"' in created
+    assert "Use this returned command as the handoff" in created
+    assert "A separate host or installation does not by itself share this trigger store" in created
+    assert "Never expose an unauthenticated HTTP adapter" in created
+    assert "authentication secrets in chat" in created
+    assert "Do not guess a provider's signature scheme" in created
+    assert "return this handoff now" in created
+    assert "not invented `local_trigger ...` shell commands" in created
     assert "does not poll or schedule" in created
     assert trigger.id in listed
 
