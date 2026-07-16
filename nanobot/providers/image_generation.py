@@ -1760,11 +1760,11 @@ _MODELSCOPE_TIMEOUT_S = 300.0
 _MODELSCOPE_POLL_INTERVAL_S = 5.0
 _MODELSCOPE_POLL_MAX_ATTEMPTS = 60  # 5 min at 5s intervals
 _MODELSCOPE_ASPECT_RATIOS = {
-    "1:1": "1024x1024",
-    "16:9": "1536x1024",
-    "9:16": "1024x1536",
-    "3:4": "1024x1536",
-    "4:3": "1536x1024",
+    "1:1": "1328x1328",
+    "16:9": "1664x928",
+    "9:16": "928x1664",
+    "3:4": "1140x1472",
+    "4:3": "1472x1140",
 }
 
 

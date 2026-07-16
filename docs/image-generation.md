@@ -323,7 +323,7 @@ Other supported models: `cogview-4`, `cogview-4-250304`, `cogview-3-flash`. Refe
 
 ModelScope (魔搭社区) API-Inference supports text-to-image generation and image editing via an async task pattern.
 
-Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be specified as `WIDTHxHEIGHT` (e.g. `1024x1024`, `1536x1024`) or using aspect ratio presets.
+Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be specified as `WIDTHxHEIGHT` (e.g. `1024x1024`, `1664x928`) or using aspect ratio presets.
 
 ```json
 {

@@ -1633,8 +1633,21 @@ async def test_modelscope_image_generation_with_size() -> None:
     assert body["size"] == "768x1024"
 
 
+@pytest.mark.parametrize(
+    ("aspect_ratio", "expected_size"),
+    [
+        ("1:1", "1328x1328"),
+        ("16:9", "1664x928"),
+        ("9:16", "928x1664"),
+        ("3:4", "1140x1472"),
+        ("4:3", "1472x1140"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_modelscope_image_generation_aspect_ratio_mapping() -> None:
+async def test_modelscope_image_generation_aspect_ratio_mapping(
+    aspect_ratio: str,
+    expected_size: str,
+) -> None:
     submit = FakeResponse({"task_id": "t1"})
     poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
     fake = ModelScopeFakeClient(submit, poll)
@@ -1643,9 +1656,9 @@ async def test_modelscope_image_generation_aspect_ratio_mapping() -> None:
         client=fake,  # type: ignore[arg-type]
     )
 
-    await client.generate(prompt="test", model="m", aspect_ratio="16:9")
+    await client.generate(prompt="test", model="m", aspect_ratio=aspect_ratio)
 
-    assert fake.calls[0]["json"]["size"] == "1536x1024"
+    assert fake.calls[0]["json"]["size"] == expected_size
 
 
 @pytest.mark.asyncio
@@ -1753,4 +1766,3 @@ async def test_modelscope_image_generation_poll_timeout(monkeypatch) -> None:
 
     # Should have polled up to the (patched) attempt limit.
     assert len(fake.get_calls) == 3
-
