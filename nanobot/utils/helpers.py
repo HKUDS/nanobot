@@ -21,6 +21,68 @@ _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
 
 
+def sanitize_surrogates(text: str) -> str:
+    """Reconstruct surrogate pairs and replace unpaired surrogates.
+
+    Lone UTF-16 surrogate code points (``U+D800``..``U+DFFF``) cannot be
+    encoded as UTF-8 and cause ``UnicodeEncodeError`` when the message is
+    serialized for an HTTP request body. This helper round-trips through
+    UTF-16 to reconstruct genuine surrogate pairs (produced e.g. by Windows
+    console input for emoji) and substitutes lone surrogates with
+    ``U+FFFD``.
+
+    Non-string inputs are returned unchanged so this helper is safe to call
+    on arbitrary message payload leaves.
+    """
+    if not isinstance(text, str):
+        return text
+    # Fast path: no surrogate code points → return the original object so
+    # callers can rely on identity to detect an actual mutation.
+    for ch in text:
+        cp = ord(ch)
+        if 0xD800 <= cp <= 0xDFFF:
+            break
+    else:
+        return text
+    return text.encode("utf-16-le", errors="surrogatepass").decode(
+        "utf-16-le", errors="replace"
+    )
+
+
+def sanitize_surrogates_deep(value: Any) -> Any:
+    """Recursively apply :func:`sanitize_surrogates` to every string leaf.
+
+    Lists and dicts are rebuilt only when a nested string actually changes,
+    so the common case (no surrogates present) returns the original object
+    without allocations.
+    """
+    if isinstance(value, str):
+        cleaned = sanitize_surrogates(value)
+        return cleaned
+    if isinstance(value, list):
+        result_list: list[Any] = []
+        mutated = False
+        for item in value:
+            new_item = sanitize_surrogates_deep(item)
+            if new_item is not item:
+                mutated = True
+            result_list.append(new_item)
+        return result_list if mutated else value
+    if isinstance(value, dict):
+        result_dict: dict[Any, Any] = {}
+        mutated = False
+        for key, item in value.items():
+            new_item = sanitize_surrogates_deep(item)
+            if new_item is not item:
+                mutated = True
+            result_dict[key] = new_item
+        return result_dict if mutated else value
+    if isinstance(value, tuple):
+        result_tuple = tuple(sanitize_surrogates_deep(item) for item in value)
+        return result_tuple if any(a is not b for a, b in zip(result_tuple, value)) else value
+    return value
+
+
 @lru_cache(maxsize=1)
 def _get_token_encoding() -> Any:
     return tiktoken.get_encoding("cl100k_base")
