@@ -1241,6 +1241,29 @@ async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
     assert bot.sessions.get("sdk:first") is None
 
 
+def test_session_helpers_read_live_session_outside_strong_cache(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    sessions = bot._loop.sessions
+    sessions._max_cached_sessions = 1
+    active = sessions.get_or_create("sdk:active")
+    active.add_message("user", "persisted")
+    sessions.save(active)
+
+    sessions.save(sessions.get_or_create("sdk:other"))
+    active.add_message("assistant", "not saved yet")
+
+    visible = bot.sessions.get("sdk:active")
+    exported = bot.sessions.export("sdk:active")
+    assert visible is not None
+    assert exported is not None
+    assert [message["content"] for message in visible.messages] == [
+        "persisted",
+        "not saved yet",
+    ]
+    assert exported.messages == visible.messages
+
+
 @pytest.mark.asyncio
 async def test_session_export_and_restore_preserve_runtime_context(tmp_path):
     config_path = _write_config(tmp_path)
