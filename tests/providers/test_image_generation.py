@@ -15,6 +15,7 @@ from nanobot.providers.image_generation import (
     GeneratedImageResponse,
     ImageGenerationError,
     MiniMaxImageGenerationClient,
+    ModelScopeImageGenerationClient,
     OllamaImageGenerationClient,
     OpenAIImageGenerationClient,
     OpenRouterImageGenerationClient,
@@ -1524,3 +1525,232 @@ async def test_zhipu_image_generation_rejects_reference_images() -> None:
             model="glm-image",
             reference_images=["ref.png"],
         )
+
+
+# ---------------------------------------------------------------------------
+# ModelScope (魔搭) image generation tests
+# ---------------------------------------------------------------------------
+
+
+class ModelScopeFakeClient:
+    """Fake httpx client for ModelScope async task pattern.
+
+    Returns submit_response for POST, and serves poll_responses in sequence
+    for GET /tasks/{id} calls. Image download GETs return PNG content.
+    """
+
+    def __init__(
+        self,
+        submit_response: FakeResponse,
+        poll_responses: list[FakeResponse],
+        download_content: bytes = PNG_BYTES,
+    ) -> None:
+        self.submit_response = submit_response
+        self.poll_responses = poll_responses
+        self.poll_idx = 0
+        self.download_content = download_content
+        self.calls: list[dict[str, Any]] = []
+        self.get_calls: list[dict[str, Any]] = []
+
+    async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.submit_response
+
+    async def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.get_calls.append({"url": url, **kwargs})
+        if "/tasks/" in url:
+            idx = min(self.poll_idx, len(self.poll_responses) - 1)
+            resp = self.poll_responses[idx]
+            self.poll_idx += 1
+            return resp
+        return FakeResponse({}, content=self.download_content)
+
+
+@pytest.fixture(autouse=True)
+def _modelscope_fast_poll(monkeypatch) -> None:
+    """Skip the real asyncio.sleep between ModelScope poll attempts."""
+    monkeypatch.setattr(
+        "nanobot.providers.image_generation._MODELSCOPE_POLL_INTERVAL_S", 0.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_submit_and_poll() -> None:
+    submit = FakeResponse({"task_id": "abc123"})
+    poll_responses = [
+        FakeResponse({"task_status": "PENDING"}),
+        FakeResponse({
+            "task_status": "SUCCEED",
+            "output_images": ["https://cdn.example/image.png"],
+        }),
+    ]
+    fake = ModelScopeFakeClient(submit, poll_responses)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        api_base="https://api-inference.modelscope.cn/v1",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="A golden cat",
+        model="Qwen/Qwen-Image",
+    )
+
+    assert response.images[0].startswith("data:image/png;base64,")
+
+    # Verify POST request
+    post_call = fake.calls[0]
+    assert post_call["url"] == "https://api-inference.modelscope.cn/v1/images/generations"
+    assert post_call["headers"]["Authorization"] == "Bearer ms-token"
+    assert post_call["headers"]["X-ModelScope-Async-Mode"] == "true"
+    body = post_call["json"]
+    assert body["model"] == "Qwen/Qwen-Image"
+    assert body["prompt"] == "A golden cat"
+
+    # Verify task polling GET
+    assert "/tasks/abc123" in fake.get_calls[0]["url"]
+    poll_headers = fake.get_calls[0]["headers"]
+    assert poll_headers["X-ModelScope-Task-Type"] == "image_generation"
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_with_size() -> None:
+    submit = FakeResponse({"task_id": "t1"})
+    poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="test",
+        model="Qwen/Qwen-Image-2512",
+        image_size="768x1024",
+    )
+
+    body = fake.calls[0]["json"]
+    assert body["size"] == "768x1024"
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_aspect_ratio_mapping() -> None:
+    submit = FakeResponse({"task_id": "t1"})
+    poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(prompt="test", model="m", aspect_ratio="16:9")
+
+    assert fake.calls[0]["json"]["size"] == "1536x1024"
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_task_failed() -> None:
+    submit = FakeResponse({"task_id": "bad-task"})
+    poll = [FakeResponse({"task_status": "FAILED", "errors": "oom"})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="task failed"):
+        await client.generate(prompt="test", model="m")
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_requires_api_key() -> None:
+    client = ModelScopeImageGenerationClient(api_key=None)
+
+    with pytest.raises(ImageGenerationError, match="API key"):
+        await client.generate(prompt="draw", model="m")
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_missing_task_id() -> None:
+    submit = FakeResponse({"unexpected": "response"})
+    fake = ModelScopeFakeClient(submit, [])
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="task_id"):
+        await client.generate(prompt="draw", model="m")
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_with_reference_image() -> None:
+    """Reference images are converted to base64 data URLs for image editing models."""
+    submit = FakeResponse({"task_id": "t1"})
+    poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    # Create a temporary image file
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(PNG_BYTES)
+        ref_path = f.name
+
+    try:
+        await client.generate(
+            prompt="edit this image",
+            model="Qwen/Qwen-Image-Edit",
+            reference_images=[ref_path],
+        )
+
+        body = fake.calls[0]["json"]
+        assert "image_url" in body
+        assert body["image_url"].startswith("data:image/png;base64,")
+    finally:
+        Path(ref_path).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_extra_body_passthrough() -> None:
+    """Extra body fields like loras are passed through to the API."""
+    submit = FakeResponse({"task_id": "t1"})
+    poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        extra_body={"loras": "lora-repo-1", "seed": 42},
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(prompt="test", model="m")
+
+    body = fake.calls[0]["json"]
+    assert body["loras"] == "lora-repo-1"
+    assert body["seed"] == 42
+
+
+@pytest.mark.asyncio
+async def test_modelscope_image_generation_poll_timeout(monkeypatch) -> None:
+    """Polling that never reaches SUCCEED/FAILED raises a timeout error."""
+    monkeypatch.setattr(
+        "nanobot.providers.image_generation._MODELSCOPE_POLL_MAX_ATTEMPTS", 3
+    )
+    submit = FakeResponse({"task_id": "t1"})
+    # Always PENDING — never resolves.
+    poll = [FakeResponse({"task_status": "PENDING"})]
+    fake = ModelScopeFakeClient(submit, poll)
+    client = ModelScopeImageGenerationClient(
+        api_key="ms-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="timed out"):
+        await client.generate(prompt="test", model="m")
+
+    # Should have polled up to the (patched) attempt limit.
+    assert len(fake.get_calls) == 3
+

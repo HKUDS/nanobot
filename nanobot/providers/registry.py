@@ -471,6 +471,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
     ),
+    # ModelScope (魔搭社区): OpenAI-compatible API
+    ProviderSpec(
+        name="modelscope",
+        keywords=("modelscope",),
+        env_key="MODELSCOPE_API_KEY",
+        display_name="ModelScope",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="modelscope",
+        default_api_base="https://api-inference.modelscope.cn/v1",
+        strip_model_prefixes=("modelscope",),
+        thinking_style="enable_thinking",
+    ),
     # Moonshot (月之暗面): Kimi K2.5/K2.6 choose temperature from thinking mode;
     # the OpenAI-compatible provider omits it. K2.7 models require 1.0.
     ProviderSpec(

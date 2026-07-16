@@ -34,7 +34,7 @@ This snippet uses the current built-in image-generation default so the JSON has 
 }
 ```
 
-See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Ollama, StepFun, and Zhipu configuration examples.
+See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Ollama, StepFun, Zhipu, and ModelScope configuration examples.
 
 > [!TIP]
 > Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
@@ -55,7 +55,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Current built-in image provider default. Supported values: `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Current built-in image provider default. Supported values: `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu`, `modelscope` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -319,6 +319,29 @@ Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be speci
 
 Other supported models: `cogview-4`, `cogview-4-250304`, `cogview-3-flash`. Reference images are not supported by this integration.
 
+### ModelScope
+
+ModelScope (魔搭社区) API-Inference supports text-to-image generation and image editing via an async task pattern.
+
+Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be specified as `WIDTHxHEIGHT` (e.g. `1024x1024`, `1536x1024`) or using aspect ratio presets.
+
+```json
+{
+  "providers": {
+    "modelscope": {
+      "apiKey": "${MODELSCOPE_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "modelscope",
+      "model": "Qwen/Qwen-Image-2512"
+    }
+  }
+}
+```
+
 ## Artifacts
 
 Generated images are stored under the active nanobot instance's media directory:
@@ -373,7 +396,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
+| `unsupported image generation provider` | Use `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu`, or `modelscope` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |
