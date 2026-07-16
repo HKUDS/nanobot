@@ -1792,27 +1792,27 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 > { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "useJinaReader": false } } } }
 > ```
 
-nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
-
-If you want to always use the local conversion, you can force it using:
+nanobot uses local conversion based on [readability-lxml](https://github.com/buriy/python-readability) by default. You may explicitly enable [Jina Reader](https://jina.ai/reader/) when you want its third-party conversion service:
 
 ```json
 {
   "tools": {
     "web": {
       "fetch": {
-        "useJinaReader": false
+        "useJinaReader": true
       }
     }
   }
 }
 ```
 
+When enabled, Jina Reader receives the URL it fetches. URLs containing credentials or query strings are always processed locally, so password-bearing and signed URLs are not forwarded; URL fragments are removed before an ordinary URL is sent to Jina. Set `useJinaReader` to `false` to always keep conversion local.
+
 #### `tools.web.fetch`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
+| `useJinaReader` | boolean | `false` | If true, use Jina Reader for URLs without credentials or query strings; otherwise use local conversion |
 
 ## Image Generation
 

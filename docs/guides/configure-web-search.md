@@ -74,7 +74,7 @@ in the WebUI or logs.
 - Keep API keys in environment variables.
 - Set `maxResults` when you need fewer or more search results per query.
 - Set `tools.web.proxy` only to a proxy you trust.
-- Use `fetch.useJinaReader: false` if you need local page conversion.
+- Local page conversion is the default. Set `fetch.useJinaReader: true` only when you intend to share eligible URLs with Jina Reader.
 
 ## Security notes
 

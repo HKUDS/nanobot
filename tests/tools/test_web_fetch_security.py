@@ -128,7 +128,7 @@ async def test_web_fetch_blocks_localhost_even_in_full_workspace_scope(tmp_path)
 @pytest.mark.asyncio
 async def test_web_fetch_result_contains_untrusted_flag(monkeypatch: pytest.MonkeyPatch):
     """When fetch succeeds, result JSON must include untrusted=True and the banner."""
-    tool = WebFetchTool()
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=True))
     _patch_web_fetch_fake_client(monkeypatch)
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
@@ -189,7 +189,10 @@ async def test_safe_redirect_requests_use_independent_pinned_dns_concurrently(mo
 
 @pytest.mark.asyncio
 async def test_web_fetch_proxy_remains_supported(monkeypatch):
-    tool = WebFetchTool(proxy="http://config-proxy.example:7890")
+    tool = WebFetchTool(
+        config=WebFetchConfig(use_jina_reader=True),
+        proxy="http://config-proxy.example:7890",
+    )
     client_kwargs = _patch_web_fetch_fake_client(monkeypatch)
 
     monkeypatch.setenv("HTTPS_PROXY", "http://env-proxy.example:8080")
@@ -207,7 +210,7 @@ async def test_web_fetch_proxy_remains_supported(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_web_fetch_env_proxy_adds_proxy_mounts_and_keeps_pinned_transport(monkeypatch):
-    tool = WebFetchTool()
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=True))
     client_kwargs = _patch_web_fetch_fake_client(monkeypatch)
 
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
@@ -237,6 +240,73 @@ def test_web_fetch_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
 
     assert "transport" in kwargs
     assert any(transport is None for transport in kwargs["mounts"].values())
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_uses_local_reader_by_default(monkeypatch: pytest.MonkeyPatch):
+    tool = WebFetchTool()
+    _patch_web_fetch_fake_client(monkeypatch)
+
+    async def _unexpected_jina(*args, **kwargs):
+        raise AssertionError("Jina Reader must require explicit configuration")
+
+    async def _local_reader(*args, **kwargs):
+        return '{"extractor":"readability"}'
+
+    monkeypatch.setattr(tool, "_fetch_jina", _unexpected_jina)
+    monkeypatch.setattr(tool, "_fetch_readability", _local_reader)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page")
+
+    assert json.loads(result)["extractor"] == "readability"
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_strips_fragment_before_calling_jina(monkeypatch: pytest.MonkeyPatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=True))
+    _patch_web_fetch_fake_client(monkeypatch)
+    jina_urls: list[str] = []
+
+    async def _jina_reader(url: str, max_chars: int):
+        jina_urls.append(url)
+        return '{"extractor":"jina"}'
+
+    monkeypatch.setattr(tool, "_fetch_jina", _jina_reader)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page#private-section")
+
+    assert json.loads(result)["extractor"] == "jina"
+    assert jina_urls == ["https://example.com/page"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:secret@example.com/page",
+        "https://example.com/page?token=secret",
+    ],
+)
+async def test_web_fetch_never_sends_sensitive_urls_to_jina(monkeypatch: pytest.MonkeyPatch, url: str):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=True))
+    _patch_web_fetch_fake_client(monkeypatch)
+
+    async def _unexpected_jina(*args, **kwargs):
+        raise AssertionError("Sensitive URLs must not be sent to Jina Reader")
+
+    async def _local_reader(local_url: str, *args, **kwargs):
+        assert local_url == url
+        return '{"extractor":"readability"}'
+
+    monkeypatch.setattr(tool, "_fetch_jina", _unexpected_jina)
+    monkeypatch.setattr(tool, "_fetch_readability", _local_reader)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url=url)
+
+    assert json.loads(result)["extractor"] == "readability"
 
 
 @pytest.mark.asyncio

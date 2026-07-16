@@ -8,7 +8,7 @@ import json
 import os
 import re
 from typing import Any, Callable
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse, urlsplit, urlunsplit
 
 import httpx
 from loguru import logger
@@ -65,7 +65,7 @@ class WebSearchConfig(Base):
 
 class WebFetchConfig(Base):
     """Web fetch tool configuration."""
-    use_jina_reader: bool = True
+    use_jina_reader: bool = False
 
 
 class WebToolsConfig(Base):
@@ -109,6 +109,20 @@ def _validate_url_safe(url: str) -> tuple[bool, str]:
     from nanobot.security.network import validate_url_target
 
     return validate_url_target(url)
+
+
+def _jina_reader_url(url: str) -> str | None:
+    """Return a URL safe to share with Jina Reader, or None to use local extraction.
+
+    Jina Reader fetches the target from its own infrastructure. Do not disclose
+    URLs containing credentials or query strings, which commonly carry access
+    tokens and signed-resource parameters. Fragments are client-side only and
+    are removed before forwarding ordinary URLs.
+    """
+    parsed = urlsplit(url)
+    if parsed.username is not None or parsed.password is not None or parsed.query:
+        return None
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
 def _resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
@@ -1028,7 +1042,11 @@ class WebFetchTool(Tool):
 
         result = None
         if self.config.use_jina_reader:
-            result = await self._fetch_jina(url, max_chars)
+            jina_url = _jina_reader_url(url)
+            if jina_url is None:
+                logger.debug("Skipping Jina Reader for a URL with credentials or a query string")
+            else:
+                result = await self._fetch_jina(jina_url, max_chars)
         if result is None:
             result = await self._fetch_readability(url, extract_mode, max_chars)
         return result
