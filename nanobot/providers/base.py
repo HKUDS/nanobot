@@ -18,6 +18,7 @@ from loguru import logger
 STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
+RETRY_AFTER_BUFFER = 1
 
 
 def resolve_stream_idle_timeout_s(
@@ -952,8 +953,9 @@ class LLMProvider(ABC):
                     )
                 break
 
+            retry_after = self._extract_retry_after_from_response(response)
             base_delay = delays[min(attempt - 1, len(delays) - 1)]
-            delay = self._extract_retry_after_from_response(response) or base_delay
+            delay = retry_after + RETRY_AFTER_BUFFER if retry_after else base_delay
             if persistent:
                 delay = min(delay, self._PERSISTENT_MAX_DELAY)
 

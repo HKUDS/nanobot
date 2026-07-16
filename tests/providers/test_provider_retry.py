@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
+from nanobot.providers.base import RETRY_AFTER_BUFFER, GenerationSettings, LLMProvider, LLMResponse
 
 
 class ScriptedProvider(LLMProvider):
@@ -402,8 +402,8 @@ async def test_chat_with_retry_uses_retry_after_and_emits_wait_progress(monkeypa
     )
 
     assert response.content == "ok"
-    assert delays == [7.0]
-    assert progress and "7s" in progress[0]
+    assert delays == [7.0 + RETRY_AFTER_BUFFER]
+    assert progress and f"{int(7 + RETRY_AFTER_BUFFER)}s" in progress[0]
 
 
 def test_extract_retry_after_supports_common_provider_formats() -> None:
@@ -444,7 +444,7 @@ async def test_chat_with_retry_prefers_structured_retry_after_when_present(monke
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
     assert response.content == "ok"
-    assert delays == [9.0]
+    assert delays == [9.0 + RETRY_AFTER_BUFFER]
 
 
 @pytest.mark.asyncio
@@ -521,7 +521,7 @@ async def test_chat_with_retry_retries_429_transient_rate_limit(monkeypatch) -> 
 
     assert response.content == "ok"
     assert provider.calls == 2
-    assert delays == [0.2]
+    assert delays == [0.2 + RETRY_AFTER_BUFFER]
 
 
 @pytest.mark.asyncio
@@ -591,7 +591,7 @@ async def test_chat_with_retry_prefers_structured_retry_after(monkeypatch) -> No
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
     assert response.content == "ok"
-    assert delays == [0.2]
+    assert delays == [0.2 + RETRY_AFTER_BUFFER]
 
 
 @pytest.mark.asyncio
