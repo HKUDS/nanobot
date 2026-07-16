@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from weakref import WeakValueDictionary
 
 from loguru import logger
@@ -425,6 +425,7 @@ class SessionManager:
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
+        self._file_cap_archiver: Callable[..., None] | None = None
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -445,6 +446,10 @@ class SessionManager:
         if session is not None:
             self._remember(session)
         return session
+
+    def set_file_cap_archiver(self, archiver: Callable[..., None]) -> None:
+        """Archive unconsolidated overflow whenever a session is persisted."""
+        self._file_cap_archiver = archiver
 
     @staticmethod
     def safe_key(key: str) -> str:
@@ -663,6 +668,14 @@ class SessionManager:
         write-back caching (e.g. rclone VFS, NFS, FUSE mounts) do not lose
         the most recent writes.
         """
+        if self._file_cap_archiver is not None:
+            session.enforce_file_cap(
+                on_archive=lambda messages: self._file_cap_archiver(
+                    messages,
+                    session_key=session.key,
+                )
+            )
+
         path = self._get_session_path(session.key)
         tmp_path = path.with_suffix(".jsonl.tmp")
 
