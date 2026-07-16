@@ -138,6 +138,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   minimax: brand("minimax.io", "#111827", "MM"),
   mistral: brand("mistral.ai", "#FA520F", "M"),
   moonshot: brand("moonshot.ai", "#111827", "MS"),
+  nimble: brand("nimbleway.com", "#0E0732", "N"),
   novita: brand("novita.ai", "#7C3AED", "N"),
   olostep: brand("olostep.com", "#111827", "O"),
   nvidia: brand("nvidia.com", "#76B900", "NV"),

@@ -202,6 +202,121 @@ async def test_keenable_search_http_error(monkeypatch):
     assert "Error: Keenable search failed (401)" in result
 
 
+def test_nimble_without_api_key_is_treated_as_duckduckgo(monkeypatch):
+    # Nimble requires a key; without one we fall back to DuckDuckGo.
+    monkeypatch.delenv("NIMBLE_API_KEY", raising=False)
+    tool = _tool(provider="nimble", api_key="")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
+def test_nimble_with_api_key_remains_concurrency_safe():
+    tool = _tool(provider="nimble", api_key="nimble-key")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+@pytest.mark.asyncio
+async def test_nimble_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "nimbleway" in url
+        assert kw["headers"]["Authorization"] == "Bearer nimble-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["X-Client-Source"] == "nanobot"
+        assert kw["json"]["search_depth"] == "lite"
+        assert kw["json"]["max_results"] == 1
+        return _response(json={
+            "results": [{
+                "title": "Nimble",
+                "url": "https://nimbleway.com",
+                "description": "short",
+                "content": "longer excerpt",
+            }]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="nimble", api_key="nimble-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="nimble", count=1)
+    assert "Nimble" in result
+    assert "https://nimbleway.com" in result
+    assert "longer excerpt" in result
+
+
+@pytest.mark.asyncio
+async def test_nimble_search_falls_back_to_description_when_content_empty(monkeypatch):
+    # search_depth="lite" returns description-only rows; they must still render.
+    async def mock_post(self, url, **kw):
+        return _response(json={
+            "results": [{
+                "title": "Lite",
+                "url": "https://nimbleway.com/lite",
+                "description": "description text",
+                "content": "",
+            }]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="nimble", api_key="nimble-key")
+    result = await tool.execute(query="nimble", count=1)
+    assert "description text" in result
+
+
+@pytest.mark.asyncio
+async def test_nimble_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["Authorization"] == "Bearer env-nimble-key"
+        return _response(json={
+            "results": [{"title": "Env", "url": "https://nimbleway.com/env", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("NIMBLE_API_KEY", "env-nimble-key")
+    tool = _tool(provider="nimble", api_key="")
+    result = await tool.execute(query="nimble", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_nimble_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("NIMBLE_API_KEY", raising=False)
+
+    tool = _tool(provider="nimble", api_key="")
+    result = await tool.execute(query="nimble", count=1)
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_nimble_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="nimble", api_key="bad-nimble-key")
+    result = await tool.execute(query="nimble")
+    assert "Error: Nimble search failed (401)" in result
+    assert is_tool_error_result(tool.name, result)
+
+
+@pytest.mark.asyncio
+async def test_nimble_search_rate_limited(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=429, json={"error": "rate limited"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="nimble", api_key="nimble-key")
+    result = await tool.execute(query="nimble")
+    assert "Nimble search rate limited" in result
+    assert is_tool_error_result(tool.name, result)
+
+
 def test_serper_without_api_key_is_treated_as_duckduckgo(monkeypatch):
     # Serper requires a key; without one we fall back to DuckDuckGo for concurrency.
     monkeypatch.delenv("SERPER_API_KEY", raising=False)

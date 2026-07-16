@@ -62,4 +62,9 @@ describe("provider brand logos", () => {
     expect(providerBrand("keenable")?.logoUrls).toContain("https://keenable.ai/favicon.ico");
     expect(providerBrand("keenable")?.initials).toBe("K");
   });
+
+  it("keeps Nimble web search settings on the first-party brand domain", () => {
+    expect(providerBrand("nimble")?.logoUrls).toContain("https://nimbleway.com/favicon.ico");
+    expect(providerBrand("nimble")?.initials).toBe("N");
+  });
 });
