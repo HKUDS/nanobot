@@ -1969,6 +1969,17 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             "login_supported": True,
         },
     )
+    image_reload = AsyncMock(
+        return_value={
+            "ok": True,
+            "message": "Image generation settings applied.",
+            "requires_restart": False,
+        }
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.request_image_generation_reload",
+        image_reload,
+    )
 
     channel = _ch(bus, port=port)
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
@@ -2029,8 +2040,14 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         }
         assert image_providers["openrouter"]["label"] == "OpenRouter"
         assert image_providers["openrouter"]["configured"] is False
+        assert image_providers["openrouter"]["default_model"] == "openai/gpt-5.4-image-2"
+        assert image_providers["openrouter"]["models"] == ["openai/gpt-5.4-image-2"]
         assert image_providers["openai_codex"]["auth_type"] == "oauth"
         assert image_providers["openai_codex"]["configured"] is False
+        assert image_providers["gemini"]["models"] == [
+            "gemini-2.5-flash-image",
+            "imagen-4.0-generate-001",
+        ]
         assert image_providers["gemini"]["label"] == "Gemini"
         assert body["runtime"]["config_path"] == str(config_path)
         workspace_path = body["runtime"]["workspace_path"].replace("\\", "/")
@@ -2187,7 +2204,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert image_updated.status_code == 200
         image_body = image_updated.json()
         assert image_body["requires_restart"] is True
-        assert image_body["restart_required_sections"] == ["browser", "image", "runtime"]
+        assert image_body["restart_required_sections"] == ["browser", "runtime"]
         assert image_body["image_generation"]["enabled"] is True
         assert image_body["image_generation"]["model"] == "openai/gpt-image-1"
         assert image_body["image_generation"]["default_aspect_ratio"] == "16:9"
@@ -2202,12 +2219,9 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         )
         assert image_provider_updated.status_code == 200
         assert image_provider_updated.json()["requires_restart"] is True
-        assert image_provider_updated.json()["restart_required_sections"] == [
-            "browser",
-            "image",
-            "runtime",
-        ]
+        assert image_provider_updated.json()["restart_required_sections"] == ["browser", "runtime"]
         assert "sk-or-next" not in image_provider_updated.text
+        assert image_reload.await_count == 2
 
         bad_web = await _http_get(
             "http://127.0.0.1:"
@@ -2250,6 +2264,92 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.tools.image_generation.default_aspect_ratio == "16:9"
         assert saved.tools.image_generation.default_image_size == "2K"
         assert saved.tools.image_generation.max_images_per_turn == 3
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_image_settings_hot_reload_without_restart(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    port = 29935
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter.api_key = "image-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    image_reload = AsyncMock(
+        return_value={
+            "ok": True,
+            "message": "Image generation settings applied.",
+            "requires_restart": False,
+        }
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.request_image_generation_reload",
+        image_reload,
+    )
+
+    channel = _ch(bus, port=port)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/settings/image-generation/update"
+            "?enabled=true&provider=openrouter&model=openai%2Fgpt-image-1",
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["requires_restart"] is False
+        assert response.json()["restart_required_sections"] == []
+        image_reload.assert_awaited_once_with(bus)
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_image_settings_fall_back_to_restart_when_hot_reload_fails(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    port = 29936
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter.api_key = "image-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.request_image_generation_reload",
+        AsyncMock(
+            return_value={
+                "ok": False,
+                "message": "Image generation hot reload timed out.",
+                "requires_restart": True,
+            }
+        ),
+    )
+
+    channel = _ch(bus, port=port)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/settings/image-generation/update"
+            "?enabled=true&provider=openrouter&model=openai%2Fgpt-image-1",
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["requires_restart"] is True
+        assert response.json()["restart_required_sections"] == ["image"]
     finally:
         await channel.stop()
         await server_task

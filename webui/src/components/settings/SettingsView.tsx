@@ -3574,6 +3574,20 @@ function ImageGenerationSettings({
     IMAGE_SIZE_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultImageSize,
   );
+  const modelOptions = optionRowsWithCurrent(
+    (selectedProvider?.models ?? []).map((model) => ({ name: model, label: model })),
+    form.model,
+  );
+  const hasModelCatalog = Boolean(selectedProvider?.models?.length);
+
+  const selectProvider = (provider: string) => {
+    const nextProvider = settings.image_generation.providers.find((row) => row.name === provider);
+    onChangeForm((prev) => ({
+      ...prev,
+      provider,
+      model: nextProvider?.default_model || nextProvider?.models?.[0] || prev.model,
+    }));
+  };
 
   return (
     <div className="space-y-7">
@@ -3600,7 +3614,7 @@ function ImageGenerationSettings({
               value={form.provider}
               emptyLabel={tx("settings.image.selectProvider", "Select provider")}
               showProviderLogos={showBrandLogos}
-              onChange={(provider) => onChangeForm((prev) => ({ ...prev, provider }))}
+              onChange={selectProvider}
             />
           </SettingsRow>
           <SettingsRow
@@ -3635,11 +3649,22 @@ function ImageGenerationSettings({
             title={tx("settings.rows.imageModel", "Image model")}
             description={tx("settings.help.imageModel", "Model name sent to the selected image provider.")}
           >
-            <Input
-              value={form.model}
-              onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
-              className="h-8 w-[min(300px,70vw)] rounded-full text-[13px]"
-            />
+            {hasModelCatalog ? (
+              <ProviderPicker
+                providers={modelOptions}
+                value={form.model}
+                emptyLabel={tx("settings.image.selectModel", "Select image model")}
+                onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
+                triggerClassName="w-[min(300px,70vw)]"
+                contentClassName="w-[320px]"
+              />
+            ) : (
+              <Input
+                value={form.model}
+                onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
+                className="h-8 w-[min(300px,70vw)] rounded-full text-[13px]"
+              />
+            )}
           </SettingsRow>
           <SettingsRow
             title={tx("settings.rows.defaultAspectRatio", "Default aspect")}
@@ -7632,12 +7657,16 @@ function ProviderPicker({
   value,
   emptyLabel,
   showProviderLogos = false,
+  triggerClassName,
+  contentClassName,
   onChange,
 }: {
   providers: Array<{ name: string; label: string }>;
   value: string;
   emptyLabel: string;
   showProviderLogos?: boolean;
+  triggerClassName?: string;
+  contentClassName?: string;
   onChange: (provider: string) => void;
 }) {
   const selectedProvider = providers.find((provider) => provider.name === value) ?? null;
@@ -7654,6 +7683,7 @@ function ProviderPicker({
             "h-8 w-[210px] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
             "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
+            triggerClassName,
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
@@ -7670,7 +7700,10 @@ function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
+        className={cn(
+          "max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent",
+          contentClassName,
+        )}
       >
         {providers.map((provider) => {
           const selected = provider.name === value;

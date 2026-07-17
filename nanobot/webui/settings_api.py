@@ -703,6 +703,7 @@ def _validate_configured_provider(config: Any, provider: str) -> None:
 def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in image_gen_provider_names():
+        image_provider = get_image_gen_provider(name)
         spec = find_by_name(name)
         provider_config = getattr(config.providers, name, None)
         configured = (
@@ -722,6 +723,12 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
                 "api_base": getattr(provider_config, "api_base", None),
                 "default_api_base": (
                     spec.default_api_base if spec and spec.default_api_base else None
+                ),
+                "models": list(image_provider.model_options) if image_provider else [],
+                "default_model": (
+                    image_provider.model_options[0]
+                    if image_provider and image_provider.model_options
+                    else None
                 ),
             }
         )

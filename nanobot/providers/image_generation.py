@@ -177,6 +177,7 @@ class ImageGenerationProvider(ABC):
     """Base class for image generation provider clients."""
 
     provider_name: str = ""
+    model_options: tuple[str, ...] = ()
     missing_key_message: str = ""
     default_timeout: float = _DEFAULT_TIMEOUT_S
 
@@ -254,6 +255,7 @@ class OpenRouterImageGenerationClient(ImageGenerationProvider):
     """Small async client for OpenRouter Chat Completions image generation."""
 
     provider_name = "openrouter"
+    model_options = ("openai/gpt-5.4-image-2",)
     missing_key_message = (
         "OpenRouter API key is not configured. Set providers.openrouter.apiKey."
     )
@@ -345,6 +347,7 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
     """Small async client for AIHubMix unified image generation."""
 
     provider_name = "aihubmix"
+    model_options = ("gpt-image-2-free",)
     missing_key_message = (
         "AIHubMix API key is not configured. Set providers.aihubmix.apiKey."
     )
@@ -515,6 +518,7 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
     """Async client for Ollama native image generation models."""
 
     provider_name = "ollama"
+    model_options = ("x/z-image-turbo",)
     default_timeout = 300.0
 
     def _default_base_url(self) -> str:
@@ -591,6 +595,7 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
     """Async client for Gemini/Imagen image generation via the Generative Language API."""
 
     provider_name = "gemini"
+    model_options = ("gemini-2.5-flash-image", "imagen-4.0-generate-001")
     missing_key_message = (
         "Gemini API key is not configured. Set providers.gemini.apiKey."
     )
@@ -815,6 +820,7 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
     """Async client for MiniMax image generation API."""
 
     provider_name = "minimax"
+    model_options = ("image-01",)
     missing_key_message = (
         "MiniMax API key is not configured. Set providers.minimax.apiKey."
     )
@@ -947,6 +953,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
     """OpenAI Images API using an API key (``providers.openai.apiKey``)."""
 
     provider_name = "openai"
+    model_options = ("gpt-image-2", "gpt-image-1", "dall-e-3", "dall-e-2")
     missing_key_message = (
         "OpenAI API key is not configured. Set providers.openai.apiKey."
     )
@@ -1210,6 +1217,7 @@ class CodexImageGenerationClient(ImageGenerationProvider):
     """
 
     provider_name = "openai_codex"
+    model_options = ("gpt-5.4",)
     missing_key_message = (
         "Codex OAuth token is unavailable. "
         "Log in with Codex subscription first."
@@ -1508,6 +1516,7 @@ class StepFunImageGenerationClient(ImageGenerationProvider):
     """
 
     provider_name = "stepfun"
+    model_options = ("step-image-edit-2", "step-1x-medium")
     missing_key_message = (
         "StepFun API key is not configured. Set providers.stepfun.apiKey."
     )
@@ -1634,6 +1643,7 @@ class ZhipuImageGenerationClient(ImageGenerationProvider):
     """
 
     provider_name = "zhipu"
+    model_options = ("glm-image", "cogview-4", "cogview-4-250304", "cogview-3-flash")
     missing_key_message = "Zhipu API key is not configured. Set providers.zhipu.apiKey."
     default_timeout = _ZHIPU_TIMEOUT_S
 

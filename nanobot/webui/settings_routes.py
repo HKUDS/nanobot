@@ -17,6 +17,7 @@ from typing import Any
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.agent.tools.image_generation import request_image_generation_reload
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.api.runtime import ApiRuntime, ApiStartOptions, api_runtime_paths
 from nanobot.bus.queue import MessageBus
@@ -145,7 +146,7 @@ class WebUISettingsRouter:
         if path == "/api/settings/model-configurations/update":
             return self._handle_settings_model_configuration_update(request)
         if path == "/api/settings/provider/update":
-            return self._handle_settings_provider_update(request)
+            return await self._handle_settings_provider_update(request)
         if path == "/api/settings/provider-models":
             return await self._handle_settings_provider_models(request)
         if path == "/api/settings/provider/oauth-login":
@@ -163,7 +164,7 @@ class WebUISettingsRouter:
         if path == "/api/settings/api-service/stop":
             return await self._handle_settings_api_service_stop(request)
         if path == "/api/settings/image-generation/update":
-            return self._handle_settings_image_generation_update(request)
+            return await self._handle_settings_image_generation_update(request)
         if path == "/api/settings/transcription/update":
             return self._handle_settings_transcription_update(request)
         if path == "/api/settings/network-safety/update":
@@ -352,13 +353,14 @@ class WebUISettingsRouter:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload))
 
-    def _handle_settings_provider_update(self, request: WsRequest) -> Response:
+    async def _handle_settings_provider_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
         try:
             payload = update_provider_settings(self._query(request))
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
+        payload = await self._apply_image_generation_runtime_change(payload)
         return self._json_response(self._with_restart_state(payload, section="image"))
 
     async def _handle_settings_provider_models(self, request: WsRequest) -> Response:
@@ -541,14 +543,40 @@ class WebUISettingsRouter:
             return f"API server {message.removeprefix('api_').replace('_', ' ')}"
         return message.replace("_", " ")
 
-    def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
+    async def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
         try:
             payload = update_image_generation_settings(self._query(request))
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
+        payload = await self._apply_image_generation_runtime_change(payload)
         return self._json_response(self._with_restart_state(payload, section="image"))
+
+    async def _apply_image_generation_runtime_change(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Hot-apply image settings, preserving restart fallback on failure."""
+        if not payload.get("requires_restart"):
+            return payload
+        try:
+            result = await request_image_generation_reload(self.bus)
+        except Exception:
+            self.logger.exception("failed to hot-reload image generation settings")
+            return payload
+
+        applied = bool(result.get("ok")) and not result.get("requires_restart")
+        payload = dict(payload)
+        payload["requires_restart"] = not applied
+        if applied:
+            self._restart_sections.discard("image")
+        else:
+            self.logger.warning(
+                "image generation settings were saved but require restart: {}",
+                result.get("message") or "hot reload failed",
+            )
+        return payload
 
     def _handle_settings_transcription_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):

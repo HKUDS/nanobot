@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tools import image_generation as image_generation_tools
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
@@ -41,7 +42,13 @@ async def close_mcp(state: Any) -> None:
 
 
 async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolRegistry) -> bool:
-    return await mcp_tools.handle_runtime_control(state, msg, tools)
+    for handler in (
+        image_generation_tools.handle_runtime_control,
+        mcp_tools.handle_runtime_control,
+    ):
+        if await handler(state, msg, tools):
+            return True
+    return False
 
 
 class ContextBuilder:

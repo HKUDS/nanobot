@@ -303,6 +303,7 @@ function renderSettingsView(
       | "automations"
       | "advanced"
       | "models"
+      | "image"
       | "browser"
       | "runtime";
     initialSettings?: SettingsPayload;
@@ -2275,6 +2276,56 @@ describe("SettingsView Apps catalog", () => {
         expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
       ),
     );
+  });
+
+  it("selects image models from provider-specific options", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      image_generation: {
+        ...base.image_generation,
+        providers: [
+          {
+            name: "openrouter",
+            label: "OpenRouter",
+            configured: true,
+            models: ["openai/gpt-5.4-image-2"],
+            default_model: "openai/gpt-5.4-image-2",
+          },
+          {
+            name: "gemini",
+            label: "Gemini",
+            configured: true,
+            models: ["gemini-2.5-flash-image", "imagen-4.0-generate-001"],
+            default_model: "gemini-2.5-flash-image",
+          },
+          {
+            name: "custom",
+            label: "Custom",
+            configured: true,
+            models: [],
+            default_model: null,
+          },
+        ],
+      },
+    };
+
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+
+    expect(screen.queryByDisplayValue("openai/gpt-5.4-image-2")).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "OpenRouter" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Gemini" }));
+
+    expect(await screen.findByRole("button", { name: "gemini-2.5-flash-image" })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "gemini-2.5-flash-image" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "imagen-4.0-generate-001" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "imagen-4.0-generate-001" })).toBeInTheDocument(),
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Gemini" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Custom" }));
+    expect(screen.getByDisplayValue("imagen-4.0-generate-001")).toBeInTheDocument();
   });
 
   it("keeps the default model distinct from the active named configuration", async () => {
