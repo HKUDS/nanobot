@@ -59,6 +59,7 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
+_KIMI_K3_MODEL = "kimi-k3"
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
@@ -109,9 +110,9 @@ def _provider_prefix_key(name: str) -> str:
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
-    """Return True for models that reject ``max_tokens`` (GPT-5 family, o-series)."""
+    """Return True for models that require ``max_completion_tokens``."""
     slug = _model_slug(model_name)
-    return "gpt-5" in slug or any(
+    return slug == _KIMI_K3_MODEL or "gpt-5" in slug or any(
         slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
     )
 
@@ -712,9 +713,12 @@ class OpenAICompatProvider(LLMProvider):
     ) -> bool:
         """Return True when the model accepts a temperature parameter.
 
-        GPT-5 family and reasoning models (o1/o3/o4) reject temperature
-        when reasoning_effort is set to anything other than ``"none"``.
+        Kimi K3 uses a fixed temperature that should be omitted. GPT-5 family
+        and reasoning models (o1/o3/o4) reject temperature when
+        reasoning_effort is set to anything other than ``"none"``.
         """
+        if _model_slug(model_name) == _KIMI_K3_MODEL:
+            return False
         if reasoning_effort and reasoning_effort.lower() != "none":
             return False
         name = model_name.lower()
@@ -774,6 +778,17 @@ class OpenAICompatProvider(LLMProvider):
                 semantic_effort = "minimal"
 
         wire_effort = reasoning_effort
+        slug = _model_slug(model_name)
+        if slug == _KIMI_K3_MODEL and semantic_effort is not None:
+            # K3 always reasons and currently accepts only the top-level
+            # reasoning_effort="max". Preserve disabled/default semantics by
+            # omitting the field; normalize older enabled presets to "max" so
+            # switching from a K2.x model does not send an unsupported value.
+            if semantic_effort in ("none", "minimal"):
+                wire_effort = None
+            else:
+                semantic_effort = "max"
+                wire_effort = "max"
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
@@ -811,7 +826,6 @@ class OpenAICompatProvider(LLMProvider):
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
-            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
                 if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:

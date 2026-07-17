@@ -1602,6 +1602,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
   });
 
   it("keeps the default model distinct from the active named configuration", async () => {

@@ -15,6 +15,7 @@ from nanobot.webui.settings_api import (
     _docs_version,
     _model_catalog_kind,
     _oauth_provider_status,
+    _reasoning_effort_values_for,
     create_model_configuration,
     login_oauth_provider,
     provider_models_payload,
@@ -38,6 +39,10 @@ def test_docs_version_uses_released_versions_and_falls_back_for_dev() -> None:
     assert _docs_version("0.2.3.post1") == "0.2.3.post1"
     assert _docs_version("0.2.3.dev0") == "latest"
     assert _docs_version("0.2.3+editable") == "latest"
+
+
+def test_kimi_k3_only_offers_supported_reasoning_effort_values() -> None:
+    assert _reasoning_effort_values_for("moonshot", "kimi-k3") == ["", "max"]
 
 
 def test_settings_payload_includes_versioned_docs(
@@ -357,13 +362,13 @@ def test_update_model_configuration_accepts_context_window_options(
     payload = update_model_configuration(
         {
             "name": ["codex"],
-            "context_window_tokens": ["262144"],
+            "context_window_tokens": ["1048576"],
         }
     )
 
-    assert payload["agent"]["context_window_tokens"] == 262144
+    assert payload["agent"]["context_window_tokens"] == 1048576
     saved = load_config(config_path)
-    assert saved.model_presets["codex"].context_window_tokens == 262144
+    assert saved.model_presets["codex"].context_window_tokens == 1048576
 
 
 def test_update_context_window_rejects_unknown_values(
@@ -376,7 +381,7 @@ def test_update_context_window_rejects_unknown_values(
 
     with pytest.raises(
         WebUISettingsError,
-        match="context_window_tokens must be 65536, 200000, or 262144",
+        match="context_window_tokens must be 65536, 200000, 262144, or 1048576",
     ):
         update_agent_settings({"context_window_tokens": ["128000"]})
 
