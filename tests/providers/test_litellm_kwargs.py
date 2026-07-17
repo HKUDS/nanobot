@@ -1605,9 +1605,9 @@ def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> 
 
 
 def test_moonshot_kimi_k26_temperature_override() -> None:
-    """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
+    """Moonshot registry forces temperature 0.6 for kimi-k2.6 (API requirement)."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
-    assert kw["temperature"] == 1.0
+    assert kw["temperature"] == 0.6
 
 
 def test_moonshot_kimi_k27_code_temperature_override() -> None:
