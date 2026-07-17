@@ -1690,7 +1690,7 @@ describe("App layout", () => {
     expect(screen.getByRole("heading", { name: "Image" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
     expect(screen.getByText("Provider status")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("openai/gpt-5.4-image-2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "openai/gpt-5.4-image-2" })).toBeInTheDocument();
     expect(screen.getByText("Save directory")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
