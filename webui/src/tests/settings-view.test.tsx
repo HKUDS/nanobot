@@ -2323,9 +2323,23 @@ describe("SettingsView Apps catalog", () => {
       expect(screen.getByRole("button", { name: "imagen-4.0-generate-001" })).toBeInTheDocument(),
     );
 
+    fireEvent.pointerDown(screen.getByRole("button", { name: "imagen-4.0-generate-001" }));
+    const modelInput = await screen.findByRole("textbox", { name: "Search or type model ID" });
+    fireEvent.change(modelInput, { target: { value: "imagen-5-preview" } });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Use “imagen-5-preview”" }));
+    expect(await screen.findByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+
     fireEvent.pointerDown(screen.getByRole("button", { name: "Gemini" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Custom" }));
-    expect(screen.getByDisplayValue("imagen-4.0-generate-001")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "imagen-5-preview" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "imagen-5-preview" }));
+    const customProviderInput = await screen.findByRole("textbox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(customProviderInput, { target: { value: "private/image-v2" } });
+    fireEvent.keyDown(customProviderInput, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: "private/image-v2" })).toBeInTheDocument();
   });
 
   it("keeps the default model distinct from the active named configuration", async () => {

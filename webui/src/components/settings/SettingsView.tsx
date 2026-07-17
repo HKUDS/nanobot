@@ -3574,11 +3574,10 @@ function ImageGenerationSettings({
     IMAGE_SIZE_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultImageSize,
   );
-  const modelOptions = optionRowsWithCurrent(
-    (selectedProvider?.models ?? []).map((model) => ({ name: model, label: model })),
-    form.model,
-  );
-  const hasModelCatalog = Boolean(selectedProvider?.models?.length);
+  const modelOptions = (selectedProvider?.models ?? []).map((model) => ({
+    name: model,
+    label: model,
+  }));
 
   const selectProvider = (provider: string) => {
     const nextProvider = settings.image_generation.providers.find((row) => row.name === provider);
@@ -3649,22 +3648,21 @@ function ImageGenerationSettings({
             title={tx("settings.rows.imageModel", "Image model")}
             description={tx("settings.help.imageModel", "Model name sent to the selected image provider.")}
           >
-            {hasModelCatalog ? (
-              <ProviderPicker
-                providers={modelOptions}
-                value={form.model}
-                emptyLabel={tx("settings.image.selectModel", "Select image model")}
-                onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
-                triggerClassName="w-[min(300px,70vw)]"
-                contentClassName="w-[320px]"
-              />
-            ) : (
-              <Input
-                value={form.model}
-                onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
-                className="h-8 w-[min(300px,70vw)] rounded-full text-[13px]"
-              />
-            )}
+            <EditableOptionPicker
+              options={modelOptions}
+              value={form.model}
+              emptyLabel={tx("settings.image.selectModel", "Select image model")}
+              searchPlaceholder={tx(
+                "settings.image.searchOrTypeModel",
+                "Search or type model ID",
+              )}
+              emptyMessage={tx(
+                "settings.image.typeModelId",
+                "Type the model ID supported by this provider.",
+              )}
+              useCustomLabel={tx("settings.models.useCustomModel", "Use")}
+              onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
+            />
           </SettingsRow>
           <SettingsRow
             title={tx("settings.rows.defaultAspectRatio", "Default aspect")}
@@ -7730,6 +7728,137 @@ function ProviderPicker({
             </DropdownMenuItem>
           );
         })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function EditableOptionPicker({
+  options,
+  value,
+  emptyLabel,
+  searchPlaceholder,
+  emptyMessage,
+  useCustomLabel,
+  onChange,
+}: {
+  options: Array<{ name: string; label: string }>;
+  value: string;
+  emptyLabel: string;
+  searchPlaceholder: string;
+  emptyMessage: string;
+  useCustomLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const customCandidate = query.trim();
+  const exactMatch = options.some((option) => option.name === customCandidate);
+  const visibleOptions = options.filter((option) =>
+    [option.name, option.label].some((field) => field.toLowerCase().includes(normalizedQuery)),
+  );
+
+  const selectValue = (nextValue: string) => {
+    onChange(nextValue);
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) setQuery("");
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn(
+            "h-8 w-[min(300px,70vw)] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <span className={cn("truncate", !value && "text-muted-foreground")}>
+            {value || emptyLabel}
+          </span>
+          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-[320px] max-w-[calc(100vw-2rem)] p-1.5"
+      >
+        <div className="p-1 pb-1.5">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter" && customCandidate) {
+                  event.preventDefault();
+                  selectValue(customCandidate);
+                }
+              }}
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
+            />
+          </div>
+        </div>
+
+        {visibleOptions.length ? (
+          <div className="max-h-[14rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent">
+            {visibleOptions.map((option) => {
+              const selected = option.name === value;
+              return (
+                <DropdownMenuItem
+                  key={option.name}
+                  onSelect={() => selectValue(option.name)}
+                  className={cn(
+                    "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-2.5 py-2 text-[13px]",
+                    "focus:bg-muted/85 focus:text-foreground",
+                    selected && "bg-muted/80 text-foreground focus:bg-muted",
+                  )}
+                >
+                  <span className="min-w-0 truncate">{option.label}</span>
+                  {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
+                </DropdownMenuItem>
+              );
+            })}
+          </div>
+        ) : !customCandidate ? (
+          <div className="px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+            {emptyMessage}
+          </div>
+        ) : null}
+
+        {customCandidate && !exactMatch ? (
+          <>
+            {visibleOptions.length ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem
+              onSelect={() => selectValue(customCandidate)}
+              className="flex cursor-default items-center gap-2 rounded-[12px] px-2 py-1.5 text-[12px] focus:bg-muted/85"
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted/80 text-muted-foreground">
+                <Pencil className="h-3 w-3" aria-hidden />
+              </span>
+              <span className="min-w-0 truncate">
+                {useCustomLabel}{" "}
+                <span className="font-medium text-foreground">“{customCandidate}”</span>
+              </span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
