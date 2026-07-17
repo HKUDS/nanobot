@@ -1604,10 +1604,14 @@ def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> 
     assert "reasoning_effort" not in kw
 
 
-def test_moonshot_kimi_k26_temperature_override() -> None:
-    """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
-    assert kw["temperature"] == 1.0
+@pytest.mark.parametrize("model", ["kimi-k2.5", "kimi-k2.6"])
+@pytest.mark.parametrize("reasoning_effort", [None, "none", "minimal", "medium", "high"])
+def test_moonshot_kimi_k25_k26_omit_temperature(
+    model: str, reasoning_effort: str | None,
+) -> None:
+    """Moonshot chooses the valid temperature from the K2.5/K2.6 thinking mode."""
+    kw = _build_kwargs_for("moonshot", model, reasoning_effort=reasoning_effort)
+    assert "temperature" not in kw
 
 
 def test_moonshot_kimi_k27_code_temperature_override() -> None:

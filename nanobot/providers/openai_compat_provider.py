@@ -71,6 +71,10 @@ _KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.7-code",
     "kimi-k2.7-code-highspeed",
 })
+_KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.5",
+    "kimi-k2.6",
+})
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -763,6 +767,16 @@ class OpenAICompatProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     break
+
+        # Moonshot selects the only valid temperature from the K2.5/K2.6 thinking mode:
+        # 1.0 when enabled and 0.6 when disabled. Omitting the parameter lets the API
+        # apply the matching value for both its default and explicit thinking controls.
+        if (
+            spec
+            and spec.name == "moonshot"
+            and _model_slug(model_name) in _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS
+        ):
+            kwargs.pop("temperature", None)
 
         # Normalize reasoning_effort into a semantic form (OpenAI vocab)
         # used for internal decisions, and a wire form actually sent out.
