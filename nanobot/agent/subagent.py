@@ -459,6 +459,15 @@ class SubagentManager:
             await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)
 
+    async def close(self) -> None:
+        """Cancel running subagents and close their shared exec sessions."""
+        tasks = [task for task in self._running_tasks.values() if not task.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self._exec_session_manager.close_all()
+
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)

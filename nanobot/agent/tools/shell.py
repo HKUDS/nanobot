@@ -6,6 +6,8 @@ import asyncio
 import os
 import re
 import shutil
+import signal
+import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -516,6 +518,7 @@ class ExecTool(Tool):
         login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
+        process_tree: bool = False,
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
@@ -563,6 +566,7 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            **({"start_new_session": True} if process_tree else {}),
         )
 
     @staticmethod
@@ -650,6 +654,39 @@ class ExecTool(Tool):
         try:
             with suppress(ProcessLookupError):
                 process.kill()
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+        finally:
+            _reap_pid(process.pid)
+
+    @staticmethod
+    async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        """Kill a session process and descendants, then reap the root process."""
+        if process.returncode is not None:
+            _reap_pid(process.pid)
+            return
+        try:
+            if _IS_WINDOWS:
+                with suppress(OSError, asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            subprocess.run,
+                            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        ),
+                        timeout=5.0,
+                    )
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    process.kill()
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=5.0)
         finally:
