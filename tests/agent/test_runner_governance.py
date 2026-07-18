@@ -574,7 +574,7 @@ def test_microcompact_overflow_compacts_to_low_watermark(monkeypatch):
 
 
 def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
-    """The newest result is preserved only while the request can still fit."""
+    """An unfit newest result tells the model to retry narrowly or report the limit."""
     provider = MagicMock()
     provider.generation = SimpleNamespace(max_tokens=0)
     tools = MagicMock()
@@ -611,6 +611,9 @@ def test_microcompact_compacts_newest_when_it_alone_overflows(monkeypatch):
 
     tool_msg = next(m for m in result if m.get("role") == "tool")
     assert "compacted to fit context" in tool_msg["content"]
+    assert "Do not repeat the same call unchanged" in tool_msg["content"]
+    assert "Retry with a narrower path, query, range, or result limit" in tool_msg["content"]
+    assert "tell the user the task cannot fit" in tool_msg["content"]
     assert compacted_tool_call_ids == {"c0"}
 
 
