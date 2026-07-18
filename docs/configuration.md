@@ -64,6 +64,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
+| Compress noisy shell command output with RTK | `tools.exec.rtk.enabled`, optional `tools.exec.rtk.path` | Run a failing test or git command through `exec` and check that RTK rewrites it | [Security](#security) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
 | Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Use the same explicit paths with `nanobot status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
@@ -1915,9 +1916,43 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
+| `tools.exec.rtk.enabled` | `false` | Enable optional [RTK](https://github.com/rtk-ai/rtk) command rewriting for shell commands. RTK can wrap noisy developer commands such as test and git invocations so their output is summarized for the model. |
+| `tools.exec.rtk.path` | `"rtk"` | RTK executable path or command name. If the binary is not found, nanobot runs the original command. |
+| `tools.exec.rtk.rewriteTimeoutMs` | `2000` | Maximum time to wait for `rtk rewrite <command>`. On timeout or rewrite failure, nanobot runs the original command. |
+| `tools.exec.rtk.teeDir` | `".nanobot/rtk-tee"` | Directory for RTK tee files containing full command output. Relative paths are resolved under the active workspace. Set to `""` to leave RTK's default behavior unchanged. |
 | `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install missing optional packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin is allowed to install Python packages into this nanobot environment. |
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
+
+### RTK command rewriting
+
+RTK integration is opt-in and only applies to the built-in shell `exec` tool. Install RTK separately so the configured binary is available to the nanobot process, then enable it in `config.json`:
+
+```json
+{
+  "tools": {
+    "exec": {
+      "rtk": {
+        "enabled": true,
+        "path": "rtk",
+        "rewriteTimeoutMs": 2000,
+        "teeDir": ".nanobot/rtk-tee"
+      }
+    }
+  }
+}
+```
+
+When enabled, nanobot asks RTK whether a command should be rewritten before execution:
+
+1. nanobot applies its existing guard to the original command;
+2. nanobot runs `rtk rewrite <command>`;
+3. if RTK returns a different command, nanobot applies the same guard to the rewritten command;
+4. nanobot then applies any configured shell sandbox wrapper and executes the final command.
+
+This means RTK cannot be used to bypass `denyPatterns`, workspace checks, SSRF checks, or `tools.exec.sandbox`. RTK is also fail-open: if RTK is missing, returns no rewrite, exits with an unsupported-command status, or times out, nanobot runs the original command.
+
+By default, nanobot sets `RTK_TEE_DIR` to `.nanobot/rtk-tee` under the active workspace so full command output stays reachable from workspace-scoped tools. The normal `exec` response still contains RTK's summarized output.
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 

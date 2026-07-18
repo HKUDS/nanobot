@@ -16,6 +16,11 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.command_rewriters import (
+    RTKCommandRewriter,
+    RTKCommandRewriterConfig,
+    filter_rtk_hook_warnings,
+)
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
@@ -85,6 +90,7 @@ class ExecToolConfig(Base):
     allowed_env_keys: list[str] = Field(default_factory=list)
     allow_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
+    rtk: RTKCommandRewriterConfig = Field(default_factory=RTKCommandRewriterConfig)
 
 
 @dataclass(slots=True)
@@ -188,6 +194,7 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
+            rtk=cfg.rtk,
         )
 
     def __init__(
@@ -203,6 +210,7 @@ class ExecTool(Tool):
         path_prepend: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
+        rtk: RTKCommandRewriterConfig | dict[str, Any] | None = None,
         session_manager: Any | None = None,
     ):
         self.timeout = timeout
@@ -235,6 +243,12 @@ class ExecTool(Tool):
         self.path_prepend = path_prepend
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
+        self.rtk = RTKCommandRewriterConfig.model_validate(rtk or {})
+        self._rtk_rewriter = RTKCommandRewriter(
+            self.rtk,
+            path_prepend=path_prepend,
+            path_append=path_append,
+        )
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @property
@@ -300,7 +314,7 @@ class ExecTool(Tool):
         if max_output_chars is None:
             max_output_chars = max_output_tokens
 
-        prepared = self._prepare_command(command, working_dir, timeout, shell, login)
+        prepared = await self._prepare_command(command, working_dir, timeout, shell, login)
         if isinstance(prepared, str):
             return prepared
 
@@ -337,10 +351,16 @@ class ExecTool(Tool):
             output_parts = []
 
             if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
+                stdout_text = stdout.decode("utf-8", errors="replace")
+                if self.rtk.enabled:
+                    stdout_text = filter_rtk_hook_warnings(stdout_text)
+                if stdout_text:
+                    output_parts.append(stdout_text)
 
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
+                if self.rtk.enabled:
+                    stderr_text = filter_rtk_hook_warnings(stderr_text)
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
 
@@ -408,7 +428,7 @@ class ExecTool(Tool):
             return self.timeout
         return None
 
-    def _prepare_command(
+    async def _prepare_command(
         self,
         command: str,
         working_dir: str | None = None,
@@ -453,6 +473,26 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
+        effective_timeout = self._resolve_timeout(timeout)
+        env = self._build_env()
+
+        rewritten_command = await self._rtk_rewriter.rewrite(
+            command,
+            cwd=cwd,
+            env=env,
+            workspace_root=workspace_root,
+        )
+        if rewritten_command != command:
+            rewrite_guard_error = self._guard_command(
+                rewritten_command,
+                cwd,
+                restrict_to_workspace=access.restrict_to_workspace,
+                workspace_root=workspace_root,
+            )
+            if rewrite_guard_error:
+                return rewrite_guard_error
+            command = rewritten_command
+
         if self.sandbox:
             if _IS_WINDOWS:
                 logger.warning(
@@ -463,9 +503,6 @@ class ExecTool(Tool):
                 workspace = workspace_root or cwd
                 command = wrap_command(self.sandbox, command, workspace, cwd)
                 cwd = str(Path(workspace).resolve())
-
-        effective_timeout = self._resolve_timeout(timeout)
-        env = self._build_env()
 
         if self.path_prepend or self.path_append:
             if _IS_WINDOWS:

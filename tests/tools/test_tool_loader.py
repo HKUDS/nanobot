@@ -239,6 +239,7 @@ def test_exec_tool_enabled():
 
 
 def test_exec_tool_create():
+    from nanobot.agent.tools.command_rewriters import RTKCommandRewriterConfig
     from nanobot.agent.tools.shell import ExecTool
     mock_config = MagicMock()
     mock_config.exec.enable = True
@@ -249,11 +250,13 @@ def test_exec_tool_create():
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []
     mock_config.exec.deny_patterns = []
+    mock_config.exec.rtk = RTKCommandRewriterConfig()
     mock_config.restrict_to_workspace = False
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = ExecTool.create(ctx)
     assert isinstance(tool, ExecTool)
     assert tool.path_prepend == "/venv/bin"
+    assert tool.rtk.enabled is False
 
 
 def test_web_tools_config_cls():
@@ -357,6 +360,7 @@ def test_mcp_wrappers_not_discoverable():
 
 def test_loader_registers_same_tools_as_old_hardcoded():
     """Verify the loader produces the same tool set as the old _register_default_tools."""
+    from nanobot.agent.tools.command_rewriters import RTKCommandRewriterConfig
     from nanobot.agent.tools.loader import ToolLoader
     from nanobot.agent.tools.registry import ToolRegistry
 
@@ -369,6 +373,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []
     mock_config.exec.deny_patterns = []
+    mock_config.exec.rtk = RTKCommandRewriterConfig()
     mock_config.restrict_to_workspace = False
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()
