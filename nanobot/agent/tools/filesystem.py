@@ -4,8 +4,9 @@ import difflib
 import mimetypes
 import os
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
@@ -18,6 +19,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.security.workspace_policy import WORKSPACE_BOUNDARY_NOTE, WorkspaceBoundaryError
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
@@ -152,6 +154,53 @@ class _FsTool(Tool):
 
     def _resolve(self, path: str) -> Path:
         return self._resolve_read(path)
+
+    def _open_validated_file(
+        self,
+        path: Path,
+        *,
+        write: bool,
+        validate_write_access: bool = False,
+    ) -> BinaryIO:
+        """Open without destructive writes, then bind validation to the file handle."""
+        flags = os.O_WRONLY | os.O_CREAT if write else os.O_RDONLY
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags, 0o666)
+        try:
+            resolver = self._resolve_write if validate_write_access else self._resolve_read
+            current_path = resolver(str(path))
+            if not os.path.samestat(os.fstat(fd), os.stat(current_path)):
+                raise WorkspaceBoundaryError(
+                    f"Path {path} changed during workspace validation"
+                    + WORKSPACE_BOUNDARY_NOTE
+                )
+            if write:
+                # Truncate only after the opened handle passes the boundary check.
+                os.ftruncate(fd, 0)
+            return os.fdopen(fd, "wb" if write else "rb")
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _read_bytes(self, path: Path, *, validate_write_access: bool = False) -> bytes:
+        with self._open_validated_file(
+            path,
+            write=False,
+            validate_write_access=validate_write_access,
+        ) as file:
+            return file.read()
+
+    def _write_bytes(self, path: Path, content: bytes) -> None:
+        with self._open_validated_file(
+            path,
+            write=True,
+            validate_write_access=True,
+        ) as file:
+            file.write(content)
+
+    def _write_text(self, path: Path, content: str) -> None:
+        self._write_bytes(path, content.encode("utf-8"))
 
     def _display_workspace(self) -> Path | None:
         return current_tool_workspace(self._workspace).project_path
@@ -290,15 +339,16 @@ class ReadFileTool(_FsTool):
             if not fp.is_file():
                 return ToolResult.error(f"Error: Not a file: {path}")
 
+            raw = self._read_bytes(fp)
+
             # PDF support
             if fp.suffix.lower() == ".pdf":
-                return self._read_pdf(fp, pages)
+                return self._read_pdf(fp, raw, pages)
 
             # Office document support
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-                return self._read_office_doc(fp)
+                return self._read_office_doc(fp, raw)
 
-            raw = fp.read_bytes()
             if not raw:
                 return f"(Empty file: {path})"
 
@@ -343,7 +393,7 @@ class ReadFileTool(_FsTool):
                     entry.can_dedup = False
 
             # Read the file content after dedup check
-            raw = fp.read_bytes()
+            raw = self._read_bytes(fp)
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
@@ -393,12 +443,12 @@ class ReadFileTool(_FsTool):
         except Exception as e:
             return ToolResult.error(f"Error reading file: {e}")
 
-    def _read_pdf(self, fp: Path, pages: str | None) -> str:
+    def _read_pdf(self, fp: Path, raw: bytes, pages: str | None) -> str:
         from nanobot.utils.document import PdfPageRangeError, PdfSafetyError, extract_pdf_pages
 
         try:
             extraction = extract_pdf_pages(
-                fp,
+                BytesIO(raw),
                 pages=pages,
                 max_pages=self._MAX_PDF_PAGES,
                 max_chars=self._MAX_CHARS,
@@ -423,10 +473,10 @@ class ReadFileTool(_FsTool):
             )
         return result
 
-    def _read_office_doc(self, fp: Path) -> str:
+    def _read_office_doc(self, fp: Path, raw: bytes) -> str:
         from nanobot.utils.document import extract_text
 
-        result = extract_text(fp)
+        result = extract_text(fp, content=raw)
 
         if result is None:
             return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
@@ -480,7 +530,7 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown content")
             fp = self._resolve_write(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
+            self._write_text(fp, content)
             self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
@@ -847,7 +897,7 @@ class EditFileTool(_FsTool):
             if not fp.exists():
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8")
+                    self._write_text(fp, new_text)
                     self._file_states.record_write(fp)
                     return f"Successfully created {fp}"
                 return self._file_not_found_msg(path, fp)
@@ -862,18 +912,18 @@ class EditFileTool(_FsTool):
 
             # Create-file: old_text='' but file exists and not empty → reject
             if old_text == "":
-                raw = fp.read_bytes()
+                raw = self._read_bytes(fp, validate_write_access=True)
                 content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8")
+                self._write_text(fp, new_text)
                 self._file_states.record_write(fp)
                 return f"Successfully edited {fp}"
 
             # Read-before-edit check
             warning = self._file_states.check_read(fp)
 
-            raw = fp.read_bytes()
+            raw = self._read_bytes(fp, validate_write_access=True)
             uses_crlf = b"\r\n" in raw
             content = raw.decode("utf-8").replace("\r\n", "\n")
             norm_old = old_text.replace("\r\n", "\n")
@@ -954,7 +1004,7 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
+            self._write_bytes(fp, new_content.encode("utf-8"))
             self._file_states.record_write(fp)
             msg = f"Successfully edited {fp}"
             if warning:
