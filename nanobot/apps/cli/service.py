@@ -961,6 +961,8 @@ class CliAppManager:
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         logger.info("CLI Apps: command exited with code {}: {}", result.returncode, command)
@@ -1364,6 +1366,8 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=effective_timeout,
                 env=os.environ.copy(),
             )
