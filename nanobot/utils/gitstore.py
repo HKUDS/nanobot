@@ -113,7 +113,10 @@ class GitStore:
                     p.write_text("", encoding="utf-8")
 
             # Initial commit
-            porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
+            porcelain.add(
+                str(self._workspace),
+                paths=self._staging_paths(".gitignore", *self._tracked_files),
+            )
             porcelain.commit(
                 str(self._workspace),
                 message=b"init: nanobot memory store",
@@ -146,7 +149,7 @@ class GitStore:
                 return None
 
             msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
+            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,
@@ -163,6 +166,10 @@ class GitStore:
             return None
 
     # -- internal helpers ------------------------------------------------------
+
+    def _staging_paths(self, *paths: str) -> list[str]:
+        """Return absolute paths so Dulwich resolves them inside this workspace."""
+        return [str((self._workspace / path).resolve()) for path in paths]
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         """Resolve a short SHA prefix to the full SHA bytes."""

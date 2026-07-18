@@ -225,6 +225,21 @@ class TestNestedRepoProtection:
         assert result is True
         assert (workspace / ".git").is_dir()
 
+    def test_staging_paths_are_resolved_from_workspace(self, tmp_path, monkeypatch):
+        """Git operations should not depend on the process working directory."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        git = GitStore(workspace, tracked_files=["MEMORY.md"])
+
+        assert git.init() is True
+        assert len(git.log()) == 1
+
+        (workspace / "MEMORY.md").write_text("updated\n", encoding="utf-8")
+        assert git.auto_commit("update memory") is not None
+        assert len(git.log()) == 2
+
     def test_init_refuses_inside_git_worktree(self, tmp_path):
         """init() should refuse when the parent checkout is a git worktree."""
         repo = tmp_path / "repo"
