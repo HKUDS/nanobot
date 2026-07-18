@@ -1915,6 +1915,10 @@ class FeishuChannel(BaseChannel):
         text = text.strip()
         if not text:
             return []
+        # Non-positive limit cannot advance the cut pointer; return unsplit
+        # (same policy as split_message / _split_telegram_markdown).
+        if limit <= 0:
+            return [text]
         chunks: list[str] = []
         remaining = text
         while remaining:
