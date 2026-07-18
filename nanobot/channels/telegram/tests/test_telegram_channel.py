@@ -188,6 +188,13 @@ def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
         assert html.count("<pre><code>") == html.count("</code></pre>")
 
 
+def test_split_telegram_markdown_nonpositive_maxlen_returns_unsplit() -> None:
+    content = "hello world\nmore text that would hang without a max_len guard"
+
+    assert _split_telegram_markdown(content, max_len=0) == [content]
+    assert _split_telegram_markdown(content, max_len=-1) == [content]
+
+
 def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
     content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
 

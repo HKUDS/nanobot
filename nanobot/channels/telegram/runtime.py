@@ -51,6 +51,10 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     content = content.lstrip()
     if not content:
         return []
+    # Non-positive max_len cannot advance the cut pointer; return unsplit
+    # (same policy as split_message).
+    if max_len <= 0:
+        return [content]
     if len(content) <= max_len:
         return [content]
 
