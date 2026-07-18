@@ -650,7 +650,7 @@ def _format_dream_restore_list(commits: list) -> str:
         "",
     ]
     for c in commits:
-        lines.append(f"- `{c.sha}` {c.timestamp} - {c.message.splitlines()[0]}")
+        lines.append(f"- `{c.sha}` {c.timestamp} - {c.subject()}")
     lines.extend([
         "",
         "Preview a version with `/dream-log <sha>` before restoring it.",

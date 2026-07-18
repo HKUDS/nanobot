@@ -22,9 +22,14 @@ class CommitInfo:
     message: str
     timestamp: str  # Formatted datetime
 
+    def subject(self) -> str:
+        """First line of the commit message, or a placeholder if empty."""
+        lines = self.message.splitlines()
+        return lines[0] if lines else "(no message)"
+
     def format(self, diff: str = "") -> str:
         """Format this commit for display, optionally with a diff."""
-        header = f"## {self.message.splitlines()[0]}\n`{self.sha}` — {self.timestamp}\n"
+        header = f"## {self.subject()}\n`{self.sha}` — {self.timestamp}\n"
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
