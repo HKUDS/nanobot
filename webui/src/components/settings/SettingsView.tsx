@@ -4048,8 +4048,9 @@ function AutomationDetailPanel({
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
   const localTrigger = isLocalTriggerAutomation(job);
   const triggerCommand = automationTriggerCommand(job);
+  const pendingMessage = automationPendingMessage(job);
   const message = automationDetailText(job, tx);
-  const messageLabel = localTrigger
+  const messageLabel = localTrigger && !pendingMessage
     ? tx("settings.automations.fields.command", "Command")
     : tx("settings.automations.fields.message", "Message");
   const schedule = formatAutomationSchedule(job, locale, tx);
@@ -4116,14 +4117,14 @@ function AutomationDetailPanel({
                   )}
                   {commandCopied
                     ? tx("settings.automations.commandCopied", "Copied")
-                    : tx("settings.automations.copyCommand", "Copy")}
+                    : tx("settings.automations.copyCommand", "Copy command")}
                 </Button>
               ) : null}
             </div>
             <div
               className={cn(
                 "mt-3 whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85",
-                localTrigger && "font-mono text-[12.5px]",
+                localTrigger && !pendingMessage && "font-mono text-[12.5px]",
                 !messageExpanded && messageNeedsExpansion && "line-clamp-6",
               )}
             >
@@ -4699,12 +4700,18 @@ function automationTriggerCommand(job: SessionAutomationJob): string {
   return job.trigger?.command || job.payload.command || job.payload.message || "";
 }
 
+function automationPendingMessage(job: SessionAutomationJob): string {
+  return isLocalTriggerAutomation(job) ? job.state.pending_message || "" : "";
+}
+
 function automationSummary(
   job: SessionAutomationJob,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
   if (isLocalTriggerAutomation(job)) {
-    return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
+    return automationPendingMessage(job)
+      || automationTriggerCommand(job)
+      || tx("settings.automations.localTrigger", "Local trigger");
   }
   return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
 }
@@ -4942,13 +4949,16 @@ function automationSearchParts(
   const scheduleParts = automationScheduleSearchParts(job);
   if (field === "id") return [job.id];
   if (field === "name") return [job.name, job.id];
-  if (field === "message") return [job.payload.message, job.payload.command, job.trigger?.command];
+  if (field === "message") {
+    return [job.state.pending_message, job.payload.message, job.payload.command, job.trigger?.command];
+  }
   if (field === "chat") return originParts;
   if (field === "cron" || field === "schedule") return scheduleParts;
   if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
   return [
     job.id,
     job.name,
+    job.state.pending_message,
     job.payload.message,
     job.payload.command,
     job.trigger?.command,

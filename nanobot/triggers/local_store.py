@@ -8,6 +8,7 @@ import os
 import secrets
 import time
 import uuid
+from collections.abc import Collection
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ _TRIGGER_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _MAX_RUN_HISTORY = 20
 _MAX_DELIVERY_ATTEMPTS = 10
 _RUN_RECORD_TEXT_MAX_CHARS = 4000
+_PENDING_PREVIEW_MAX_CHARS = 4000
+_PENDING_PREVIEW_PREFIX_MAX_CHARS = 32 * 1024
+_PENDING_PREVIEW_CACHE_VARIANTS = 16
 _PROCESSING_RECOVERY_ERROR = "delivery was recovered from interrupted processing"
 
 
@@ -50,6 +54,8 @@ class LocalTriggerStore:
         self.failed_dir = self.root / "failed"
         self.runs_dir = self.root / "runs"
         self._lock = FileLock(str(self.root / ".lock"))
+        self._pending_preview_cache_state: tuple[int, int] | None = None
+        self._pending_preview_cache: dict[frozenset[str] | None, dict[str, str]] = {}
 
     def create(
         self,
@@ -157,6 +163,7 @@ class LocalTriggerStore:
                 return False
             self._save_triggers_unlocked(remaining)
             self._delete_delivery_files_for_trigger_unlocked(trigger_id)
+            self._invalidate_pending_preview_cache_unlocked()
             return True
 
     def enqueue(self, trigger_id: str, content: str) -> TriggerDelivery:
@@ -177,7 +184,9 @@ class LocalTriggerStore:
                 content=content,
                 created_at_ms=_now_ms(),
             )
-            path = self.inbox_dir / f"{delivery.created_at_ms}-{delivery.id}.json"
+            path = self.inbox_dir / (
+                f"{delivery.created_at_ms}-{delivery.id}-{delivery.trigger_id}.json"
+            )
             self._atomic_write(path, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
             delivery.path = path
             try:
@@ -186,6 +195,7 @@ class LocalTriggerStore:
                 path.unlink(missing_ok=True)
                 delivery.path = None
                 raise
+            self._invalidate_pending_preview_cache_unlocked()
             return delivery
 
     def claim_deliveries(self, *, limit: int = 20) -> list[TriggerDelivery]:
@@ -206,7 +216,70 @@ class LocalTriggerStore:
                     continue
                 os.replace(path, delivery.path)
                 claimed.append(delivery)
+            if claimed:
+                self._invalidate_pending_preview_cache_unlocked()
         return claimed
+
+    def pending_delivery_previews(
+        self,
+        trigger_ids: Collection[str] | None = None,
+    ) -> dict[str, str]:
+        """Return bounded previews of the next delivery for selected local triggers."""
+        self._ensure_dirs()
+        targets = (
+            frozenset(trigger_id.strip() for trigger_id in trigger_ids if trigger_id.strip())
+            if trigger_ids is not None
+            else None
+        )
+        if targets is not None and not targets:
+            return {}
+
+        with self._lock:
+            state = self._pending_queue_state_unlocked()
+            if state != self._pending_preview_cache_state:
+                self._pending_preview_cache_state = state
+                self._pending_preview_cache.clear()
+            cached = self._pending_preview_cache.get(targets)
+            if cached is not None:
+                return dict(cached)
+
+            previews: dict[str, str] = {}
+            done = False
+            # Claimed deliveries run before anything still in the inbox. New
+            # filenames expose the trigger ID so duplicate backlog entries can
+            # be skipped without reading their full payloads. Legacy queue files
+            # remain readable through the JSON fallback below.
+            for directory in (self.processing_dir, self.inbox_dir):
+                for path in sorted(directory.glob("*.json")):
+                    trigger_hint = self._delivery_file_trigger_id_from_name(path)
+                    if trigger_hint is not None:
+                        if targets is not None and trigger_hint not in targets:
+                            continue
+                        if trigger_hint in previews:
+                            continue
+                    preview = self._read_pending_delivery_preview_unlocked(
+                        path,
+                        expected_trigger_id=trigger_hint,
+                    )
+                    if preview is None:
+                        # Queue recovery/claiming owns corrupt-file handling. This
+                        # read-only view should not mutate the delivery queue.
+                        continue
+                    trigger_id, content = preview
+                    if targets is not None and trigger_id not in targets:
+                        continue
+                    previews.setdefault(trigger_id, content)
+                    if targets is not None and targets.issubset(previews):
+                        done = True
+                        break
+                if done:
+                    break
+
+            if len(self._pending_preview_cache) >= _PENDING_PREVIEW_CACHE_VARIANTS:
+                oldest = next(iter(self._pending_preview_cache))
+                self._pending_preview_cache.pop(oldest)
+            self._pending_preview_cache[targets] = dict(previews)
+            return previews
 
     def recover_processing_deliveries(self) -> int:
         """Requeue deliveries left in processing by an interrupted gateway."""
@@ -235,6 +308,7 @@ class LocalTriggerStore:
         self._ensure_dirs()
         with self._lock:
             delivery.path.unlink(missing_ok=True)
+            self._invalidate_pending_preview_cache_unlocked()
 
     def retry_delivery(self, delivery: TriggerDelivery, error: str) -> bool:
         """Retry a claimed delivery unless it exceeded the attempt limit."""
@@ -334,6 +408,36 @@ class LocalTriggerStore:
         }
         self._atomic_write(self.store_path, json.dumps(payload, indent=2, ensure_ascii=False))
 
+    def _pending_queue_state_unlocked(self) -> tuple[int, int]:
+        return (
+            self.processing_dir.stat().st_mtime_ns,
+            self.inbox_dir.stat().st_mtime_ns,
+        )
+
+    def _invalidate_pending_preview_cache_unlocked(self) -> None:
+        self._pending_preview_cache_state = None
+        self._pending_preview_cache.clear()
+
+    def _read_pending_delivery_preview_unlocked(
+        self,
+        path: Path,
+        *,
+        expected_trigger_id: str | None,
+    ) -> tuple[str, str] | None:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                prefix = handle.read(_PENDING_PREVIEW_PREFIX_MAX_CHARS)
+                preview = _preview_from_payload_prefix(prefix)
+                if preview is not None and (
+                    expected_trigger_id is None or preview[0] == expected_trigger_id
+                ):
+                    return preview
+                data = json.loads(prefix + handle.read())
+            delivery = TriggerDelivery.from_dict(data.get("delivery", data), path=path)
+        except Exception:
+            return None
+        return delivery.trigger_id, _pending_preview_text(delivery.content)
+
     @staticmethod
     def _find_unlocked(
         triggers: list[LocalTrigger],
@@ -343,8 +447,11 @@ class LocalTriggerStore:
 
     def _move_bad_delivery_unlocked(self, path: Path) -> None:
         target = self.failed_dir / f"{path.name}.bad"
-        with suppress(OSError):
+        try:
             os.replace(path, target)
+        except OSError:
+            return
+        self._invalidate_pending_preview_cache_unlocked()
 
     def _retry_delivery_unlocked(self, delivery: TriggerDelivery, error: str) -> bool:
         if delivery.path is None:
@@ -355,12 +462,14 @@ class LocalTriggerStore:
             failed = self.failed_dir / delivery.path.name
             self._atomic_write(failed, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
             delivery.path.unlink(missing_ok=True)
+            self._invalidate_pending_preview_cache_unlocked()
             return False
         delivery.attempts += 1
         delivery.last_error = error
         target = self.inbox_dir / delivery.path.name
         self._atomic_write(target, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
         delivery.path.unlink(missing_ok=True)
+        self._invalidate_pending_preview_cache_unlocked()
         return True
 
     def _delete_delivery_files_for_trigger_unlocked(self, trigger_id: str) -> None:
@@ -382,6 +491,9 @@ class LocalTriggerStore:
 
     @staticmethod
     def _delivery_file_trigger_id(path: Path) -> str | None:
+        trigger_id = LocalTriggerStore._delivery_file_trigger_id_from_name(path)
+        if trigger_id is not None:
+            return trigger_id
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -391,6 +503,17 @@ class LocalTriggerStore:
             return None
         trigger_id = raw.get("triggerId", raw.get("trigger_id", ""))
         return str(trigger_id) if trigger_id else None
+
+    @staticmethod
+    def _delivery_file_trigger_id_from_name(path: Path) -> str | None:
+        parts = path.name.split("-", 2)
+        if len(parts) != 3:
+            return None
+        delivery_name, trigger_name = parts[1:]
+        trigger_id = trigger_name.split(".", 1)[0]
+        if not delivery_name.startswith("tdl_") or not trigger_id.startswith("trg_"):
+            return None
+        return trigger_id
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
@@ -436,10 +559,39 @@ def _now_ms() -> int:
 
 
 def _delivery_payload(delivery: TriggerDelivery) -> dict[str, Any]:
+    # Keep the bounded preview before the full delivery. The WebUI queue view
+    # intentionally decodes only a fixed-size prefix for current-format files.
     return {
         "version": 1,
+        "preview": {
+            "triggerId": delivery.trigger_id,
+            "content": _pending_preview_text(delivery.content),
+        },
         "delivery": delivery.to_dict(),
     }
+
+
+def _preview_from_payload_prefix(content: str) -> tuple[str, str] | None:
+    marker = '"preview":'
+    marker_index = content.find(marker)
+    if marker_index < 0:
+        return None
+    fragment = content[marker_index + len(marker) :].lstrip()
+    try:
+        raw, _ = json.JSONDecoder().raw_decode(fragment)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    trigger_id = raw.get("triggerId")
+    preview = raw.get("content")
+    if not isinstance(trigger_id, str) or not isinstance(preview, str):
+        return None
+    return trigger_id, preview
+
+
+def _pending_preview_text(value: str) -> str:
+    return truncate_text(value, _PENDING_PREVIEW_MAX_CHARS)
 
 
 def _delivery_run_record(

@@ -15,7 +15,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Run the gateway directly | `nanobot gateway` | Service/ops command for WebUI, chat apps, cron, and heartbeat |
-| Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
+| Deliver a local trigger | `nanobot trigger <id> "message"` | Replace `"message"` with the payload; ask the agent to create the trigger, or use `/trigger <name>` manually in the target session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
@@ -166,6 +166,12 @@ marked failed instead of retried indefinitely. Each delivery also writes an
 audit record under `<workspace>/triggers/runs`. Run one gateway consumer per
 workspace; this local queue is not a distributed multi-consumer queue.
 
+The sending command must resolve the same workspace/config as the gateway.
+Installing nanobot on another host creates a separate local environment; it
+does not make that host share this trigger store. For remote CI or webhooks,
+bridge the event to the gateway host with SSH or a trusted adapter. A hosted
+runner or cloud function still needs that authenticated second hop.
+
 Use stdin when another local process generates the message:
 
 ```bash
@@ -186,7 +192,9 @@ Triggers are managed in the WebUI Automations view instead of through separate
 rename, delete, search, and copy the command for each trigger.
 
 For webhooks or other external systems, run your own small service and have it
-call this CLI after it decides what message nanobot should receive.
+call this CLI after it authenticates and validates the event and decides what
+message nanobot should receive. Do not use the trigger ID or raw command as a
+public authentication mechanism.
 
 See [Automations](./automations.md) for the broader automation model, WebUI
 management, and delivery behavior.

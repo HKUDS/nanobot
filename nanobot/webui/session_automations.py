@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import Any, Protocol
 
 from nanobot.cron.types import CronJob
@@ -33,6 +33,11 @@ class _LocalTriggerStoreLike(Protocol):
         *,
         include_disabled: bool = True,
     ) -> list[LocalTrigger]: ...
+
+    def pending_delivery_previews(
+        self,
+        trigger_ids: Collection[str] | None = None,
+    ) -> dict[str, str]: ...
 
 
 class _SessionManagerLike(Protocol):
@@ -72,14 +77,21 @@ def session_automations_payload(
     pending_job_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Return user-created automation jobs attached to a WebUI session."""
+    jobs = session_automation_jobs(
+        cron_service,
+        session_key,
+        local_trigger_store=local_trigger_store,
+    )
+    trigger_ids = [job.id for job in jobs if isinstance(job, LocalTrigger)]
     return {
         "jobs": serialize_automation_jobs(
-            session_automation_jobs(
-                cron_service,
-                session_key,
-                local_trigger_store=local_trigger_store,
-            ),
+            jobs,
             pending_job_ids=pending_job_ids,
+            pending_trigger_messages=(
+                local_trigger_store.pending_delivery_previews(trigger_ids)
+                if local_trigger_store is not None
+                else None
+            ),
         )
     }
 
@@ -95,12 +107,21 @@ def all_automations_payload(
     jobs: list[AutomationJob] = []
     if cron_service is not None:
         jobs.extend(cron_service.list_jobs(include_disabled=True))
+    triggers: list[LocalTrigger] = []
     if local_trigger_store is not None:
-        jobs.extend(local_trigger_store.list_triggers(include_disabled=True))
+        triggers = local_trigger_store.list_triggers(include_disabled=True)
+        jobs.extend(triggers)
     return {
         "jobs": serialize_automation_jobs(
             jobs,
             pending_job_ids=pending_job_ids,
+            pending_trigger_messages=(
+                local_trigger_store.pending_delivery_previews(
+                    [trigger.id for trigger in triggers]
+                )
+                if local_trigger_store is not None
+                else None
+            ),
             include_details=True,
             session_manager=session_manager,
         )
@@ -111,13 +132,17 @@ def serialize_automation_jobs(
     jobs: list[AutomationJob],
     *,
     pending_job_ids: Collection[str] | None = None,
+    pending_trigger_messages: Mapping[str, str] | None = None,
     include_details: bool = False,
     session_manager: _SessionManagerLike | None = None,
 ) -> list[dict[str, Any]]:
+    pending_ids = pending_job_ids or ()
+    trigger_messages = pending_trigger_messages or {}
     return [
         _serialize_job(
             job,
-            pending=job.id in (pending_job_ids or ()),
+            pending=job.id in pending_ids or job.id in trigger_messages,
+            pending_trigger_message=trigger_messages.get(job.id),
             include_details=include_details,
             session_manager=session_manager,
         )
@@ -129,6 +154,7 @@ def _serialize_job(
     job: AutomationJob,
     *,
     pending: bool = False,
+    pending_trigger_message: str | None = None,
     include_details: bool = False,
     session_manager: _SessionManagerLike | None = None,
 ) -> dict[str, Any]:
@@ -136,6 +162,7 @@ def _serialize_job(
         return _serialize_trigger(
             job,
             pending=pending,
+            pending_message=pending_trigger_message,
             include_details=include_details,
             session_manager=session_manager,
         )
@@ -191,6 +218,7 @@ def _serialize_trigger(
     trigger: LocalTrigger,
     *,
     pending: bool = False,
+    pending_message: str | None = None,
     include_details: bool = False,
     session_manager: _SessionManagerLike | None = None,
 ) -> dict[str, Any]:
@@ -218,6 +246,8 @@ def _serialize_trigger(
             "pending": pending,
         },
     }
+    if pending_message is not None:
+        payload["state"]["pending_message"] = pending_message
     if not include_details:
         return payload
 

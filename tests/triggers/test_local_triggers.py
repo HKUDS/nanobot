@@ -147,6 +147,122 @@ def test_enqueue_writes_trigger_run_record(tmp_path: Path) -> None:
     assert record["updated_at_ms"] > 0
 
 
+def test_pending_delivery_previews_prefers_next_processing_message(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    first = store.enqueue(trigger.id, "Review PR #4591\nFocus on the API contract.")
+    store.enqueue(trigger.id, "Review the next PR")
+
+    claimed = store.claim_deliveries(limit=1)
+
+    assert [delivery.id for delivery in claimed] == [first.id]
+    assert store.pending_delivery_previews() == {
+        trigger.id: "Review PR #4591\nFocus on the API contract."
+    }
+
+    store.complete_delivery(claimed[0])
+
+    assert store.pending_delivery_previews() == {trigger.id: "Review the next PR"}
+
+
+def test_pending_delivery_previews_are_bounded_targeted_and_cached(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalTriggerStore(tmp_path)
+    target = store.create(
+        name="Large audit",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    other = store.create(
+        name="Other audit",
+        channel="websocket",
+        chat_id="chat-2",
+        session_key="websocket:chat-2",
+    )
+    large_content = "payload-" * 1000
+    first = store.enqueue(target.id, large_content)
+    assert first.path is not None
+    assert first.path.name.endswith(f"-{target.id}.json")
+    queued_payload = json.loads(first.path.read_text(encoding="utf-8"))
+    assert list(queued_payload) == ["version", "preview", "delivery"]
+    assert queued_payload["delivery"]["content"] == large_content
+    assert queued_payload["preview"]["content"].endswith("\n... (truncated)")
+    claimed = store.claim_deliveries(limit=1)
+    assert [delivery.id for delivery in claimed] == [first.id]
+    store.enqueue(target.id, "later target payload")
+    store.enqueue(other.id, "other session payload")
+
+    reads = 0
+    original = store._read_pending_delivery_preview_unlocked
+
+    def track_read(
+        path: Path,
+        *,
+        expected_trigger_id: str | None,
+    ) -> tuple[str, str] | None:
+        nonlocal reads
+        reads += 1
+        return original(path, expected_trigger_id=expected_trigger_id)
+
+    monkeypatch.setattr(store, "_read_pending_delivery_preview_unlocked", track_read)
+
+    previews = store.pending_delivery_previews([target.id])
+    preview = previews[target.id]
+    assert preview.startswith("payload-")
+    assert preview.endswith("\n... (truncated)")
+    assert len(preview) < len(large_content)
+    assert reads == 1
+
+    assert store.pending_delivery_previews([target.id]) == previews
+    assert reads == 1
+
+    store.complete_delivery(claimed[0])
+    assert store.pending_delivery_previews([target.id]) == {
+        target.id: "later target payload"
+    }
+    assert reads == 2
+
+
+def test_pending_delivery_previews_support_legacy_queue_files(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="Legacy queue",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    legacy = store.inbox_dir / "1-tdl_legacy.json"
+    _write_delivery_file(legacy, trigger_id=trigger.id, delivery_id="tdl_legacy")
+
+    assert store.pending_delivery_previews([trigger.id]) == {trigger.id: "queued"}
+
+
+def test_pending_delivery_preview_cache_observes_external_enqueue(tmp_path: Path) -> None:
+    gateway_store = LocalTriggerStore(tmp_path)
+    trigger = gateway_store.create(
+        name="External event",
+        channel="websocket",
+        chat_id="chat-1",
+        session_key="websocket:chat-1",
+    )
+    assert gateway_store.pending_delivery_previews([trigger.id]) == {}
+
+    cli_store = LocalTriggerStore(tmp_path)
+    cli_store.enqueue(trigger.id, "payload from another process")
+
+    assert gateway_store.pending_delivery_previews([trigger.id]) == {
+        trigger.id: "payload from another process"
+    }
+
+
 def test_delivery_run_record_truncates_large_content_and_response(tmp_path: Path) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(

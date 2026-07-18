@@ -33,6 +33,13 @@ Use the same workspace and config for the gateway and any process that sends
 local trigger messages. If you run multiple nanobot instances, pass the matching
 `--config` or `--workspace` option to `nanobot trigger`.
 
+Local trigger state lives in that workspace. Installing nanobot on a CI runner
+or another host does not connect it to the gateway's trigger store. Bridge a
+remote event to the gateway host with SSH or a trusted adapter that invokes the
+command against the gateway's workspace or config. A cloud function or hosted
+runner is not a complete bridge by itself; it still needs an authenticated
+second hop to the gateway host.
+
 Create each automation from the target session. An automation without a linked
 chat/session cannot be enabled or run from the WebUI because nanobot would not
 know where to deliver the turn.
@@ -68,8 +75,13 @@ report, use heartbeat instead of a user-created scheduled automation.
 Local triggers let a local script or external service send a message into a
 specific nanobot session later.
 
-Create the trigger from the chat or WebUI session where future messages should
-arrive:
+Ask nanobot to create the trigger from the chat or WebUI session where future
+messages should arrive. When the gateway trigger service is available, the
+agent can create the session binding and return the delivery command directly.
+The successful tool result is the handoff: test the returned command with the
+gateway's nanobot runtime instead of probing another `nanobot` installation.
+
+You can also create one manually with the chat command:
 
 ```text
 /trigger PR review
@@ -99,7 +111,26 @@ nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
 nanobot does not provide a built-in public webhook receiver for local triggers.
 If GitHub, CI, or another external system should wake nanobot, run your own
 small webhook service and have it call `nanobot trigger` after it builds the
-final message.
+final message. Authenticate and validate the request before invoking the CLI,
+allow only intended events, bound the payload size, and make duplicate delivery
+safe. A trigger ID or raw trigger command is not authentication and must not be
+exposed as an unauthenticated public endpoint. Store verification secrets in
+the adapter's environment or secret manager, not in the trigger command,
+payload, or chat. Follow the event provider's documented signature algorithm;
+do not substitute a generic HMAC example for provider-specific verification.
+
+The agent can list, pause, resume, or remove triggers bound to the current
+conversation. The WebUI Automations view provides the same lifecycle controls
+across the workspace. Neither control surface starts or stops the external
+script or service that invokes the trigger; manage that component separately.
+
+While a delivery is queued or running, the WebUI shows a bounded preview of the
+next message that will be delivered. Previews include up to 4,000 characters;
+longer payloads end with a truncation marker while the full message remains in
+the delivery queue. The `"message"` text in the copied command remains only a
+placeholder to replace at invocation time. If several messages are waiting for
+one trigger, the in-flight message is shown first, followed by the oldest queued
+message after it completes.
 
 ## Heartbeat
 

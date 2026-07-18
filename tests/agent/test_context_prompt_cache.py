@@ -339,15 +339,25 @@ def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
 
     prompt = builder.build_system_prompt()
 
-    # memory skill should be in Active Skills section
+    # Always-loaded skills should be in the Active Skills section.
     assert "# Active Skills" in prompt
     assert "### Skill: memory" in prompt
 
-    # memory skill should NOT appear in the skills index
+    # Always-loaded skills should NOT appear in the skills index.
     skills_section = prompt.split("# Skills\n", 1)
     if len(skills_section) > 1:
         index_text = skills_section[1].split("\n\n---")[0]
         assert "**memory**" not in index_text
+
+
+def test_local_trigger_skill_is_indexed_instead_of_always_loaded(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    assert "### Skill: local-trigger" not in prompt
+    assert "**local-trigger** — Connect an external event source" in prompt
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:

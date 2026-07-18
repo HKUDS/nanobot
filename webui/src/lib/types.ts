@@ -123,6 +123,7 @@ export interface SessionAutomationJob {
     last_status?: "ok" | "error" | "skipped" | string | null;
     last_error?: string | null;
     pending?: boolean;
+    pending_message?: string;
     run_history?: Array<{
       run_at_ms: number;
       status: "ok" | "error" | "skipped" | string;
