@@ -811,7 +811,12 @@ class SessionManager:
         """
         path = self._get_session_path(key)
         if not path.exists():
-            return None
+            legacy_path = self._get_legacy_lossy_path(key)
+            if not legacy_path.exists():
+                legacy_path = self._get_legacy_session_path(key)
+            if not legacy_path.exists():
+                return None
+            path = legacy_path
         try:
             messages: list[dict[str, Any]] = []
             metadata: dict[str, Any] = {}
@@ -854,7 +859,12 @@ class SessionManager:
         """
         path = self._get_session_path(key)
         if not path.exists():
-            return None
+            legacy_path = self._get_legacy_lossy_path(key)
+            if not legacy_path.exists():
+                legacy_path = self._get_legacy_session_path(key)
+            if not legacy_path.exists():
+                return None
+            path = legacy_path
         try:
             with open(path, encoding="utf-8") as f:
                 for line in f:
