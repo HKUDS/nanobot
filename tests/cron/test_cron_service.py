@@ -25,6 +25,46 @@ def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
     }
 
 
+def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "every_ms": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "session_key": "websocket:chat-1",
+                        },
+                        "state": {
+                            "run_history": [
+                                {"run_at_ms": 1000, "status": "ok", "duration_ms": 12},
+                            ],
+                        },
+                        "created_at_ms": 0,
+                        "updated_at_ms": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].payload.session_key == "websocket:chat-1"
+    assert jobs[0].state.run_history[0].run_at_ms == 1000
+    assert jobs[0].state.run_history[0].duration_ms == 12
+
+
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 

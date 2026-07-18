@@ -6,13 +6,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from nanobot.utils.dict_keys import get_camel_snake as _get
+
 TriggerStatus = Literal["ok", "error"]
-
-
-def _get(data: dict[str, Any], camel: str, snake: str, default: Any = None) -> Any:
-    if camel in data:
-        return data[camel]
-    return data.get(snake, default)
 
 
 @dataclass
