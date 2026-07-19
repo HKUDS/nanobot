@@ -785,6 +785,35 @@ def test_discover_plugins_skips_names_outside_enabled_set():
     assert loaded == []
 
 
+def test_discover_plugins_warns_once_for_legacy_entry_points():
+    from nanobot.channels.registry import _warn_legacy_channel_entry_points, discover_plugins
+
+    legacy_entry_points = [SimpleNamespace(name="z-old"), SimpleNamespace(name="a-old")]
+    _warn_legacy_channel_entry_points.cache_clear()
+    try:
+        with (
+            patch(
+                "nanobot.channels.registry.entry_points",
+                return_value=legacy_entry_points,
+            ) as metadata_entry_points,
+            patch("nanobot.channels.registry._channel_package_names", return_value=[]),
+            patch("nanobot.channels.registry.logger.warning") as warning,
+        ):
+            discover_plugins()
+            discover_plugins()
+    finally:
+        _warn_legacy_channel_entry_points.cache_clear()
+
+    metadata_entry_points.assert_called_once_with(group="nanobot.channels")
+    warning.assert_called_once_with(
+        "Legacy channel entry points were detected but will not be loaded: {}. "
+        "The '{}' entry-point group is no longer supported; use a built-in channel or "
+        "migrate it into nanobot/channels/<channel>/.",
+        "a-old, z-old",
+        "nanobot.channels",
+    )
+
+
 def test_channel_manifest_rejects_invalid_dependency_metadata():
     with pytest.raises(TypeError, match="tuple of requirements"):
         ChannelPlugin(
