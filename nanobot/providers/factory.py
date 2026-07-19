@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
 from nanobot.providers.base import GenerationSettings, LLMProvider
@@ -21,64 +18,6 @@ class ProviderSnapshot:
     context_window_tokens: int
     signature: tuple[object, ...]
     generation: GenerationSettings | None = None
-
-
-@dataclass(frozen=True)
-class _ProviderFailureDomain:
-    """Non-secret identity for failures shared by one provider account/endpoint."""
-
-    provider_name: str | None
-    endpoint_fingerprint: bytes | None = field(repr=False)
-    credential_fingerprint: bytes | None = field(repr=False)
-    region: str | None
-    profile: str | None
-
-
-def _fingerprint(value: str | None) -> bytes | None:
-    if not value:
-        return None
-    return hashlib.sha256(value.encode("utf-8")).digest()
-
-
-def _normalize_api_base(value: str | None) -> str | None:
-    if not value:
-        return None
-    parsed = urlsplit(value)
-    return urlunsplit((
-        parsed.scheme.lower(),
-        parsed.netloc.lower(),
-        parsed.path.rstrip("/"),
-        parsed.query,
-        "",
-    ))
-
-
-def _provider_failure_domain(
-    config: Config,
-    preset: ModelPresetConfig,
-) -> _ProviderFailureDomain:
-    provider_name = config.get_provider_name(preset.model, preset=preset)
-    provider_config = config.get_provider(preset.model, preset=preset)
-    configured_headers = provider_config.extra_headers if provider_config else None
-    credential_material = None
-    if (provider_config and provider_config.api_key) or configured_headers:
-        credential_material = json.dumps(
-            {
-                "api_key": provider_config.api_key if provider_config else None,
-                "extra_headers": configured_headers,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    return _ProviderFailureDomain(
-        provider_name=provider_name,
-        endpoint_fingerprint=_fingerprint(
-            _normalize_api_base(config.get_api_base(preset.model, preset=preset))
-        ),
-        credential_fingerprint=_fingerprint(credential_material),
-        region=getattr(provider_config, "region", None) if provider_config else None,
-        profile=getattr(provider_config, "profile", None) if provider_config else None,
-    )
 
 
 def _resolve_model_preset(
@@ -254,11 +193,6 @@ def make_provider(
             provider_factory=lambda fb: _make_provider_core(
                 config, preset_name=preset_name, preset=fb
             ),
-            primary_failure_domain=_provider_failure_domain(config, resolved),
-            fallback_failure_domains=[
-                _provider_failure_domain(config, fallback)
-                for fallback in fallback_presets
-            ],
         )
 
     return provider

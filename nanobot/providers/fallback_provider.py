@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Hashable
-from enum import Enum, auto
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
@@ -23,38 +22,14 @@ _FALLBACK_ERROR_KINDS = frozenset({
     "overloaded",
 })
 _NON_FALLBACK_ERROR_KINDS = frozenset({
+    "authentication",
+    "auth",
+    "permission",
     "content_filter",
     "refusal",
     "context_length",
     "invalid_request",
 })
-_PROVIDER_DOMAIN_ERROR_KINDS = frozenset({
-    "authentication",
-    "auth",
-    "permission",
-})
-_PROVIDER_DOMAIN_ERROR_TOKENS = (
-    "authentication_error",
-    "invalid_api_key",
-    "incorrect_api_key",
-    "invalid_token",
-    "expired_token",
-    "unauthorized",
-    "permission_denied",
-    "account_deactivated",
-    "organization_deactivated",
-)
-_MODEL_ERROR_TOKENS = (
-    "model_not_found",
-    "model not found",
-    "model_not_available",
-    "model unavailable",
-    "model_disabled",
-    "model_not_supported",
-    "unsupported_model",
-    "model_permission",
-    "model_access",
-)
 _FALLBACK_ERROR_TOKENS = (
     "rate_limit",
     "rate limit",
@@ -81,14 +56,6 @@ _FALLBACK_ERROR_TOKENS = (
 )
 
 
-class FailoverDecision(Enum):
-    """How failover should proceed after one candidate fails."""
-
-    STOP = auto()
-    NEXT_CANDIDATE = auto()
-    NEXT_PROVIDER_DOMAIN = auto()
-
-
 class FallbackProvider(LLMProvider):
     """Wrap a primary provider and transparently failover to fallback models.
 
@@ -100,12 +67,12 @@ class FallbackProvider(LLMProvider):
     callable creates the underlying provider on-the-fly.
 
     Key design:
-    - Failover decisions and failed-domain skips are request-scoped.
+    - Failover is request-scoped (the wrapper itself is stateless between turns).
     - Skipped when content was already streamed to avoid duplicate output,
       except timeout recovery can resume in a new stream segment.
     - Recursive failover is prevented by the factory returning plain providers.
-    - Primary health and its tripped failure domain persist in the circuit
-      breaker to avoid wasting requests on a known-bad endpoint or account.
+    - Primary provider is circuit-broken after repeated failures to avoid
+      wasting requests on a known-bad endpoint.
     """
 
     supports_stream_recover_callback = True
@@ -115,28 +82,13 @@ class FallbackProvider(LLMProvider):
         primary: LLMProvider,
         fallback_presets: list[Any],
         provider_factory: Callable[[Any], LLMProvider],
-        *,
-        primary_failure_domain: Hashable | None = None,
-        fallback_failure_domains: list[Hashable | None] | None = None,
     ):
-        if (
-            fallback_failure_domains is not None
-            and len(fallback_failure_domains) != len(fallback_presets)
-        ):
-            raise ValueError("fallback_failure_domains must align with fallback_presets")
         self._primary = primary
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
-        self._primary_failure_domain = primary_failure_domain
-        self._fallback_failure_domains = (
-            list(fallback_failure_domains)
-            if fallback_failure_domains is not None
-            else [None] * len(fallback_presets)
-        )
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
-        self._primary_tripped_domain: Hashable | None = None
 
     @property
     def generation(self):
@@ -201,9 +153,6 @@ class FallbackProvider(LLMProvider):
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
         primary_error = "unknown error"
-        last_response: LLMResponse | None = None
-        last_attempted_model = primary_model
-        blocked_domains: set[Hashable] = set()
 
         if self._primary_available():
             primary_was_attempted = True
@@ -211,10 +160,8 @@ class FallbackProvider(LLMProvider):
             if response.finish_reason != "error":
                 self._primary_failures = 0
                 self._primary_tripped_at = None
-                self._primary_tripped_domain = None
                 return response
             primary_error = (response.content or primary_error)[:120]
-            last_response = response
 
             if has_streamed is not None and has_streamed[0]:
                 is_timeout = (response.error_kind or "").lower() == "timeout"
@@ -235,48 +182,28 @@ class FallbackProvider(LLMProvider):
                     )
                     return response
 
-            decision = self._failover_decision(response)
-            if decision is FailoverDecision.STOP:
+            if not self._should_fallback(response):
                 logger.warning(
                     "Primary model '{}' returned non-fallbackable error: {}",
                     primary_model,
                     (response.content or "")[:120],
                 )
                 return response
-            if (
-                decision is FailoverDecision.NEXT_PROVIDER_DOMAIN
-                and self._primary_failure_domain is not None
-            ):
-                blocked_domains.add(self._primary_failure_domain)
 
             self._primary_failures += 1
             if self._primary_failures >= _PRIMARY_FAILURE_THRESHOLD:
                 self._primary_tripped_at = time.monotonic()
-                self._primary_tripped_domain = (
-                    self._primary_failure_domain
-                    if decision is FailoverDecision.NEXT_PROVIDER_DOMAIN
-                    else None
-                )
                 logger.warning(
                     "Primary model '{}' circuit open after {} consecutive failures",
                     primary_model, self._primary_failures,
                 )
         else:
             logger.debug("Primary model '{}' circuit open; skipping", primary_model)
-            if self._primary_tripped_domain is not None:
-                blocked_domains.add(self._primary_tripped_domain)
 
+        last_response: LLMResponse | None = None
         primary_skipped = not primary_was_attempted
-        attempted_fallbacks = 0
         for idx, fallback in enumerate(self._fallback_presets):
             fallback_model = fallback.model
-            failure_domain = self._fallback_failure_domains[idx]
-            if failure_domain is not None and failure_domain in blocked_domains:
-                logger.info(
-                    "Skipping fallback '{}' in a provider failure domain that already failed",
-                    fallback_model,
-                )
-                continue
             if has_streamed is not None and has_streamed[0]:
                 is_timeout = (
                     last_response is not None
@@ -286,26 +213,26 @@ class FallbackProvider(LLMProvider):
                     logger.warning(
                         "Fallback model '{}' stream stalled after content was emitted; "
                         "starting a new stream segment and trying next fallback",
-                        last_attempted_model,
+                        self._fallback_presets[idx - 1].model if idx > 0 else primary_model,
                     )
                     has_streamed[0] = False
                     await on_stream_recover()
                 else:
                     break
-            if attempted_fallbacks == 0 and primary_skipped:
+            if idx == 0 and primary_skipped:
                 logger.info(
                     "Primary model '{}' circuit open, trying fallback '{}'",
                     primary_model, fallback_model,
                 )
-            elif attempted_fallbacks == 0:
+            elif idx == 0:
                 logger.info(
                     "Primary model '{}' failed: {}; trying fallback '{}'",
                     primary_model, primary_error, fallback_model,
                 )
             else:
                 logger.info(
-                    "Fallback '{}' failed, trying next fallback '{}'",
-                    last_attempted_model, fallback_model,
+                    "Fallback '{}' also failed, trying next fallback '{}'",
+                    self._fallback_presets[idx - 1].model, fallback_model,
                 )
             try:
                 fallback_provider = self._provider_factory(fallback)
@@ -315,8 +242,6 @@ class FallbackProvider(LLMProvider):
                 )
                 continue
 
-            attempted_fallbacks += 1
-            last_attempted_model = fallback_model
             original_values = {
                 name: kwargs.get(name, _MISSING)
                 for name in ("model", "max_tokens", "temperature", "reasoning_effort")
@@ -350,18 +275,6 @@ class FallbackProvider(LLMProvider):
                 fallback_model,
                 (fallback_response.content or "")[:120],
             )
-            decision = self._failover_decision(fallback_response)
-            if decision is FailoverDecision.STOP:
-                logger.warning(
-                    "Fallback '{}' returned non-fallbackable error; stopping failover",
-                    fallback_model,
-                )
-                return fallback_response
-            if (
-                decision is FailoverDecision.NEXT_PROVIDER_DOMAIN
-                and failure_domain is not None
-            ):
-                blocked_domains.add(failure_domain)
 
         logger.warning(
             "All {} fallback model(s) failed",
@@ -376,52 +289,28 @@ class FallbackProvider(LLMProvider):
             finish_reason="error",
         )
 
-    @classmethod
-    def _failover_decision(cls, response: LLMResponse) -> FailoverDecision:
+    @staticmethod
+    def _should_fallback(response: LLMResponse) -> bool:
+        if LLMProvider.is_arrearage_response(response):
+            return True
+        if response.error_should_retry is False:
+            return False
         status = response.error_status_code
         kind = (response.error_kind or "").lower()
         error_type = (response.error_type or "").lower()
         code = (response.error_code or "").lower()
         text = (response.content or "").lower()
-        structured_values = (kind, error_type, code)
-        all_values = (*structured_values, text)
 
-        # Specific model semantics override generic wrappers such as
-        # type=invalid_request_error + code=model_not_found.
-        if any(token in value for value in all_values for token in _MODEL_ERROR_TOKENS):
-            return FailoverDecision.NEXT_CANDIDATE
+        if status in {400, 401, 403, 404, 422}:
+            return False
         if kind in _NON_FALLBACK_ERROR_KINDS:
-            return FailoverDecision.STOP
-        if any(
-            token in value
-            for value in structured_values
-            for token in _NON_FALLBACK_ERROR_KINDS
-        ):
-            return FailoverDecision.STOP
-        if LLMProvider.is_arrearage_response(response):
-            return FailoverDecision.NEXT_PROVIDER_DOMAIN
-        if kind in _PROVIDER_DOMAIN_ERROR_KINDS:
-            return FailoverDecision.NEXT_PROVIDER_DOMAIN
-        if any(
-            token in value
-            for value in all_values
-            for token in _PROVIDER_DOMAIN_ERROR_TOKENS
-        ):
-            return FailoverDecision.NEXT_PROVIDER_DOMAIN
-        if status in {401, 402, 403}:
-            return FailoverDecision.NEXT_PROVIDER_DOMAIN
-        if status in {400, 404, 422}:
-            return FailoverDecision.STOP
+            return False
+        if any(token in value for value in (kind, error_type, code) for token in _NON_FALLBACK_ERROR_KINDS):
+            return False
         if response.error_should_retry is True:
-            return FailoverDecision.NEXT_CANDIDATE
+            return True
         if status is not None and (status in {408, 409, 429} or 500 <= status <= 599):
-            return FailoverDecision.NEXT_CANDIDATE
+            return True
         if kind in _FALLBACK_ERROR_KINDS:
-            return FailoverDecision.NEXT_CANDIDATE
-        if any(token in value for value in all_values for token in _FALLBACK_ERROR_TOKENS):
-            return FailoverDecision.NEXT_CANDIDATE
-        return FailoverDecision.STOP
-
-    @classmethod
-    def _should_fallback(cls, response: LLMResponse) -> bool:
-        return cls._failover_decision(response) is not FailoverDecision.STOP
+            return True
+        return any(token in value for value in (kind, error_type, code, text) for token in _FALLBACK_ERROR_TOKENS)
