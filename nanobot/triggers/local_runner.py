@@ -21,6 +21,7 @@ async def run_local_trigger_queue(
     *,
     store: LocalTriggerStore,
     submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None = None,
+    is_channel_available: Callable[[str], bool] | None = None,
     poll_interval_s: float = 0.5,
     batch_size: int = 20,
 ) -> None:
@@ -46,6 +47,7 @@ async def run_local_trigger_queue(
                     store,
                     delivery,
                     submit_turn=submit_turn,
+                    is_channel_available=is_channel_available,
                 )
                 store.complete_delivery(delivery)
             except asyncio.CancelledError as exc:
@@ -130,12 +132,15 @@ async def _deliver_delivery(
     delivery: TriggerDelivery,
     *,
     submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]],
+    is_channel_available: Callable[[str], bool] | None = None,
 ) -> None:
     trigger = store.get(delivery.trigger_id)
     if trigger is None:
         raise _TerminalDeliveryError("trigger not found")
     if not trigger.enabled:
         raise _TerminalDeliveryError("trigger is disabled")
+    if is_channel_available is not None and not is_channel_available(trigger.channel):
+        raise _TerminalDeliveryError(f"target channel is not enabled: {trigger.channel}")
 
     store.write_delivery_run_record(delivery, trigger=trigger, status="processing")
     msg = InboundMessage(

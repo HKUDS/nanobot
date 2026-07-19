@@ -299,6 +299,52 @@ async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_local_trigger_queue_rejects_unavailable_target_channel(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="telegram",
+        chat_id="chat-1",
+        session_key="telegram:chat-1",
+    )
+    delivery = store.enqueue(trigger.id, "Review PR #4502")
+    submitted: list[InboundMessage] = []
+
+    async def _submit_turn(msg: InboundMessage):
+        submitted.append(msg)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="done")
+
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=_submit_turn,
+            is_channel_available=lambda name: name == "websocket",
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        for _ in range(100):
+            stored = store.get(trigger.id)
+            if stored and stored.last_status == "error":
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    stored = store.get(trigger.id)
+    assert submitted == []
+    assert stored is not None
+    assert stored.last_status == "error"
+    assert stored.last_error == "target channel is not enabled: telegram"
+    assert store.claim_deliveries() == []
+    record = _read_run_record(store, delivery.id)
+    assert record["status"] == "error"
+    assert record["error"] == "target channel is not enabled: telegram"
+
+
+@pytest.mark.asyncio
 async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
     tmp_path: Path,
 ) -> None:
