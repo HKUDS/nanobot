@@ -514,11 +514,14 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         assert detail.status_code == 200
         detail_body = detail.json()
         assert "path" not in detail_body
+        print(detail_body["requirements"] )
         assert detail_body["requirements"] == {
             "bins": ["definitely-missing-nanobot-skill-cli"],
             "env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
+            "skills": [],
             "missing_bins": ["definitely-missing-nanobot-skill-cli"],
             "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
+            "missing_skills": [],
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
     finally:

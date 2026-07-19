@@ -69,7 +69,8 @@ class SkillsLoader:
             skills = [s for s in skills if s["name"] not in self.disabled_skills]
 
         if filter_unavailable:
-            return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
+            return [s for s in skills if self._is_skill_fully_available(s["name"], skills)]
+
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -131,42 +132,71 @@ class SkillsLoader:
             if exclude and skill_name in exclude:
                 continue
             meta = self._get_skill_meta(skill_name)
-            available = self._check_requirements(meta)
+            available = self._is_skill_fully_available(skill_name, all_skills)
             desc = self._get_skill_description(skill_name)
             if available:
                 lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
             else:
-                missing = self._get_missing_requirements(meta)
+                missing = self._get_missing_requirements(meta, all_skills)
                 suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
                 lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
         return "\n".join(lines)
 
-    def _get_missing_requirements(self, skill_meta: dict) -> str:
-        """Get a description of missing requirements."""
+    def _get_missing_requirements(self, skill_meta: dict, all_skills: list[dict[str, str]] | None = None, visited: set[str] | None = None) -> str:
+        """Get a description of missing requirements, including recursive skill deps."""
         requires = skill_meta.get("requires", {})
         required_bins = requires.get("bins", [])
         required_env_vars = requires.get("env", [])
-        return ", ".join(
-            [f"CLI: {command_name}" for command_name in required_bins if not shutil.which(command_name)]
-            + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
-        )
+        parts: list[str] = [
+            f"CLI: {cmd}" for cmd in required_bins if not shutil.which(cmd)
+        ]
+        parts += [f"ENV: {v}" for v in required_env_vars if not os.environ.get(v)]
+
+        # Recursively check skill-type dependencies
+        if all_skills is not None:
+            v = visited or set()
+            required_skills = requires.get("skills", [])
+            for dep_name in required_skills:
+                if dep_name in v:
+                    continue  # cycle detected, skip
+                v.add(dep_name)
+                dep_entry = next((s for s in all_skills if s["name"] == dep_name), None)
+                if dep_entry is None:
+                    parts.append("SKILL: " + dep_name + " (missing)")
+                else:
+                    dep_meta = self._get_skill_meta(dep_name)
+                    dep_missing = self._get_missing_requirements(dep_meta, all_skills, v)
+                    if dep_missing:
+                        parts.append("SKILL: " + dep_name + " (needs " + dep_missing + ")")
+
+        return ", ".join(parts)
 
     def get_skill_availability(self, name: str) -> tuple[bool, str]:
         """Return whether a skill can run and why not when it cannot."""
+        all_skills = self.list_skills(filter_unavailable=False)
+        available = self._is_skill_fully_available(name, all_skills)
+        if available:
+            return True, ""
         meta = self._get_skill_meta(name)
-        available = self._check_requirements(meta)
-        return available, "" if available else self._get_missing_requirements(meta)
+        return False, self._get_missing_requirements(meta, all_skills)
 
     def get_skill_requirements(self, name: str) -> dict[str, list[str]]:
-        """Return explicit command/env requirements and currently missing entries."""
+        """Return explicit command/env/skill requirements and currently missing entries."""
+        all_skills = self.list_skills(filter_unavailable=False)
         requires = self._get_skill_meta(name).get("requires", {})
         bins = [str(value) for value in requires.get("bins", [])]
         env = [str(value) for value in requires.get("env", [])]
+        skills_req = [str(value) for value in requires.get("skills", [])]
         return {
             "bins": bins,
             "env": env,
-            "missing_bins": [value for value in bins if not shutil.which(value)],
-            "missing_env": [value for value in env if not os.environ.get(value)],
+            "skills": skills_req,
+            "missing_bins": [v for v in bins if not shutil.which(v)],
+            "missing_env": [v for v in env if not os.environ.get(v)],
+            "missing_skills": [
+                v for v in skills_req
+                if not any(s["name"] == v for s in all_skills)
+            ],
         }
 
     def _get_skill_description(self, name: str) -> str:
@@ -212,6 +242,34 @@ class SkillsLoader:
         return all(shutil.which(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
         )
+
+    def _is_skill_fully_available(
+        self, name: str, all_skills: list[dict[str, str]], visited: set[str] | None = None,
+    ) -> bool:
+        """Check bins, env, AND all transitive skill dependencies (cycle-safe)."""
+        if visited is None:
+            visited = set()
+        if name in visited:
+            return True  # already verified this dependency upstream
+        visited.add(name)
+
+        meta = self._get_skill_meta(name)
+        if not meta:
+            return True
+
+        # Bins and env vars must be satisfied first.
+        if not self._check_requirements(meta):
+            return False
+
+        required_skills = meta.get("requires", {}).get("skills", [])
+        for dep_name in required_skills:
+            dep_entry = next((s for s in all_skills if s["name"] == dep_name), None)
+            if dep_entry is None:
+                return False  # dependency doesn't exist at all
+            if not self._is_skill_fully_available(dep_name, all_skills, visited):
+                return False
+
+        return True
 
     def _get_skill_meta(self, name: str) -> dict:
         """Get nanobot metadata for a skill (cached in frontmatter)."""

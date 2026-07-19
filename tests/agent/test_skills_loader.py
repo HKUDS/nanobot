@@ -397,3 +397,111 @@ def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
     assert meta.get("always") is True
     # metadata is a parsed dict, not a JSON string
     assert isinstance(meta.get("metadata"), dict)
+
+
+# -- skill dependency tests -----------------------------------------------------
+
+
+def test_list_skills_filters_out_missing_skill_dep(tmp_path: Path) -> None:
+    """Skill A depends on B, but B doesn't exist — A should be unavailable."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "A", metadata_json={"requires": {"skills": ["B"]}})
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = loader.list_skills(filter_unavailable=True)
+    assert entries == []
+
+
+def test_list_skills_includes_when_skill_dep_exists(tmp_path: Path) -> None:
+    """A depends on B, B exists with no requirements — both available."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "A", metadata_json={"requires": {"skills": ["B"]}})
+    _write_skill(skills_root, "B")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = loader.list_skills(filter_unavailable=True)
+    print(entries)
+    names = {e["name"] for e in entries}
+    assert names == {"A", "B"}
+
+
+def test_list_skills_recursive_skill_dep_unmet_deep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A -> B -> C where C has unmet bin — A should be unavailable (transitive)."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "A", metadata_json={"requires": {"skills": ["B"]}})
+    _write_skill(skills_root, "B", metadata_json={"requires": {"skills": ["C"]}})
+    _write_skill(skills_root, "C", metadata_json={"requires": {"bins": ["fake_bin"]}})
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    monkeypatch.setattr("nanobot.agent.skills.shutil.which", lambda _cmd: None)
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = loader.list_skills(filter_unavailable=True)
+    assert entries == []
+
+
+def test_get_skill_availability_reports_missing_skill_dep(tmp_path: Path) -> None:
+    """get_skill_availability reason should mention the missing dependency."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "A", metadata_json={"requires": {"skills": ["B"]}})
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    available, reason = loader.get_skill_availability("A")
+    assert not available
+    assert "B" in reason
+
+
+def test_get_skill_requirements_includes_skills_field(tmp_path: Path) -> None:
+    """get_skill_requirements should report skills and missing_skills."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(skills_root, "A", metadata_json={"requires": {"skills": ["B", "Z"]}})
+    _write_skill(skills_root, "B")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    reqs = loader.get_skill_requirements("A")
+    assert reqs["skills"] == ["B", "Z"]
+    assert reqs["missing_skills"] == ["Z"]  # Z doesn't exist
+
+
+def test_cycle_dependency_does_not_recurse_infinitely(tmp_path: Path) -> None:
+    """A -> B -> C -> A cycle: should not hit RecursionError."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill(skills_root, "A", metadata_json={"requires": {"skills": ["B"]}})
+    _write_skill(skills_root, "B", metadata_json={"requires": {"skills": ["C"]}})
+    _write_skill(skills_root, "C", metadata_json={"requires": {"skills": ["A"]}})
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    # _is_skill_fully_available: visited prevents inf loop
+    entries = loader.list_skills(filter_unavailable=True)
+    assert {e["name"] for e in entries} == {"A", "B", "C"}
+
+    # _get_missing_requirements: visited prevents inf loop in summary
+    summary = loader.build_skills_summary()
+    assert "A" in summary
+    assert "B" in summary
+    assert "C" in summary
