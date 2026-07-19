@@ -1457,7 +1457,7 @@ class AgentLoop:
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         if ctx.kind is TurnKind.SYSTEM:
-            logger.info("Processing system message from {}: {}", msg.sender_id, preview)
+            logger.info("Processing system message from {}", msg.sender_id)
         else:
             logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 

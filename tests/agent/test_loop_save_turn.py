@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop, TurnState
@@ -1429,6 +1430,46 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
         },
         {"role": "assistant", "content": "done"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_system_subagent_followup_does_not_log_content(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]
+        return_value=False
+    )
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+    secret = "LEAKME42"
+    content = f"[Subagent 'research' completed]\n\nTask: inspect logs\n\nResult:\n{secret}"
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, level="INFO", format="{message}")
+
+    try:
+        await loop._process_message(
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="cli:logs",
+                content=content,
+                metadata={"subagent_task_id": "sub-logs"},
+            )
+        )
+    finally:
+        logger.remove(sink_id)
+
+    logged = "".join(logs)
+    assert "Processing system message from subagent" in logged
+    assert secret not in logged
 
 
 @pytest.mark.asyncio
