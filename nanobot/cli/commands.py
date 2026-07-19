@@ -2076,7 +2076,7 @@ def _run_gateway(
                     run_local_trigger_queue(
                         store=trigger_store,
                         submit_turn=getattr(agent, "submit_local_trigger_turn", None),
-                        is_channel_available=lambda name: name in channels.channels,
+                        is_channel_enabled=lambda name: channels.get_channel(name) is not None,
                     ),
                     name="nanobot-local-triggers",
                 ),

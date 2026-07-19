@@ -2748,7 +2748,10 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         enabled_channels: list[str] = []
 
         def __init__(self, *_args, **_kwargs) -> None:
-            self.channels: dict[str, object] = {}
+            return None
+
+        def get_channel(self, name: str) -> object | None:
+            return object() if name == "websocket" else None
 
         async def start_all(self) -> None:
             await asyncio.Event().wait()
@@ -2776,7 +2779,8 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     assert kwargs["store"] is agent_kwargs["local_trigger_store"]
     assert "bus" not in kwargs
     assert kwargs["submit_turn"] is agent.submit_local_trigger_turn
-    assert kwargs["is_channel_available"]("websocket") is False
+    assert kwargs["is_channel_enabled"]("websocket") is True
+    assert kwargs["is_channel_enabled"]("telegram") is False
 
 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
