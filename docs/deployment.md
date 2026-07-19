@@ -70,11 +70,13 @@ a comma-separated `NANOBOT_CHANNELS` build argument:
 NANOBOT_CHANNELS=telegram,slack docker compose build
 ```
 
-The image keeps nanobot in a virtual environment owned by its non-root runtime
-user. If an enabled channel was not preinstalled, gateway startup can therefore
-install its manifest-declared dependencies. Rebuilding with `NANOBOT_CHANNELS`
-keeps that installation reproducible instead of relying on the container's
-writable layer.
+The image keeps nanobot in a virtual environment owned by its built-in non-root
+runtime user (UID 1000). If an enabled channel was not preinstalled, gateway
+startup can therefore install its manifest-declared dependencies. Rebuilding
+with `NANOBOT_CHANNELS` keeps that installation reproducible instead of relying
+on the container's writable layer. If you override the container with a
+different `--user`, bake every enabled channel into the image because that UID
+is not guaranteed write access to the virtual environment.
 
 ```bash
 docker compose run --rm nanobot-cli onboard   # first-time setup
