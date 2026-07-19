@@ -1608,6 +1608,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `bocha` | `apiKey` | `BOCHA_API_KEY` | Free tier (1M calls for startups) |
 | `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
 | `keenable` | `apiKey` (optional) | `KEENABLE_API_KEY` | Yes (no key needed; key raises limits) |
+| `nimble` | `apiKey` | `NIMBLE_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -1732,6 +1733,22 @@ You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-
 
 Keenable search works out of the box with no account, via its token-less public endpoint (free tier, limited to 1,000 requests/hour). Set `apiKey` (or `KEENABLE_API_KEY`) from [keenable.ai](https://keenable.ai) to remove the hourly limit.
 
+**Nimble:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "nimble",
+        "apiKey": "${NIMBLE_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Create a key at [nimbleway.com](https://nimbleway.com). You can also set `NIMBLE_API_KEY` in the environment instead of storing it in config. Without a key, search falls back to DuckDuckGo.
+
 **Serper** (Google Search API):
 ```json
 {
@@ -1779,7 +1796,7 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `nimble`, `serper`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
