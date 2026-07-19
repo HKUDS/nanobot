@@ -8,6 +8,13 @@ from typing import Any, Literal
 from nanobot.utils.dict_keys import get_camel_snake
 
 
+def _required_store_int(value: Any, default: int = 0) -> int:
+    """Coerce JSON numerics to int; treat null/blank like a missing key."""
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
 @dataclass
 class CronSchedule:
     """Schedule definition for a cron job."""
@@ -78,9 +85,11 @@ class CronRunRecord:
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronRunRecord:
         return cls(
-            run_at_ms=int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
+            run_at_ms=_required_store_int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
             status=data["status"],
-            duration_ms=int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
+            duration_ms=_required_store_int(
+                get_camel_snake(data, "durationMs", "duration_ms", 0)
+            ),
             error=data.get("error"),
         )
 
