@@ -4,7 +4,11 @@ import os
 import tomllib
 from pathlib import Path
 
-from nanobot.webui.build import ensure_webui_bundle, inspect_webui_bundle
+from nanobot.webui.build import (
+    ensure_webui_bundle,
+    inspect_webui_bundle,
+    pick_webui_build_runner,
+)
 
 _MTIME_BASE_NS = 1_700_000_000_000_000_000
 _MTIME_STEP_NS = 5_000_000_000
@@ -117,6 +121,17 @@ def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path) -> None:
 
     assert status.stale is False
     assert commands == [("bun", "install"), ("bun", "run", "build")]
+
+
+def test_pick_webui_build_runner_returns_resolved_executable(monkeypatch) -> None:
+    bun_shim = r"C:\tools\npm\bun.CMD"
+
+    monkeypatch.setattr(
+        "nanobot.webui.build.shutil.which",
+        lambda candidate: bun_shim if candidate == "bun" else None,
+    )
+
+    assert pick_webui_build_runner() == bun_shim
 
 
 def test_ensure_webui_bundle_warns_without_building(tmp_path: Path) -> None:

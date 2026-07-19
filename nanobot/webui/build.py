@@ -266,8 +266,8 @@ def ensure_webui_bundle(
 def pick_webui_build_runner() -> str | None:
     """Pick the frontend package manager used to build the WebUI."""
     for candidate in ("bun", "npm"):
-        if shutil.which(candidate):
-            return candidate
+        if executable := shutil.which(candidate):
+            return executable
     return None
 
 
