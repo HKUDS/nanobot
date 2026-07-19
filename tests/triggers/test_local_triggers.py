@@ -13,6 +13,7 @@ from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.triggers.local_runner import run_local_trigger_queue
 from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
+from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 
@@ -493,8 +494,6 @@ async def test_local_trigger_queue_recovers_processing_delivery_on_start(
 
 
 def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
-    from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
-
     trigger = LocalTrigger.from_dict(
         {
             "id": "t1",
@@ -513,6 +512,13 @@ def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
     assert trigger.updated_at_ms == 0
 
     delivery = TriggerDelivery.from_dict(
-        {"id": "d1", "triggerId": "t1", "content": "hi", "createdAtMs": None}
+        {
+            "id": "d1",
+            "triggerId": "t1",
+            "content": "hi",
+            "createdAtMs": None,
+            "attempts": None,
+        }
     )
     assert delivery.created_at_ms == 0
+    assert delivery.attempts == 0
