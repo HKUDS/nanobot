@@ -490,3 +490,29 @@ async def test_local_trigger_queue_recovers_processing_delivery_on_start(
     assert submitted[0].content == "Review PR #4591"
     assert submitted[0].metadata["_local_trigger"]["trigger_id"] == trigger.id
     assert restarted.claim_deliveries() == []
+
+
+def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
+    from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
+
+    trigger = LocalTrigger.from_dict(
+        {
+            "id": "t1",
+            "name": "n",
+            "enabled": True,
+            "channel": "websocket",
+            "chatId": "c1",
+            "sessionKey": "websocket:c1",
+            "runHistory": [{"runAtMs": None, "status": "ok"}],
+            "createdAtMs": None,
+            "updatedAtMs": None,
+        }
+    )
+    assert trigger.run_history[0].run_at_ms == 0
+    assert trigger.created_at_ms == 0
+    assert trigger.updated_at_ms == 0
+
+    delivery = TriggerDelivery.from_dict(
+        {"id": "d1", "triggerId": "t1", "content": "hi", "createdAtMs": None}
+    )
+    assert delivery.created_at_ms == 0
