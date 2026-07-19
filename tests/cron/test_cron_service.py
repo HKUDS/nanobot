@@ -1032,8 +1032,8 @@ def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
                                 {"runAtMs": None, "status": "ok", "durationMs": None},
                             ],
                         },
-                        "createdAtMs": 0,
-                        "updatedAtMs": 0,
+                        "createdAtMs": None,
+                        "updatedAtMs": None,
                     }
                 ],
             }
@@ -1046,3 +1046,5 @@ def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
     assert jobs[0].state.run_history[0].run_at_ms == 0
     assert jobs[0].state.run_history[0].duration_ms == 0
     assert jobs[0].state.run_history[0].status == "ok"
+    assert jobs[0].created_at_ms == 0
+    assert jobs[0].updated_at_ms == 0

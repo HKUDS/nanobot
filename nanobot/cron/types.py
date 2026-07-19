@@ -8,7 +8,7 @@ from typing import Any, Literal
 from nanobot.utils.dict_keys import get_camel_snake
 
 
-def _required_store_int(value: Any, default: int = 0) -> int:
+def _store_int(value: Any, default: int = 0) -> int:
     """Coerce JSON numerics to int; treat null/blank like a missing key."""
     if value is None or value == "":
         return default
@@ -85,11 +85,9 @@ class CronRunRecord:
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronRunRecord:
         return cls(
-            run_at_ms=_required_store_int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
+            run_at_ms=_store_int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
             status=data["status"],
-            duration_ms=_required_store_int(
-                get_camel_snake(data, "durationMs", "duration_ms", 0)
-            ),
+            duration_ms=_store_int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
             error=data.get("error"),
         )
 
@@ -155,8 +153,8 @@ class CronJob:
             schedule=CronSchedule.from_store_dict(data["schedule"]),
             payload=CronPayload.from_store_dict(data.get("payload") or {}),
             state=CronJobState.from_store_dict(data.get("state") or {}),
-            created_at_ms=int(get_camel_snake(data, "createdAtMs", "created_at_ms", 0)),
-            updated_at_ms=int(get_camel_snake(data, "updatedAtMs", "updated_at_ms", 0)),
+            created_at_ms=_store_int(get_camel_snake(data, "createdAtMs", "created_at_ms", 0)),
+            updated_at_ms=_store_int(get_camel_snake(data, "updatedAtMs", "updated_at_ms", 0)),
             delete_after_run=bool(
                 get_camel_snake(data, "deleteAfterRun", "delete_after_run", False)
             ),
