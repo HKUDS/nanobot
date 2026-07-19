@@ -116,6 +116,21 @@ def resolve_config_env_vars(config: Config) -> Config:
     return _resolve_in_place(config)
 
 
+def resolve_env_refs(value: str) -> str:
+    """Resolve ``${VAR}`` references in a single string, leniently.
+
+    Unlike :func:`resolve_config_env_vars` (which walks a whole ``Config`` and
+    raises on a missing variable), this resolves one value and substitutes an
+    empty string for any unset reference. It is meant for individual, lazily
+    consumed secret fields — e.g. a transcription provider's ``api_key`` — so a
+    missing variable degrades to "not configured" instead of sending the literal
+    ``${VAR}`` text to the provider. Non-string input is returned unchanged.
+    """
+    if not isinstance(value, str):
+        return value
+    return _ENV_REF_PATTERN.sub(lambda m: os.environ.get(m.group(1), ""), value)
+
+
 def _resolve_in_place(obj: Any) -> Any:
     if isinstance(obj, str):
         new = _ENV_REF_PATTERN.sub(_env_replace, obj)
