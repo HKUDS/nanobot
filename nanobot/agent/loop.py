@@ -592,11 +592,6 @@ class AgentLoop:
             self._runtime_context_providers.append(provider)
 
     @staticmethod
-    def _runtime_chat_id(msg: InboundMessage) -> str:
-        """Return the chat id shown in runtime metadata for the model."""
-        return str(msg.metadata.get("context_chat_id") or msg.chat_id)
-
-    @staticmethod
     def _turn_route(msg: InboundMessage, session_key: str) -> TurnRoute:
         """Resolve response routing without mixing it into execution metadata."""
         if msg.channel != "system":
@@ -1940,7 +1935,9 @@ class AgentLoop:
         persist_user_message: bool = True,
         runtime: LLMRuntime | None = None,
     ) -> OutboundMessage | None:
-        """Process a message directly and return the outbound payload."""
+        """Process an external message directly and return the outbound payload."""
+        if channel == "system":
+            raise ValueError("channel 'system' is reserved for internal messages")
         await self._connect_mcp()
         metadata: dict[str, Any] = {}
         if not persist_user_message:

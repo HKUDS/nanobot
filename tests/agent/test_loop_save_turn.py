@@ -1145,6 +1145,19 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
 
 
 @pytest.mark.asyncio
+async def test_process_direct_rejects_reserved_system_channel(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()  # type: ignore[method-assign]
+    loop._process_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="reserved for internal messages"):
+        await loop.process_direct("external input", channel="system")
+
+    loop._connect_mcp.assert_not_awaited()
+    loop._process_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_process_direct_skip_user_persist_does_not_save_retry_user(
     tmp_path: Path,
 ) -> None:
