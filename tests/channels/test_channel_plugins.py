@@ -1499,6 +1499,72 @@ def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_pat
     assert not config_path.exists()
 
 
+def test_plugins_install_channel_dependencies_without_enabling(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    plugin = ChannelPlugin(
+        name="demo",
+        display_name="Demo",
+        runtime="missing.demo.runtime:DemoChannel",
+        dependencies=("demo-sdk>=1",),
+    )
+    commands: list[list[str]] = []
+    config_path = tmp_path / "config.json"
+    _stub_channel_registry(monkeypatch, plugin)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr(
+        "nanobot.optional_features.run_install_command",
+        lambda argv: commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+    )
+
+    result = CliRunner().invoke(app, ["plugins", "install", "demo"])
+
+    assert result.exit_code == 0
+    assert commands == [[sys.executable, "-m", "pip", "install", "demo-sdk>=1"]]
+    assert "Installed dependencies for 'demo'" in result.stdout
+    assert not config_path.exists()
+
+
+def test_plugins_install_all_channels_uses_manifest_dependencies(monkeypatch):
+    from typer.testing import CliRunner
+
+    from nanobot.cli.commands import app
+
+    plugins = (
+        ChannelPlugin(
+            name="second",
+            display_name="Second",
+            runtime="missing.second.runtime:SecondChannel",
+            dependencies=("second-sdk>=2",),
+        ),
+        ChannelPlugin(
+            name="first",
+            display_name="First",
+            runtime="missing.first.runtime:FirstChannel",
+            dependencies=("first-sdk>=1",),
+        ),
+    )
+    commands: list[list[str]] = []
+    _stub_channel_registry(monkeypatch, *plugins)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    monkeypatch.setattr(
+        "nanobot.optional_features.run_install_command",
+        lambda argv: commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+    )
+
+    result = CliRunner().invoke(app, ["plugins", "install", "--all-channels"])
+
+    assert result.exit_code == 0
+    assert commands == [
+        [sys.executable, "-m", "pip", "install", "first-sdk>=1"],
+        [sys.executable, "-m", "pip", "install", "second-sdk>=2"],
+    ]
+
+
 def test_plugins_disable_channel_writes_config(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 

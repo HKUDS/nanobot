@@ -18,7 +18,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
-| Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
+| Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can install or turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
 | Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OAuth providers such as OpenAI Codex and GitHub Copilot |
 
@@ -253,7 +253,8 @@ See [`chat-apps.md`](./chat-apps.md) for channel-specific setup.
 Use these commands when you want nanobot to add or remove a built-in capability
 without hand-editing JSON. Enabling may install the support package first.
 Disabling is for channels such as Telegram, Matrix, or Slack; it keeps your
-saved settings and turns the channel off.
+saved settings and turns the channel off. Installing only prepares the current
+Python environment; it does not change config or import the channel runtime.
 
 The `plugins` command name is retained for compatibility, but these entries are
 nanobot runtime support packages, not the user-invokable tools shown in WebUI
@@ -271,6 +272,9 @@ Apps. They cannot be attached to a chat turn with `@`.
 | Command | Description |
 |---|---|
 | `nanobot plugins list` | Show available channels and optional capabilities |
+| `nanobot plugins install <name>` | Install missing support without changing configuration |
+| `nanobot plugins install <name> --logs` | Show package install logs without enabling the feature |
+| `nanobot plugins install --all-channels` | Install dependencies declared by every discovered channel; useful in CI and image builds |
 | `nanobot plugins enable <name>` | Install missing support and enable the feature or channel |
 | `nanobot plugins enable <name> --logs` | Show package install logs while enabling |
 | `nanobot plugins disable <channel>` | Turn off a channel without deleting its saved settings |

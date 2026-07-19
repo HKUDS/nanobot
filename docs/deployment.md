@@ -62,6 +62,20 @@ Restart the deployed process after editing `config.json`. Long-running processes
 
 ### Docker Compose
 
+The default image preinstalls WhatsApp dependencies. To bake other enabled
+channels into an image (recommended for deployments without PyPI access), pass
+a comma-separated `NANOBOT_CHANNELS` build argument:
+
+```bash
+NANOBOT_CHANNELS=telegram,slack docker compose build
+```
+
+The image keeps nanobot in a virtual environment owned by its non-root runtime
+user. If an enabled channel was not preinstalled, gateway startup can therefore
+install its manifest-declared dependencies. Rebuilding with `NANOBOT_CHANNELS`
+keeps that installation reproducible instead of relying on the container's
+writable layer.
+
 ```bash
 docker compose run --rm nanobot-cli onboard   # first-time setup
 vim ~/.nanobot/config.json                     # add API keys
@@ -93,6 +107,9 @@ bwrap sandbox is enabled.
 ```bash
 # Build the image
 docker build -t nanobot .
+
+# Or preinstall dependencies for a specific set of channels
+docker build --build-arg NANOBOT_CHANNELS=telegram,slack -t nanobot .
 
 # Initialize config (first time only)
 docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard

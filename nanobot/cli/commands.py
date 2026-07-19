@@ -2565,6 +2565,46 @@ def plugins_enable(
     console.print(f"[green]{escape(message)}[/green]")
 
 
+@plugins_app.command("install")
+def plugins_install(
+    name: str | None = typer.Argument(
+        None,
+        help="Feature or channel name (e.g. telegram, matrix, bedrock)",
+    ),
+    all_channels: bool = typer.Option(
+        False,
+        "--all-channels",
+        help="Install dependencies declared by every discovered channel",
+    ),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show package install logs"),
+):
+    """Install optional dependencies without changing feature or channel configuration."""
+    from nanobot.channels.registry import discover_plugins
+
+    if all_channels and name is not None:
+        console.print("[red]Pass a feature name or --all-channels, not both.[/red]")
+        raise typer.Exit(1)
+    if all_channels:
+        names = sorted(discover_plugins())
+    elif name is not None:
+        names = [name]
+    else:
+        console.print("[red]Pass a feature name or --all-channels.[/red]")
+        raise typer.Exit(1)
+
+    _set_nanobot_logs(logs)
+    for feature_name in names:
+        try:
+            payload = feature_support.install_optional_feature_dependencies(
+                feature_name,
+                runner=feature_support.run_install_command,
+            )
+        except feature_support.OptionalFeatureError as exc:
+            console.print(f"[red]{escape(exc.message)}[/red]")
+            raise typer.Exit(1) from exc
+        console.print(f"[green]{escape(payload['message'])}[/green]")
+
+
 @plugins_app.command("disable")
 def plugins_disable(
     name: str = typer.Argument(..., help="Channel name (e.g. telegram, matrix, slack)"),

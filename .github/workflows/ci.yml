@@ -57,21 +57,26 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      - name: Install channel dependencies
+        run: uv run nanobot plugins install --all-channels
+
+      # Channel requirements live in manifests rather than uv.lock. Avoid a
+      # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
         if: matrix.coverage
-        run: uv run ruff check nanobot tests conftest.py
+        run: uv run --no-sync ruff check nanobot tests conftest.py
 
       - name: Run tests with coverage
         if: matrix.coverage
         run: >-
-          uv run python -m pytest
+          uv run --no-sync python -m pytest
           --cov=nanobot --cov-report=term-missing:skip-covered
           --durations=25 --durations-min=1.0
 
       - name: Run compatibility tests
         if: ${{ !matrix.coverage }}
         run: >-
-          uv run python -m pytest
+          uv run --no-sync python -m pytest
           --durations=25 --durations-min=1.0
 
   webui:
@@ -105,3 +110,21 @@ jobs:
       - name: Build WebUI
         working-directory: webui
         run: bun run build
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image with default channel dependencies
+        run: docker build -t nanobot:test .
+
+      - name: Verify default WhatsApp dependencies
+        run: docker run --rm --entrypoint python nanobot:test -c "import neonize, segno"
+
+      - name: Install and import a channel dependency as the runtime user
+        run: >-
+          docker run --rm --user 1000:1000 --entrypoint sh nanobot:test -c
+          'nanobot plugins install discord && python -c "import discord"'

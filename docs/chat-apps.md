@@ -46,15 +46,16 @@ The sections below explain what each chat platform requires and provide manual c
 
 > [!NOTE]
 > If you are upgrading from a version where chat app SDKs were installed by default,
-> install the channel extra in the same Python environment before enabling or
+> install the channel dependencies in the same Python environment before enabling or
 > restarting that channel:
 >
 > ```bash
-> nanobot plugins enable <channel>
+> nanobot plugins install <channel>
 > ```
 >
 > Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
 > `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
+> Use `nanobot plugins enable <channel>` instead when you also want to enable it.
 > To turn a channel off later, run `nanobot plugins disable <channel>`.
 > nanobot keeps the saved settings, but stops loading that channel after the
 > next restart.
@@ -185,7 +186,7 @@ Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
 nanobot plugins enable mochat
 ```
 
-Without this extra, Mochat still works through HTTP polling.
+Without these dependencies, Mochat still works through HTTP polling.
 
 **1. Ask nanobot to set up Mochat for you**
 
