@@ -168,8 +168,8 @@ class GitStore:
     # -- internal helpers ------------------------------------------------------
 
     def _staging_paths(self, *paths: str) -> list[str]:
-        """Return absolute paths so Dulwich resolves them inside this workspace."""
-        return [str((self._workspace / path).resolve()) for path in paths]
+        """Return absolute paths without resolving tracked-file symlinks."""
+        return [str((self._workspace / path).absolute()) for path in paths]
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         """Resolve a short SHA prefix to the full SHA bytes."""
