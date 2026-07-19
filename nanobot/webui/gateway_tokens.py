@@ -17,8 +17,10 @@ class GatewayTokenStore:
     """Own short-lived WebSocket and WebUI API tokens for one gateway process."""
 
     max_tokens: int = 10_000
+    max_companion_sessions: int = 64
     issued_tokens: dict[str, float] = field(default_factory=dict)
     api_tokens: dict[str, float] = field(default_factory=dict)
+    companion_sessions: dict[str, float] = field(default_factory=dict)
 
     def check_api_token(self, request: WsRequest) -> bool:
         self._purge_expired_api_tokens()
@@ -42,6 +44,10 @@ class GatewayTokenStore:
             return False
         return True
 
+    def can_issue_companion_session(self) -> bool:
+        self._purge_expired_companion_sessions()
+        return len(self.companion_sessions) < self.max_companion_sessions
+
     def issue_token(self, ttl_s: int | float) -> str:
         token_value = f"nbwt_{secrets.token_urlsafe(32)}"
         expiry = time.monotonic() + float(ttl_s)
@@ -52,6 +58,11 @@ class GatewayTokenStore:
         token_value = f"nbwt_{secrets.token_urlsafe(32)}"
         expiry = time.monotonic() + float(ttl_s)
         self.api_tokens[token_value] = expiry
+        return token_value
+
+    def issue_companion_session(self, ttl_s: int | float) -> str:
+        token_value = f"nbcs_{secrets.token_urlsafe(32)}"
+        self.companion_sessions[token_value] = time.monotonic() + float(ttl_s)
         return token_value
 
     def take_issued_token_if_valid(self, token_value: str | None) -> bool:
@@ -65,9 +76,17 @@ class GatewayTokenStore:
             return False
         return True
 
+    def companion_session_is_valid(self, token_value: str | None) -> bool:
+        if not token_value:
+            return False
+        self._purge_expired_companion_sessions()
+        expiry = self.companion_sessions.get(token_value)
+        return expiry is not None and time.monotonic() <= expiry
+
     def clear(self) -> None:
         self.issued_tokens.clear()
         self.api_tokens.clear()
+        self.companion_sessions.clear()
 
     def _purge_expired_api_tokens(self) -> None:
         now = time.monotonic()
@@ -80,6 +99,12 @@ class GatewayTokenStore:
         for token_key, expiry in list(self.issued_tokens.items()):
             if now > expiry:
                 self.issued_tokens.pop(token_key, None)
+
+    def _purge_expired_companion_sessions(self) -> None:
+        now = time.monotonic()
+        for token_key, expiry in list(self.companion_sessions.items()):
+            if now > expiry:
+                self.companion_sessions.pop(token_key, None)
 
 
 def token_response_payload(token: str, expires_in: Any) -> dict[str, Any]:

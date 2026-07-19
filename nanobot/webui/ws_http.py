@@ -23,12 +23,14 @@ from loguru import logger
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot import __version__
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_context import public_history_messages
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.webui import browser_companion
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -70,6 +72,9 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.http_utils import (
     query_first as _query_first,
+)
+from nanobot.webui.http_utils import (
+    request_cookie as _request_cookie,
 )
 from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
@@ -245,6 +250,12 @@ class GatewayHTTPHandler:
         if got == "/webui/bootstrap":
             return self._handle_bootstrap(connection, request)
 
+        if got == browser_companion.STATUS_PATH:
+            return self._handle_companion_status(connection, request)
+
+        if got == browser_companion.OPEN_PATH:
+            return self._handle_companion_open(connection, request)
+
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(connection, request, got)
         if response is not None:
@@ -319,16 +330,56 @@ class GatewayHTTPHandler:
 
     # -- Bootstrap ----------------------------------------------------------
 
+    def _handle_companion_status(self, connection: Any, request: Any) -> Response:
+        if not _is_local_browser_request(connection, request.headers):
+            return _http_error(403, "companion is localhost-only")
+        return _http_json_response({"ready": True, "version": __version__})
+
+    def _handle_companion_open(self, connection: Any, request: Any) -> Response:
+        if not _is_local_browser_request(connection, request.headers):
+            return _http_error(403, "companion is localhost-only")
+        if not browser_companion.is_top_level_user_navigation(request.headers):
+            return _http_error(403, "companion launch requires a direct browser navigation")
+        cookie_name = browser_companion.session_cookie_name(self.config.port)
+        companion_session = _request_cookie(request.headers, cookie_name)
+        if not self.tokens.companion_session_is_valid(companion_session):
+            if not self.tokens.can_issue_companion_session():
+                return _http_error(429, "too many companion sessions")
+            companion_session = self.tokens.issue_companion_session(
+                browser_companion.SESSION_TTL_SECONDS
+            )
+        cookie = (
+            f"{cookie_name}={companion_session}; "
+            "Path=/webui; HttpOnly; SameSite=Strict"
+        )
+        return _http_response(
+            b"",
+            status=302,
+            extra_headers=[
+                ("Location", "/#/"),
+                ("Set-Cookie", cookie),
+                ("Cache-Control", "no-store"),
+                ("Referrer-Policy", "no-referrer"),
+                ("X-Content-Type-Options", "nosniff"),
+            ],
+        )
+
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
-        if secret:
+        cookie_name = browser_companion.session_cookie_name(self.config.port)
+        companion_authenticated = self.tokens.companion_session_is_valid(
+            _request_cookie(request.headers, cookie_name)
+        )
+        if companion_authenticated and not is_local_browser:
+            return _http_error(403, "companion session is localhost-only")
+        if secret and not companion_authenticated:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not is_local_browser:
+        elif not secret and not is_local_browser:
             return _http_error(403, "bootstrap is localhost-only")
 
-        api_token_allowed = bool(secret) or is_local_browser
+        api_token_allowed = companion_authenticated or bool(secret) or is_local_browser
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),

@@ -254,6 +254,75 @@ async def test_bootstrap_returns_token_for_localhost(
 
 
 @pytest.mark.asyncio
+async def test_browser_companion_launch_uses_private_refreshable_session(
+    bus: MagicMock,
+) -> None:
+    port = _free_port()
+    channel = _ch(bus, port=port, tokenIssueSecret="persistent-secret")
+    server_task = asyncio.create_task(channel.start())
+    try:
+        status = await _http_get(f"http://127.0.0.1:{port}/webui/companion/status")
+        assert status.status_code == 200
+        assert status.json()["ready"] is True
+        assert isinstance(status.json()["version"], str)
+
+        navigation_headers = {
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Site": "none",
+        }
+        launch = await _http_get(
+            f"http://127.0.0.1:{port}/webui/companion/open",
+            headers=navigation_headers,
+        )
+        assert launch.status_code == 302
+        assert launch.headers["cache-control"] == "no-store"
+        assert launch.headers["location"] == "/#/"
+        cookie = launch.headers["set-cookie"]
+        assert cookie.startswith(f"nanobot_companion_{port}=nbcs_")
+        assert "HttpOnly" in cookie
+        assert "SameSite=Strict" in cookie
+        companion_cookie = cookie.split(";", 1)[0]
+
+        bootstrap_headers = {"Cookie": companion_cookie}
+        accepted = await _http_get(
+            f"http://127.0.0.1:{port}/webui/bootstrap",
+            headers=bootstrap_headers,
+        )
+        assert accepted.status_code == 200
+
+        refreshed = await _http_get(
+            f"http://127.0.0.1:{port}/webui/bootstrap",
+            headers=bootstrap_headers,
+        )
+        assert refreshed.status_code == 200
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_browser_companion_rejects_cross_site_launch(bus: MagicMock) -> None:
+    port = _free_port()
+    channel = _ch(bus, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/webui/companion/open",
+            headers={
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+        assert response.status_code == 403
+        assert channel.gateway.tokens.companion_sessions == {}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_sessions_routes_require_bearer_token(
     bus: MagicMock, tmp_path: Path
 ) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import email.utils
 import hmac
 import http
+import http.cookies
 import ipaddress
 import json
 import re
@@ -39,6 +40,20 @@ def case_insensitive_header(headers: Any, key: str) -> str:
         except Exception:
             value = None
     return str(value or "").strip()
+
+
+def request_cookie(headers: Any, name: str) -> str | None:
+    """Read one request cookie without accepting malformed cookie syntax."""
+    raw = case_insensitive_header(headers, "Cookie")
+    if not raw:
+        return None
+    cookies = http.cookies.SimpleCookie()
+    try:
+        cookies.load(raw)
+    except http.cookies.CookieError:
+        return None
+    morsel = cookies.get(name)
+    return morsel.value if morsel else None
 
 
 def safe_host_header(value: str) -> str:
