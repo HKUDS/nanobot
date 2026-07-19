@@ -10,6 +10,7 @@ import pytest
 
 import nanobot.channels.whatsapp.runtime as whatsapp_module
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.whatsapp.runtime import (
     WhatsAppChannel,
     _legacy_bridge_config_fields,
@@ -322,6 +323,50 @@ async def test_group_sender_id_uses_participant_not_group_jid() -> None:
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["sender_id"] == "SENDERLID"
     assert kwargs["metadata"]["participant"] == "SENDERLID@lid"
+
+
+@pytest.mark.parametrize("allowed_group", ["120363000@g.us", "120363000"])
+@pytest.mark.asyncio
+async def test_group_allow_from_accepts_group_jid_or_bare_id(allowed_group: str) -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": [allowed_group]}, bus)
+    ch._started_at = 0
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="hi"),
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("SENDERLID", "lid"),
+            is_group=True,
+        ),
+    )
+
+    assert bus.inbound_size == 1
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "SENDERLID"
+    assert msg.chat_id == "120363000@g.us"
+    assert msg.content == "hi"
+    assert msg.metadata["participant"] == "SENDERLID@lid"
+
+
+@pytest.mark.asyncio
+async def test_group_allow_from_does_not_allow_same_participant_in_other_group() -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["120363000"]}, bus)
+    ch._started_at = 0
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="hi"),
+            chat=_jid("120363999", "g.us"),
+            sender=_jid("SENDERLID", "lid"),
+            is_group=True,
+        ),
+    )
+
+    assert bus.inbound_size == 0
 
 
 @pytest.mark.asyncio

@@ -121,7 +121,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 1_048_576}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -634,7 +634,9 @@ def _parse_context_window_tokens(value: str | None) -> int | None:
     except ValueError:
         raise WebUISettingsError("context_window_tokens must be an integer") from None
     if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
-        raise WebUISettingsError("context_window_tokens must be 65536, 200000, or 262144")
+        raise WebUISettingsError(
+            "context_window_tokens must be 65536, 200000, 262144, or 1048576"
+        )
     return parsed
 
 
@@ -706,6 +708,10 @@ def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
         return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
     model_lower = (model or "").lower()
+    if model_lower.rsplit("/", 1)[-1] == "kimi-k3":
+        # K3 always reasons and currently exposes only its default/max effort.
+        return ["", "max"]
+
     implicit = getattr(spec, "implicit_reasoning_models", ())
     if implicit and any(pat in model_lower for pat in implicit):
         # Reasoning is always on; only "Default" makes sense.

@@ -5,12 +5,14 @@ import json
 import os
 import re
 import shutil
+from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from weakref import WeakValueDictionary
 
 from loguru import logger
 
@@ -31,6 +33,7 @@ from nanobot.utils.helpers import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 FILE_MAX_MESSAGES = 2000
+SESSION_CACHE_MAX_SIZE = 128
 MIN_REPLAY_MAX_MESSAGES = 120
 REPLAY_TOKENS_PER_MESSAGE = 100
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
@@ -418,7 +421,30 @@ class SessionManager:
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = get_legacy_sessions_dir()
-        self._cache: dict[str, Session] = {}
+        self._cache: OrderedDict[str, Session] = OrderedDict()
+        # Preserve identity for sessions held by active callers without retaining idle ones.
+        self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
+        self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
+
+    def _remember(self, session: Session) -> None:
+        """Keep recent sessions strongly cached without duplicating live objects."""
+        self._overflow_cache.pop(session.key, None)
+        self._cache[session.key] = session
+        self._cache.move_to_end(session.key)
+        while len(self._cache) > self._max_cached_sessions:
+            key, evicted = self._cache.popitem(last=False)
+            self._overflow_cache[key] = evicted
+
+    def _cached(self, key: str) -> Session | None:
+        session = self._cache.get(key)
+        if session is not None:
+            self._cache.move_to_end(key)
+            return session
+
+        session = self._overflow_cache.get(key)
+        if session is not None:
+            self._remember(session)
+        return session
 
     @staticmethod
     def safe_key(key: str) -> str:
@@ -482,14 +508,15 @@ class SessionManager:
         Returns:
             The session.
         """
-        if key in self._cache:
-            return self._cache[key]
+        session = self._cached(key)
+        if session is not None:
+            return session
 
         session = self._load(key)
         if session is None:
             session = Session(key=key)
 
-        self._cache[key] = session
+        self._remember(session)
         return session
 
     def _load(self, key: str) -> Session | None:
@@ -673,7 +700,7 @@ class SessionManager:
             tmp_path.unlink(missing_ok=True)
             raise
 
-        self._cache[session.key] = session
+        self._remember(session)
 
     def flush_all(self) -> int:
         """Re-save every cached session with fsync for durable shutdown.
@@ -683,7 +710,9 @@ class SessionManager:
         flushed.
         """
         flushed = 0
-        for key, session in list(self._cache.items()):
+        cached = dict(self._overflow_cache.items())
+        cached.update(self._cache)
+        for key, session in cached.items():
             try:
                 self.save(session, fsync=True)
                 flushed += 1
@@ -694,6 +723,7 @@ class SessionManager:
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+        self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
         """Remove a session from disk (both workspace and legacy locations) and cache.
@@ -733,7 +763,7 @@ class SessionManager:
         """
         if before_user_index < 0:
             return None
-        source = self._cache.get(source_key) or self._load(source_key)
+        source = self._cached(source_key) or self._load(source_key)
         if source is None:
             return None
 

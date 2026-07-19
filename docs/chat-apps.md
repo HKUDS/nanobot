@@ -393,6 +393,10 @@ nanobot channels login whatsapp
 }
 ```
 
+For groups, `allowFrom` can contain either a participant sender ID/LID or a
+group JID/bare group ID. A participant entry allows that sender wherever the bot
+can see them; a group entry allows replies in that group.
+
 Optional session database path:
 
 ```json

@@ -425,9 +425,14 @@ class ContextGovernor:
         return system_messages + self._legal_history_tail(kept, non_system)
 
     @staticmethod
-    def _summary_for(message: dict[str, Any]) -> str:
+    def _tool_result_compaction_message(message: dict[str, Any]) -> str:
         name = message.get("name", "tool")
-        return f"[Prior {name} result compacted to fit context; the tool call already completed.]"
+        return (
+            f"Error: The previous {name} result was compacted to fit context because it was too "
+            "large. Do not repeat the same call unchanged. Retry with a narrower path, query, "
+            "range, or result limit, use another tool, or tell the user the task cannot fit in "
+            "the available context."
+        )
 
     def _legal_history_tail(
         self,
@@ -462,12 +467,12 @@ class ContextGovernor:
             tool_call_id = msg.get("tool_call_id")
             if not tool_call_id or str(tool_call_id) not in compacted_tool_call_ids:
                 continue
-            summary = self._summary_for(msg)
-            if msg.get("content") == summary:
+            compaction_message = self._tool_result_compaction_message(msg)
+            if msg.get("content") == compaction_message:
                 continue
             if updated is messages:
                 updated = [dict(m) for m in messages]
-            updated[idx]["content"] = summary
+            updated[idx]["content"] = compaction_message
         return updated
 
     def _inflight_compaction_candidates(
@@ -500,4 +505,4 @@ class ContextGovernor:
         return primary + fallback
 
     def _compact_tool_result_at(self, messages: list[dict[str, Any]], idx: int) -> None:
-        messages[idx]["content"] = self._summary_for(messages[idx])
+        messages[idx]["content"] = self._tool_result_compaction_message(messages[idx])

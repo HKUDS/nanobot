@@ -126,6 +126,24 @@ class TestParseTavilyUsage:
         assert info.extract_used is None
         assert info.crawl_used is None
 
+    def test_string_numeric_fields(self):
+        data = {
+            "account": {
+                "plan_usage": "10",
+                "plan_limit": "100",
+                "search_usage": "7",
+                "extract_usage": "2",
+                "crawl_usage": "1",
+            },
+        }
+        info = _parse_tavily_usage(data)
+        assert info.used == 10
+        assert info.limit == 100
+        assert info.remaining == 90
+        assert info.search_used == 7
+        assert info.extract_used == 2
+        assert info.crawl_used == 1
+
 
 # ---------------------------------------------------------------------------
 # fetch_search_usage routing tests

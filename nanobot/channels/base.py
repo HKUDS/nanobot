@@ -224,9 +224,17 @@ class BaseChannel(ABC):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         is_dm: bool = False,
+        authorization_id: str | None = None,
     ) -> None:
-        """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
-        if not self.is_allowed(sender_id):
+        """Handle a message after checking its authorization subject.
+
+        ``sender_id`` is the identity recorded on the inbound message.  Channels
+        where access is scoped to another entity (for example, a group or room)
+        can pass that entity as ``authorization_id`` without changing the
+        sender's identity.  When omitted, authorization remains sender-based.
+        """
+        permission_id = authorization_id if authorization_id is not None else sender_id
+        if not self.is_allowed(permission_id):
             if is_dm:
                 code = generate_code(self.name, str(sender_id))
                 await self.send(

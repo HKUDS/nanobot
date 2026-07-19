@@ -59,16 +59,16 @@
     "createAnother": "建立另一個助手",
     "createHint": "為其他團隊、空間或工作流程建立獨立的飛書機器人。",
     "createAssistant": "建立助手",
-    "reconnect": "重新連接",
+    "reconnect": "重新連線",
     "countNone": "尚未連接助手",
     "countOne": "已連接 1 個助手",
     "countMany": "已連接 {{count}} 個助手",
-    "qrAlt": "飛書連接二維碼",
-    "scanTitle": "使用飛書掃碼",
-    "scanDescription": "用手機上的飛書或 Lark 掃描二維碼。授權完成後，nanobot 會自動完成設定。",
-    "waiting": "正在等待授權...",
-    "connected": "飛書已連接。",
-    "stopped": "連接已停止。",
-    "connecting": "正在連接..."
+    "qrAlt": "飛書連線 QR Code",
+    "scanTitle": "使用飛書掃描",
+    "scanDescription": "請使用手機上的飛書或 Lark 掃描此 QR Code。完成授權後，nanobot 會自動完成設定。",
+    "waiting": "正在等待授權…",
+    "connected": "飛書已連線。",
+    "stopped": "連線已停止。",
+    "connecting": "正在連線…"
   }
 }

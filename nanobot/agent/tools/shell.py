@@ -188,6 +188,7 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
+            session_manager=getattr(ctx, "exec_session_manager", None),
         )
 
     def __init__(

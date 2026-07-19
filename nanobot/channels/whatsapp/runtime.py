@@ -583,7 +583,10 @@ class WhatsAppChannel(BaseChannel):
             "phone": phone_id or None,
             "is_reply_to_bot": self._is_reply_to_bot(message),
         }
-        if not self.is_allowed(sender_id):
+        sender_allowed = self.is_allowed(sender_id)
+        group_allow_id = self._group_allow_id(chat_jid) if is_group else None
+        authorization_id = sender_id if sender_allowed else group_allow_id
+        if authorization_id is None:
             self.logger.info(
                 "Passing unauthorized WhatsApp sender {} to pairing flow "
                 "(phone={}, lid={}, chat={})",
@@ -628,7 +631,16 @@ class WhatsAppChannel(BaseChannel):
             media=media_paths,
             metadata=metadata,
             is_dm=not is_group,
+            authorization_id=authorization_id,
         )
+
+    def _group_allow_id(self, chat_jid: str) -> str | None:
+        if self.is_allowed(chat_jid):
+            return chat_jid
+        bare_chat_id = _bare_jid(chat_jid)
+        if bare_chat_id and bare_chat_id != chat_jid and self.is_allowed(bare_chat_id):
+            return bare_chat_id
+        return None
 
     def _is_addressed_to_bot(self, message: Any) -> bool:
         return self._was_mentioned(message) or self._is_reply_to_bot(message)

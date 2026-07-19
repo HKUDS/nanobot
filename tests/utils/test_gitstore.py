@@ -2,6 +2,7 @@
 
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -224,6 +225,48 @@ class TestNestedRepoProtection:
 
         assert result is True
         assert (workspace / ".git").is_dir()
+
+    def test_staging_paths_are_absolute_from_workspace(self, tmp_path, monkeypatch):
+        """Git operations should not depend on the process working directory."""
+        from dulwich import porcelain
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        git = GitStore(workspace, tracked_files=["MEMORY.md"])
+
+        with patch.object(porcelain, "add", wraps=porcelain.add) as mock_add:
+            assert git.init() is True
+            assert len(git.log()) == 1
+
+            (workspace / "MEMORY.md").write_text("updated\n", encoding="utf-8")
+            assert git.auto_commit("update memory") is not None
+            assert len(git.log()) == 2
+
+        assert len(mock_add.call_args_list) == 2
+        for call in mock_add.call_args_list:
+            staging_paths = [Path(path) for path in call.kwargs["paths"]]
+            assert all(path.is_absolute() for path in staging_paths)
+            assert all(path.is_relative_to(workspace) for path in staging_paths)
+
+    def test_staging_paths_preserve_symlinks(self, tmp_path):
+        """Absolute staging paths should still identify the tracked symlink itself."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        target = tmp_path / "shared-memory.md"
+        target.write_text("shared\n", encoding="utf-8")
+        link = workspace / "MEMORY.md"
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+
+        git = GitStore(workspace, tracked_files=["MEMORY.md"])
+
+        staging_path = Path(git._staging_paths("MEMORY.md")[0])
+        assert staging_path == link.absolute()
+        assert staging_path.is_symlink()
 
     def test_init_refuses_inside_git_worktree(self, tmp_path):
         """init() should refuse when the parent checkout is a git worktree."""

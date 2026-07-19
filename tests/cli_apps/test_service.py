@@ -423,10 +423,14 @@ def test_run_argv_logs_command_exit_and_output(
         *,
         capture_output: bool,
         text: bool,
+        encoding: str,
+        errors: str,
         timeout: int,
     ) -> subprocess.CompletedProcess[str]:
         assert capture_output is True
         assert text is True
+        assert encoding == "utf-8"
+        assert errors == "replace"
         assert timeout == 5
         return subprocess.CompletedProcess(argv, 0, stdout="installed ok", stderr="")
 
@@ -439,6 +443,22 @@ def test_run_argv_logs_command_exit_and_output(
     assert any(record.startswith("CLI Apps: running ") for record in records)
     assert any("command exited with code 0" in record for record in records)
     assert any("installed ok" in record for record in records)
+
+
+def test_run_argv_decodes_utf8_output(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+
+    result = manager._run_argv(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(chr(0x2713).encode('utf-8'))",
+        ],
+        timeout=5,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "\u2713"
 
 
 def test_install_records_available_cli_without_reinstalling(
@@ -863,6 +883,9 @@ def test_run_installed_cli_uses_argv_without_shell(
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "shell" not in kwargs or kwargs["shell"] is False
+        assert kwargs["text"] is True
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         return subprocess.CompletedProcess(
             argv,
             0,

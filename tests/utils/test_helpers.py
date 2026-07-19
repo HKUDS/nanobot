@@ -12,6 +12,13 @@ def test_split_message_no_code_blocks_unchanged():
     assert split_message(content, max_len=12) == ["alpha beta", "gamma delta"]
 
 
+def test_split_message_nonpositive_maxlen_returns_unsplit():
+    content = "alpha beta gamma delta"
+
+    assert split_message(content, max_len=0) == [content]
+    assert split_message(content, max_len=-1) == [content]
+
+
 def test_truncate_text_to_tokens_keeps_text_within_budget():
     text = "hello world " * 100
 

@@ -6,13 +6,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from nanobot.utils.dict_keys import get_camel_snake as _get
+
 TriggerStatus = Literal["ok", "error"]
 
 
-def _get(data: dict[str, Any], camel: str, snake: str, default: Any = None) -> Any:
-    if camel in data:
-        return data[camel]
-    return data.get(snake, default)
+def _int_or_zero(value: Any) -> int:
+    """Coerce a stored JSON numeric, using zero for null or empty values."""
+    return 0 if value is None or value == "" else int(value)
 
 
 @dataclass
@@ -26,7 +27,7 @@ class TriggerRunRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TriggerRunRecord":
         return cls(
-            run_at_ms=int(_get(data, "runAtMs", "run_at_ms", 0)),
+            run_at_ms=_int_or_zero(_get(data, "runAtMs", "run_at_ms", 0)),
             status=str(data.get("status") or "error"),  # type: ignore[arg-type]
             error=data.get("error"),
         )
@@ -74,8 +75,8 @@ class LocalTrigger:
             session_key=str(_get(data, "sessionKey", "session_key", "")),
             sender_id=str(_get(data, "senderId", "sender_id", "trigger") or "trigger"),
             origin_metadata=dict(_get(data, "originMetadata", "origin_metadata", {}) or {}),
-            created_at_ms=int(_get(data, "createdAtMs", "created_at_ms", 0)),
-            updated_at_ms=int(_get(data, "updatedAtMs", "updated_at_ms", 0)),
+            created_at_ms=_int_or_zero(_get(data, "createdAtMs", "created_at_ms", 0)),
+            updated_at_ms=_int_or_zero(_get(data, "updatedAtMs", "updated_at_ms", 0)),
             last_run_at_ms=_get(data, "lastRunAtMs", "last_run_at_ms"),
             last_status=_get(data, "lastStatus", "last_status"),  # type: ignore[arg-type]
             last_error=_get(data, "lastError", "last_error"),
@@ -124,8 +125,8 @@ class TriggerDelivery:
             id=str(data["id"]),
             trigger_id=str(_get(data, "triggerId", "trigger_id", "")),
             content=str(data.get("content") or ""),
-            created_at_ms=int(_get(data, "createdAtMs", "created_at_ms", 0)),
-            attempts=int(data.get("attempts", 0)),
+            created_at_ms=_int_or_zero(_get(data, "createdAtMs", "created_at_ms", 0)),
+            attempts=_int_or_zero(data.get("attempts", 0)),
             last_error=data.get("lastError") or data.get("last_error"),
             path=path,
         )

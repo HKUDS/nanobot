@@ -250,11 +250,7 @@ class ExecSessionManager:
             session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(session_id)
-        if (
-            owner_session_key
-            and session.owner_session_key
-            and session.owner_session_key != owner_session_key
-        ):
+        if session.owner_session_key and session.owner_session_key != owner_session_key:
             raise KeyError(session_id)
 
         if chars:
@@ -296,9 +292,7 @@ class ExecSessionManager:
                     owner_session_key=session.owner_session_key,
                 )
                 for session_id, session in sorted(self._sessions.items())
-                if not owner_session_key
-                or not session.owner_session_key
-                or session.owner_session_key == owner_session_key
+                if session.owner_session_key == owner_session_key
             ]
 
     async def _cleanup_locked(self) -> None:
@@ -442,7 +436,7 @@ class WriteStdinTool(Tool):
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        return cls()
+        return cls(manager=getattr(ctx, "exec_session_manager", None))
 
     @property
     def exclusive(self) -> bool:
@@ -586,7 +580,7 @@ class ListExecSessionsTool(Tool):
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        return cls()
+        return cls(manager=getattr(ctx, "exec_session_manager", None))
 
     @property
     def name(self) -> str:

@@ -224,7 +224,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 1_048_576] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -2813,7 +2813,13 @@ function ModelsSettings({
               options={CONTEXT_WINDOW_TOKEN_OPTIONS.map((tokens) => ({
                 value: String(tokens),
                 label:
-                  tokens === 262_144 ? "256K" : tokens === 200_000 ? "200K" : "64K",
+                  tokens === 1_048_576
+                    ? "1M"
+                    : tokens === 262_144
+                      ? "256K"
+                      : tokens === 200_000
+                        ? "200K"
+                        : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({

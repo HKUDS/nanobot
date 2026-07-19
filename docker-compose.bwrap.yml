@@ -1,0 +1,16 @@
+x-bwrap-security: &bwrap-security
+  cap_add:
+    - SYS_ADMIN
+  security_opt:
+    - apparmor=unconfined
+    - seccomp=unconfined
+
+services:
+  nanobot-gateway:
+    <<: *bwrap-security
+
+  nanobot-api:
+    <<: *bwrap-security
+
+  nanobot-cli:
+    <<: *bwrap-security

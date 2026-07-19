@@ -144,6 +144,35 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
 
 
+@pytest.mark.asyncio
+async def test_connect_missing_servers_propagates_external_cancellation(monkeypatch) -> None:
+    started = asyncio.Event()
+
+    async def connect_mcp_servers(_servers: dict, _registry: ToolRegistry) -> dict:
+        started.set()
+        await asyncio.sleep(60)
+        return {}
+
+    class State:
+        pass
+
+    state = State()
+    state._mcp_closing = False
+    state._mcp_servers = {"test": MCPServerConfig(command="fake")}
+    state._mcp_stacks = {}
+    state._mcp_connecting = False
+    monkeypatch.setattr(mcp_mod, "connect_mcp_servers", connect_mcp_servers)
+
+    task = asyncio.create_task(mcp_mod.connect_missing_servers(state, ToolRegistry()))
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert state._mcp_connecting is False
+
+
 def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",

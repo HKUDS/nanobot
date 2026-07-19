@@ -22,9 +22,14 @@ class CommitInfo:
     message: str
     timestamp: str  # Formatted datetime
 
+    def subject(self) -> str:
+        """First line of the commit message, or a placeholder if empty."""
+        lines = self.message.splitlines()
+        return lines[0] if lines else "(no message)"
+
     def format(self, diff: str = "") -> str:
         """Format this commit for display, optionally with a diff."""
-        header = f"## {self.message.splitlines()[0]}\n`{self.sha}` — {self.timestamp}\n"
+        header = f"## {self.subject()}\n`{self.sha}` — {self.timestamp}\n"
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
@@ -108,7 +113,10 @@ class GitStore:
                     p.write_text("", encoding="utf-8")
 
             # Initial commit
-            porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
+            porcelain.add(
+                str(self._workspace),
+                paths=self._staging_paths(".gitignore", *self._tracked_files),
+            )
             porcelain.commit(
                 str(self._workspace),
                 message=b"init: nanobot memory store",
@@ -141,7 +149,7 @@ class GitStore:
                 return None
 
             msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
+            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,
@@ -158,6 +166,10 @@ class GitStore:
             return None
 
     # -- internal helpers ------------------------------------------------------
+
+    def _staging_paths(self, *paths: str) -> list[str]:
+        """Return absolute paths without resolving tracked-file symlinks."""
+        return [str((self._workspace / path).absolute()) for path in paths]
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         """Resolve a short SHA prefix to the full SHA bytes."""

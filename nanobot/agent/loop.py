@@ -28,6 +28,7 @@ from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
+from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -80,6 +81,7 @@ from nanobot.session.manager import (
     replay_max_messages_for_context,
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
+from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
@@ -355,6 +357,7 @@ class AgentLoop:
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
+        self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
         self.subagents = SubagentManager(
             workspace=workspace,
@@ -540,6 +543,7 @@ class AgentLoop:
             bus=self.bus,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
+            exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
@@ -995,8 +999,11 @@ class AgentLoop:
                 except asyncio.CancelledError:
                     # Preserve real task cancellation so shutdown can complete cleanly.
                     # Only ignore non-task CancelledError signals that may leak from integrations.
-                    if not self._running or asyncio.current_task().cancelling():
+                    if not self._running or task_is_cancelling():
                         raise
+                    logger.warning(
+                        "Ignoring leaked CancelledError while consuming inbound messages"
+                    )
                     continue
                 except Exception as e:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)

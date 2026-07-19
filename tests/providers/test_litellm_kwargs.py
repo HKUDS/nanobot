@@ -1540,6 +1540,43 @@ def test_kimi_k25_no_extra_body_when_reasoning_effort_none() -> None:
     assert "extra_body" not in kw
 
 
+def test_kimi_k3_uses_native_defaults() -> None:
+    """K3 omits fixed sampling params and uses the non-deprecated token limit field."""
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=None)
+
+    assert "temperature" not in kw
+    assert "max_tokens" not in kw
+    assert kw["max_completion_tokens"] == 1024
+    assert "reasoning_effort" not in kw
+    assert "extra_body" not in kw
+
+
+def test_kimi_k3_uses_top_level_max_reasoning_effort() -> None:
+    """K3 uses top-level reasoning_effort=max, never the K2.x thinking body."""
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="max")
+
+    assert kw["reasoning_effort"] == "max"
+    assert "temperature" not in kw
+    assert "extra_body" not in kw
+
+
+def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort() -> None:
+    """Switching a K2.x preset to K3 must not send unsupported effort values."""
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="high")
+
+    assert kw["reasoning_effort"] == "max"
+    assert "extra_body" not in kw
+
+
+def test_kimi_k3_omits_disabled_reasoning_effort() -> None:
+    """K3 cannot disable reasoning, so disabled effort falls back to its default."""
+    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="none")
+
+    assert "reasoning_effort" not in kw
+    assert "temperature" not in kw
+    assert "extra_body" not in kw
+
+
 def test_kimi_k25_thinking_enabled_with_openrouter_prefix() -> None:
     """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking.
 
@@ -1604,10 +1641,14 @@ def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> 
     assert "reasoning_effort" not in kw
 
 
-def test_moonshot_kimi_k26_temperature_override() -> None:
-    """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
-    assert kw["temperature"] == 1.0
+@pytest.mark.parametrize("model", ["kimi-k2.5", "kimi-k2.6"])
+@pytest.mark.parametrize("reasoning_effort", [None, "none", "minimal", "medium", "high"])
+def test_moonshot_kimi_k25_k26_omit_temperature(
+    model: str, reasoning_effort: str | None,
+) -> None:
+    """Moonshot chooses the valid temperature from the K2.5/K2.6 thinking mode."""
+    kw = _build_kwargs_for("moonshot", model, reasoning_effort=reasoning_effort)
+    assert "temperature" not in kw
 
 
 def test_moonshot_kimi_k27_code_temperature_override() -> None:

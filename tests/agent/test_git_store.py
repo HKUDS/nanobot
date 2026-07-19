@@ -227,6 +227,14 @@ class TestCommitInfoFormat:
         result = c.format()
         assert "(no file changes)" in result
 
+    def test_format_empty_message(self):
+        from nanobot.utils.gitstore import CommitInfo
+        c = CommitInfo(sha="abcd1234", message="", timestamp="2026-04-02 12:00")
+        result = c.format()
+        assert "(no message)" in result
+        assert "`abcd1234`" in result
+        assert c.subject() == "(no message)"
+
 
 class TestRevert:
     def test_returns_none_when_not_initialized(self, git):

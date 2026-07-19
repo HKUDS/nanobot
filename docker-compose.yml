@@ -6,11 +6,6 @@ x-common-config: &common-config
     - ~/.nanobot:/home/nanobot/.nanobot
   cap_drop:
     - ALL
-  cap_add:
-    - SYS_ADMIN
-  security_opt:
-    - apparmor=unconfined
-    - seccomp=unconfined
 
 services:
   nanobot-gateway:

@@ -66,7 +66,7 @@ class SessionClient:
 
     def get(self, session_key: str) -> SessionSnapshot | None:
         """Return a display-safe snapshot without creating a new session on disk."""
-        cached = self._loop.sessions._cache.get(session_key)
+        cached = self._loop.sessions._cached(session_key)
         if cached is not None:
             return snapshot_from_session(cached)
         payload = self._loop.sessions.read_session_file(session_key)
@@ -90,7 +90,7 @@ class SessionClient:
 
     def export(self, session_key: str) -> SessionSnapshot | None:
         """Return a trusted full snapshot, including model-only runtime context."""
-        cached = self._loop.sessions._cache.get(session_key)
+        cached = self._loop.sessions._cached(session_key)
         if cached is not None:
             return snapshot_from_session(cached, include_runtime_context=True)
         payload = self._loop.sessions.read_session_file(session_key)
