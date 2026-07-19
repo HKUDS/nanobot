@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop, TurnContext, TurnState
+from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind, TurnRoute, TurnState
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ChannelsConfig
@@ -54,6 +54,8 @@ async def test_state_restore_extracts_documents_by_default(
         state=TurnState.RESTORE,
         turn_id="turn-1",
         runtime=loop.llm_runtime(),
+        kind=TurnKind.USER,
+        route=TurnRoute(channel="cli", chat_id="c"),
     )
 
     assert await loop._state_restore(ctx) == "ok"
@@ -89,6 +91,8 @@ async def test_state_restore_references_documents_when_extraction_disabled(
         state=TurnState.RESTORE,
         turn_id="turn-1",
         runtime=loop.llm_runtime(),
+        kind=TurnKind.USER,
+        route=TurnRoute(channel="cli", chat_id="c"),
     )
 
     assert await loop._state_restore(ctx) == "ok"
