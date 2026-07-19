@@ -230,6 +230,31 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://opencode.ai/zen/go/v1",
         strip_model_prefixes=("opencode-go", "opencode_go"),
     ),
+    # Atlas Cloud: OpenAI-compatible gateway for Atlas-hosted LLM models.
+    ProviderSpec(
+        name="atlascloud",
+        keywords=("atlascloud", "atlas-cloud"),
+        env_key="ATLASCLOUD_API_KEY",
+        display_name="Atlas Cloud",
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(
+                id="qwen/qwen3.5-flash",
+                label="Qwen3.5 Flash",
+                context_window=131_072,
+            ),
+            ProviderModelSpec(
+                id="deepseek-ai/deepseek-v4-pro",
+                label="DeepSeek V4 Pro",
+                context_window=163_840,
+            ),
+        ),
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="atlascloud.ai",
+        default_api_base="https://api.atlascloud.ai/v1",
+        strip_model_prefixes=("atlascloud", "atlas-cloud"),
+    ),
     # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
     ProviderSpec(
         name="huggingface",

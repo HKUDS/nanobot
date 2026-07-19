@@ -1,1 +1,0 @@
-"""WeCom channel package."""

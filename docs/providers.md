@@ -156,6 +156,44 @@ the `chat/completions` endpoint; models listed only under `responses`,
 `messages`, or provider-specific endpoints are not handled by this
 OpenAI-compatible provider path.
 
+### Atlas Cloud
+
+Atlas Cloud uses an OpenAI-compatible chat completions endpoint. Configure the
+Atlas Cloud key and select one of the Atlas model IDs directly:
+
+```json
+{
+  "providers": {
+    "atlascloud": {
+      "apiKey": "${ATLASCLOUD_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "atlascloud",
+      "model": "qwen/qwen3.5-flash",
+      "maxTokens": 8192,
+      "contextWindowTokens": 131072
+    },
+    "reasoning": {
+      "provider": "atlascloud",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "maxTokens": 8192,
+      "contextWindowTokens": 163840
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+nanobot defaults Atlas Cloud to `https://api.atlascloud.ai/v1`. Set
+`providers.atlascloud.apiBase` only when you need to route through a private
+proxy that preserves the same OpenAI-compatible request shape.
+
 ### Anthropic Direct
 
 ```json
