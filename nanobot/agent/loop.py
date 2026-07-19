@@ -184,6 +184,18 @@ class TurnContext:
     trace: list[StateTraceEntry] = field(default_factory=list)
 
 
+def _is_background_turn(msg: InboundMessage) -> bool:
+    """True when a turn runs with no interactive user waiting on the reply.
+
+    Currently that means scheduled cron jobs (``sender_id == "cron"``). Such a
+    turn ending with no assistant text is a legitimate silent outcome — e.g. a
+    monitor that found nothing to report — so it must not manufacture the
+    ``EMPTY_FINAL_RESPONSE_MESSAGE`` placeholder, which for a session-bound cron
+    job would otherwise be auto-published to the chat as a spurious message.
+    """
+    return msg.sender_id == "cron"
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -1625,6 +1637,7 @@ class AgentLoop:
             ctx.kind is TurnKind.USER
             and (ctx.final_content is None or not ctx.final_content.strip())
             and not ctx.suppress_response
+            and not _is_background_turn(ctx.msg)
         ):
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 

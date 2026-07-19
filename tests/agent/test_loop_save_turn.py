@@ -147,6 +147,48 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert message["cron_prompt_ref"] == prompt_ref
 
 
+@pytest.mark.parametrize(
+    ("sender_id", "expect_placeholder"),
+    [
+        ("user", True),     # interactive: keep the placeholder
+        ("cron", False),    # scheduled cron job: stay silent
+    ],
+)
+async def test_empty_final_placeholder_skipped_for_cron_turns(
+    tmp_path: Path, sender_id: str, expect_placeholder: bool
+) -> None:
+    """A cron turn that ends empty stays silent; an interactive turn keeps the
+    'couldn't produce a final answer' placeholder so the waiting user still gets
+    a reply."""
+    from nanobot.agent.loop import TurnContext, TurnState
+    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+
+    loop = _make_full_loop(tmp_path)
+    session_key = f"telegram:{sender_id}"
+    session = loop.sessions.get_or_create(session_key)
+
+    ctx = TurnContext(
+        msg=InboundMessage(
+            channel="telegram", sender_id=sender_id, chat_id="c1", content="run watch"
+        ),
+        session=session,
+        session_key=session_key,
+        state=TurnState.SAVE,
+        turn_id=f"{session_key}:1",
+        runtime=loop.llm_runtime(),
+        final_content="",
+        stop_reason="empty_final_response",
+        ephemeral=True,  # skip file-cap / consolidation side effects
+    )
+
+    await loop._state_save(ctx)
+
+    if expect_placeholder:
+        assert ctx.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    else:
+        assert not (ctx.final_content or "").strip()
+
+
 def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
