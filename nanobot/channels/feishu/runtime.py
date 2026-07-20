@@ -37,6 +37,7 @@ from nanobot.channels.feishu.instances import (
     upsert_feishu_instance,
 )
 from nanobot.channels.feishu.websocket import get_feishu_ws_runner
+from nanobot.command import CommandRouter, register_builtin_commands
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
 from nanobot.pairing import clear_channel
@@ -49,6 +50,10 @@ if TYPE_CHECKING:
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 _LOGIN_CONSOLE = Console()
 _LARK_RUNTIME_LOCK = threading.Lock()
+
+# Probe for listen-mode slash-command bypass (no handlers invoked — match only).
+_LISTEN_CMD_PROBE = CommandRouter()
+register_builtin_commands(_LISTEN_CMD_PROBE)
 
 
 def _identity_timestamp() -> str:
@@ -2583,26 +2588,8 @@ class FeishuChannel(BaseChannel):
                     )
                 return
 
-            # Add reaction (non-blocking — tracked background task).
-            # Listen history-only: optional persistent listen_emoji ack (no stream
-            # cleanup). Agent turns: temporary react_emoji, removed on stream end.
-            if history_only:
-                listen_emoji = (self.config.listen_emoji or "").strip()
-                if listen_emoji:
-                    task = asyncio.create_task(
-                        self._add_reaction(message_id, listen_emoji)
-                    )
-                    self._background_tasks.add(task)
-                    task.add_done_callback(self._on_background_task_done)
-            else:
-                task = asyncio.create_task(
-                    self._add_reaction(message_id, self.config.react_emoji)
-                )
-                self._background_tasks.add(task)
-                task.add_done_callback(self._on_background_task_done)
-                task.add_done_callback(lambda t: self._on_reaction_added(message_id, t))
-
-            # Parse content
+            # Parse content before reactions so listen slash commands can skip
+            # history-only (no listenEmoji Pin on /new).
             content_parts = []
             media_paths = []
 
@@ -2680,6 +2667,29 @@ class FeishuChannel(BaseChannel):
 
             if not content and not media_paths:
                 return
+
+            # Known slash commands under listen skip history-only (run immediately).
+            if history_only and _LISTEN_CMD_PROBE.is_known_command(content):
+                history_only = False
+
+            # Add reaction (non-blocking — tracked background task).
+            # Listen history-only: optional persistent listen_emoji ack (no stream
+            # cleanup). Agent turns: temporary react_emoji, removed on stream end.
+            if history_only:
+                listen_emoji = (self.config.listen_emoji or "").strip()
+                if listen_emoji:
+                    task = asyncio.create_task(
+                        self._add_reaction(message_id, listen_emoji)
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._on_background_task_done)
+            else:
+                task = asyncio.create_task(
+                    self._add_reaction(message_id, self.config.react_emoji)
+                )
+                self._background_tasks.add(task)
+                task.add_done_callback(self._on_background_task_done)
+                task.add_done_callback(lambda t: self._on_reaction_added(message_id, t))
 
             if chat_type == "p2p" and normalize_command_text(content).lower() == "/new":
                 loop = asyncio.get_running_loop()

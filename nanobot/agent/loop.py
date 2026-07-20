@@ -1106,8 +1106,17 @@ class AgentLoop:
         try:
             async with lock, gate:
                 if msg.metadata.get(INBOUND_META_HISTORY_ONLY):
-                    self._ingest_history_only(msg, session_key)
-                    return
+                    # Known slash commands (e.g. /new) must run immediately even
+                    # under listen/history-only policies — otherwise they are
+                    # persisted as plain user text and never execute.
+                    raw = msg.content.strip() if isinstance(msg.content, str) else ""
+                    if self.commands.is_known_command(raw):
+                        meta = dict(msg.metadata or {})
+                        meta.pop(INBOUND_META_HISTORY_ONLY, None)
+                        msg = dataclasses.replace(msg, metadata=meta)
+                    else:
+                        self._ingest_history_only(msg, session_key)
+                        return
 
                 # Only the task that owns the session lock may publish the
                 # active mid-turn injection queue for this session.

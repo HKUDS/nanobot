@@ -65,6 +65,89 @@ async def test_dispatch_history_only_persists_without_llm_or_outbound(tmp_path: 
 
 
 @pytest.mark.asyncio
+async def test_dispatch_history_only_new_command_clears_session(tmp_path: Path) -> None:
+    """Known slash commands bypass history-only and run (e.g. /new clears session)."""
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.consolidator.archive = AsyncMock()  # type: ignore[method-assign]
+    loop.provider.chat_with_retry = AsyncMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("LLM must not run for /new shortcut"),
+    )
+
+    await loop._dispatch(
+        InboundMessage(
+            channel="feishu",
+            sender_id="ou_alice",
+            chat_id="oc_group",
+            content="old context",
+            metadata={INBOUND_META_HISTORY_ONLY: True},
+        )
+    )
+    session = loop.sessions.get_or_create("feishu:oc_group")
+    assert len(session.messages) == 1
+
+    outbound: list = []
+    original_publish = loop.bus.publish_outbound
+
+    async def capture_outbound(msg):
+        outbound.append(msg)
+        await original_publish(msg)
+
+    loop.bus.publish_outbound = capture_outbound  # type: ignore[method-assign]
+
+    await loop._dispatch(
+        InboundMessage(
+            channel="feishu",
+            sender_id="ou_alice",
+            chat_id="oc_group",
+            content="/new",
+            metadata={INBOUND_META_HISTORY_ONLY: True},
+        )
+    )
+
+    loop.provider.chat_with_retry.assert_not_awaited()
+    session = loop.sessions.get_or_create("feishu:oc_group")
+    assert session.messages == []
+    assert any(getattr(m, "content", None) == "New session started." for m in outbound)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_history_only_unknown_slash_stays_ingest_only(tmp_path: Path) -> None:
+    """Unknown /foo under history-only stays ingest-only (not an agent turn)."""
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._process_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    loop.provider.chat_with_retry = AsyncMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("LLM must not run for unknown slash under listen"),
+    )
+
+    outbound: list = []
+    original_publish = loop.bus.publish_outbound
+
+    async def capture_outbound(msg):
+        outbound.append(msg)
+        await original_publish(msg)
+
+    loop.bus.publish_outbound = capture_outbound  # type: ignore[method-assign]
+
+    await loop._dispatch(
+        InboundMessage(
+            channel="feishu",
+            sender_id="ou_alice",
+            chat_id="oc_group",
+            content="/not-a-real-command",
+            metadata={INBOUND_META_HISTORY_ONLY: True},
+        )
+    )
+
+    loop._process_message.assert_not_awaited()
+    loop.provider.chat_with_retry.assert_not_awaited()
+    assert outbound == []
+    session = loop.sessions.get_or_create("feishu:oc_group")
+    assert session.messages[0]["content"] == "/not-a-real-command"
+
+
+@pytest.mark.asyncio
 async def test_dispatch_history_only_then_mention_sees_prior_context(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
