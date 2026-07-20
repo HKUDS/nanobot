@@ -7,14 +7,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
-from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
+from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
@@ -116,6 +116,47 @@ async def test_filesystem_tool_uses_current_restricted_workspace_scope(tmp_path:
         assert "outside allowed directory" in await tool.execute(path=str(outside))
     finally:
         reset_workspace_scope(token)
+
+
+@pytest.mark.asyncio
+async def test_restricted_project_can_only_read_agent_workspace_skills(tmp_path: Path) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
+    private_file = agent_workspace / "private.txt"
+    project_file = project / "project.txt"
+    skill_file.parent.mkdir(parents=True)
+    project.mkdir()
+    skill_file.write_text("global skill", encoding="utf-8")
+    private_file.write_text("private", encoding="utf-8")
+    project_file.write_text("project", encoding="utf-8")
+
+    ctx = ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True),
+        workspace=str(agent_workspace),
+    )
+    read_tool = ReadFileTool.create(ctx)
+    write_tool = WriteFileTool.create(ctx)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        project_result = await read_tool.execute(path="project.txt")
+        skill_result = await read_tool.execute(path=str(skill_file))
+        private_result = await read_tool.execute(path=str(private_file))
+        write_result = await write_tool.execute(path=str(skill_file), content="changed")
+    finally:
+        reset_workspace_scope(token)
+
+    assert "project" in project_result
+    assert "global skill" in skill_result
+    assert "outside allowed directory" in private_result
+    assert "outside allowed directory" in write_result
+    assert skill_file.read_text(encoding="utf-8") == "global skill"
 
 
 @pytest.mark.asyncio

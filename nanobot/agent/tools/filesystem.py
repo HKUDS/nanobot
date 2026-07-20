@@ -84,7 +84,8 @@ class _FsTool(Tool):
         )
         sandbox_restricts = bool(ctx.config.exec.sandbox)
         allowed_dir = Path(ctx.workspace) if restrict else None
-        extra_read = [BUILTIN_SKILLS_DIR]
+        # Custom skills remain agent-owned when a request selects another project.
+        extra_read = [BUILTIN_SKILLS_DIR, Path(ctx.workspace) / "skills"]
         return cls(
             workspace=Path(ctx.workspace),
             allowed_dir=allowed_dir,
