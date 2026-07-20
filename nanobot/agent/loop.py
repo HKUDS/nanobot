@@ -189,7 +189,7 @@ def _is_background_turn(msg: InboundMessage) -> bool:
 
     Currently that means scheduled cron jobs (``sender_id == "cron"``). Such a
     turn ending with no assistant text is a legitimate silent outcome — e.g. a
-    monitor that found nothing to report — so it must not manufacture the
+    monitor that found nothing to report — so it must not deliver the
     ``EMPTY_FINAL_RESPONSE_MESSAGE`` placeholder, which for a session-bound cron
     job would otherwise be auto-published to the chat as a spurious message.
     """
@@ -1633,11 +1633,18 @@ class AgentLoop:
     async def _state_save(self, ctx: TurnContext) -> str:
         turn_continuation.prepare_save_boundary(ctx)
 
-        if (
+        blank_final = ctx.final_content is None or not ctx.final_content.strip()
+        if _is_background_turn(ctx.msg):
+            # AgentRunner substitutes the placeholder itself the moment the model
+            # returns blank text, so a background turn usually arrives here with
+            # it already in place rather than with an empty final. Suppress both
+            # shapes, otherwise the earlier substitution slips past this guard.
+            if blank_final or ctx.stop_reason == "empty_final_response":
+                ctx.suppress_response = True
+        elif (
             ctx.kind is TurnKind.USER
-            and (ctx.final_content is None or not ctx.final_content.strip())
+            and blank_final
             and not ctx.suppress_response
-            and not _is_background_turn(ctx.msg)
         ):
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 

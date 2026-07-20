@@ -148,18 +148,21 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("sender_id", "expect_placeholder"),
+    ("sender_id", "runner_substituted", "expect_delivered"),
     [
-        ("user", True),     # interactive: keep the placeholder
-        ("cron", False),    # scheduled cron job: stay silent
+        # AgentRunner normally substitutes the placeholder itself on blank text,
+        # so both shapes reach _state_save in practice and both must be handled.
+        ("user", False, True),   # interactive: manufacture the placeholder
+        ("user", True, True),    # interactive: keep the runner's placeholder
+        ("cron", False, False),  # scheduled cron job: stay silent
+        ("cron", True, False),   # scheduled cron job: drop the runner's placeholder
     ],
 )
 async def test_empty_final_placeholder_skipped_for_cron_turns(
-    tmp_path: Path, sender_id: str, expect_placeholder: bool
+    tmp_path: Path, sender_id: str, runner_substituted: bool, expect_delivered: bool
 ) -> None:
-    """A cron turn that ends empty stays silent; an interactive turn keeps the
-    'couldn't produce a final answer' placeholder so the waiting user still gets
-    a reply."""
+    """A cron turn that ends empty stays silent; an interactive turn still gets the
+    'couldn't produce a final answer' placeholder so the waiting user has a reply."""
     from nanobot.agent.loop import TurnContext, TurnState
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -176,17 +179,19 @@ async def test_empty_final_placeholder_skipped_for_cron_turns(
         state=TurnState.SAVE,
         turn_id=f"{session_key}:1",
         runtime=loop.llm_runtime(),
-        final_content="",
+        final_content=EMPTY_FINAL_RESPONSE_MESSAGE if runner_substituted else "",
         stop_reason="empty_final_response",
         ephemeral=True,  # skip file-cap / consolidation side effects
     )
 
     await loop._state_save(ctx)
+    await loop._state_respond(ctx)
 
-    if expect_placeholder:
-        assert ctx.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    if expect_delivered:
+        assert ctx.outbound is not None
+        assert ctx.outbound.content == EMPTY_FINAL_RESPONSE_MESSAGE
     else:
-        assert not (ctx.final_content or "").strip()
+        assert ctx.outbound is None
 
 
 def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
