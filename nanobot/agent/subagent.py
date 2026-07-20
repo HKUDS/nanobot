@@ -436,7 +436,8 @@ class SubagentManager:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
 
-        project_root = workspace or self.workspace
+        project_root = (workspace or self.workspace).expanduser().resolve()
+        agent_workspace = self.workspace.expanduser().resolve()
         skills_summary = SkillsLoader(
             self.workspace,
             disabled_skills=self.disabled_skills,
@@ -444,6 +445,8 @@ class SubagentManager:
         return render_template(
             "agent/subagent_system.md",
             workspace=str(project_root),
+            agent_workspace=str(agent_workspace),
+            history_log=str(agent_workspace / "memory" / "history.jsonl"),
             skills_summary=skills_summary or "",
         )
 

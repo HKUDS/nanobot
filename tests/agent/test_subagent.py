@@ -102,7 +102,9 @@ def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
 
     assert "one absolute root and relative SKILL.md paths" in prompt
     assert "Join them when using `read_file`" in prompt
-    assert str(project) in prompt
+    assert f"Current project workspace: {project.resolve()}" in prompt
+    assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
+    assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt
 

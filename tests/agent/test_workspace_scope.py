@@ -6,11 +6,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
@@ -119,15 +121,20 @@ async def test_filesystem_tool_uses_current_restricted_workspace_scope(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_restricted_project_can_only_read_agent_workspace_skills(tmp_path: Path) -> None:
+async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_path: Path) -> None:
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
     skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
+    history_file = agent_workspace / "memory" / "history.jsonl"
+    private_memory_file = agent_workspace / "memory" / "private.txt"
     private_file = agent_workspace / "private.txt"
     project_file = project / "project.txt"
     skill_file.parent.mkdir(parents=True)
+    history_file.parent.mkdir(parents=True)
     project.mkdir()
     skill_file.write_text("global skill", encoding="utf-8")
+    history_file.write_text('{"content":"global history"}\n', encoding="utf-8")
+    private_memory_file.write_text("private memory", encoding="utf-8")
     private_file.write_text("private", encoding="utf-8")
     project_file.write_text("project", encoding="utf-8")
 
@@ -136,6 +143,7 @@ async def test_restricted_project_can_only_read_agent_workspace_skills(tmp_path:
         workspace=str(agent_workspace),
     )
     read_tool = ReadFileTool.create(ctx)
+    grep_tool = GrepTool.create(ctx)
     write_tool = WriteFileTool.create(ctx)
     scope = validate_workspace_scope_payload(
         {"project_path": str(project), "access_mode": "restricted"},
@@ -147,16 +155,73 @@ async def test_restricted_project_can_only_read_agent_workspace_skills(tmp_path:
     try:
         project_result = await read_tool.execute(path="project.txt")
         skill_result = await read_tool.execute(path=str(skill_file))
+        history_result = await grep_tool.execute(
+            pattern="global history",
+            path=str(history_file),
+            output_mode="content",
+        )
+        private_memory_result = await read_tool.execute(path=str(private_memory_file))
         private_result = await read_tool.execute(path=str(private_file))
         write_result = await write_tool.execute(path=str(skill_file), content="changed")
+        history_write_result = await write_tool.execute(path=str(history_file), content="changed")
     finally:
         reset_workspace_scope(token)
 
     assert "project" in project_result
     assert "global skill" in skill_result
+    assert "global history" in history_result
+    assert "outside allowed directory" in private_memory_result
     assert "outside allowed directory" in private_result
     assert "outside allowed directory" in write_result
+    assert "outside allowed directory" in history_write_result
     assert skill_file.read_text(encoding="utf-8") == "global skill"
+    assert history_file.read_text(encoding="utf-8") == '{"content":"global history"}\n'
+
+
+@pytest.mark.asyncio
+async def test_agent_skill_write_requires_full_project_scope(tmp_path: Path) -> None:
+    agent_workspace = tmp_path / "agent"
+    project = tmp_path / "project"
+    skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
+    agent_workspace.mkdir()
+    project.mkdir()
+    tool = WriteFileTool.create(
+        ToolContext(
+            config=ToolsConfig(restrict_to_workspace=False),
+            workspace=str(agent_workspace),
+        )
+    )
+    content = "---\nname: custom\ndescription: custom skill\n---\n"
+
+    restricted = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=False,
+    )
+    token = bind_workspace_scope(restricted)
+    try:
+        denied = await tool.execute(path=str(skill_file), content=content)
+    finally:
+        reset_workspace_scope(token)
+
+    assert "outside allowed directory" in denied
+    assert not skill_file.exists()
+
+    full = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "full"},
+        default_workspace=agent_workspace,
+        default_restrict_to_workspace=False,
+    )
+    token = bind_workspace_scope(full)
+    try:
+        written = await tool.execute(path=str(skill_file), content=content)
+    finally:
+        reset_workspace_scope(token)
+
+    assert "Successfully wrote" in written
+    assert "custom" in {
+        entry["name"] for entry in SkillsLoader(agent_workspace).list_skills(False)
+    }
 
 
 @pytest.mark.asyncio
