@@ -37,6 +37,7 @@ RUN mkdir -p nanobot && touch nanobot/__init__.py && \
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
+COPY scripts/install_channel_dependencies.py scripts/
 COPY --from=webui-builder /app/nanobot/web/dist/ nanobot/web/dist/
 RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache .
 
@@ -44,7 +45,7 @@ RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python"
 # list keeps the image configurable while preserving WhatsApp in the default image.
 ARG NANOBOT_CHANNELS=whatsapp
 RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
-        python -m nanobot.channels._dependencies "$channel"; \
+        python -m scripts.install_channel_dependencies "$channel"; \
     done
 
 # Render deploy template (see render.yaml): committed gateway config that wires
