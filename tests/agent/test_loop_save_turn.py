@@ -1424,6 +1424,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     # rewritten with volatile ``[Message Time: ...]`` prefixes.
     assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
+    assert non_system[2]["role"] == "user"
     assert non_system[2]["content"].count("subagent result") == 1
     assert non_system[2]["content"] == "subagent result"
 
@@ -1580,10 +1581,11 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     ]
 
 
-def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
+def test_subagent_followup_uses_user_model_input_and_assistant_history(tmp_path: Path) -> None:
     loop = _mk_loop()
     session = Session(key="cli:merge")
     session.add_message("assistant", "previous assistant")
+    history = session.get_history(max_messages=0)
 
     inserted = loop._persist_subagent_followup(
         session,
@@ -1600,16 +1602,18 @@ def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_pat
 
     builder = ContextBuilder(tmp_path)
     projected = builder.build_messages(
-        history=session.get_history(max_messages=0),
-        current_message="",
-        current_role="assistant",
+        history=history,
+        current_message="subagent result",
+        current_role="user",
         channel="cli",
         chat_id="merge",
     )
 
     non_system = [m for m in projected if m.get("role") != "system"]
     assert len(non_system) == 2
+    assert non_system[-1]["role"] == "user"
     assert "subagent result" in non_system[-1]["content"]
+    assert session.messages[-1]["role"] == "assistant"
     assert session.messages[-1]["content"] == "subagent result"
     assert session.messages[-1]["injected_event"] == "subagent_result"
 

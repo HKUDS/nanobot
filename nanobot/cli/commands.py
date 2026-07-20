@@ -1695,11 +1695,13 @@ def _run_gateway(
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
     )
-    WebuiTurnCoordinator(
+    webui_turns = WebuiTurnCoordinator(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
-    ).subscribe(runtime_events)
+    )
+    agent.register_turn_route_provider(webui_turns.prepare_turn_route)
+    webui_turns.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 

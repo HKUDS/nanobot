@@ -122,6 +122,10 @@ class TurnRoute:
     channel: str
     chat_id: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    publish_lifecycle: bool = False
+
+
+TurnRouteProvider = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
 
 
 @dataclass
@@ -390,6 +394,7 @@ class AgentLoop:
         self._mcp_stacks: dict[str, MCPConnection] = {}
         self._mcp_connecting = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
+        self._turn_route_providers: list[TurnRouteProvider] = []
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -588,29 +593,48 @@ class AgentLoop:
         if provider not in self._runtime_context_providers:
             self._runtime_context_providers.append(provider)
 
-    @staticmethod
-    def _turn_route(msg: InboundMessage, session_key: str) -> TurnRoute:
+    def register_turn_route_provider(self, provider: TurnRouteProvider) -> None:
+        """Register an edge-owned provider that can decorate response routing."""
+        if provider not in self._turn_route_providers:
+            self._turn_route_providers.append(provider)
+
+    def _turn_route(self, msg: InboundMessage, session_key: str) -> TurnRoute:
         """Resolve response routing without mixing it into execution metadata."""
         if msg.channel != "system":
-            return TurnRoute(
+            route = TurnRoute(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 metadata=dict(msg.metadata or {}),
+                publish_lifecycle=True,
             )
+        else:
+            channel, chat_id = (
+                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+            )
+            metadata: dict[str, Any] = {}
+            if (
+                channel == "slack"
+                and session_key.startswith("slack:")
+                and session_key.count(":") >= 2
+            ):
+                metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
+            if origin_message_id := msg.metadata.get("origin_message_id"):
+                metadata["origin_message_id"] = origin_message_id
+            route = TurnRoute(channel=channel, chat_id=chat_id, metadata=metadata)
 
-        channel, chat_id = (
-            msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+        for provider in self._turn_route_providers:
+            route = provider(msg, session_key, route)
+        return route
+
+    @staticmethod
+    def _message_for_route(msg: InboundMessage, route: TurnRoute) -> InboundMessage:
+        """Build a delivery-only view while preserving the execution message."""
+        return dataclasses.replace(
+            msg,
+            channel=route.channel,
+            chat_id=route.chat_id,
+            metadata=dict(route.metadata),
         )
-        metadata: dict[str, Any] = {}
-        if (
-            channel == "slack"
-            and session_key.startswith("slack:")
-            and session_key.count(":") >= 2
-        ):
-            metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
-        if origin_message_id := msg.metadata.get("origin_message_id"):
-            metadata["origin_message_id"] = origin_message_id
-        return TurnRoute(channel=channel, chat_id=chat_id, metadata=metadata)
 
     async def _build_bus_progress_callback(
         self, msg: InboundMessage
@@ -695,15 +719,14 @@ class AgentLoop:
     def _build_initial_messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         assert ctx.session is not None
-        is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
         return self.context.build_messages(
             history=ctx.history,
-            current_message="" if is_subagent else ctx.msg.content,
+            current_message=ctx.msg.content,
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
             channel=ctx.route.channel,
             chat_id=str(ctx.msg.metadata.get("context_chat_id") or ctx.route.chat_id),
-            current_role="assistant" if is_subagent else "user",
+            current_role="user",
             sender_id=ctx.msg.sender_id,
             session_summary=ctx.pending_summary,
             session_metadata=ctx.session.metadata,
@@ -1117,6 +1140,8 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
+        route = self._turn_route(msg, session_key)
+        delivery_msg = self._message_for_route(msg, route)
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
@@ -1129,9 +1154,9 @@ class AgentLoop:
                 self._pending_queues[session_key] = pending
                 try:
                     on_stream = on_stream_end = None
-                    if msg.metadata.get("_wants_stream"):
+                    if delivery_msg.metadata.get("_wants_stream"):
                         # Split one answer into distinct stream segments.
-                        stream_base_id = f"{msg.session_key}:{time.time_ns()}"
+                        stream_base_id = f"{session_key}:{time.time_ns()}"
                         stream_segment = 0
 
                         def _current_stream_id() -> str:
@@ -1140,13 +1165,13 @@ class AgentLoop:
                         async def on_stream(delta: str) -> None:
                             await self.bus.publish_outbound(
                                 outbound_message_for_event(
-                                    channel=msg.channel,
-                                    chat_id=msg.chat_id,
+                                    channel=delivery_msg.channel,
+                                    chat_id=delivery_msg.chat_id,
                                     event=StreamDeltaEvent(
                                         content=delta,
                                         stream_id=_current_stream_id(),
                                     ),
-                                    metadata=msg.metadata,
+                                    metadata=delivery_msg.metadata,
                                 )
                             )
 
@@ -1154,31 +1179,31 @@ class AgentLoop:
                             nonlocal stream_segment
                             await self.bus.publish_outbound(
                                 outbound_message_for_event(
-                                    channel=msg.channel,
-                                    chat_id=msg.chat_id,
+                                    channel=delivery_msg.channel,
+                                    chat_id=delivery_msg.chat_id,
                                     event=StreamEndEvent(
                                         stream_id=_current_stream_id(),
                                         resuming=resuming,
                                     ),
-                                    metadata=msg.metadata,
+                                    metadata=delivery_msg.metadata,
                                 )
                             )
                             stream_segment += 1
 
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
-                        pending_queue=pending,
+                        pending_queue=pending, route=route,
                     )
-                    completed_channel = msg.channel
-                    completed_chat_id = msg.chat_id
+                    completed_channel = delivery_msg.channel
+                    completed_chat_id = delivery_msg.chat_id
                     if response is not None:
                         await self.bus.publish_outbound(response)
                         completed_channel = response.channel
                         completed_chat_id = response.chat_id
-                    elif msg.channel == "cli":
+                    elif delivery_msg.channel == "cli":
                         await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata=msg.metadata or {},
+                            channel=delivery_msg.channel, chat_id=delivery_msg.chat_id,
+                            content="", metadata=delivery_msg.metadata or {},
                         ))
                     continuing = turn_continuation.internal_continuation_pending(msg.metadata)
                     if not continuing:
@@ -1186,7 +1211,7 @@ class AgentLoop:
                             channel=completed_channel,
                             chat_id=completed_chat_id,
                             session_key=session_key,
-                            metadata=msg.metadata,
+                            metadata=delivery_msg.metadata,
                         )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
@@ -1221,15 +1246,16 @@ class AgentLoop:
                 except Exception as exc:
                     logger.exception("Error processing message for session {}", session_key)
                     await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
+                        channel=delivery_msg.channel, chat_id=delivery_msg.chat_id,
                         content="Sorry, I encountered an error.",
+                        metadata=dict(delivery_msg.metadata),
                     ))
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await self._runtime_events().turn_completed(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
+                            channel=delivery_msg.channel,
+                            chat_id=delivery_msg.chat_id,
                             session_key=session_key,
-                            metadata=msg.metadata,
+                            metadata=delivery_msg.metadata,
                         )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=exc)
@@ -1260,14 +1286,18 @@ class AgentLoop:
                             )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await self._runtime_events().run_status_changed(
-                            msg, session_key, "idle"
+                            delivery_msg if route.publish_lifecycle else msg,
+                            session_key,
+                            "idle",
                         )
                         self._runtime_events().clear_turn(session_key)
                     await self._publish_next_deferred_automation_turn(session_key)
         finally:
             if pending is None:
                 await self._runtime_events().run_status_changed(
-                    msg, session_key, "idle"
+                    delivery_msg if route.publish_lifecycle else msg,
+                    session_key,
+                    "idle",
                 )
                 self._runtime_events().clear_turn(session_key)
                 await self._publish_next_deferred_automation_turn(session_key)
@@ -1318,6 +1348,7 @@ class AgentLoop:
         hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
         runtime: LLMRuntime | None = None,
+        route: TurnRoute | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         if runtime is None:
@@ -1331,7 +1362,7 @@ class AgentLoop:
             key = session_key or msg.session_key_override or f"{destination[0]}:{destination[1]}"
         else:
             key = session_key or msg.session_key
-        route = self._turn_route(msg, key)
+        route = route or self._turn_route(msg, key)
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,
@@ -1471,8 +1502,12 @@ class AgentLoop:
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
+        if ctx.route.publish_lifecycle:
+            await self._runtime_events().session_turn_started(
+                self._message_for_route(msg, ctx.route),
+                ctx.session_key,
+            )
         if ctx.kind is TurnKind.USER:
-            await self._runtime_events().session_turn_started(msg, ctx.session_key)
             self.workspace_scopes.persist_message_scope(ctx.session, msg)
 
         if self._restore_runtime_checkpoint(ctx.session):
@@ -1549,9 +1584,6 @@ class AgentLoop:
                 replay_max_messages=replay_max_messages,
             )
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
-        if is_subagent and self._persist_subagent_followup(ctx.session, ctx.msg):
-            logger.debug("Subagent result persisted for session {}", ctx.session_key)
-            self.sessions.save(ctx.session)
 
         if ctx.kind is TurnKind.USER and (message_tool := self.tools.get("message")):
             if isinstance(message_tool, MessageTool):
@@ -1563,6 +1595,16 @@ class AgentLoop:
             "extend_to_user": is_subagent,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
+        if is_subagent:
+            # Keep the durable internal delivery as an assistant record, but
+            # present this completion to the model as fresh follow-up input.
+            # OpenAI-compatible providers drop trailing assistant messages,
+            # so using the persisted record as the current prompt would hide
+            # the subagent result whenever it starts an independent turn.
+            if self._persist_subagent_followup(ctx.session, ctx.msg):
+                logger.debug("Subagent result persisted for session {}", ctx.session_key)
+                self.sessions.save(ctx.session)
+            ctx.user_persisted_early = True
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
             ctx.runtime,
@@ -1579,19 +1621,21 @@ class AgentLoop:
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
 
+        if ctx.route.publish_lifecycle:
+            delivery_msg = self._message_for_route(ctx.msg, ctx.route)
             if ctx.on_progress is None:
-                ctx.on_progress = await self._build_bus_progress_callback(ctx.msg)
+                ctx.on_progress = await self._build_bus_progress_callback(delivery_msg)
             if ctx.on_retry_wait is None:
-                ctx.on_retry_wait = await self._build_retry_wait_callback(ctx.msg)
+                ctx.on_retry_wait = await self._build_retry_wait_callback(delivery_msg)
 
         return "ok"
 
     async def _state_run(self, ctx: TurnContext) -> str:
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
-        if ctx.kind is TurnKind.USER:
+        if ctx.route.publish_lifecycle:
             await self._runtime_events().run_status_changed(
-                ctx.msg,
+                self._message_for_route(ctx.msg, ctx.route),
                 ctx.session_key,
                 "running",
                 started_at=ctx.visible_run_started_at,
@@ -1680,11 +1724,23 @@ class AgentLoop:
             ctx.outbound = None
             return "ok"
         if ctx.kind is TurnKind.SYSTEM:
+            metadata = dict(ctx.route.metadata)
+            if ctx.route.publish_lifecycle and ctx.turn_latency_ms is not None:
+                metadata["latency_ms"] = int(ctx.turn_latency_ms)
             ctx.outbound = OutboundMessage(
                 channel=ctx.route.channel,
                 chat_id=ctx.route.chat_id,
                 content=ctx.final_content or "Background task completed.",
-                metadata=dict(ctx.route.metadata),
+                metadata=metadata,
+                event=(
+                    StreamedResponseEvent()
+                    if (
+                        ctx.route.publish_lifecycle
+                        and ctx.on_stream is not None
+                        and ctx.stop_reason not in {"error", "tool_error"}
+                    )
+                    else None
+                ),
             )
             return "ok"
         ctx.outbound = self._assemble_outbound(

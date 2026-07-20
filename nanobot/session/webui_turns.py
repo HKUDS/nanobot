@@ -5,8 +5,9 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -37,6 +38,10 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+
+if TYPE_CHECKING:
+    from nanobot.agent.loop import TurnRoute
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -243,6 +248,33 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     _title_contexts: dict[str, LLMRuntime] = field(default_factory=dict)
+
+    def prepare_turn_route(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        route: TurnRoute,
+    ) -> TurnRoute:
+        """Make an independently dispatched late subagent result visible in WebUI."""
+        if (
+            msg.channel != "system"
+            or msg.sender_id != "subagent"
+            or msg.metadata.get("injected_event") != "subagent_result"
+            or route.channel != "websocket"
+        ):
+            return route
+
+        session = self.sessions.get_or_create(session_key)
+        if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+            return route
+
+        metadata = dict(route.metadata)
+        metadata.update({
+            WEBUI_SESSION_METADATA_KEY: True,
+            "_wants_stream": True,
+            WEBUI_TURN_METADATA_KEY: f"subagent:{uuid4().hex}",
+        })
+        return replace(route, metadata=metadata, publish_lifecycle=True)
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""

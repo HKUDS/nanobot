@@ -747,6 +747,44 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_path):
+    """Injected results stay inside the active turn instead of opening a side turn."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+    route_provider = MagicMock(side_effect=lambda _msg, _key, route: route)
+    loop.register_turn_route_provider(route_provider)
+
+    session_key = "websocket:chat-1"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id=session_key,
+        content="background result",
+        metadata={
+            "injected_event": "subagent_result",
+            "subagent_task_id": "sub-1",
+        },
+        session_key_override=session_key,
+    )
+    await loop.bus.publish_inbound(msg)
+
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert queued_msg is msg
+    assert loop._dispatch.await_count == 0
+    route_provider.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_cron_turn_deferred_while_session_active(tmp_path):
     """Cron turns wait for the active session instead of becoming injections."""
     from nanobot.bus.events import InboundMessage
