@@ -163,7 +163,8 @@ describe("MarkdownTextRenderer", () => {
     );
 
     expect(screen.getByText("code without language")).toBeInTheDocument();
-    expect(screen.getByText("text")).toBeInTheDocument();
+    expect(screen.queryByText("text")).not.toBeInTheDocument();
+    expect(container.querySelector(".not-prose")).toHaveAttribute("data-language", "text");
     expect(container.querySelectorAll("pre")).toHaveLength(1);
   });
 

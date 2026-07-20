@@ -48,20 +48,20 @@ describe("CodeBlock", () => {
 
     expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
-    expect(screen.getByText("ts")).toBeInTheDocument();
+    expect(screen.queryByText("ts")).not.toBeInTheDocument();
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("bg-transparent");
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("py-4", "pl-5", "pr-14");
 
     const container = screen.getByTestId("plain-code-fallback").closest(".not-prose");
-    expect(container).toHaveClass(
-      "rounded-md",
-      "border-border/55",
-      "bg-background/80",
-    );
-    expect(screen.getByText("ts").parentElement).toHaveClass(
-      "border-border/45",
-      "bg-muted/30",
-    );
+    expect(container).toHaveClass("relative", "rounded-[18px]", "bg-secondary/70");
+    expect(container).not.toHaveClass("border");
+    expect(container).toHaveAttribute("data-language", "ts");
+
+    const copyButton = screen.getByRole("button", { name: "Copy code" });
+    expect(copyButton.parentElement).toBe(container);
+    expect(copyButton).toHaveClass("absolute", "h-8", "w-8", "rounded-full");
+    expect(copyButton).toHaveTextContent("");
   });
 
   it("can render without chat-style chrome for file previews", () => {
@@ -127,8 +127,11 @@ describe("CodeBlock", () => {
 
     expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
     expect(screen.getByTestId("ansi-code")).toBeInTheDocument();
-    expect(screen.getByTestId("ansi-code").closest(".not-prose")).toBeTruthy();
-    expect(screen.getByText("ansi")).toBeInTheDocument();
+    expect(screen.getByTestId("ansi-code").closest(".not-prose")).toHaveAttribute(
+      "data-language",
+      "ansi",
+    );
+    expect(screen.queryByText("ansi")).not.toBeInTheDocument();
     expect(screen.getByText("PASS")).toHaveStyle({ color: "#0dbc79" });
     expect(screen.getByText("<script>alert(1)</script>")).toBeInTheDocument();
     expect(document.querySelector("script")).toBeNull();
@@ -195,7 +198,7 @@ describe("CodeBlock", () => {
       await user.click(screen.getByRole("button", { name: /copy/i }));
 
       await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
-      expect(screen.getByText("Copied")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
     } finally {
       Reflect.deleteProperty(navigator, "clipboard");
       Reflect.deleteProperty(document, "execCommand");
