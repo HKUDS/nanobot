@@ -1,4 +1,4 @@
-"""Append-only WebUI display transcript (JSONL), separate from agent session."""
+"""Persist and replay WebUI display transcripts separately from agent sessions."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -22,6 +23,11 @@ from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.webui.transcript_store import (
+    SQLiteTranscriptStore,
+    StoredTurn,
+    TranscriptWriteQueue,
+)
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -32,6 +38,7 @@ _TRANSCRIPT_ACTIVE_CHUNK_ID = "active"
 _TRANSCRIPT_SEGMENT_RE = re.compile(r"^\d{6}\.jsonl$")
 _DEFAULT_TRANSCRIPT_PAGE_LIMIT = 160
 _MAX_TRANSCRIPT_PAGE_LIMIT = 1000
+_TRANSCRIPT_STORE_FILENAME = "transcripts.sqlite3"
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
@@ -123,6 +130,11 @@ def _media_kind_from_name(name: str) -> str:
 def webui_transcript_path(session_key: str) -> Path:
     stem = SessionManager.safe_key(session_key)
     return get_webui_dir() / f"{stem}.jsonl"
+
+
+def webui_transcript_store_path() -> Path:
+    """Return the indexed WebUI transcript database path."""
+    return get_webui_dir() / _TRANSCRIPT_STORE_FILENAME
 
 
 def webui_transcript_segments_dir(session_key: str) -> Path:
@@ -634,11 +646,196 @@ def webui_message_source(metadata: dict[str, Any] | None) -> dict[str, str] | No
 
 
 class WebUITranscriptRecorder:
-    """Prepare and persist WebUI wire events without leaking UI rules into channels."""
+    """Prepare, persist, and page WebUI wire events outside the gateway loop."""
 
-    def __init__(self, log: Any = logger) -> None:
+    def __init__(
+        self,
+        log: Any = logger,
+        *,
+        session_manager: SessionManager | None = None,
+        store_path: Path | None = None,
+        write_batch_window_s: float = 0.05,
+    ) -> None:
         self._log = log
+        self._session_manager = session_manager
+        self._write_batch_window_s = write_batch_window_s
+        self._writer_lock = threading.Lock()
+        self._writer: TranscriptWriteQueue | None = None
+        self._store = SQLiteTranscriptStore(
+            store_path or webui_transcript_store_path(),
+            legacy_loader=self._load_legacy_transcript,
+        )
         self._turn_sequences: dict[tuple[str, str], int] = {}
+
+    @property
+    def store_path(self) -> Path:
+        return self._store.path
+
+    def _load_legacy_transcript(self, session_key: str) -> list[dict[str, Any]]:
+        lines = read_transcript_lines(session_key)
+        if not lines or self._session_manager is None:
+            return lines
+        session_data = self._session_manager.read_session_file(session_key)
+        raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
+        session_messages = (
+            [message for message in raw_messages if isinstance(message, dict)]
+            if isinstance(raw_messages, list)
+            else None
+        )
+        return inject_missing_user_events_from_session(session_key, lines, session_messages)
+
+    def _get_writer(self) -> TranscriptWriteQueue:
+        with self._writer_lock:
+            if self._writer is None:
+                self._writer = TranscriptWriteQueue(
+                    self._store,
+                    log=self._log,
+                    batch_window_s=self._write_batch_window_s,
+                )
+            return self._writer
+
+    def flush(self) -> None:
+        with self._writer_lock:
+            writer = self._writer
+        if writer is not None:
+            writer.flush()
+
+    def close(self) -> None:
+        with self._writer_lock:
+            writer = self._writer
+            self._writer = None
+        if writer is not None:
+            writer.close()
+
+    def read_lines(self, session_key: str) -> list[dict[str, Any]]:
+        self.flush()
+        return self._store.read_all(session_key)
+
+    def _select_page(
+        self,
+        session_key: str,
+        *,
+        limit: int | None,
+        before: str | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        page_limit = _coerce_page_limit(limit)
+        before_ordinal = _decode_page_cursor(before)
+        selected: list[StoredTurn] = []
+        selected_message_count = 0
+        next_before = before_ordinal
+
+        while selected_message_count < page_limit:
+            turns = self._store.read_turn_batch(
+                session_key,
+                before_ordinal=next_before,
+            )
+            if not turns:
+                break
+            for turn in turns:
+                selected.append(turn)
+                selected_message_count += len(replay_transcript_to_ui_messages(turn.records))
+                if selected_message_count >= page_limit:
+                    break
+            if selected_message_count >= page_limit or len(turns) < 64:
+                break
+            next_before = turns[-1].ordinal
+
+        chronological = list(reversed(selected))
+        lines = [record for turn in chronological for record in turn.records]
+        if not chronological:
+            return [], {
+                "before_cursor": None,
+                "has_more_before": False,
+                "loaded_message_count": 0,
+                "user_message_offset": 0,
+            }
+
+        first_ordinal = chronological[0].ordinal
+        has_more = self._store.has_turn_before(session_key, first_ordinal)
+        return lines, {
+            "before_cursor": _encode_page_cursor(first_ordinal) if has_more else None,
+            "has_more_before": has_more,
+            "loaded_message_count": 0,
+            "user_message_offset": self._store.user_count_before(
+                session_key,
+                first_ordinal,
+            ),
+        }
+
+    def build_response(
+        self,
+        session_key: str,
+        *,
+        augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+        augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+        augment_assistant_text: Callable[[str], str] | None = None,
+        limit: int | None = None,
+        direction: str | None = None,
+        before: str | None = None,
+    ) -> dict[str, Any] | None:
+        self.flush()
+        paginated = limit is not None or direction is not None or before is not None
+        page: dict[str, Any] | None = None
+        if paginated:
+            lines, page = self._select_page(session_key, limit=limit, before=before)
+        else:
+            lines = self._store.read_all(session_key)
+        if not lines:
+            return None
+        fork_boundary = fork_boundary_message_count(lines)
+        messages = replay_transcript_to_ui_messages(
+            lines,
+            augment_user_media=augment_user_media,
+            augment_assistant_media=augment_assistant_media,
+            augment_assistant_text=augment_assistant_text,
+        )
+        payload: dict[str, Any] = {
+            "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
+            "sessionKey": session_key,
+            "messages": messages,
+            "has_pending_tool_calls": has_pending_tool_calls(lines),
+        }
+        if page is not None:
+            page["loaded_message_count"] = len(messages)
+            payload["page"] = page
+        if fork_boundary is not None:
+            payload["fork_boundary_message_count"] = fork_boundary
+        return payload
+
+    def fork_before_user_index(
+        self,
+        source_key: str,
+        target_key: str,
+        before_user_index: int,
+    ) -> bool:
+        return bool(
+            self._get_writer().call(
+                lambda store: store.fork_before_user_index(
+                    source_key,
+                    target_key,
+                    before_user_index,
+                )
+            )
+        )
+
+    def replace(self, session_key: str, records: list[dict[str, Any]]) -> None:
+        self._get_writer().call(lambda store: store.replace(session_key, records))
+
+    def append_fork_marker(self, session_key: str) -> None:
+        chat_id = _chat_id_from_session_key(session_key)
+        marker = _record_for_append({"event": WEBUI_FORK_MARKER_EVENT, "chat_id": chat_id})
+        self._get_writer().call(lambda store: store.append_batch([(session_key, marker)]))
+
+    def write_session_messages(
+        self,
+        session_key: str,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        self.replace(session_key, _session_messages_as_transcript_rows(session_key, messages))
+
+    def delete(self, session_key: str) -> bool:
+        removed = bool(self._get_writer().call(lambda store: store.delete(session_key)))
+        return _delete_legacy_transcript_files(session_key) or removed
 
     def client_turn_metadata(self, value: Any) -> dict[str, str]:
         return {WEBUI_TURN_METADATA_KEY: normalize_webui_turn_id(value)}
@@ -704,8 +901,9 @@ class WebUITranscriptRecorder:
     def append(self, chat_id: str, event: dict[str, Any]) -> None:
         try:
             dup = json.loads(json.dumps(event, ensure_ascii=False))
-            append_transcript_object(f"websocket:{chat_id}", dup)
-        except (OSError, ValueError, TypeError) as e:
+            record = _record_for_append(dup)
+            self._get_writer().append(f"websocket:{chat_id}", record)
+        except (OSError, RuntimeError, ValueError, TypeError) as e:
             self._log.warning("webui transcript append failed: {}", e)
 
     def _next_turn_seq(self, chat_id: str, turn_id: str) -> int:
@@ -797,11 +995,10 @@ def append_fork_marker(session_key: str) -> None:
     )
 
 
-def write_session_messages_as_transcript(
+def _session_messages_as_transcript_rows(
     target_key: str,
     messages: list[dict[str, Any]],
-) -> None:
-    """Write a minimal WebUI transcript from already-truncated session messages."""
+) -> list[dict[str, Any]]:
     target_chat_id = _chat_id_from_session_key(target_key)
     rows: list[dict[str, Any]] = []
     for msg in messages:
@@ -828,10 +1025,19 @@ def write_session_messages_as_transcript(
         else:
             continue
         rows.append(row)
+    return rows
+
+
+def write_session_messages_as_transcript(
+    target_key: str,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Write a minimal legacy transcript from already-truncated session messages."""
+    rows = _session_messages_as_transcript_rows(target_key, messages)
     _write_transcript_lines(target_key, rows)
 
 
-def delete_webui_transcript(session_key: str) -> bool:
+def _delete_legacy_transcript_files(session_key: str) -> bool:
     removed = False
     for path in (webui_transcript_path(session_key), _legacy_webui_thread_path(session_key)):
         if not path.is_file():
@@ -849,6 +1055,13 @@ def delete_webui_transcript(session_key: str) -> bool:
         except OSError as e:
             logger.warning("Failed to delete webui transcript segments {}: {}", segments_dir, e)
     return removed
+
+
+def delete_webui_transcript(session_key: str) -> bool:
+    """Delete indexed and legacy display transcript state for one session."""
+    store = SQLiteTranscriptStore(webui_transcript_store_path())
+    removed = store.delete(session_key)
+    return _delete_legacy_transcript_files(session_key) or removed
 
 
 def build_user_transcript_event(

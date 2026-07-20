@@ -244,6 +244,7 @@ export function useSessionHistory(key: string | null): {
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     // Mark the new key as loading immediately so callers never see stale
     // messages from the previous session during the render right after a switch.
     setState((prev) => prev.key === key
@@ -266,6 +267,7 @@ export function useSessionHistory(key: string | null): {
         const body = await fetchWebuiThread(token, key, {
           limit: INITIAL_HISTORY_PAGE_LIMIT,
           direction: "latest",
+          signal: controller.signal,
         });
         if (cancelled) return;
         if (!body?.messages?.length) {
@@ -337,6 +339,7 @@ export function useSessionHistory(key: string | null): {
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [key, token, refreshSeq]);
 

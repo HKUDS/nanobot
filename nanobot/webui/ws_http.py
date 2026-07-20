@@ -88,8 +88,7 @@ from nanobot.webui.sidebar_state import (
     write_webui_sidebar_state,
 )
 from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
-from nanobot.webui.thread_disk import delete_webui_thread
-from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
@@ -161,6 +160,7 @@ class GatewayHTTPHandler:
         tokens: GatewayTokenStore,
         media: WebUIMediaGateway,
         ingress: WebUIIngressPolicy,
+        transcripts: WebUITranscriptRecorder,
         workspaces: WebUIWorkspaceController,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
@@ -180,6 +180,7 @@ class GatewayHTTPHandler:
         self.tokens = tokens
         self.media = media
         self.ingress = ingress
+        self.transcripts = transcripts
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
@@ -381,7 +382,7 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
-            return self._handle_webui_thread_get(request, m.group(1))
+            return await self._handle_webui_thread_get(request, m.group(1))
 
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
@@ -393,7 +394,7 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._handle_session_delete(request, m.group(1))
 
         return None
 
@@ -447,7 +448,7 @@ class GatewayHTTPHandler:
         self.media.augment_media_urls(data)
         return _http_json_response(data)
 
-    def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
+    async def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded_key = _decode_api_key(key)
@@ -455,13 +456,6 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        scope = self.workspaces.scope_for_session_key(decoded_key)
-        session_messages: list[dict[str, Any]] | None = None
-        if self.session_manager is not None:
-            session_data = self.session_manager.read_session_file(decoded_key)
-            raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
-            if isinstance(raw_messages, list):
-                session_messages = [m for m in raw_messages if isinstance(m, dict)]
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None
@@ -474,15 +468,30 @@ class GatewayHTTPHandler:
         if direction is not None and direction not in {"latest"}:
             return _http_error(400, "invalid direction")
         before = _query_first(query, "before")
-        data = build_webui_thread_response(
+        return await asyncio.to_thread(
+            self._webui_thread_response,
             decoded_key,
+            limit,
+            direction,
+            before,
+        )
+
+    def _webui_thread_response(
+        self,
+        session_key: str,
+        limit: int | None,
+        direction: str | None,
+        before: str | None,
+    ) -> Response:
+        scope = self.workspaces.scope_for_session_key(session_key)
+        data = self.transcripts.build_response(
+            session_key,
             augment_user_media=self.media.augment_transcript_media,
             augment_assistant_media=self.media.augment_transcript_media,
             augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
                 text,
                 workspace_path=scope.project_path,
             ),
-            session_messages=session_messages,
             limit=limit,
             direction=direction,
             before=before,
@@ -533,7 +542,7 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
@@ -565,9 +574,14 @@ class GatewayHTTPHandler:
                         self.local_trigger_store.delete(job.id)
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
-        deleted = self.session_manager.delete_session(decoded_key)
-        delete_webui_thread(decoded_key)
+        deleted = await asyncio.to_thread(self._delete_session_storage, decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
+
+    def _delete_session_storage(self, session_key: str) -> bool:
+        assert self.session_manager is not None
+        deleted = self.session_manager.delete_session(session_key)
+        self.transcripts.delete(session_key)
+        return bool(deleted)
 
     # -- Automation routes --------------------------------------------------
 

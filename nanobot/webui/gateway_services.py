@@ -68,7 +68,7 @@ def build_gateway_services(
         logger=logger,
         attachment_limits=ingress.attachments,
     )
-    transcripts = WebUITranscriptRecorder(log=logger)
+    transcripts = WebUITranscriptRecorder(log=logger, session_manager=session_manager)
     workspaces = WebUIWorkspaceController(
         session_manager=session_manager,
         default_workspace=workspace_path,
@@ -85,6 +85,7 @@ def build_gateway_services(
         tokens=tokens,
         media=media,
         ingress=ingress,
+        transcripts=transcripts,
         workspaces=workspaces,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,

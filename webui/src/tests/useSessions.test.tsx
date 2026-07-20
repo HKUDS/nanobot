@@ -480,6 +480,39 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
+  it("aborts the stale history request when switching sessions", async () => {
+    let firstSignal: AbortSignal | undefined;
+    vi.mocked(api.fetchWebuiThread).mockImplementation(
+      async (_token, key, optionsOrBase) => {
+        if (key === "websocket:first") {
+          firstSignal = typeof optionsOrBase === "object" ? optionsOrBase.signal : undefined;
+          await new Promise<never>((_resolve, reject) => {
+            firstSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        }
+        return null;
+      },
+    );
+
+    const { result, rerender } = renderHook(
+      ({ sessionKey }) => useSessionHistory(sessionKey),
+      {
+        initialProps: { sessionKey: "websocket:first" },
+        wrapper: wrap(fakeClient()),
+      },
+    );
+
+    await waitFor(() => expect(firstSignal).toBeDefined());
+    rerender({ sessionKey: "websocket:second" });
+
+    expect(firstSignal?.aborted).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
   it("loads older transcript pages before the current history", async () => {
     vi.mocked(api.fetchWebuiThread)
       .mockResolvedValueOnce({
@@ -514,10 +547,15 @@ describe("useSessions", () => {
     });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(api.fetchWebuiThread).toHaveBeenCalledWith("tok", "websocket:paged", {
-      limit: 160,
-      direction: "latest",
-    });
+    expect(api.fetchWebuiThread).toHaveBeenCalledWith(
+      "tok",
+      "websocket:paged",
+      expect.objectContaining({
+        limit: 160,
+        direction: "latest",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.current.hasMoreBefore).toBe(true);
     expect(result.current.userMessageOffset).toBe(1);
 

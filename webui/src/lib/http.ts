@@ -12,6 +12,13 @@ export async function fetchWithTimeout(
   const controller = typeof AbortController !== "undefined"
     ? new AbortController()
     : null;
+  const externalSignal = init.signal;
+  const abortFromCaller = () => controller?.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) {
+    abortFromCaller();
+  } else {
+    externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const request = fetch(input, {
@@ -29,5 +36,6 @@ export async function fetchWithTimeout(
     return await Promise.race([request, timeout]);
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
