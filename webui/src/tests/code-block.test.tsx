@@ -50,6 +50,18 @@ describe("CodeBlock", () => {
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
     expect(screen.getByText("ts")).toBeInTheDocument();
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("bg-transparent");
+
+    const container = screen.getByTestId("plain-code-fallback").closest(".not-prose");
+    expect(container).toHaveClass(
+      "rounded-md",
+      "border-border/55",
+      "bg-background/80",
+    );
+    expect(screen.getByText("ts").parentElement).toHaveClass(
+      "border-border/45",
+      "bg-muted/30",
+    );
   });
 
   it("can render without chat-style chrome for file previews", () => {

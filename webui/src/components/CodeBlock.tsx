@@ -40,8 +40,6 @@ const CODE_FONT_STACK = [
 ].join(", ");
 
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
-const CODE_SURFACE_LIGHT = "#f4f4f5";
-const CODE_SURFACE_DARK = "#27272a";
 
 const LazyHighlightedCode = lazy(async () => {
   const [
@@ -81,16 +79,12 @@ const LazyHighlightedCode = lazy(async () => {
           language={language || "text"}
           style={transparentTheme}
           customStyle={{
-            background: chrome === "none"
-              ? "transparent"
-              : isDark
-                ? CODE_SURFACE_DARK
-                : CODE_SURFACE_LIGHT,
+            background: "transparent",
             margin: 0,
-            padding: chrome === "none" ? "0.75rem 1rem" : "1rem",
+            padding: chrome === "none" ? "0.75rem 1rem" : "0.75rem",
             fontFamily: CODE_FONT_STACK,
-            fontSize: chrome === "none" ? "13px" : "0.875rem",
-            lineHeight: chrome === "none" ? 1.55 : 1.6,
+            fontSize: "13px",
+            lineHeight: chrome === "none" ? 1.55 : "1.25rem",
             tabSize: 2,
           }}
           codeTagProps={{
@@ -148,9 +142,9 @@ function CodeTextBlock({
   return (
     <pre
       className={cn(
-        "m-0 overflow-x-auto p-4 font-mono text-sm leading-[1.6] text-foreground/90",
+        "m-0 overflow-x-auto p-3 font-mono text-[13px] leading-5 text-foreground/90",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
-        chrome === "default" ? "bg-zinc-100 dark:bg-zinc-800" : "bg-transparent",
+        "bg-transparent",
         chrome === "none" && "p-3 text-[13px] leading-[1.55]",
         className,
       )}
@@ -206,19 +200,14 @@ export function CodeBlock({
     <div
       className={cn(
         "not-prose overflow-hidden",
-        hasChrome && "rounded-lg border",
-        hasChrome && (isDark ? "border-white/10" : "border-black/10"),
+        hasChrome
+          && "rounded-md border border-border/55 bg-background/80 shadow-[0_1px_0_rgba(15,23,42,0.03)]",
         className,
       )}
     >
       {hasChrome ? (
         <div
-          className={cn(
-            "flex items-center justify-between px-4 pb-1.5 pt-2 text-xs font-medium",
-            isDark
-              ? "bg-zinc-800 text-zinc-300"
-              : "bg-zinc-100 text-zinc-600",
-          )}
+          className="flex items-center justify-between border-b border-border/45 bg-muted/30 px-2 py-1 text-[11px] font-medium leading-5 text-muted-foreground"
         >
           <span className="lowercase font-mono">
             {language || t("code.fallbackLanguage")}
@@ -227,10 +216,9 @@ export function CodeBlock({
             type="button"
             onClick={onCopy}
             className={cn(
-              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono transition-colors",
-              isDark
-                ? "text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
-                : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700",
+              "inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono transition-colors",
+              "text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45",
             )}
             aria-label={t("code.copyAria")}
           >
