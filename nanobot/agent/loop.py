@@ -74,7 +74,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import (
     Session,
     SessionManager,
@@ -747,6 +747,27 @@ class AgentLoop:
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
         return msg.session_key
+
+    def _remember_unified_session_route(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        *,
+        is_user_turn: bool,
+    ) -> None:
+        """Remember the latest user-facing route for unified-session delivery."""
+        if (
+            not self._unified_session
+            or session.key != UNIFIED_SESSION_KEY
+            or not is_user_turn
+            or msg.channel in {"cli", "system"}
+            or msg.sender_id == "subagent"
+        ):
+            return
+        _, automation_metadata = automation_history_overrides(msg.metadata)
+        if automation_metadata:
+            return
+        remember_last_channel(session.metadata, msg.channel, msg.chat_id)
 
     @staticmethod
     def _replay_token_budget(runtime: LLMRuntime) -> int:
@@ -1527,6 +1548,11 @@ class AgentLoop:
         # ensure it exists in case this handler is invoked independently.
         if ctx.session is None:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
+        self._remember_unified_session_route(
+            ctx.session,
+            msg,
+            is_user_turn=ctx.original_user_text is not None,
+        )
         await self._runtime_events().session_turn_started(msg, ctx.session_key)
         self.workspace_scopes.persist_message_scope(ctx.session, msg)
 
