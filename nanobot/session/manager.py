@@ -25,8 +25,8 @@ from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
     find_legal_message_start,
-    image_placeholder_text,
     recent_message_start_index,
+    rehydrate_history_user_content,
     safe_filename,
     strip_think,
 )
@@ -206,17 +206,8 @@ class Session:
             role = message.get("role")
             if role == "assistant" and isinstance(content, str):
                 content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
-            media = message.get("media")
-            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
-                breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
-                )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            # CLI app breadcrumbs must land on string content before media
+            # rehydration may turn the payload into multimodal blocks.
             cli_apps = message.get("cli_apps")
             if (
                 include_runtime_context
@@ -241,6 +232,12 @@ class Session:
                 if cli_lines:
                     breadcrumbs = "\n".join(cli_lines)
                     content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            # Rehydrate persisted ``media`` paths into multimodal ``image_url``
+            # blocks when files still exist. Missing paths keep ``[image: …]``
+            # breadcrumbs so image-only turns never replay as empty user rows.
+            media = message.get("media")
+            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
+                content = rehydrate_history_user_content(content, media)
             if role == "assistant" and isinstance(content, str) and not content.strip():
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue

@@ -371,14 +371,58 @@ def test_window_cuts_mid_tool_group():
     assert history[0]["role"] == "user"
 
 
-# --- Image breadcrumbs: media kwarg is synthesized into content for replay ---
+# --- Image breadcrumbs / multimodal rehydration from media kwarg ---
 
 
-def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
-    """Persisted user turns carry image paths as a ``media`` kwarg; LLM
-    replay must still see an ``[image: path]`` breadcrumb so the assistant's
-    follow-up reply has a referent instead of trailing an empty user row."""
+def test_get_history_rehydrates_existing_images_from_media(tmp_path):
+    """Persisted user turns with on-disk ``media`` replay as multimodal content."""
+    png_a = tmp_path / "a.png"
+    png_b = tmp_path / "b.png"
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    png_a.write_bytes(png_bytes)
+    png_b.write_bytes(png_bytes)
+
     session = Session(key="test:media")
+    session.messages.append(
+        {
+            "role": "user",
+            "content": "look",
+            "media": [str(png_a), str(png_b)],
+        }
+    )
+    session.messages.append({"role": "assistant", "content": "nice"})
+
+    history = session.get_history(max_messages=500)
+    content = history[0]["content"]
+
+    assert isinstance(content, list)
+    assert [part["type"] for part in content] == ["image_url", "image_url", "text"]
+    assert content[0]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert content[2]["text"] == "look"
+    assert history[1] == {"role": "assistant", "content": "nice"}
+
+
+def test_get_history_rehydrates_image_only_turn(tmp_path):
+    """Image-only turns must replay with vision blocks, not an empty user row."""
+    png = tmp_path / "pic.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    session = Session(key="test:image-only")
+    session.messages.append({"role": "user", "content": "", "media": [str(png)]})
+    session.messages.append({"role": "assistant", "content": "I see a cat"})
+
+    history = session.get_history(max_messages=500)
+    content = history[0]["content"]
+
+    assert isinstance(content, list)
+    assert content[0]["type"] == "image_url"
+    assert content[1] == {"type": "text", "text": ""}
+
+
+def test_get_history_falls_back_to_breadcrumb_when_media_missing():
+    """Missing files keep ``[image: path]`` breadcrumbs (no crash)."""
+    session = Session(key="test:media-missing")
     session.messages.append(
         {"role": "user", "content": "look", "media": ["/m/a.png", "/m/b.png"]}
     )
@@ -392,11 +436,34 @@ def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
     ]
 
 
-def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
-    """Turns with no text but attached images must not replay as empty
-    strings — the LLM would otherwise see a bare user turn followed by an
-    unexplained assistant answer."""
-    session = Session(key="test:image-only")
+def test_get_history_strips_duplicate_image_breadcrumb_when_rehydrating(tmp_path):
+    """Feishu-style content already embeds ``[image: path]``; strip those when vision loads."""
+    png = tmp_path / "photo.jpg"
+    # JPEG magic bytes
+    png.write_bytes(b"\xff\xd8\xff" + b"\x00" * 16)
+
+    path = str(png)
+    session = Session(key="test:feishu-dupe")
+    session.messages.append(
+        {
+            "role": "user",
+            "content": f"[image: {path}]",
+            "media": [path],
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+    content = history[0]["content"]
+
+    assert isinstance(content, list)
+    assert content[0]["type"] == "image_url"
+    assert content[1]["text"] == ""
+    assert "[image:" not in content[1]["text"]
+
+
+def test_get_history_synthesizes_breadcrumb_for_image_only_missing_file():
+    """Turns with no text but missing media still replay as breadcrumb text."""
+    session = Session(key="test:image-only-missing")
     session.messages.append({"role": "user", "content": "", "media": ["/m/pic.png"]})
     session.messages.append({"role": "assistant", "content": "I see a cat"})
 

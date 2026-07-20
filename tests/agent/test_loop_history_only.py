@@ -99,3 +99,68 @@ async def test_dispatch_history_only_then_mention_sees_prior_context(tmp_path: P
 
     loop._process_message.assert_awaited_once()
     assert any(m.get("content") == "earlier context" for m in captured_history)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_history_only_image_then_mention_rehydrates_vision(
+    tmp_path: Path,
+) -> None:
+    """Listen-ingested images must become multimodal history on a later text @mention."""
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    png = tmp_path / "photo.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    path = str(png)
+
+    await loop._dispatch(
+        InboundMessage(
+            channel="feishu",
+            sender_id="ou_alice",
+            chat_id="oc_group",
+            content=f"[image: {path}]",
+            media=[path],
+            metadata={INBOUND_META_HISTORY_ONLY: True},
+        )
+    )
+
+    session = loop.sessions.get_or_create("feishu:oc_group")
+    assert session.messages[0].get("media") == [path]
+
+    captured_messages: list = []
+
+    async def fake_process(msg, **kwargs):
+        sess = loop.sessions.get_or_create(msg.session_key)
+        history = sess.get_history(max_messages=500)
+        captured_messages.extend(
+            loop._build_initial_messages(msg, sess, history, None)
+        )
+        return None
+
+    loop._process_message = AsyncMock(side_effect=fake_process)  # type: ignore[method-assign]
+
+    await loop._dispatch(
+        InboundMessage(
+            channel="feishu",
+            sender_id="ou_alice",
+            chat_id="oc_group",
+            content="@bot what is in the image?",
+        )
+    )
+
+    loop._process_message.assert_awaited_once()
+    prior_user = next(
+        m
+        for m in captured_messages
+        if m.get("role") == "user" and isinstance(m.get("content"), list)
+    )
+    assert any(
+        isinstance(part, dict) and part.get("type") == "image_url"
+        for part in prior_user["content"]
+    )
+    assert any(
+        isinstance(part, dict)
+        and part.get("type") == "image_url"
+        and str(part.get("image_url", {}).get("url", "")).startswith("data:image/png;base64,")
+        for part in prior_user["content"]
+    )

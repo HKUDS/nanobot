@@ -1,7 +1,5 @@
 """Context builder for assembling agent prompts."""
 
-import base64
-import mimetypes
 import platform
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -20,7 +18,7 @@ from nanobot.runtime_context import (
     append_runtime_context,
 )
 from nanobot.utils.helpers import (
-    detect_image_mime,
+    build_user_content_with_media,
     load_bundled_template,
     truncate_text_to_tokens,
 )
@@ -221,25 +219,4 @@ class ContextBuilder:
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
-        if not media:
-            return text
-
-        images = []
-        for path in media:
-            p = Path(path)
-            if not p.is_file():
-                continue
-            raw = p.read_bytes()
-            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-            if not mime or not mime.startswith("image/"):
-                continue
-            b64 = base64.b64encode(raw).decode()
-            images.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
-            })
-
-        if not images:
-            return text
-        return images + [{"type": "text", "text": text}]
+        return build_user_content_with_media(text, media)
