@@ -1,0 +1,11 @@
+{
+  "id": "nanobot",
+  "name": "Nanobot",
+  "description": "Lightweight, open-source AI agent with WebUI — your personal AI assistant, self-hosted",
+  "logo": "https://raw.githubusercontent.com/HKUDS/nanobot/main/images/nanobot_logo.png",
+  "links": {
+    "github": "https://github.com/HKUDS/nanobot",
+    "website": "https://nanobot.wiki",
+    "docs": "https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"
+  }
+}
