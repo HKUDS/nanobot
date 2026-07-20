@@ -164,3 +164,74 @@ async def test_dispatch_history_only_image_then_mention_rehydrates_vision(
         and str(part.get("image_url", {}).get("url", "")).startswith("data:image/png;base64,")
         for part in prior_user["content"]
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_five_history_only_images_then_mention_keeps_all_vision(
+    tmp_path: Path,
+) -> None:
+    """Album-style listen: five image events then @mention must keep all five image_url blocks."""
+    from nanobot.providers.base import LLMProvider
+
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    paths: list[str] = []
+    for i in range(5):
+        png = tmp_path / f"photo_{i}.png"
+        png.write_bytes(png_bytes)
+        path = str(png)
+        paths.append(path)
+        await loop._dispatch(
+            InboundMessage(
+                channel="feishu",
+                sender_id="ou_alice",
+                chat_id="oc_group",
+                content=f"[image: {path}]",
+                media=[path],
+                metadata={INBOUND_META_HISTORY_ONLY: True},
+            )
+        )
+
+    session = loop.sessions.get_or_create("feishu:oc_group")
+    assert len(session.messages) == 5
+    assert [m.get("media") for m in session.messages] == [[p] for p in paths]
+
+    captured_messages: list = []
+
+    async def fake_process(msg, **kwargs):
+        sess = loop.sessions.get_or_create(msg.session_key)
+        history = sess.get_history(max_messages=500)
+        initial = loop._build_initial_messages(msg, sess, history, None)
+        # Mirror OpenAI-compat send path: consecutive multimodal users must
+        # survive role alternation with all image_url blocks intact.
+        captured_messages.extend(LLMProvider._enforce_role_alternation(initial))
+        return None
+
+    loop._process_message = AsyncMock(side_effect=fake_process)  # type: ignore[method-assign]
+
+    await loop._dispatch(
+        InboundMessage(
+            channel="feishu",
+            sender_id="ou_alice",
+            chat_id="oc_group",
+            content="@bot what do you think?",
+        )
+    )
+
+    loop._process_message.assert_awaited_once()
+    user_msgs = [m for m in captured_messages if m.get("role") == "user"]
+    assert len(user_msgs) == 1
+    content = user_msgs[0]["content"]
+    assert isinstance(content, list)
+    image_parts = [
+        part for part in content if isinstance(part, dict) and part.get("type") == "image_url"
+    ]
+    assert len(image_parts) == 5
+    assert any(
+        isinstance(part, dict)
+        and part.get("type") == "text"
+        and "@bot what do you think?" in str(part.get("text", ""))
+        for part in content
+    )

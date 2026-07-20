@@ -496,6 +496,33 @@ class LLMProvider(ABC):
         return True
 
     @staticmethod
+    def _merge_same_role_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
+        """Concatenate consecutive same-role contents, including multimodal blocks.
+
+        String+string stays text. Any list/mixed content becomes an ordered
+        block list so prior ``image_url`` parts are not dropped when merging
+        consecutive user turns (e.g. Feishu album listen + later @mention).
+        """
+        if isinstance(left, str) and isinstance(right, str):
+            if not left:
+                return right
+            if not right:
+                return left
+            return f"{left}\n\n{right}".strip()
+
+        def _to_blocks(value: Any) -> list[dict[str, Any]]:
+            if isinstance(value, list):
+                return [
+                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
+                    for item in value
+                ]
+            if value is None or value == "":
+                return []
+            return [{"type": "text", "text": str(value)}]
+
+        return _to_blocks(left) + _to_blocks(right)
+
+    @staticmethod
     def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge consecutive same-role messages and drop trailing assistant messages.
 
@@ -525,12 +552,12 @@ class LLMProvider(ABC):
                         continue
                     if prev_has_tools:
                         continue
-                prev_content = prev.get("content") or ""
-                curr_content = msg.get("content") or ""
-                if isinstance(prev_content, str) and isinstance(curr_content, str):
-                    prev["content"] = (prev_content + "\n\n" + curr_content).strip()
-                else:
-                    merged[-1] = dict(msg)
+                prev_content = prev.get("content")
+                curr_content = msg.get("content")
+                prev["content"] = LLMProvider._merge_same_role_content(
+                    prev_content if prev_content is not None else "",
+                    curr_content if curr_content is not None else "",
+                )
             else:
                 merged.append(dict(msg))
 
