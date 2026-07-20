@@ -29,7 +29,7 @@ export function buildDisplayUnits(
   });
 }
 
-export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
+export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
   const flags = new Array<boolean>(units.length).fill(true);
   let hasLaterUnitBeforeUser = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
@@ -63,7 +63,7 @@ export function ThreadMessages({
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
   );
-  const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
+  const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
@@ -90,7 +90,7 @@ export function ThreadMessages({
             ? unit.message.id
             : undefined;
         const forkIndex =
-          unit.type === "message" && unit.message.role === "assistant" && copyFlags[index]
+          unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
         if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
@@ -112,11 +112,6 @@ export function ThreadMessages({
               ) : (
                 <MessageBubble
                   message={unit.message}
-                  showCopyAction={
-                    unit.message.role === "assistant"
-                      ? copyFlags[index]
-                      : true
-                  }
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   slashCommands={slashCommands}

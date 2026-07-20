@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  assistantCopyFlags,
+  assistantForkFlags,
   buildDisplayUnits,
   ThreadMessages,
   unitKeysForDisplay,
@@ -747,7 +747,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
-  it("shows copy only on the last assistant slice before the next user turn", () => {
+  it("shows copy on every assistant slice while keeping fork on the last slice", () => {
     const messages: UIMessage[] = [
       {
         id: "early",
@@ -771,19 +771,26 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming={false}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
 
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
     expect(screen.getByText("final reply")).toBeInTheDocument();
   });
 
-  it("shows copy only on the second assistant when two text slices appear before user", () => {
+  it("shows copy on adjacent assistant text slices", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
   });
 
   it("uses turn ids as activity grouping boundaries when available", () => {
@@ -810,7 +817,7 @@ describe("ThreadMessages", () => {
     ]);
   });
 
-  it("computes final assistant copy flags with user-boundary semantics", () => {
+  it("computes final assistant fork flags with user-boundary semantics", () => {
     const units = buildDisplayUnits([
       { id: "u1", role: "user", content: "one", createdAt: 1 },
       { id: "a1", role: "assistant", content: "draft", createdAt: 2 },
@@ -827,7 +834,7 @@ describe("ThreadMessages", () => {
       { id: "a3", role: "assistant", content: "next", createdAt: 6 },
     ]);
 
-    const flags = assistantCopyFlags(units);
+    const flags = assistantForkFlags(units);
     const assistantFlags = units
       .map((unit, index) =>
         unit.type === "message" && unit.message.role === "assistant"
