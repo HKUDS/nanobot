@@ -51,6 +51,7 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.cron.session_turns import cron_trigger
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -80,6 +81,7 @@ from nanobot.session.manager import (
     SessionManager,
     replay_max_messages_for_context,
 )
+from nanobot.triggers.local_session_turns import local_trigger
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
@@ -187,13 +189,17 @@ class TurnContext:
 def _is_background_turn(msg: InboundMessage) -> bool:
     """True when a turn runs with no interactive user waiting on the reply.
 
-    Currently that means scheduled cron jobs (``sender_id == "cron"``). Such a
-    turn ending with no assistant text is a legitimate silent outcome — e.g. a
-    monitor that found nothing to report — so it must not deliver the
-    ``EMPTY_FINAL_RESPONSE_MESSAGE`` placeholder, which for a session-bound cron
-    job would otherwise be auto-published to the chat as a spurious message.
+    That means the automation paths whose assembled response is auto-published
+    to a bound chat: scheduled cron jobs and local triggers. Such a turn ending
+    with no assistant text is a legitimate silent outcome — e.g. a monitor that
+    found nothing to report — so it must not deliver the
+    ``EMPTY_FINAL_RESPONSE_MESSAGE`` placeholder, which would otherwise reach
+    the chat as a spurious message on every no-op run.
+
+    Keyed off the metadata each coordinator stamps rather than ``sender_id``,
+    which is a per-trigger setting a local trigger may override.
     """
-    return msg.sender_id == "cron"
+    return cron_trigger(msg.metadata) is not None or local_trigger(msg.metadata) is not None
 
 
 class AgentLoop:
