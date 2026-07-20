@@ -349,6 +349,14 @@ class TelegramConfig(Base):
     mode: Literal["polling", "webhook"] = "polling"
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
+    # Custom Bot API endpoint (e.g. a self-hosted Telegram Bot API server or
+    # an enterprise gateway). When set, all Bot API requests target this base
+    # URL instead of the default https://api.telegram.org. Leave unset for the
+    # official API.
+    api_base: str | None = None
+    # Extra HTTP headers appended to every Bot API request (e.g. auth tokens
+    # for a corporate gateway). Merged on top of the library's defaults.
+    extra_headers: dict[str, str] | None = None
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
@@ -373,6 +381,21 @@ class TelegramConfig(Base):
         value = value.strip() or "/telegram"
         if not value.startswith("/"):
             raise ValueError('webhook_path must start with "/"')
+        return value
+
+    @field_validator("api_base")
+    @classmethod
+    def api_base_must_be_https(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError(
+                "api_base must be a public HTTPS URL (e.g. https://my-bot-api.example.com)"
+            )
         return value
 
     @model_validator(mode="after")
@@ -496,6 +519,8 @@ class TelegramChannel(BaseChannel):
         self._running = True
 
         proxy = self.config.proxy or None
+        api_base = self.config.api_base or None
+        extra_headers = self.config.extra_headers or None
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
         api_request = HTTPXRequest(
@@ -504,6 +529,8 @@ class TelegramChannel(BaseChannel):
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
+            base_url=api_base,
+            extra_headers=extra_headers,
         )
         poll_request = HTTPXRequest(
             connection_pool_size=4,
@@ -511,6 +538,8 @@ class TelegramChannel(BaseChannel):
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
+            base_url=api_base,
+            extra_headers=extra_headers,
         )
         builder = (
             Application.builder()

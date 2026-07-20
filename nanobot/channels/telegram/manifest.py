@@ -10,6 +10,10 @@ SETUP_SPEC = ChannelSetupSpec(
         "token": field("secret"),
         "allowFrom": field("list"),
         "groupPolicy": field("enum", choices=GROUP_POLICIES, default="mention"),
+        # Optional: target a self-hosted Bot API server / enterprise gateway
+        # instead of the official https://api.telegram.org. (extraHeaders is a
+        # dict and is configured via config.json, not the webui form.)
+        "apiBase": field("string"),
     },
     required=(required("token"),),
     official_url="https://t.me/BotFather",
