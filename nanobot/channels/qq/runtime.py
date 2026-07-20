@@ -48,12 +48,14 @@ except Exception:  # pragma: no cover
 
 try:
     import botpy
+    from botpy.gateway import BotWebSocket
     from botpy.http import Route
 
     QQ_AVAILABLE = True
 except ImportError:  # pragma: no cover
     QQ_AVAILABLE = False
     botpy = None
+    BotWebSocket = None
     Route = None
 
 if TYPE_CHECKING:
@@ -104,14 +106,39 @@ def _guess_send_file_type(filename: str) -> int:
     return QQ_FILE_TYPE_FILE
 
 
+# Exponential backoff for WebSocket reconnect inside bot_connect.
+_RECONNECT_BACKOFF_START = 5
+_RECONNECT_BACKOFF_MAX = 300  # 5 minutes cap
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    """Check whether an exception is a transient network/DNS error."""
+    return isinstance(
+        exc,
+        (aiohttp.ClientConnectorError, OSError),
+    )
+
+
 def _make_bot_class(channel: QQChannel) -> type[botpy.Client]:
-    """Create a botpy Client subclass bound to the given channel."""
+    """Create a botpy Client subclass bound to the given channel.
+
+    The base ``botpy.Client.bot_connect()`` catches ``ws_connect()`` exceptions
+    internally and calls ``BotWebSocket.on_error()``, which logs a full
+    traceback via ``_log.error()`` + ``traceback.print_exc()`` and immediately
+    re-queues the session — causing log flooding on persistent DNS/network
+    failures with no backoff.
+
+    We override ``bot_connect()`` to:
+    - Apply exponential backoff before the session is re-queued.
+    - Log network errors compactly instead of dumping the full traceback.
+    """
     intents = botpy.Intents(public_messages=True, direct_message=True)
 
     class _Bot(botpy.Client):
         def __init__(self):
             # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
             super().__init__(intents=intents, ext_handlers=False)
+            self._ws_backoff = {}  # per-session backoff: {id(session): delay}
 
         async def on_ready(self):
             logger.info("QQ bot ready: {}", self.robot.name)
@@ -124,6 +151,48 @@ def _make_bot_class(channel: QQChannel) -> type[botpy.Client]:
 
         async def on_direct_message_create(self, message):
             await channel._on_message(message, is_group=False)
+
+        async def bot_connect(self, session):
+            """Override to add exponential backoff and compact error logging.
+
+            The original ``bot_connect`` catches the ``ws_connect`` exception
+            and calls ``BotWebSocket.on_error`` which does ``_log.error`` +
+            ``traceback.print_exc`` then re-queues the session immediately.
+            We intercept here to apply backoff *before* re-queuing and suppress
+            the noisy traceback for transient network errors.
+            """
+            _log = botpy.logging.get_logger() if hasattr(botpy, "logging") else None
+
+            client = BotWebSocket(session, self._connection)
+            session_id = id(session)
+            backoff = self._ws_backoff.get(session_id, _RECONNECT_BACKOFF_START)
+            try:
+                await client.ws_connect()
+                # Connection succeeded — reset per-session backoff
+                self._ws_backoff.pop(session_id, None)
+            except (Exception, KeyboardInterrupt, SystemExit) as e:
+                if _is_network_error(e):
+                    # Compact log for transient network/DNS errors — no traceback
+                    channel.logger.warning(
+                        "QQ bot network error (retry in {}s): {}",
+                        backoff,
+                        e,
+                    )
+                    # Apply backoff before the session is re-queued by on_error
+                    await asyncio.sleep(backoff)
+                    self._ws_backoff[session_id] = min(backoff * 2, _RECONNECT_BACKOFF_MAX)
+                else:
+                    # Non-network error — log normally and let on_error handle it
+                    if _log:
+                        _log.error(
+                            "[botpy] websocket连接: %s, 异常信息 : %s", client._conn, e
+                        )
+                    import traceback as _tb
+
+                    _tb.print_exc()
+
+                # Re-queue the session (same as original on_error / on_closed)
+                self._connection.add(session)
 
     return _Bot
 
@@ -210,15 +279,30 @@ class QQChannel(BaseChannel):
         await self._run_bot()
 
     async def _run_bot(self) -> None:
-        """Run the bot connection with auto-reconnect."""
+        """Run the bot connection with auto-reconnect.
+
+        Note: most WebSocket reconnect logic now lives in the overridden
+        ``bot_connect()`` method on the bot class, which handles per-session
+        backoff inside botpy's internal ``_pool_init`` loop. This outer loop
+        is a fallback for exceptions that escape ``start()`` entirely.
+        """
+        backoff = 5
+        max_backoff = 300
         while self._running:
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+                backoff = 5  # reset on clean exit
             except Exception as e:
-                self.logger.warning("bot error: {}", e)
+                if _is_network_error(e):
+                    self.logger.warning(
+                        "QQ bot network error (retry in {}s): {}", backoff, e
+                    )
+                else:
+                    self.logger.warning("bot error: {}", e)
             if self._running:
-                self.logger.info("Reconnecting bot in 5 seconds...")
-                await asyncio.sleep(5)
+                self.logger.info("Reconnecting bot in {} seconds...", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
     async def stop(self) -> None:
         """Stop bot and cleanup resources."""
