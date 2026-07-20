@@ -1544,6 +1544,9 @@ async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path
     call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
     assert call["session_key"] == "slack:C123:1700.42"
     assert call["origin_message_id"] == "msg-123"
+    assert call["origin_metadata"] == {
+        "slack": {"thread_ts": "1700.42", "channel_type": "channel"}
+    }
     assert call["runtime"] is runtime
 
 
