@@ -408,9 +408,17 @@ class GatewayHTTPHandler:
 
     def _sessions_list_payload(self) -> dict[str, Any]:
         assert self.session_manager is not None
+        try:
+            indexed_activity = self.transcripts.activity_signatures()
+        except Exception as exc:
+            self._log.warning(
+                "Failed to read WebUI transcript activity; using session timestamps: {}",
+                exc,
+            )
+            indexed_activity = {}
         sessions = list_webui_sessions(
             self.session_manager,
-            indexed_activity=self.transcripts.activity_signatures(),
+            indexed_activity=indexed_activity,
         )
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
@@ -583,7 +591,14 @@ class GatewayHTTPHandler:
     def _delete_session_storage(self, session_key: str) -> bool:
         assert self.session_manager is not None
         deleted = self.session_manager.delete_session(session_key)
-        self.transcripts.delete(session_key)
+        try:
+            self.transcripts.delete(session_key)
+        except Exception as exc:
+            self._log.warning(
+                "Failed to clean up WebUI transcript for deleted session {}: {}",
+                session_key,
+                exc,
+            )
         return bool(deleted)
 
     # -- Automation routes --------------------------------------------------
