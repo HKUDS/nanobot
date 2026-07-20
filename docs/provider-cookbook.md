@@ -431,7 +431,13 @@ curl -sS http://localhost:11434/v1/models
 nanobot agent -m "Hello!"
 ```
 
-If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If the response is very slow, try a smaller local model or lower `contextWindowTokens`.
+If you see `connection refused`, Ollama is not running or `apiBase` points to the wrong port. If every response is slow, try a smaller local model or lower `contextWindowTokens`.
+
+If direct Ollama responses are fast but tool-using nanobot turns repeatedly evaluate
+thousands of prompt tokens, the model's chat template may be moving its tool
+definitions between requests. See
+[Improve Ollama Tool-Calling Prompt Cache Reuse](./guides/configure-ollama-prompt-cache.md)
+for a diagnostic procedure and an optional model-specific workaround.
 
 ## Recipe: vLLM or LM Studio
 
