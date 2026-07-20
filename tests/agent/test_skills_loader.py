@@ -333,7 +333,7 @@ def test_bundled_skills_use_agent_owned_paths(tmp_path: Path) -> None:
     assert 'path="memory/history.jsonl"' not in memory
     assert update_setup is not None
     assert "<agent-workspace>/skills/update/SKILL.md" in update_setup
-    assert "Never fall back to a project-relative `skills/` path" in update_setup
+    assert "Never substitute a project-relative" in update_setup
 
 
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:

@@ -7,11 +7,10 @@ description: "One-time setup wizard for the nanobot upgrade skill. Triggers: set
 
 Generate a personalized upgrade skill in Nanobot's agent workspace.
 
-Let `<agent-workspace>` be the Nanobot agent workspace path shown in the system prompt.
-Every skill path below must use that absolute root, even when the current project
-workspace is different. Never fall back to a project-relative `skills/` path. If a write
-is rejected by the workspace boundary, stop and ask the user to select the agent
-workspace or enable Full Access before rerunning setup.
+Use the absolute `<agent-workspace>/skills/update/SKILL.md` path, where
+`<agent-workspace>` is shown in the system prompt. Never substitute a project-relative
+path. If the write is rejected, ask the user to select the agent workspace or enable
+Full Access before rerunning setup.
 
 ## Step 1: Check Existing
 
