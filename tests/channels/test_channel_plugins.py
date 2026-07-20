@@ -1499,70 +1499,61 @@ def test_plugins_enable_skips_install_when_extra_is_present(monkeypatch, tmp_pat
     assert not config_path.exists()
 
 
-def test_plugins_install_channel_dependencies_without_enabling(monkeypatch, tmp_path):
-    from typer.testing import CliRunner
+def test_internal_dependency_installer_selects_all_channel_manifests(monkeypatch):
+    from nanobot.channels import _dependencies
 
-    from nanobot.cli.commands import app
-
-    plugin = ChannelPlugin(
-        name="demo",
-        display_name="Demo",
-        runtime="missing.demo.runtime:DemoChannel",
-        dependencies=("demo-sdk>=1",),
-    )
-    commands: list[list[str]] = []
-    config_path = tmp_path / "config.json"
-    _stub_channel_registry(monkeypatch, plugin)
-    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
-    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
-    monkeypatch.setattr(
-        "nanobot.optional_features.run_install_command",
-        lambda argv: commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
-    )
-
-    result = CliRunner().invoke(app, ["plugins", "install", "demo"])
-
-    assert result.exit_code == 0
-    assert commands == [[sys.executable, "-m", "pip", "install", "demo-sdk>=1"]]
-    assert "Installed dependencies for 'demo'" in result.stdout
-    assert not config_path.exists()
-
-
-def test_plugins_install_all_channels_uses_manifest_dependencies(monkeypatch):
-    from typer.testing import CliRunner
-
-    from nanobot.cli.commands import app
-
-    plugins = (
-        ChannelPlugin(
+    plugins = {
+        "second": ChannelPlugin(
             name="second",
             display_name="Second",
             runtime="missing.second.runtime:SecondChannel",
             dependencies=("second-sdk>=2",),
         ),
-        ChannelPlugin(
+        "first": ChannelPlugin(
             name="first",
             display_name="First",
             runtime="missing.first.runtime:FirstChannel",
             dependencies=("first-sdk>=1",),
         ),
-    )
-    commands: list[list[str]] = []
-    _stub_channel_registry(monkeypatch, *plugins)
-    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
-    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: False)
+    }
+    prepared: list[tuple[set[str], dict[str, ChannelPlugin]]] = []
+    monkeypatch.setattr(_dependencies, "discover_plugins", lambda: plugins)
     monkeypatch.setattr(
-        "nanobot.optional_features.run_install_command",
-        lambda argv: commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""),
+        _dependencies,
+        "ensure_enabled_channel_dependencies",
+        lambda names, discovered: prepared.append((names, discovered)) or {},
     )
 
-    result = CliRunner().invoke(app, ["plugins", "install", "--all-channels"])
+    assert _dependencies.main(["--all-channels"]) == 0
+    assert prepared == [(set(plugins), plugins)]
 
-    assert result.exit_code == 0
-    assert commands == [
-        [sys.executable, "-m", "pip", "install", "first-sdk>=1"],
-        [sys.executable, "-m", "pip", "install", "second-sdk>=2"],
-    ]
+
+def test_internal_dependency_installer_rejects_unknown_channel(monkeypatch, capsys):
+    from nanobot.channels import _dependencies
+
+    monkeypatch.setattr(_dependencies, "discover_plugins", lambda: {})
+
+    assert _dependencies.main(["missing"]) == 2
+    assert "Unknown channels: missing" in capsys.readouterr().err
+
+
+def test_internal_dependency_installer_propagates_install_failure(monkeypatch, capsys):
+    from nanobot.channels import _dependencies
+
+    plugin = ChannelPlugin(
+        name="demo",
+        display_name="Demo",
+        runtime="missing.demo.runtime:DemoChannel",
+    )
+    monkeypatch.setattr(_dependencies, "discover_plugins", lambda: {"demo": plugin})
+    monkeypatch.setattr(
+        _dependencies,
+        "ensure_enabled_channel_dependencies",
+        lambda _names, _plugins: {"demo": "dependency install failed"},
+    )
+
+    assert _dependencies.main(["demo"]) == 1
+    assert "demo: dependency install failed" in capsys.readouterr().err
 
 
 def test_plugins_disable_channel_writes_config(monkeypatch, tmp_path):

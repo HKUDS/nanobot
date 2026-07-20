@@ -412,54 +412,6 @@ def _feature_dependencies(
     return extras.get(name)
 
 
-def install_optional_feature_dependencies(
-    name: str,
-    *,
-    runner: Any = run_install_command,
-) -> dict[str, Any]:
-    """Install declared requirements without enabling or importing a channel runtime."""
-    from nanobot.channels.registry import discover_plugins
-
-    if name in _BUNDLED_FEATURE_ALIASES:
-        return {
-            "ok": True,
-            "changed": False,
-            "message": f"Feature '{name}' is included with nanobot",
-        }
-
-    extras = optional_dependency_groups()
-    channel_plugins = discover_plugins()
-    known = set(channel_plugins) | set(extras)
-    if name not in known:
-        available = ", ".join(sorted(known))
-        raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
-
-    dependencies = _feature_dependencies(name, channel_plugins.get(name), extras)
-    if not dependencies:
-        return {
-            "ok": True,
-            "changed": False,
-            "message": f"Feature '{name}' has no additional dependencies",
-        }
-    if extra_installed(name, dependencies):
-        return {
-            "ok": True,
-            "changed": False,
-            "message": f"Dependencies for '{name}' are already installed",
-        }
-
-    result = install_extra(name, dependencies, runner=runner)
-    if not result.ok:
-        failed = command_text(result.failed_cmd or result.pip_cmd)
-        detail = f": {result.output}" if result.output else ""
-        raise OptionalFeatureError(f"Failed: {failed}{detail}", status=500)
-    return {
-        "ok": True,
-        "changed": True,
-        "message": f"Installed dependencies for '{name}'",
-    }
-
-
 def optional_features_payload(
     *,
     config: Config | None = None,

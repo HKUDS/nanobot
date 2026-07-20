@@ -46,16 +46,15 @@ The sections below explain what each chat platform requires and provide manual c
 
 > [!NOTE]
 > If you are upgrading from a version where chat app SDKs were installed by default,
-> install the channel dependencies in the same Python environment before enabling or
-> restarting that channel:
+> enable the channel in the same Python environment so nanobot installs its
+> manifest-declared dependencies:
 >
 > ```bash
-> nanobot plugins install <channel>
+> nanobot plugins enable <channel>
 > ```
 >
 > Replace `<channel>` with names such as `telegram`, `slack`, `feishu`,
 > `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`.
-> Use `nanobot plugins enable <channel>` instead when you also want to enable it.
 > To turn a channel off later, run `nanobot plugins disable <channel>`.
 > nanobot keeps the saved settings, but stops loading that channel after the
 > next restart.

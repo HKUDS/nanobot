@@ -110,6 +110,9 @@ bwrap sandbox is enabled.
 # Build the image
 docker build -t nanobot .
 
+# Or preinstall a regular Python extra such as Bedrock support
+docker build --build-arg NANOBOT_EXTRAS=bedrock -t nanobot .
+
 # Or preinstall dependencies for a specific set of channels
 docker build --build-arg NANOBOT_CHANNELS=telegram,slack -t nanobot .
 

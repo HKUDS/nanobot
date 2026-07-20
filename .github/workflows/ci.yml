@@ -58,7 +58,7 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Install channel dependencies
-        run: uv run nanobot plugins install --all-channels
+        run: uv run --no-sync python -m nanobot.channels._dependencies --all-channels
 
       # Channel requirements live in manifests rather than uv.lock. Avoid a
       # later uv run sync pruning the packages installed by the previous step.
@@ -127,4 +127,4 @@ jobs:
       - name: Install and import a channel dependency as the runtime user
         run: >-
           docker run --rm --user 1000:1000 --entrypoint sh nanobot:test -c
-          'nanobot plugins install discord && python -c "import discord"'
+          'python -m nanobot.channels._dependencies discord && python -c "import discord"'

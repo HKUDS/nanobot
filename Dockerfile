@@ -23,9 +23,16 @@ RUN uv venv --seed "$VIRTUAL_ENV"
 
 # Install Python dependencies first (cached layer). Hatch reads the custom build
 # hook from hatch_build.py even for this metadata-only install.
+ARG NANOBOT_EXTRAS=
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
 RUN mkdir -p nanobot && touch nanobot/__init__.py && \
-    NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache . && \
+    if [ -n "$NANOBOT_EXTRAS" ]; then \
+        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
+            --python "$VIRTUAL_ENV/bin/python" --no-cache ".[${NANOBOT_EXTRAS}]"; \
+    else \
+        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
+            --python "$VIRTUAL_ENV/bin/python" --no-cache .; \
+    fi && \
     rm -rf nanobot
 
 # Copy the full source and install
@@ -37,7 +44,7 @@ RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python"
 # list keeps the image configurable while preserving WhatsApp in the default image.
 ARG NANOBOT_CHANNELS=whatsapp
 RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
-        nanobot plugins install "$channel"; \
+        python -m nanobot.channels._dependencies "$channel"; \
     done
 
 # Render deploy template (see render.yaml): committed gateway config that wires

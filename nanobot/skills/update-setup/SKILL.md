@@ -58,7 +58,7 @@ If the user selected `source (git clone)`, ask for the local checkout path:
 **Question 2 — Optional dependencies:**
 
 ```
-question: "Which optional dependencies do you need? List names separated by spaces, or reply 'none'. Available: api, azure, bedrock, langfuse, olostep. Enabled channel dependencies are installed from their manifests when the gateway starts; use `nanobot plugins install <channel>` to preinstall one without changing config."
+question: "Which optional dependencies do you need? List names separated by spaces, or reply 'none'. Available: api, azure, bedrock, langfuse, olostep. Channel dependencies are installed from their manifests when the gateway starts."
 ```
 
 Parse the reply. If the user says "none" or similar, set extras to empty. Otherwise collect the valid names.

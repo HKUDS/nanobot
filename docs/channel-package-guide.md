@@ -187,7 +187,7 @@ Edit `~/.nanobot/config.json`:
 }
 ```
 
-nanobot always loads the dependency-free descriptor during discovery. When the WebUI gateway starts, it installs missing requirements for enabled channels before importing their runtimes. It also installs them when a channel is enabled from the CLI or WebUI. Use `nanobot plugins install <channel>` to prepare an environment without changing configuration, or `nanobot plugins install --all-channels` when CI needs every declared channel dependency. Status, configuration, and disable operations do not need the runtime. Single-instance and multi-instance channels use the same activation rules.
+nanobot always loads the dependency-free descriptor during discovery. When the WebUI gateway starts, it installs missing requirements for enabled channels before importing their runtimes. It also installs them when a channel is enabled from the CLI or WebUI. Status, configuration, and disable operations do not need the runtime. Single-instance and multi-instance channels use the same activation rules.
 
 ### 3. Run & Test
 
@@ -777,7 +777,7 @@ git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 python -m pip install -e .
 nanobot plugins list    # should show the package as "webhook"
-nanobot plugins install webhook
+nanobot plugins enable webhook
 nanobot gateway         # test end-to-end
 ```
 
