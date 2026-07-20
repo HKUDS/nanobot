@@ -9,6 +9,7 @@ from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
+from nanobot.webui.transcript import WebUITranscriptRecorder
 
 
 def test_webui_session_list_reuses_valid_index_without_scanning_files(
@@ -200,6 +201,70 @@ def test_webui_session_list_rescans_when_transcript_changes(
 
     assert scanned == [manager._get_session_path("websocket:transcript-change").name]
     assert rows[0]["updated_at"].startswith("2026-06-15T12:30:00")
+
+
+def test_webui_session_list_tracks_per_session_sqlite_activity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    webui_dir = tmp_path / "webui"
+    webui_dir.mkdir()
+    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+
+    manager = SessionManager(tmp_path)
+    old = manager.get_or_create("websocket:old-sqlite")
+    old.created_at = datetime(2000, 1, 1, 10, 0, 0)
+    old.add_message("user", "old sqlite")
+    old.messages[-1]["timestamp"] = "2000-01-01T10:00:00"
+    old.updated_at = datetime(2000, 1, 1, 10, 0, 0)
+    manager.save(old)
+
+    newer = manager.get_or_create("websocket:newer-sqlite")
+    newer.created_at = datetime(2000, 1, 1, 11, 0, 0)
+    newer.add_message("user", "newer sqlite")
+    newer.messages[-1]["timestamp"] = "2000-01-01T11:00:00"
+    newer.updated_at = datetime(2000, 1, 1, 11, 0, 0)
+    manager.save(newer)
+
+    recorder = WebUITranscriptRecorder(
+        session_manager=manager,
+        store_path=webui_dir / "transcripts.sqlite3",
+        write_batch_window_s=0,
+    )
+    assert [row["key"] for row in list_webui_sessions(manager)] == [
+        "websocket:newer-sqlite",
+        "websocket:old-sqlite",
+    ]
+    recorder.append(
+        "old-sqlite",
+        {"event": "message", "chat_id": "old-sqlite", "text": "display-only activity"},
+    )
+    indexed_activity = recorder.activity_signatures()
+
+    original_scan = session_list_index._scan_session_row
+    scanned: list[str] = []
+
+    def record_scan(
+        session_manager: SessionManager,
+        path: Path,
+        **kwargs,
+    ) -> dict | None:
+        scanned.append(path.name)
+        return original_scan(session_manager, path, **kwargs)
+
+    monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
+    rows = session_list_index.list_webui_sessions(
+        manager,
+        indexed_activity=indexed_activity,
+    )
+
+    assert scanned == [manager._get_session_path("websocket:old-sqlite").name]
+    assert [row["key"] for row in rows] == [
+        "websocket:old-sqlite",
+        "websocket:newer-sqlite",
+    ]
+    recorder.close()
 
 
 def test_webui_session_list_sorts_by_message_activity_not_maintenance_timestamp(

@@ -196,6 +196,10 @@ export function useSessionHistory(key: string | null): {
 } {
   const { token } = useClient();
   const loadingOlderRef = useRef(false);
+  const olderRequestRef = useRef<{
+    key: string;
+    controller: AbortController;
+  } | null>(null);
   const [refreshSeq, setRefreshSeq] = useState(0);
   const refresh = useCallback(() => {
     setRefreshSeq((value) => value + 1);
@@ -227,6 +231,11 @@ export function useSessionHistory(key: string | null): {
   });
 
   useEffect(() => {
+    if (olderRequestRef.current) {
+      olderRequestRef.current.controller.abort();
+      olderRequestRef.current = null;
+      loadingOlderRef.current = false;
+    }
     if (!key) {
       setState({
         key: null,
@@ -340,6 +349,11 @@ export function useSessionHistory(key: string | null): {
     return () => {
       cancelled = true;
       controller.abort();
+      if (olderRequestRef.current?.key === key) {
+        olderRequestRef.current.controller.abort();
+        olderRequestRef.current = null;
+        loadingOlderRef.current = false;
+      }
     };
   }, [key, token, refreshSeq]);
 
@@ -347,13 +361,18 @@ export function useSessionHistory(key: string | null): {
     if (!key || loadingOlderRef.current) return;
     const before = state.key === key ? state.beforeCursor : null;
     if (!before || !state.hasMoreBefore) return;
+    const controller = new AbortController();
+    const request = { key, controller };
     loadingOlderRef.current = true;
+    olderRequestRef.current = request;
     setState((prev) => prev.key === key ? { ...prev, loadingOlder: true, error: null } : prev);
     try {
       const body = await fetchWebuiThread(token, key, {
         limit: OLDER_HISTORY_PAGE_LIMIT,
         before,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       setState((prev) => {
         if (prev.key !== key) return prev;
         if (!body?.messages?.length) {
@@ -386,6 +405,7 @@ export function useSessionHistory(key: string | null): {
         };
       });
     } catch (e) {
+      if (controller.signal.aborted) return;
       setState((prev) => prev.key === key
         ? {
             ...prev,
@@ -394,7 +414,10 @@ export function useSessionHistory(key: string | null): {
           }
         : prev);
     } finally {
-      loadingOlderRef.current = false;
+      if (olderRequestRef.current === request) {
+        olderRequestRef.current = null;
+        loadingOlderRef.current = false;
+      }
     }
   }, [
     key,

@@ -8,6 +8,8 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from loguru import logger
+
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
 from nanobot.webui.transcript import (
@@ -70,11 +72,25 @@ def create_webui_chat_fork(
             forked.metadata[WEBUI_TITLE_METADATA_KEY] = fork_title
             session_manager.save(forked, fsync=True)
     except Exception:
-        if transcripts is None:
-            delete_webui_transcript(target_key)
-        else:
-            transcripts.delete(target_key)
-        session_manager.delete_session(target_key)
+        try:
+            if transcripts is None:
+                delete_webui_transcript(target_key)
+            else:
+                transcripts.delete(target_key)
+        except Exception as cleanup_error:
+            logger.warning(
+                "Failed to clean up WebUI transcript for fork {}: {}",
+                target_key,
+                cleanup_error,
+            )
+        try:
+            session_manager.delete_session(target_key)
+        except Exception as cleanup_error:
+            logger.warning(
+                "Failed to clean up fork session {}: {}",
+                target_key,
+                cleanup_error,
+            )
         raise
     return new_id, target_key
 

@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from loguru import logger
 
@@ -26,16 +26,23 @@ from nanobot.session.manager import (
     _metadata_title,
 )
 
-_INDEX_VERSION = 2
+_INDEX_VERSION = 3
 _INDEX_FILENAME = ".webui_session_index.json"
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
+_WEBUI_ACTIVITY_REVISION = "webui_activity_revision"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
 
+IndexedActivity = Mapping[str, Mapping[str, int]]
 
-def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
+
+def list_webui_sessions(
+    session_manager: SessionManager,
+    *,
+    indexed_activity: IndexedActivity | None = None,
+) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
-    rows, changed = _reconcile_index(session_manager)
+    rows, changed = _reconcile_index(session_manager, indexed_activity=indexed_activity)
     if changed:
         try:
             _write_index_rows(session_manager.sessions_dir, rows)
@@ -45,7 +52,11 @@ def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]
     return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
 
 
-def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
+def _reconcile_index(
+    session_manager: SessionManager,
+    *,
+    indexed_activity: IndexedActivity | None,
+) -> tuple[list[dict[str, Any]], bool]:
     existing_rows = _read_index_rows(session_manager.sessions_dir)
     existing_by_file = {
         row.get("file"): row
@@ -58,12 +69,29 @@ def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, An
 
     for path in paths:
         row = existing_by_file.get(path.name)
-        if row is not None and _indexed_row_matches_file(row, path):
+        row_matches = False
+        if row is not None:
+            if indexed_activity is None:
+                row_matches = _indexed_row_matches_file(row, path)
+            else:
+                row_matches = _indexed_row_matches_file(
+                    row,
+                    path,
+                    indexed_activity=indexed_activity,
+                )
+        if row_matches:
             rows.append(row)
             continue
 
         changed = True
-        scanned = _scan_session_row(session_manager, path)
+        if indexed_activity is None:
+            scanned = _scan_session_row(session_manager, path)
+        else:
+            scanned = _scan_session_row(
+                session_manager,
+                path,
+                indexed_activity=indexed_activity,
+            )
         if scanned is not None:
             rows.append(scanned)
 
@@ -111,7 +139,12 @@ def _file_signature(path: Path) -> dict[str, int]:
     return {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
 
 
-def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
+def _indexed_row_matches_file(
+    row: dict[str, Any],
+    path: Path,
+    *,
+    indexed_activity: IndexedActivity | None = None,
+) -> bool:
     if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
         return False
     if not isinstance(row.get("title", ""), str) or not isinstance(row.get("preview", ""), str):
@@ -122,12 +155,16 @@ def _indexed_row_matches_file(row: dict[str, Any], path: Path) -> bool:
         signature = _file_signature(path)
     except OSError:
         return False
-    activity_signature = _webui_activity_signature(str(row.get("key")))
+    activity_signature = _webui_activity_signature(
+        str(row.get("key")),
+        indexed_activity=indexed_activity,
+    )
     return (
         row.get("mtime_ns") == signature["mtime_ns"]
         and row.get("size") == signature["size"]
         and row.get(_WEBUI_ACTIVITY_MTIME_NS) == activity_signature[_WEBUI_ACTIVITY_MTIME_NS]
         and row.get(_WEBUI_ACTIVITY_SIZE) == activity_signature[_WEBUI_ACTIVITY_SIZE]
+        and row.get(_WEBUI_ACTIVITY_REVISION) == activity_signature[_WEBUI_ACTIVITY_REVISION]
     )
 
 
@@ -175,7 +212,11 @@ def _webui_activity_paths(session_key: str) -> list[Path]:
     ]
 
 
-def _webui_activity_signature(session_key: str) -> dict[str, int]:
+def _webui_activity_signature(
+    session_key: str,
+    *,
+    indexed_activity: IndexedActivity | None = None,
+) -> dict[str, int]:
     latest_mtime_ns = 0
     total_size = 0
     for path in _webui_activity_paths(session_key):
@@ -187,9 +228,15 @@ def _webui_activity_signature(session_key: str) -> dict[str, int]:
             continue
         latest_mtime_ns = max(latest_mtime_ns, stat.st_mtime_ns)
         total_size += stat.st_size
+    indexed = (indexed_activity or {}).get(session_key, {})
+    indexed_updated_at_ns = indexed.get("updated_at_ns", 0)
+    indexed_revision = indexed.get("revision", 0)
+    if isinstance(indexed_updated_at_ns, int):
+        latest_mtime_ns = max(latest_mtime_ns, indexed_updated_at_ns)
     return {
         _WEBUI_ACTIVITY_MTIME_NS: latest_mtime_ns,
         _WEBUI_ACTIVITY_SIZE: total_size,
+        _WEBUI_ACTIVITY_REVISION: indexed_revision if isinstance(indexed_revision, int) else 0,
     }
 
 
@@ -241,9 +288,17 @@ def _visible_activity_updated_at(
     return _latest_updated_at(visible_message_at, webui_activity) or stored
 
 
-def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
+def _indexed_row_for_session(
+    session: Session,
+    path: Path,
+    *,
+    indexed_activity: IndexedActivity | None = None,
+) -> dict[str, Any]:
     signature = _file_signature(path)
-    activity_signature = _webui_activity_signature(session.key)
+    activity_signature = _webui_activity_signature(
+        session.key,
+        indexed_activity=indexed_activity,
+    )
     activity_updated_at = _webui_activity_updated_at(activity_signature)
     visible_message_at = _last_visible_message_at(session.messages)
     return {
@@ -263,7 +318,12 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
     }
 
 
-def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, Any] | None:
+def _scan_session_row(
+    session_manager: SessionManager,
+    path: Path,
+    *,
+    indexed_activity: IndexedActivity | None = None,
+) -> dict[str, Any] | None:
     storage_key = SessionManager._decode_storage_key(path.stem)
     fallback_key = storage_key or path.stem.replace("_", ":", 1)
     try:
@@ -317,7 +377,10 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 created_at_s = created_at_s or fallback_time
                 updated_at_s = updated_at_s or fallback_time
             key = data.get("key") or fallback_key
-            activity_signature = _webui_activity_signature(key)
+            activity_signature = _webui_activity_signature(
+                key,
+                indexed_activity=indexed_activity,
+            )
             activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
                 "key": key,
@@ -338,4 +401,8 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
         repaired = session_manager._repair(fallback_key)
         if repaired is None:
             return None
-        return _indexed_row_for_session(repaired, path)
+        return _indexed_row_for_session(
+            repaired,
+            path,
+            indexed_activity=indexed_activity,
+        )

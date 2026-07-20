@@ -45,9 +45,12 @@ def test_writer_batches_ordered_events_and_persists_wal_store(tmp_path: Path) ->
         str(index) for index in range(12)
     ]
     assert store.append_batch.call_count == 1
+    activity = store.activity_signatures()["websocket:ordered"]
+    assert activity["revision"] == 1
+    assert activity["updated_at_ns"] > 0
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
 
     writer.close()
 
@@ -106,6 +109,7 @@ def test_legacy_jsonl_is_imported_once_and_preserved(
         "legacy question",
         "legacy answer",
     ]
+    assert first.activity_signatures() == {}
     first.close()
     assert legacy_path.is_file()
 
@@ -205,3 +209,82 @@ def test_newer_database_schema_fails_without_overwriting_it(tmp_path: Path) -> N
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 99
+
+
+def test_schema_one_database_is_migrated_without_losing_events(tmp_path: Path) -> None:
+    path = tmp_path / "transcripts.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE transcript_sessions (
+                session_key TEXT PRIMARY KEY,
+                legacy_imported INTEGER NOT NULL DEFAULT 0,
+                next_sequence INTEGER NOT NULL DEFAULT 0,
+                active_turn INTEGER NOT NULL DEFAULT 0,
+                next_user_index INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE transcript_turns (
+                session_key TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                finalized INTEGER NOT NULL DEFAULT 0,
+                user_offset INTEGER NOT NULL DEFAULT 0,
+                user_count INTEGER NOT NULL DEFAULT 0,
+                event_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (session_key, ordinal),
+                FOREIGN KEY (session_key)
+                    REFERENCES transcript_sessions(session_key)
+                    ON DELETE CASCADE
+            );
+            CREATE TABLE transcript_events (
+                session_key TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                turn_ordinal INTEGER NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY (session_key, sequence),
+                FOREIGN KEY (session_key, turn_ordinal)
+                    REFERENCES transcript_turns(session_key, ordinal)
+                    ON DELETE CASCADE
+            );
+            INSERT INTO transcript_sessions (
+                session_key, legacy_imported, next_sequence, active_turn, next_user_index
+            ) VALUES ('websocket:v1', 1, 1, 0, 1);
+            INSERT INTO transcript_turns (
+                session_key, ordinal, user_offset, user_count, event_count
+            ) VALUES ('websocket:v1', 0, 0, 1, 1);
+            INSERT INTO transcript_events (
+                session_key, sequence, turn_ordinal, payload
+            ) VALUES ('websocket:v1', 0, 0, '{"event":"user","text":"kept"}');
+            PRAGMA user_version = 1;
+            """
+        )
+
+    store = SQLiteTranscriptStore(path)
+
+    assert store.read_all("websocket:v1") == [{"event": "user", "text": "kept"}]
+    assert store.activity_signatures() == {}
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(transcript_sessions)")
+        }
+    assert {"activity_revision", "activity_updated_at_ns"} <= columns
+
+
+def test_recorder_closes_all_sqlite_handles_after_reads(tmp_path: Path) -> None:
+    path = tmp_path / "transcripts.sqlite3"
+    recorder = WebUITranscriptRecorder(store_path=path, write_batch_window_s=0)
+    _append_turn(recorder, "handles", 1)
+    assert recorder.build_response(
+        "websocket:handles",
+        limit=2,
+        direction="latest",
+    ) is not None
+    assert recorder.activity_signatures()["websocket:handles"]["revision"] > 0
+
+    recorder.close()
+    moved = path.with_name("moved.sqlite3")
+    path.rename(moved)
+    moved.unlink()
+
+    assert not moved.exists()

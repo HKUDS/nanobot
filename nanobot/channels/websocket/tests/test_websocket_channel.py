@@ -2849,7 +2849,11 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "updated_at": "2026-05-19T10:01:00Z",
         },
     ]
-    monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager: sessions)
+    monkeypatch.setattr(
+        ws_http_module,
+        "list_webui_sessions",
+        lambda _session_manager, **_kwargs: sessions,
+    )
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,

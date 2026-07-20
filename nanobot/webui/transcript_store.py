@@ -13,11 +13,12 @@ import queue
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAX_EVENT_BYTES = 8 * 1024 * 1024
 _DEFAULT_BUSY_TIMEOUT_MS = 30_000
 _DEFAULT_WRITE_BATCH_WINDOW_S = 0.05
@@ -66,24 +67,31 @@ class SQLiteTranscriptStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             connection = sqlite3.connect(self.path, timeout=_DEFAULT_BUSY_TIMEOUT_MS / 1000)
             try:
+                connection.execute(f"PRAGMA busy_timeout = {_DEFAULT_BUSY_TIMEOUT_MS}")
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA foreign_keys = ON")
+                connection.execute("BEGIN IMMEDIATE")
                 version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-                if version not in {0, _SCHEMA_VERSION}:
+                if version not in {0, 1, _SCHEMA_VERSION}:
                     raise RuntimeError(
                         f"unsupported WebUI transcript schema {version}; "
                         f"expected {_SCHEMA_VERSION}"
                     )
-                connection.execute("PRAGMA journal_mode = WAL")
-                connection.execute("PRAGMA foreign_keys = ON")
-                connection.executescript(
+                connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS transcript_sessions (
                         session_key TEXT PRIMARY KEY,
                         legacy_imported INTEGER NOT NULL DEFAULT 0,
                         next_sequence INTEGER NOT NULL DEFAULT 0,
                         active_turn INTEGER NOT NULL DEFAULT 0,
-                        next_user_index INTEGER NOT NULL DEFAULT 0
-                    );
-
+                        next_user_index INTEGER NOT NULL DEFAULT 0,
+                        activity_revision INTEGER NOT NULL DEFAULT 0,
+                        activity_updated_at_ns INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                connection.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS transcript_turns (
                         session_key TEXT NOT NULL,
                         ordinal INTEGER NOT NULL,
@@ -95,8 +103,11 @@ class SQLiteTranscriptStore:
                         FOREIGN KEY (session_key)
                             REFERENCES transcript_sessions(session_key)
                             ON DELETE CASCADE
-                    );
-
+                    )
+                    """
+                )
+                connection.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS transcript_events (
                         session_key TEXT NOT NULL,
                         sequence INTEGER NOT NULL,
@@ -106,15 +117,39 @@ class SQLiteTranscriptStore:
                         FOREIGN KEY (session_key, turn_ordinal)
                             REFERENCES transcript_turns(session_key, ordinal)
                             ON DELETE CASCADE
-                    );
-
-                    CREATE INDEX IF NOT EXISTS transcript_events_by_turn
-                        ON transcript_events(session_key, turn_ordinal, sequence);
+                    )
                     """
                 )
-                if version == 0:
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS transcript_events_by_turn
+                        ON transcript_events(session_key, turn_ordinal, sequence)
+                    """
+                )
+                session_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(transcript_sessions)")
+                }
+                if "activity_revision" not in session_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE transcript_sessions
+                        ADD COLUMN activity_revision INTEGER NOT NULL DEFAULT 0
+                        """
+                    )
+                if "activity_updated_at_ns" not in session_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE transcript_sessions
+                        ADD COLUMN activity_updated_at_ns INTEGER NOT NULL DEFAULT 0
+                        """
+                    )
+                if version < _SCHEMA_VERSION:
                     connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
                 connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
             finally:
                 connection.close()
             self._initialized = True
@@ -127,7 +162,7 @@ class SQLiteTranscriptStore:
         return raw
 
     def _is_imported(self, session_key: str) -> bool:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 "SELECT legacy_imported FROM transcript_sessions WHERE session_key = ?",
                 (session_key,),
@@ -248,8 +283,10 @@ class SQLiteTranscriptStore:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            activity_ns = time.time_ns()
             for session_key, records in grouped.items():
                 self._append_serialized(connection, session_key, records)
+                self._touch_activity(connection, session_key, activity_ns)
             connection.commit()
         except BaseException:
             connection.rollback()
@@ -276,12 +313,29 @@ class SQLiteTranscriptStore:
             )
             if serialized:
                 self._append_serialized(connection, session_key, serialized)
+            self._touch_activity(connection, session_key, time.time_ns())
             connection.commit()
         except BaseException:
             connection.rollback()
             raise
         finally:
             connection.close()
+
+    @staticmethod
+    def _touch_activity(
+        connection: sqlite3.Connection,
+        session_key: str,
+        activity_ns: int,
+    ) -> None:
+        connection.execute(
+            """
+            UPDATE transcript_sessions
+            SET activity_revision = activity_revision + 1,
+                activity_updated_at_ns = MAX(activity_updated_at_ns, ?)
+            WHERE session_key = ?
+            """,
+            (activity_ns, session_key),
+        )
 
     def delete(self, session_key: str) -> bool:
         connection = self._connect()
@@ -308,7 +362,7 @@ class SQLiteTranscriptStore:
     ) -> list[StoredTurn]:
         self.ensure_imported(session_key)
         upper = before_ordinal if before_ordinal is not None else 2**63 - 1
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             turn_rows = connection.execute(
                 """
                 SELECT ordinal
@@ -340,9 +394,27 @@ class SQLiteTranscriptStore:
                 records_by_turn[int(row["turn_ordinal"])].append(payload)
         return [StoredTurn(ordinal, records_by_turn[ordinal]) for ordinal in ordinals]
 
+    def activity_signatures(self) -> dict[str, dict[str, int]]:
+        """Return per-session activity revisions without importing legacy files."""
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT session_key, activity_revision, activity_updated_at_ns
+                FROM transcript_sessions
+                WHERE activity_revision > 0
+                """
+            ).fetchall()
+        return {
+            str(row["session_key"]): {
+                "revision": int(row["activity_revision"]),
+                "updated_at_ns": int(row["activity_updated_at_ns"]),
+            }
+            for row in rows
+        }
+
     def read_all(self, session_key: str) -> list[dict[str, Any]]:
         self.ensure_imported(session_key)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT payload
@@ -360,7 +432,7 @@ class SQLiteTranscriptStore:
         return records
 
     def user_count_before(self, session_key: str, ordinal: int) -> int:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 """
                 SELECT user_offset
@@ -372,7 +444,7 @@ class SQLiteTranscriptStore:
         return int(row["user_offset"]) if row is not None else 0
 
     def has_turn_before(self, session_key: str, ordinal: int) -> bool:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 """
                 SELECT 1

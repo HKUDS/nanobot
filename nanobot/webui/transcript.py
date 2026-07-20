@@ -711,6 +711,10 @@ class WebUITranscriptRecorder:
         self.flush()
         return self._store.read_all(session_key)
 
+    def activity_signatures(self) -> dict[str, dict[str, int]]:
+        self.flush()
+        return self._store.activity_signatures()
+
     def _select_page(
         self,
         session_key: str,

@@ -408,7 +408,10 @@ class GatewayHTTPHandler:
 
     def _sessions_list_payload(self) -> dict[str, Any]:
         assert self.session_manager is not None
-        sessions = list_webui_sessions(self.session_manager)
+        sessions = list_webui_sessions(
+            self.session_manager,
+            indexed_activity=self.transcripts.activity_signatures(),
+        )
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
         cleaned = []
