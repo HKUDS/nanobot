@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import base64
+import errno
 import json
 import os
 import re
@@ -688,12 +689,16 @@ class SessionManager:
             if fsync:
                 # fsync the directory so the rename is durable.
                 # On Windows, opening a directory with O_RDONLY raises
-                # PermissionError — skip the dir sync there (NTFS
-                # journals metadata synchronously).
+                # PermissionError; some shared filesystems allow the open but
+                # reject directory fsync with EINVAL.
                 with suppress(PermissionError):
                     fd = os.open(str(path.parent), os.O_RDONLY)
                     try:
-                        os.fsync(fd)
+                        try:
+                            os.fsync(fd)
+                        except OSError as exc:
+                            if exc.errno != errno.EINVAL:
+                                raise
                     finally:
                         os.close(fd)
         except BaseException:
