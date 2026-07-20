@@ -40,6 +40,10 @@ from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
 
+_RM_COMMAND_RE = re.compile(r"\brm\b")
+_SHELL_COMMAND_SEPARATOR_RE = re.compile(r"(?:&&|\|\||[;&|\r\n])")
+_SHELL_TOKEN_RE = re.compile(r'''"[^"]*"|'[^']*'|[^\s]+''')
+
 
 def _reap_pid(pid: int) -> None:
     """Best-effort ``waitpid`` to reap a child and prevent zombies.
@@ -210,7 +214,6 @@ class ExecTool(Tool):
         self.working_dir = working_dir
         self.sandbox = sandbox
         self.deny_patterns = (deny_patterns or []) + [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
             r"(?:^|[;&|]\s*)format(?!=)\b",   # format (as standalone command only)
@@ -704,6 +707,74 @@ class ExecTool(Tool):
                 env[key] = val
         return env
 
+    @classmethod
+    def _contains_unscoped_recursive_rm(cls, command: str) -> bool:
+        """Return whether ``command`` contains recursive rm outside a scoped /tmp target.
+
+        The exec guard deliberately remains conservative for recursive deletion, but
+        test and build scripts routinely clean their own named directories below
+        ``/tmp``.  Treat only static, direct ``/tmp/<name>`` targets as scoped cleanup.
+        Any ambiguous invocation (variables, traversal, broad globs, nested paths,
+        mixed targets) stays blocked.
+        """
+        for match in _RM_COMMAND_RE.finditer(command):
+            tail = command[match.end():]
+            segment = _SHELL_COMMAND_SEPARATOR_RE.split(tail, maxsplit=1)[0]
+            tokens = _SHELL_TOKEN_RE.findall(segment)
+            recursive = False
+            targets: list[str] = []
+            parsing_options = True
+            unsafe_redirect = False
+
+            for raw_token in tokens:
+                token = raw_token.strip().strip("\"'")
+                if not token:
+                    continue
+                if token == "--" and parsing_options:
+                    parsing_options = False
+                    continue
+                if parsing_options and token.startswith("--"):
+                    recursive = recursive or token == "--recursive"
+                    continue
+                if parsing_options and re.fullmatch(r"-[a-z]+", token):
+                    recursive = recursive or "r" in token[1:]
+                    continue
+
+                parsing_options = False
+                if token.startswith("#"):
+                    break
+                if re.match(r"^\d*[<>]", token):
+                    redirect_target = re.sub(r"^\d*[<>]+", "", token)
+                    if redirect_target and redirect_target != "/dev/null":
+                        unsafe_redirect = True
+                    continue
+                targets.append(token)
+
+            if recursive and (
+                unsafe_redirect
+                or not targets
+                or not all(cls._is_scoped_tmp_cleanup_target(target) for target in targets)
+            ):
+                return True
+
+        return False
+
+    @staticmethod
+    def _is_scoped_tmp_cleanup_target(raw_target: str) -> bool:
+        """Accept a static, specifically named descendant of the POSIX /tmp root."""
+        target = raw_target.strip().rstrip("\"'),")
+        if not target.startswith("/tmp/"):
+            return False
+
+        relative = target.removeprefix("/tmp/")
+        if not relative or any(char in relative for char in ("$", "`", "\\", "[", "{")):
+            return False
+        if "/" in relative or relative in {".", ".."}:
+            return False
+
+        literal_prefix = re.split(r"[*?]", relative, maxsplit=1)[0]
+        return any(char.isalnum() or char in "_-" for char in literal_prefix)
+
     def _guard_command(
         self,
         command: str,
@@ -723,6 +794,9 @@ class ExecTool(Tool):
             re.fullmatch(p, lower) for p in self.allow_patterns
         )
         if not explicitly_allowed:
+            if self._contains_unscoped_recursive_rm(lower):
+                return ToolResult.error("Error: Command blocked by deny pattern filter")
+
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):
                     return ToolResult.error("Error: Command blocked by deny pattern filter")
