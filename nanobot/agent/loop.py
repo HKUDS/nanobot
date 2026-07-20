@@ -528,6 +528,48 @@ class AgentLoop:
         """Select a context limit for future turns."""
         return self.runtime_resolver.select_context_window(context_window_tokens)
 
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
+        """Return the live tool schemas for an opt-in channel integration."""
+        return self.tools.get_definitions()
+
+    async def execute_tool(
+        self,
+        session_key: str,
+        name: str,
+        args: Any,
+        *,
+        channel: str,
+        chat_id: str | None = None,
+    ) -> Any:
+        """Execute one channel-requested tool under normal turn safety context.
+
+        This is intentionally narrower than an agent turn: it does not invoke a
+        model or persist messages, but it binds the same workspace, request, and
+        per-session file-state context that regular tool execution receives.
+        """
+        session = self.sessions.get_or_create(session_key)
+        scope = self.workspace_scopes.for_turn(
+            channel=channel,
+            message_metadata=None,
+            session_metadata=session.metadata,
+        )
+        request = RequestContext(
+            channel=channel,
+            chat_id=chat_id or "",
+            session_key=session_key,
+            runtime=self.llm_runtime(),
+            workspace=scope.project_path,
+        )
+        file_state_token = bind_file_states(self._file_state_store.for_session(session_key))
+        request_token = bind_request_context(request)
+        workspace_token = bind_workspace_scope(scope)
+        try:
+            return await self.tools.execute(name, args)
+        finally:
+            reset_workspace_scope(workspace_token)
+            reset_request_context(request_token)
+            reset_file_states(file_state_token)
+
     def _register_default_tools(
         self,
         *,

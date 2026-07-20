@@ -205,6 +205,36 @@ curl -X POST http://localhost:9000/message \
 
 The agent receives the message and processes it. Replies arrive in your `send()` method.
 
+### Optional: Run Guarded Agent Tools
+
+Most channels should publish inbound messages and let the agent decide which
+tools to call. A real-time channel that must execute a tool itself can opt in
+to a narrow gateway. Declare `wants_tool_gateway = True` and accept the
+keyword-only `tool_gateway` constructor argument:
+
+```python
+from nanobot.channels.base import BaseChannel, ToolGateway
+
+
+class RealtimeChannel(BaseChannel):
+    wants_tool_gateway = True
+
+    def __init__(self, config, bus, *, tool_gateway: ToolGateway):
+        super().__init__(config, bus)
+        self.tool_gateway = tool_gateway
+
+    async def run_external_call(self, chat_id: str, name: str, args: dict):
+        session_key = f"{self.name}:{chat_id}"
+        return await self.tool_gateway.execute_tool(
+            session_key, name, args, channel=self.name, chat_id=chat_id,
+        )
+```
+
+The gateway exposes only the live tool schemas and guarded tool execution. It
+uses the normal tool registry and binds the same workspace, request, and
+per-session file-state context as an agent turn. Do not instantiate tools or
+bypass this gateway in a channel package.
+
 ## Channel Package Requirements
 
 Every channel is a self-contained package at `nanobot/channels/<channel>/`; channel-specific runtime code, setup metadata, tests, WebUI structure, components, and translations stay under that directory.

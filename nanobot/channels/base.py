@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from loguru import logger
 
@@ -16,6 +16,22 @@ from nanobot.pairing import (
     generate_code,
     is_approved,
 )
+
+
+class ToolGateway(Protocol):
+    """Narrow, guarded tool access exposed to opt-in channel plugins."""
+
+    def get_tool_definitions(self) -> list[dict[str, Any]]: ...
+
+    async def execute_tool(
+        self,
+        session_key: str,
+        name: str,
+        args: Any,
+        *,
+        channel: str,
+        chat_id: str | None = None,
+    ) -> Any: ...
 
 
 class BaseChannel(ABC):
@@ -31,6 +47,9 @@ class BaseChannel(ABC):
     send_progress: bool = True
     send_tool_hints: bool = False
     show_reasoning: bool = True
+    # Plugins that need to invoke agent tools must opt in and accept a
+    # ``tool_gateway=`` constructor keyword argument.
+    wants_tool_gateway: bool = False
 
     def __init__(self, config: Any, bus: MessageBus):
         """

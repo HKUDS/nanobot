@@ -24,7 +24,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels._setup import channel_setup_spec
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, ToolGateway
 from nanobot.channels.contracts import (
     channel_default_config,
     channel_instance_specs,
@@ -97,6 +97,7 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
+        tool_gateway: ToolGateway | None = None,
     ):
         self.config = config
         self.bus = bus
@@ -109,6 +110,7 @@ class ChannelManager:
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
+        self._tool_gateway = tool_gateway
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -178,6 +180,10 @@ class ChannelManager:
                 logger=logger,
             )
             kwargs["gateway"] = gateway
+        if cls.wants_tool_gateway:
+            if self._tool_gateway is None:
+                raise RuntimeError(f"{cls.name} requires a tool gateway but none is configured")
+            kwargs["tool_gateway"] = self._tool_gateway
         channel = cls(section, self.bus, **kwargs)
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name

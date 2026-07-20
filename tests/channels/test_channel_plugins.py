@@ -83,6 +83,24 @@ class _SetupPlugin(_FakePlugin):
         }
 
 
+class _ToolGatewayPlugin(BaseChannel):
+    name = "toolgateway"
+    display_name = "Tool Gateway"
+    wants_tool_gateway = True
+
+    def __init__(self, config, bus, *, tool_gateway):
+        super().__init__(config, bus)
+        self.tool_gateway = tool_gateway
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send(self, msg: OutboundMessage) -> None:
+        pass
+
 class _FakeLine(_FakePlugin):
     name = "line"
     display_name = "Line"
@@ -262,6 +280,16 @@ def test_channels_config_getattr_returns_extra():
     section = getattr(cfg, "myplugin", None)
     assert isinstance(section, dict)
     assert section["enabled"] is True
+
+
+def test_channel_manager_injects_tool_gateway_only_for_opted_in_plugin(monkeypatch: pytest.MonkeyPatch):
+    _stub_channel_registry(monkeypatch, _channel_plugin(_ToolGatewayPlugin))
+    gateway = object()
+    config = Config.model_validate({"channels": {"toolgateway": {"enabled": True}}})
+
+    manager = ChannelManager(config, MessageBus(), tool_gateway=gateway)
+
+    assert manager.channels["toolgateway"].tool_gateway is gateway
 
 
 def test_channels_config_has_no_per_channel_fields():
