@@ -694,11 +694,10 @@ class SessionManager:
                 with suppress(PermissionError):
                     fd = os.open(str(path.parent), os.O_RDONLY)
                     try:
-                        try:
-                            os.fsync(fd)
-                        except OSError as exc:
-                            if exc.errno != errno.EINVAL:
-                                raise
+                        os.fsync(fd)
+                    except OSError as exc:
+                        if exc.errno != errno.EINVAL:
+                            raise
                     finally:
                         os.close(fd)
         except BaseException:
