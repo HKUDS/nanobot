@@ -57,7 +57,7 @@ COPY render-config.json ./
 # Create the non-root user and hand ownership of the writable virtualenv to it.
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \
     mkdir -p /home/nanobot/.nanobot && \
-    chown -R nanobot:nanobot /home/nanobot /app
+    chown -R nanobot:nanobot /home/nanobot /app/.venv
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh

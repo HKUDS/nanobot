@@ -124,7 +124,8 @@ jobs:
       - name: Verify default WhatsApp dependencies
         run: docker run --rm --entrypoint python nanobot:test -c "import neonize, segno"
 
-      - name: Install and import a channel dependency as the runtime user
+      - name: Verify runtime dependency permissions
         run: >-
           docker run --rm --user 1000:1000 --entrypoint sh nanobot:test -c
-          'python -m scripts.install_channel_dependencies discord && python -c "import discord"'
+          'test -w /app/.venv && test ! -w /app && test ! -w /app/nanobot &&
+          python -m scripts.install_channel_dependencies discord && python -c "import discord"'
