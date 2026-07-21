@@ -947,6 +947,9 @@ def settings_payload(
             "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
+        "webui": {
+            "hidden_settings_sections": list(config.webui.hidden_settings_sections),
+        },
         "requires_restart": requires_restart,
         "version": _version_payload(),
         "docs": _docs_payload(),
