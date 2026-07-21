@@ -2,7 +2,9 @@
 
 import mimetypes
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 from zipfile import BadZipFile, ZipFile
 
 from loguru import logger
@@ -95,11 +97,12 @@ class PdfExtraction:
     end_page: int
 
 
-def extract_text(path: Path) -> str | None:
+def extract_text(path: Path, *, content: bytes | None = None) -> str | None:
     """Extract text from a file.
 
     Args:
-        path: Path to the file.
+        path: Path to the file. Its suffix selects the parser.
+        content: Optional validated file snapshot to parse instead of reopening ``path``.
 
     Returns:
         Extracted text as string, None for unsupported types,
@@ -108,28 +111,35 @@ def extract_text(path: Path) -> str | None:
     if not isinstance(path, Path):
         path = Path(path)
 
-    if not path.exists():
-        return f"[error: file not found: {path}]"
-    try:
-        if path.stat().st_size > _MAX_EXTRACT_FILE_SIZE:
-            return f"[error: file exceeds {_MAX_EXTRACT_FILE_SIZE // (1024 * 1024)} MB limit]"
-    except OSError as e:
-        return f"[error: failed to inspect file: {e!s}]"
+    if content is None:
+        if not path.exists():
+            return f"[error: file not found: {path}]"
+        try:
+            size = path.stat().st_size
+        except OSError as e:
+            return f"[error: failed to inspect file: {e!s}]"
+        source: Path | BinaryIO = path
+    else:
+        size = len(content)
+        source = BytesIO(content)
+
+    if size > _MAX_EXTRACT_FILE_SIZE:
+        return f"[error: file exceeds {_MAX_EXTRACT_FILE_SIZE // (1024 * 1024)} MB limit]"
 
     ext = path.suffix.lower()
 
     # Parsers stay lazy even though they are bundled so idle processes do not
     # retain their import cost (see issue #3422).
     if ext == ".pdf":
-        return _extract_pdf(path)
+        return _extract_pdf(source)
     elif ext == ".docx":
-        return _extract_docx(path)
+        return _extract_docx(source)
     elif ext == ".xlsx":
-        return _extract_xlsx(path)
+        return _extract_xlsx(source)
     elif ext == ".pptx":
-        return _extract_pptx(path)
+        return _extract_pptx(source)
     elif _is_text_extension(ext):
-        return _extract_text_file(path)
+        return _extract_text_file(source)
     elif ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
         # Image files - for future OCR support
         return f"[image: {path.name}]"
@@ -138,11 +148,11 @@ def extract_text(path: Path) -> str | None:
         return None
 
 
-def _extract_pdf(path: Path) -> str:
+def _extract_pdf(source: Path | BinaryIO) -> str:
     """Extract text from PDF using pypdf."""
     try:
         result = extract_pdf_pages(
-            path,
+            source,
             max_pages=_MAX_PDF_ATTACHMENT_PAGES,
             max_chars=_MAX_TEXT_LENGTH,
         )
@@ -151,12 +161,12 @@ def _extract_pdf(path: Path) -> str:
             text += f"\n\n(Showing pages 1-{result.end_page + 1} of {result.total_pages}.)"
         return text
     except Exception as e:
-        logger.exception("Failed to extract PDF {}", path)
+        logger.exception("Failed to extract PDF {}", source)
         return f"[error: failed to extract PDF: {e!s}]"
 
 
 def extract_pdf_pages(
-    path: Path,
+    path: Path | BinaryIO,
     *,
     pages: str | None = None,
     max_pages: int = _MAX_PDF_ATTACHMENT_PAGES,
@@ -206,16 +216,17 @@ def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int
     return start - 1, min(end, total_pages) - 1
 
 
-def _extract_docx(path: Path) -> str:
+def _extract_docx(source: Path | BinaryIO) -> str:
     """Extract text from DOCX using python-docx."""
     try:
         from docx import Document as DocxDocument
     except ImportError:
         return "[error: python-docx not installed]"
     try:
-        if error := _office_archive_error(path):
+        if error := _office_archive_error(source):
             return error
-        doc = DocxDocument(path)
+        _rewind(source)
+        doc = DocxDocument(source)
         collector = _TextCollector(_MAX_TEXT_LENGTH)
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
@@ -223,20 +234,21 @@ def _extract_docx(path: Path) -> str:
                 break
         return collector.render()
     except Exception as e:
-        logger.exception("Failed to extract DOCX {}", path)
+        logger.exception("Failed to extract DOCX {}", source)
         return f"[error: failed to extract DOCX: {e!s}]"
 
 
-def _extract_xlsx(path: Path) -> str:
+def _extract_xlsx(source: Path | BinaryIO) -> str:
     """Extract text from XLSX using openpyxl."""
     try:
         from openpyxl import load_workbook
     except ImportError:
         return "[error: openpyxl not installed]"
     try:
-        if error := _office_archive_error(path):
+        if error := _office_archive_error(source):
             return error
-        wb = load_workbook(path, read_only=True, data_only=True)
+        _rewind(source)
+        wb = load_workbook(source, read_only=True, data_only=True)
         try:
             collector = _TextCollector(_MAX_TEXT_LENGTH)
             for sheet_name in wb.sheetnames:
@@ -258,20 +270,21 @@ def _extract_xlsx(path: Path) -> str:
         finally:
             wb.close()
     except Exception as e:
-        logger.exception("Failed to extract XLSX {}", path)
+        logger.exception("Failed to extract XLSX {}", source)
         return f"[error: failed to extract XLSX: {e!s}]"
 
 
-def _extract_pptx(path: Path) -> str:
+def _extract_pptx(source: Path | BinaryIO) -> str:
     """Extract text from PPTX using python-pptx."""
     try:
         from pptx import Presentation as PptxPresentation
     except ImportError:
         return "[error: python-pptx not installed]"
     try:
-        if error := _office_archive_error(path):
+        if error := _office_archive_error(source):
             return error
-        prs = PptxPresentation(path)
+        _rewind(source)
+        prs = PptxPresentation(source)
         collector = _TextCollector(_MAX_TEXT_LENGTH)
         for i, slide in enumerate(prs.slides, 1):
             slide_text: list[str] = []
@@ -285,7 +298,7 @@ def _extract_pptx(path: Path) -> str:
                     break
         return collector.render()
     except Exception as e:
-        logger.exception("Failed to extract PPTX {}", path)
+        logger.exception("Failed to extract PPTX {}", source)
         return f"[error: failed to extract PPTX: {e!s}]"
 
 
@@ -314,10 +327,10 @@ def _collect_pptx_shape_text(shape, out: list[str]) -> None:
         out.append(text)
 
 
-def _office_archive_error(path: Path) -> str | None:
+def _office_archive_error(source: Path | BinaryIO) -> str | None:
     """Reject oversized or encrypted OOXML containers before parsing XML."""
     try:
-        with ZipFile(path) as archive:
+        with ZipFile(source) as archive:
             members = archive.infolist()
     except (BadZipFile, OSError) as e:
         return f"[error: invalid Office document: {e!s}]"
@@ -336,17 +349,31 @@ def _office_archive_error(path: Path) -> str | None:
     return None
 
 
-def _extract_text_file(path: Path) -> str:
+def _rewind(source: Path | BinaryIO) -> None:
+    """Reset a file-like parser source after a preflight inspection."""
+    if not isinstance(source, Path):
+        source.seek(0)
+
+
+def _extract_text_file(source: Path | BinaryIO) -> str:
     """Extract text from a plain text file."""
     try:
         # Try UTF-8 first, then latin-1 fallback
         try:
-            content = path.read_text(encoding="utf-8")
+            if isinstance(source, Path):
+                content = source.read_text(encoding="utf-8")
+            else:
+                _rewind(source)
+                content = source.read().decode("utf-8")
         except UnicodeDecodeError:
-            content = path.read_text(encoding="latin-1")
+            if isinstance(source, Path):
+                content = source.read_text(encoding="latin-1")
+            else:
+                _rewind(source)
+                content = source.read().decode("latin-1")
         return _truncate(content, _MAX_TEXT_LENGTH)
     except Exception as e:
-        logger.exception("Failed to read text file {}", path)
+        logger.exception("Failed to read text file {}", source)
         return f"[error: failed to read file: {e!s}]"
 
 

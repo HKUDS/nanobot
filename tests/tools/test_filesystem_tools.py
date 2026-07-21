@@ -1,5 +1,8 @@
 """Tests for enhanced filesystem tools: ReadFileTool, EditFileTool, ListDirTool."""
 
+import os
+import subprocess
+
 import pytest
 
 from nanobot.agent.tools.filesystem import (
@@ -295,6 +298,142 @@ class TestListDirTool:
 # ---------------------------------------------------------------------------
 
 class TestWorkspaceRestriction:
+
+    @staticmethod
+    def _replace_directory_with_link(directory, outside):
+        original = directory.with_name(f"{directory.name}-original")
+        directory.rename(original)
+        if os.name == "nt":
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(directory), str(outside)],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode:
+                original.rename(directory)
+                pytest.skip(f"junction creation is unavailable: {result.stderr}")
+        else:
+            try:
+                directory.symlink_to(outside, target_is_directory=True)
+            except OSError as exc:
+                original.rename(directory)
+                pytest.skip(f"symlink creation is unavailable: {exc}")
+        return original
+
+    @staticmethod
+    def _restore_directory(directory, original):
+        if os.name == "nt":
+            directory.rmdir()
+        else:
+            directory.unlink()
+        original.rename(directory)
+
+    @staticmethod
+    def _race_files(tmp_path, filename="note.txt"):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        checked_dir = workspace / "checked"
+        checked_dir.mkdir()
+        target = checked_dir / filename
+        target.write_text("workspace content", encoding="utf-8")
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        outside = outside_dir / filename
+        outside.write_text("outside secret", encoding="utf-8")
+        return workspace, checked_dir, target, outside_dir, outside
+
+    @staticmethod
+    def _swap_directory_after_resolve(
+        tool, resolver_name, directory, outside, monkeypatch,
+    ):
+        original_resolver = getattr(tool, resolver_name)
+        swapped = False
+
+        def resolve_and_swap(path):
+            nonlocal swapped
+            resolved = original_resolver(path)
+            if not swapped:
+                TestWorkspaceRestriction._replace_directory_with_link(directory, outside)
+                swapped = True
+            return resolved
+
+        monkeypatch.setattr(tool, resolver_name, resolve_and_swap)
+
+    @pytest.mark.parametrize(
+        ("tool_cls", "resolver_name", "execute_kwargs"),
+        [
+            (ReadFileTool, "_resolve_read", {}),
+            (WriteFileTool, "_resolve_write", {"content": "replacement"}),
+            (
+                EditFileTool,
+                "_resolve_write",
+                {"old_text": "outside secret", "new_text": "replacement"},
+            ),
+        ],
+        ids=["read", "write", "edit"],
+    )
+    @pytest.mark.asyncio
+    async def test_file_access_blocks_directory_swap_after_workspace_check(
+        self, tmp_path, monkeypatch, tool_cls, resolver_name, execute_kwargs,
+    ):
+        workspace, checked_dir, target, outside_dir, outside = self._race_files(tmp_path)
+        tool = tool_cls(workspace=workspace, allowed_dir=workspace)
+        self._swap_directory_after_resolve(
+            tool, resolver_name, checked_dir, outside_dir, monkeypatch,
+        )
+
+        result = await tool.execute(path=str(target), **execute_kwargs)
+
+        assert "Error" in result
+        assert "outside secret" not in result
+        assert outside.read_text(encoding="utf-8") == "outside secret"
+
+    @pytest.mark.asyncio
+    async def test_office_read_blocks_directory_swap_before_parser(
+        self, tmp_path, monkeypatch,
+    ):
+        workspace, checked_dir, target, outside_dir, _ = self._race_files(
+            tmp_path, "note.docx",
+        )
+        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+        self._swap_directory_after_resolve(
+            tool, "_resolve_read", checked_dir, outside_dir, monkeypatch,
+        )
+        monkeypatch.setattr(
+            "nanobot.utils.document.extract_text",
+            lambda path, content=None: path.read_text(encoding="utf-8"),
+        )
+
+        result = await tool.execute(path=str(target))
+
+        assert "Error" in result
+        assert "outside secret" not in result
+
+    @pytest.mark.asyncio
+    async def test_read_blocks_swap_restored_before_boundary_recheck(self, tmp_path, monkeypatch):
+        workspace, checked_dir, target, outside_dir, _ = self._race_files(tmp_path)
+        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+        original_resolver = tool._resolve_read
+        original_dir = None
+        calls = 0
+
+        def resolve_with_transient_swap(path):
+            nonlocal calls, original_dir
+            calls += 1
+            if calls == 1:
+                resolved = original_resolver(path)
+                original_dir = self._replace_directory_with_link(checked_dir, outside_dir)
+                return resolved
+            if calls == 2 and original_dir is not None:
+                self._restore_directory(checked_dir, original_dir)
+            return original_resolver(path)
+
+        monkeypatch.setattr(tool, "_resolve_read", resolve_with_transient_swap)
+
+        result = await tool.execute(path=str(target))
+
+        assert "Error" in result
+        assert "outside secret" not in result
 
     @pytest.mark.asyncio
     async def test_read_blocked_outside_workspace(self, tmp_path):

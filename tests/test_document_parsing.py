@@ -1,5 +1,6 @@
 """Tests for document text extraction utilities."""
 
+from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -130,8 +131,10 @@ class TestExtractText:
 
         wb.save(xlsx_file)
         wb.close()
+        snapshot = xlsx_file.read_bytes()
+        xlsx_file.write_bytes(b"not the validated workbook")
 
-        result = extract_text(xlsx_file)
+        result = extract_text(xlsx_file, content=snapshot)
         assert result is not None
         assert "--- Sheet: Sheet1 ---" in result
         assert "--- Sheet: Sheet2 ---" in result
@@ -174,6 +177,23 @@ class TestExtractText:
         assert "This is paragraph one." in result
         assert "This is paragraph two." in result
 
+    def test_extract_text_docx_uses_supplied_content_snapshot(self, tmp_path: Path):
+        """Validated bytes should be parsed without reopening the path."""
+        from docx import Document
+
+        snapshot = BytesIO()
+        doc = Document()
+        doc.add_paragraph("validated snapshot")
+        doc.save(snapshot)
+
+        docx_file = tmp_path / "test.docx"
+        docx_file.write_bytes(b"not the validated document")
+
+        result = extract_text(docx_file, content=snapshot.getvalue())
+
+        assert result is not None
+        assert "validated snapshot" in result
+
     def test_extract_text_docx_empty(self, tmp_path: Path):
         """Test extracting text from an empty .docx file."""
         from docx import Document
@@ -206,8 +226,10 @@ class TestExtractText:
         text_frame.text = "Bullet point content"
 
         prs.save(pptx_file)
+        snapshot = pptx_file.read_bytes()
+        pptx_file.write_bytes(b"not the validated presentation")
 
-        result = extract_text(pptx_file)
+        result = extract_text(pptx_file, content=snapshot)
         assert result is not None
         assert "--- Slide 1 ---" in result
         assert "--- Slide 2 ---" in result
