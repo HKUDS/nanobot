@@ -15,7 +15,7 @@ from nanobot import __version__
 from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
-from nanobot.session.goal_state import cancel_goal_state, sustained_goal_active
+from nanobot.session.goal_state import cancel_goal_state
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
