@@ -213,6 +213,7 @@ vi.mock("@/lib/nanobot-client", () => {
     };
     getRunStartedAt = () => null;
     getGoalState = () => undefined;
+    getTurnModel = () => undefined;
     sendMessage = vi.fn();
     newChat = vi.fn();
     attach = attachSpy;

@@ -14,6 +14,7 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel._turn_models = {}
 
     sent_events = []
 
@@ -39,6 +40,7 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel._turn_models = {}
 
     sent_events = []
 
