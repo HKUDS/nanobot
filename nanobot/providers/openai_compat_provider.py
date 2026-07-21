@@ -86,6 +86,17 @@ _MIMO_THINKING_MODELS: frozenset[str] = frozenset({
     "mimo-v2-pro",
     "mimo-v2-omni",
 })
+# Qwen 3.x models that expose thinking/reasoning content by default.
+# Uses enable_thinking parameter to control thinking mode.
+_QWEN_THINKING_MODELS: frozenset[str] = frozenset({
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-max-preview",
+    "qwen3.6-plus",
+    "qwen3.6-flash",
+    "qwen3.5-plus",
+    "qwen3.5-flash",
+})
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
@@ -102,6 +113,7 @@ _GATEWAY_REASONING_STYLE_MAP: dict[str, Any] = {
 _MODEL_THINKING_STYLES: dict[str, str] = {
     **dict.fromkeys(_KIMI_THINKING_MODELS, "thinking_type"),
     **dict.fromkeys(_MIMO_THINKING_MODELS, "thinking_type"),
+    **dict.fromkeys(_QWEN_THINKING_MODELS, "enable_thinking"),
 }
 
 
