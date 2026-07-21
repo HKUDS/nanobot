@@ -758,11 +758,7 @@ def settings_payload(
     config = load_config()
     defaults = config.agents.defaults
     active_preset_name = defaults.model_preset or "default"
-    try:
-        effective_preset = config.resolve_preset()
-    except Exception:
-        effective_preset = config.resolve_default_preset()
-        active_preset_name = "default"
+    effective_preset = config.resolve_preset()
 
     provider_name = (
         config.get_provider_name(effective_preset.model, preset=effective_preset)

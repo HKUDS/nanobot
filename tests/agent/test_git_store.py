@@ -1,9 +1,10 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
+from unittest.mock import patch
 
 import pytest
 
-from nanobot.utils.gitstore import CommitInfo, GitStore
+from nanobot.utils.gitstore import CommitInfo, GitStore, GitStoreError
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -48,6 +49,11 @@ class TestInit:
         commits = git_ready.log()
         assert len(commits) == 1
         assert "init" in commits[0].message
+
+    def test_init_failure_is_explicit(self, git):
+        with patch("dulwich.porcelain.init", side_effect=OSError("cannot initialize")):
+            with pytest.raises(GitStoreError, match="init failed"):
+                git.init()
 
 
 class TestBuildGitignore:
@@ -96,6 +102,11 @@ class TestAutoCommit:
         git_ready.auto_commit("nothing 1")
         git_ready.auto_commit("nothing 2")
         assert len(git_ready.log()) == 1  # only init commit
+
+    def test_status_failure_is_explicit(self, git_ready):
+        with patch("dulwich.porcelain.status", side_effect=OSError("broken index")):
+            with pytest.raises(GitStoreError, match="auto-commit failed"):
+                git_ready.auto_commit("update")
 
 
 class TestLog:

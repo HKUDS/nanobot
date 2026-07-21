@@ -53,36 +53,32 @@ _BUNDLED_FEATURE_ALIASES = {"documents", "pdf"}
 
 
 def load_pyproject(path: Path) -> dict[str, Any]:
-    try:
-        import tomllib
+    import tomllib
 
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return {}
+    return tomllib.loads(content)
 
 
 def optional_dependency_groups_from_metadata() -> dict[str, list[str] | None]:
-    try:
-        from importlib.metadata import metadata, requires
-    except Exception:
-        return {}
+    from importlib.metadata import metadata, requires
 
     try:
         extras = metadata("nanobot-ai").get_all("Provides-Extra") or []
-        groups: dict[str, list[str] | None] = {name: [] for name in extras if name != "dev"}
-        for raw in requires("nanobot-ai") or []:
-            try:
-                req = Requirement(raw)
-            except Exception:
-                continue
-            if not req.marker:
-                continue
-            for extra, deps in groups.items():
-                if deps is not None and req.marker.evaluate({"extra": extra}):
-                    deps.append(raw)
-        return groups
-    except Exception:
+        raw_requirements = requires("nanobot-ai") or []
+    except PackageNotFoundError:
         return {}
+    groups: dict[str, list[str] | None] = {name: [] for name in extras if name != "dev"}
+    for raw in raw_requirements:
+        req = Requirement(raw)
+        if not req.marker:
+            continue
+        for extra, deps in groups.items():
+            if deps is not None and req.marker.evaluate({"extra": extra}):
+                deps.append(raw)
+    return groups
 
 
 def optional_dependency_groups() -> dict[str, list[str] | None]:
@@ -105,11 +101,7 @@ def optional_dependency_groups() -> dict[str, list[str] | None]:
 def _install_requirements_for_extra(extra: str, deps: list[str]) -> list[str]:
     install_args: list[str] = []
     for raw in deps:
-        try:
-            req = Requirement(raw)
-        except Exception:
-            install_args.append(raw)
-            continue
+        req = Requirement(raw)
         if req.marker and not req.marker.evaluate({"extra": extra}):
             continue
         req.marker = None
@@ -168,10 +160,7 @@ def _extra_dependencies_installed(
 
     matched = False
     for raw in dist.requires or []:
-        try:
-            req = Requirement(raw)
-        except Exception:
-            continue
+        req = Requirement(raw)
         if req.marker and not req.marker.evaluate({"extra": requested_extra}):
             continue
         matched = True

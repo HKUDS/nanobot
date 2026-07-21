@@ -170,3 +170,27 @@ class TestFlushAll:
         assert len(history) == 2
         assert history[0]["content"] == "remember this"
         assert history[1]["content"] == "noted"
+
+
+class TestLoadErrors:
+    @pytest.mark.parametrize(
+        "operation",
+        ("get_or_create", "read_session_file", "read_session_metadata", "list_sessions"),
+    )
+    def test_permission_error_is_not_treated_as_corrupt_data(
+        self,
+        sessions_dir: Path,
+        operation: str,
+    ) -> None:
+        writer = SessionManager(workspace=sessions_dir)
+        session = writer.get_or_create("test:permission")
+        session.add_message("user", "must not disappear")
+        writer.save(session)
+
+        reader = SessionManager(workspace=sessions_dir)
+        with patch("builtins.open", side_effect=PermissionError("access denied")):
+            with pytest.raises(PermissionError, match="access denied"):
+                if operation == "list_sessions":
+                    reader.list_sessions()
+                else:
+                    getattr(reader, operation)("test:permission")

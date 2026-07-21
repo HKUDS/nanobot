@@ -150,6 +150,30 @@ def _tool_message(result, tool_call_id: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_runner_propagates_tool_preparation_failure():
+    tools = MagicMock()
+    tools.prepare_call.side_effect = RuntimeError("tool preparation failed")
+    tools.execute = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="tool preparation failed"):
+        await AgentRunner()._run_tool(
+            make_run_spec(
+                MagicMock(),
+                initial_messages=[],
+                tools=tools,
+                model="test-model",
+                max_iterations=1,
+                max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            ),
+            ToolCallRequest(id="call-1", name="demo", arguments={}),
+            {},
+            {},
+        )
+
+    tools.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
     tools = ToolRegistry()
     shared_events: list[str] = []

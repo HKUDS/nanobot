@@ -34,6 +34,21 @@ DYNAMIC_PROVIDER_NAME = "my-company-api"
 DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
 
 
+def test_settings_payload_propagates_preset_resolution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = Config()
+    monkeypatch.setattr("nanobot.webui.settings_api.load_config", lambda: config)
+    monkeypatch.setattr(
+        Config,
+        "resolve_preset",
+        lambda _self: (_ for _ in ()).throw(RuntimeError("invalid preset")),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid preset"):
+        settings_payload()
+
+
 def test_docs_version_uses_released_versions_and_falls_back_for_dev() -> None:
     assert _docs_version("0.2.3") == "0.2.3"
     assert _docs_version("0.2.3.post1") == "0.2.3.post1"

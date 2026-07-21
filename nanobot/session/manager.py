@@ -43,6 +43,7 @@ _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
+_SESSION_DATA_ERRORS = (ValueError, TypeError, AttributeError, KeyError)
 _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
@@ -466,7 +467,7 @@ class SessionManager:
             if padding != 4:
                 stem += "=" * padding
             return base64.urlsafe_b64decode(stem).decode("utf-8")
-        except Exception:
+        except _SESSION_DATA_ERRORS:
             return None
 
     def _get_session_path(self, key: str) -> Path:
@@ -491,11 +492,13 @@ class SessionManager:
                     if not line:
                         continue
                     data = json.loads(line)
+                    if not isinstance(data, dict):
+                        raise ValueError("session records must be JSON objects")
                     if data.get("_type") == "metadata":
                         stored_key = data.get("key")
                         return stored_key if isinstance(stored_key, str) else None
                     return None
-        except Exception:
+        except _SESSION_DATA_ERRORS:
             return None
         return None
 
@@ -540,11 +543,8 @@ class SessionManager:
                         stored_key,
                     )
                     continue
-                try:
-                    shutil.move(str(fallback_path), str(path))
-                    logger.info("Migrated session {} from {}", key, description)
-                except Exception:
-                    logger.exception("Failed to migrate session {}", key)
+                shutil.move(str(fallback_path), str(path))
+                logger.info("Migrated session {} from {}", key, description)
                 break
 
         if not path.exists():
@@ -564,6 +564,8 @@ class SessionManager:
                         continue
 
                     data = json.loads(line)
+                    if not isinstance(data, dict):
+                        raise ValueError("session records must be JSON objects")
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
@@ -581,7 +583,7 @@ class SessionManager:
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
-        except Exception as e:
+        except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to load session {}: {}", key, e)
             repaired = self._repair(key)
             if repaired is not None:
@@ -613,6 +615,9 @@ class SessionManager:
                     except json.JSONDecodeError:
                         skipped += 1
                         continue
+                    if not isinstance(data, dict):
+                        skipped += 1
+                        continue
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
@@ -640,7 +645,7 @@ class SessionManager:
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
-        except Exception as e:
+        except _SESSION_DATA_ERRORS as e:
             logger.warning("Repair failed for session {}: {}", key, e)
             return None
 
@@ -842,7 +847,7 @@ class SessionManager:
                 "metadata": metadata,
                 "messages": messages,
             }
-        except Exception as e:
+        except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session {}: {}", key, e)
             repaired = self._repair(key)
             if repaired is not None:
@@ -866,6 +871,8 @@ class SessionManager:
                     if not line:
                         continue
                     data = json.loads(line)
+                    if not isinstance(data, dict):
+                        raise ValueError("session records must be JSON objects")
                     if data.get("_type") != "metadata":
                         return None
                     metadata = data.get("metadata", {})
@@ -876,7 +883,7 @@ class SessionManager:
                         "metadata": metadata if isinstance(metadata, dict) else {},
                     }
             return None
-        except Exception as e:
+        except _SESSION_DATA_ERRORS as e:
             logger.warning("Failed to read session metadata {}: {}", key, e)
             repaired = self._repair(key)
             if repaired is not None:
@@ -907,6 +914,8 @@ class SessionManager:
                     first_line = f.readline().strip()
                     if first_line:
                         data = json.loads(first_line)
+                        if not isinstance(data, dict):
+                            raise ValueError("session records must be JSON objects")
                         if data.get("_type") == "metadata":
                             key = data.get("key") or fallback_key
                             metadata = data.get("metadata", {})
@@ -926,6 +935,8 @@ class SessionManager:
                                 ):
                                     break
                                 item = json.loads(line)
+                                if not isinstance(item, dict):
+                                    raise ValueError("session records must be JSON objects")
                                 if item.get("_type") == "metadata":
                                     continue
                                 text = _message_preview_text(item)
@@ -948,7 +959,7 @@ class SessionManager:
                                     "path": str(path),
                                 }
                             )
-            except Exception:
+            except _SESSION_DATA_ERRORS:
                 repaired = self._repair(fallback_key, path=path)
                 if repaired is not None:
                     sessions.append(

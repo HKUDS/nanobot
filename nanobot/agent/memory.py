@@ -941,18 +941,19 @@ class Consolidator:
         messages_to_summarize = public_history_messages(
             summary_messages if summary_messages is not None else messages
         )
+        formatted = MemoryStore._format_messages(messages_to_summarize)
+        formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
+        system_prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+        )
         try:
-            formatted = MemoryStore._format_messages(messages_to_summarize)
-            formatted = self._truncate_to_token_budget(formatted, runtime=runtime)
             response = await runtime.provider.chat_with_retry(
                 model=runtime.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": render_template(
-                            "agent/consolidator_archive.md",
-                            strip=True,
-                        ),
+                        "content": system_prompt,
                     },
                     {"role": "user", "content": formatted},
                 ],
@@ -962,19 +963,21 @@ class Consolidator:
                 max_tokens=runtime.generation.max_tokens,
                 reasoning_effort=runtime.generation.reasoning_effort,
             )
-            if response.finish_reason == "error":
-                raise RuntimeError(f"LLM returned error: {response.content}")
-            summary = response.content or "[no summary]"
-            self.store.append_history(
-                summary,
-                max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
-                session_key=session_key,
-            )
-            return summary
         except Exception:
-            logger.warning("Consolidation LLM call failed, raw-dumping to history")
+            logger.warning("Consolidation provider call failed, raw-dumping to history")
             self.store.raw_archive(messages, session_key=session_key)
             return None
+        if response.finish_reason == "error":
+            logger.warning("Consolidation provider returned an error, raw-dumping to history")
+            self.store.raw_archive(messages, session_key=session_key)
+            return None
+        summary = response.content or "[no summary]"
+        self.store.append_history(
+            summary,
+            max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
+            session_key=session_key,
+        )
+        return summary
 
     async def maybe_consolidate_by_tokens(
         self,
@@ -1007,14 +1010,10 @@ class Consolidator:
                 replay_max_messages,
                 runtime=runtime,
             )
-            try:
-                estimated, source = self.estimate_session_prompt_tokens(
-                    session,
-                    runtime=runtime,
-                )
-            except Exception:
-                logger.exception("Token estimation failed for {}", session.key)
-                estimated, source = 0, "error"
+            estimated, source = self.estimate_session_prompt_tokens(
+                session,
+                runtime=runtime,
+            )
             if estimated <= 0:
                 self._persist_last_summary(session, last_summary)
                 return
@@ -1077,14 +1076,10 @@ class Consolidator:
                     # the next invocation can retry a fresh chunk.
                     break
 
-                try:
-                    estimated, source = self.estimate_session_prompt_tokens(
-                        session,
-                        runtime=runtime,
-                    )
-                except Exception:
-                    logger.exception("Token estimation failed for {}", session.key)
-                    estimated, source = 0, "error"
+                estimated, source = self.estimate_session_prompt_tokens(
+                    session,
+                    runtime=runtime,
+                )
                 if estimated <= 0:
                     break
 
