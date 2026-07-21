@@ -1146,14 +1146,15 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("opens skills only from a $ reference anywhere", () => {
+  it("opens skills only from a $ reference and prioritizes the skill name", () => {
+    const skillName = "arxiv-intelligence-filter";
     render(
         <ThreadComposer
           onSend={vi.fn()}
           placeholder="Type your message..."
           skills={[{
-            name: "github",
-            description: "Work with pull requests and issues",
+            name: skillName,
+            description: "Fetch and summarize the latest AI research papers every day",
             source: "builtin",
             available: true,
           }]}
@@ -1165,15 +1166,18 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
 
-    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+    fireEvent.change(input, { target: { value: "please use $arxiv", selectionStart: 17 } });
 
     const palette = screen.getByRole("listbox", { name: "Slash commands" });
-    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("$github");
+    const option = within(palette).getByRole("option", { name: new RegExp(skillName, "i") });
+    const name = within(option).getByText(skillName);
+    expect(name).not.toHaveClass("truncate");
+    expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: "Tab" });
 
-    expect(input).toHaveValue("please use $github ");
+    expect(input).toHaveValue(`please use $${skillName} `);
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {
