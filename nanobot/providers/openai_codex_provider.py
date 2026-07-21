@@ -37,10 +37,12 @@ class OpenAICodexProvider(LLMProvider):
         self,
         default_model: str = "openai-codex/gpt-5.6-sol",
         proxy: str | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.proxy = proxy or None
+        self._extra_body = dict(extra_body or {})
 
     async def _call_codex(
         self,
@@ -74,6 +76,9 @@ class OpenAICodexProvider(LLMProvider):
             body["reasoning"] = reasoning_options
         if tools:
             body["tools"] = convert_tools(tools)
+        if self._extra_body:
+            # Apply explicit provider overrides last, matching other provider backends.
+            body.update(self._extra_body)
 
         stage = "oauth_token"
         try:

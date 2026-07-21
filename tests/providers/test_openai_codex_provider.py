@@ -9,6 +9,8 @@ import pytest
 from loguru import logger
 
 import nanobot.providers.base as provider_base
+from nanobot.config.schema import Config
+from nanobot.providers.factory import make_provider
 from nanobot.providers.openai_codex_provider import (
     OpenAICodexProvider,
     _build_reasoning_options,
@@ -220,6 +222,38 @@ async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatc
 
     assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
     assert bodies[0]["prompt_cache_key"] != bodies[2]["prompt_cache_key"]
+    assert all("service_tier" not in body for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> None:
+    bodies: list[dict[str, Any]] = []
+    _mock_codex_token(monkeypatch)
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        bodies.append(body)
+        return "ok", [], "stop", {}, None
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "openai-codex/gpt-5.6-sol",
+                "provider": "openai_codex",
+            },
+        },
+        "providers": {
+            "openaiCodex": {
+                "extraBody": {"service_tier": "priority"},
+            },
+        },
+    })
+
+    provider = make_provider(config)
+    response = await provider.chat([{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert bodies[0]["service_tier"] == "priority"
 
 
 @pytest.mark.asyncio
