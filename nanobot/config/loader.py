@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from nanobot.config.schema import Config, _resolve_tool_config_refs
+from nanobot.utils.helpers import _write_text_atomic
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
@@ -85,8 +86,8 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
             "proxy": config.providers.openai_codex.proxy,
         }
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    # Temp + replace so a crash mid-write cannot leave a truncated config.json.
+    _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def merge_missing_defaults(existing: Any, defaults: Any) -> Any:
@@ -114,6 +115,24 @@ def resolve_config_env_vars(config: Config) -> Config:
     Raises ``ValueError`` if a referenced variable is not set.
     """
     return _resolve_in_place(config)
+
+
+def resolve_env_refs(value: str) -> str:
+    """Resolve ``${VAR}`` references in a single string, leniently.
+
+    Unlike :func:`resolve_config_env_vars` (which walks a whole ``Config`` and
+    raises on a missing variable), this resolves one value and returns an empty
+    string if any reference is unset. It is meant for individual, lazily consumed
+    fields — e.g. a transcription provider's ``api_key`` or ``api_base`` — so a
+    missing variable degrades to "not configured" instead of producing a partial
+    value. Non-string input is returned unchanged.
+    """
+    if not isinstance(value, str):
+        return value
+    names = _ENV_REF_PATTERN.findall(value)
+    if any(name not in os.environ for name in names):
+        return ""
+    return _ENV_REF_PATTERN.sub(lambda m: os.environ[m.group(1)], value)
 
 
 def _resolve_in_place(obj: Any) -> Any:

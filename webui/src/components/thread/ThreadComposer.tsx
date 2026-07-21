@@ -286,6 +286,7 @@ interface SlashPaletteCommand {
   title: string;
   description: string;
   icon: string;
+  kind?: "skill";
   argHint?: string;
   detail: string;
   badge?: string;
@@ -1009,6 +1010,7 @@ export function ThreadComposer({
             description,
             detail: description,
             icon: "brain",
+            kind: "skill" as const,
             recent: recentSlashCommands.includes(command),
           };
         })
@@ -2582,6 +2584,7 @@ function SlashCommandPalette({
         {commands.map((command, index) => {
           const Icon = COMMAND_ICONS[command.icon] ?? CircleHelp;
           const selected = index === selectedIndex;
+          const isSkill = command.kind === "skill";
           const commandKey = slashCommandI18nKey(command.command);
           const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
             defaultValue: command.title,
@@ -2617,23 +2620,34 @@ function SlashCommandPalette({
                 <Icon className="h-4 w-4" />
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-                <span className="min-w-0 truncate text-[13.5px] font-semibold tracking-normal text-foreground">
+                <span
+                  className={cn(
+                    "text-[13.5px] font-semibold tracking-normal text-foreground",
+                    isSkill
+                      ? "max-w-full shrink-0 break-all sm:max-w-[55%]"
+                      : "min-w-0 truncate",
+                  )}
+                >
                   {title}
                 </span>
                 <span className="min-w-0 truncate text-[13px] text-muted-foreground">
                   {command.detail || description}
                 </span>
               </span>
-              <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
-                {command.badge || command.recent ? (
-                  <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
-                    {command.badge ?? t("thread.composer.slash.badges.recent")}
-                  </span>
-                ) : null}
-                <span className="font-mono text-[12px] text-muted-foreground/60">
-                  {command.argHint ? `${command.command} ${command.argHint}` : command.command}
+              {!isSkill || command.badge || command.recent ? (
+                <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
+                  {command.badge || command.recent ? (
+                    <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
+                      {command.badge ?? t("thread.composer.slash.badges.recent")}
+                    </span>
+                  ) : null}
+                  {!isSkill ? (
+                    <span className="font-mono text-[12px] text-muted-foreground/60">
+                      {command.argHint ? `${command.command} ${command.argHint}` : command.command}
+                    </span>
+                  ) : null}
                 </span>
-              </span>
+              ) : null}
             </button>
           );
         })}

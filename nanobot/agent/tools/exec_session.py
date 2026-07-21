@@ -61,12 +61,14 @@ class _ExecSession:
         cwd: str,
         timeout: int | None,
         owner_session_key: str | None = None,
+        process_tree: bool = False,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command = command
         self.cwd = cwd
         self.owner_session_key = owner_session_key
+        self._process_tree = process_tree
         self.started_at = time.monotonic()
         # timeout None/0 means no limit; an infinite deadline is never reached.
         self.deadline = time.monotonic() + timeout if timeout else float("inf")
@@ -171,17 +173,23 @@ class _ExecSession:
         )
 
     async def kill(self) -> None:
-        if self.process.returncode is not None:
-            return
-        self.process.kill()
+        from nanobot.agent.tools.shell import ExecTool
+
         try:
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self.process.wait(), timeout=5.0)
+            if self._process_tree:
+                await ExecTool._kill_process_tree(self.process)
+            else:
+                await ExecTool._kill_process(self.process)
         finally:
-            # Safety-net waitpid — prevent zombie if asyncio's child watcher
-            # did not reap the process (common in containers).
-            from nanobot.agent.tools.shell import _reap_pid
-            _reap_pid(self.process.pid)
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        self._stdout_task,
+                        self._stderr_task,
+                        return_exceptions=True,
+                    ),
+                    timeout=2.0,
+                )
 
     async def _wait_for_buffered_output(self) -> None:
         deadline = time.monotonic() + OUTPUT_DRAIN_GRACE_S
@@ -198,6 +206,7 @@ class ExecSessionManager:
         self.idle_timeout = idle_timeout
         self._sessions: dict[str, _ExecSession] = {}
         self._lock = asyncio.Lock()
+        self._closed = False
 
     async def start(
         self,
@@ -213,6 +222,8 @@ class ExecSessionManager:
         owner_session_key: str | None = None,
     ) -> tuple[str, _SessionPoll]:
         async with self._lock:
+            if self._closed:
+                raise RuntimeError("exec session manager is closed")
             await self._cleanup_locked()
             if len(self._sessions) >= self.max_sessions:
                 raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
@@ -225,6 +236,7 @@ class ExecSessionManager:
                 cwd=cwd,
                 timeout=timeout,
                 owner_session_key=owner_session_key,
+                process_tree=True,
             )
             self._sessions[session_id] = session
 
@@ -295,6 +307,33 @@ class ExecSessionManager:
                 if session.owner_session_key == owner_session_key
             ]
 
+    async def close_all(self) -> int:
+        """Terminate and remove all active sessions during shutdown."""
+        async with self._lock:
+            self._closed = True
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        results = await asyncio.gather(
+            *(session.kill() for session in sessions),
+            return_exceptions=True,
+        )
+        failures = [
+            (session, result)
+            for session, result in zip(sessions, results, strict=True)
+            if isinstance(result, BaseException)
+        ]
+        if failures:
+            async with self._lock:
+                for session, _ in failures:
+                    self._sessions[session.session_id] = session
+            if len(failures) == 1:
+                raise failures[0][1]
+            raise BaseExceptionGroup(
+                "failed to close exec sessions",
+                [result for _, result in failures],
+            )
+        return len(sessions)
+
     async def _cleanup_locked(self) -> None:
         now = time.monotonic()
         stale = [
@@ -319,6 +358,7 @@ class ExecSessionManager:
         return await ExecTool._spawn(
             command, cwd, env, shell_program, login,
             stdin=asyncio.subprocess.PIPE,
+            process_tree=True,
         )
 
 

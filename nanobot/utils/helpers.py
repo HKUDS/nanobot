@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import time
 import uuid
 from contextlib import suppress
@@ -18,6 +19,68 @@ from loguru import logger
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+
+
+def sanitize_surrogates(text: str) -> str:
+    """Reconstruct surrogate pairs and replace unpaired surrogates.
+
+    Lone UTF-16 surrogate code points (``U+D800``..``U+DFFF``) cannot be
+    encoded as UTF-8 and cause ``UnicodeEncodeError`` when the message is
+    serialized for an HTTP request body. This helper round-trips through
+    UTF-16 to reconstruct genuine surrogate pairs (produced e.g. by Windows
+    console input for emoji) and substitutes lone surrogates with
+    ``U+FFFD``.
+
+    Non-string inputs are returned unchanged so this helper is safe to call
+    on arbitrary message payload leaves.
+    """
+    if not isinstance(text, str):
+        return text
+    # Fast path: no surrogate code points → return the original object so
+    # callers can rely on identity to detect an actual mutation.
+    for ch in text:
+        cp = ord(ch)
+        if 0xD800 <= cp <= 0xDFFF:
+            break
+    else:
+        return text
+    return text.encode("utf-16-le", errors="surrogatepass").decode(
+        "utf-16-le", errors="replace"
+    )
+
+
+def sanitize_surrogates_deep(value: Any) -> Any:
+    """Recursively apply :func:`sanitize_surrogates` to every string leaf.
+
+    Lists and dicts are rebuilt only when a nested string actually changes,
+    so the common case (no surrogates present) returns the original object
+    without allocations.
+    """
+    if isinstance(value, str):
+        cleaned = sanitize_surrogates(value)
+        return cleaned
+    if isinstance(value, list):
+        result_list: list[Any] = []
+        mutated = False
+        for item in value:
+            new_item = sanitize_surrogates_deep(item)
+            if new_item is not item:
+                mutated = True
+            result_list.append(new_item)
+        return result_list if mutated else value
+    if isinstance(value, dict):
+        result_dict: dict[Any, Any] = {}
+        mutated = False
+        for key, item in value.items():
+            new_item = sanitize_surrogates_deep(item)
+            if new_item is not item:
+                mutated = True
+            result_dict[key] = new_item
+        return result_dict if mutated else value
+    if isinstance(value, tuple):
+        result_tuple = tuple(sanitize_surrogates_deep(item) for item in value)
+        return result_tuple if any(a is not b for a, b in zip(result_tuple, value)) else value
+    return value
 
 
 @lru_cache(maxsize=1)
@@ -278,11 +341,7 @@ def current_time_str(timezone: str | None = None) -> str:
     """Return the current time string."""
     from zoneinfo import ZoneInfo
 
-    try:
-        tz = ZoneInfo(timezone) if timezone else None
-    except (KeyError, Exception):
-        tz = None
-
+    tz = ZoneInfo(timezone) if timezone else None
     now = datetime.now(tz=tz) if tz else datetime.now().astimezone()
     offset = now.strftime("%z")
     offset_fmt = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
@@ -320,8 +379,7 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
 
     Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
     regardless of language or content (CJK and code cost more tokens per char).
-    Falls back to a char-based estimate (~4 chars/token) if tiktoken is
-    unavailable.
+    Falls back to a conservative UTF-8 byte budget if tiktoken is unavailable.
     """
     if max_tokens <= 0:
         return text
@@ -340,11 +398,23 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
                 return result
         return enc.decode(tokens[:max_tokens])
     except Exception:
-        max_chars = max_tokens * 4
-        suffix_chars = len(_TRUNCATED_SUFFIX)
-        if max_chars <= suffix_chars:
-            return text[:max_chars]
-        return truncate_text(text, max_chars - suffix_chars)
+        if len(text.encode("utf-8")) <= max_tokens:
+            return text
+        suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
+        if max_tokens <= suffix_bytes:
+            return _truncate_text_to_utf8_bytes(text, max_tokens)
+        body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
+        return body + _TRUNCATED_SUFFIX
+
+
+def _truncate_text_to_utf8_bytes(text: str, max_bytes: int) -> str:
+    """Return the longest code-point prefix within a UTF-8 byte budget."""
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def recent_message_start_index(
@@ -447,8 +517,13 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
 
 def _write_text_atomic(path: Path, content: str) -> None:
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    existing_mode: int | None = None
+    with suppress(OSError):
+        existing_mode = stat.S_IMODE(path.stat().st_mode)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
+            if existing_mode is not None:
+                os.chmod(tmp, existing_mode)
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
@@ -569,51 +644,67 @@ def build_assistant_message(
     return msg
 
 
-def estimate_prompt_tokens(
+def _estimate_prompt_tokens_with_source(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
-) -> int:
-    """Estimate prompt tokens with tiktoken.
+) -> tuple[int, str]:
+    """Estimate prompt tokens and identify the counter used.
 
     Counts all fields that providers send to the LLM: content, tool_calls,
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
+    parts: list[str] = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    txt = part.get("text", "")
+                    if txt:
+                        parts.append(txt)
+
+        tc = msg.get("tool_calls")
+        if tc:
+            parts.append(json.dumps(tc, ensure_ascii=False))
+
+        rc = msg.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            parts.append(rc)
+
+        for key in ("name", "tool_call_id"):
+            value = msg.get(key)
+            if isinstance(value, str) and value:
+                parts.append(value)
+
+    message_payload = "\n".join(parts)
+    per_message_overhead = len(messages) * 4
     try:
         enc = _get_token_encoding()
-        parts: list[str] = []
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, str):
-                parts.append(content)
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        txt = part.get("text", "")
-                        if txt:
-                            parts.append(txt)
-
-            tc = msg.get("tool_calls")
-            if tc:
-                parts.append(json.dumps(tc, ensure_ascii=False))
-
-            rc = msg.get("reasoning_content")
-            if isinstance(rc, str) and rc:
-                parts.append(rc)
-
-            for key in ("name", "tool_call_id"):
-                value = msg.get(key)
-                if isinstance(value, str) and value:
-                    parts.append(value)
-
         tool_tokens = (
             _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
         )
-
-        per_message_overhead = len(messages) * 4
-        message_tokens = len(enc.encode("\n".join(parts))) if parts else 0
-        return message_tokens + tool_tokens + per_message_overhead
+        message_tokens = len(enc.encode(message_payload)) if message_payload else 0
+        return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
     except Exception:
-        return 0
+        tool_payload = (
+            ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
+            if tools
+            else ""
+        )
+        payload = message_payload + tool_payload
+        estimated = len(payload.encode("utf-8"))
+        return estimated + per_message_overhead, "heuristic"
+
+
+def estimate_prompt_tokens(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> int:
+    """Estimate prompt tokens with tiktoken and a conservative byte fallback."""
+    estimated, _ = _estimate_prompt_tokens_with_source(messages, tools)
+    return estimated
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:
@@ -651,7 +742,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         enc = _get_token_encoding()
         return max(4, len(enc.encode(payload)) + 4)
     except Exception:
-        return max(4, len(payload) // 4 + 4)
+        return max(4, len(payload.encode("utf-8")) + 4)
 
 
 def estimate_prompt_tokens_chain(
@@ -660,16 +751,16 @@ def estimate_prompt_tokens_chain(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> tuple[int, str]:
-    """Estimate prompt tokens via provider counter first, then tiktoken fallback."""
+    """Estimate prompt tokens via provider, tiktoken, then a byte heuristic."""
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
         with suppress(Exception):
             tokens, source = provider_counter(messages, tools, model)
             if isinstance(tokens, (int, float)) and tokens > 0:
                 return int(tokens), str(source or "provider_counter")
-    estimated = estimate_prompt_tokens(messages, tools)
+    estimated, source = _estimate_prompt_tokens_with_source(messages, tools)
     if estimated > 0:
-        return int(estimated), "tiktoken"
+        return int(estimated), source
     return 0, "none"
 
 

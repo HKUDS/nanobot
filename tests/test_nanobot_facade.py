@@ -35,6 +35,7 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
+from nanobot.session.manager import FILE_MAX_MESSAGES
 from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 
@@ -1203,6 +1204,27 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     reloaded = bot.sessions.get("sdk:history")
     assert reloaded is not None
     assert reloaded.messages == snapshot.messages
+
+
+@pytest.mark.asyncio
+async def test_sessions_ingest_archives_overflow_at_persistence_boundary(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    snapshot = await bot.sessions.ingest(
+        "sdk:overflow",
+        [
+            {"role": "user", "content": f"message-{index}"}
+            for index in range(FILE_MAX_MESSAGES + 1)
+        ],
+    )
+
+    assert len(snapshot.messages) == FILE_MAX_MESSAGES
+    assert snapshot.messages[0]["content"] == "message-1"
+    history = bot.memory.read_history(session_key="sdk:overflow")
+    assert len(history) == 1
+    assert "[RAW] 1 messages" in history[0]["content"]
+    assert "message-0" in history[0]["content"]
 
 
 @pytest.mark.asyncio

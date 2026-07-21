@@ -349,6 +349,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         session = Session(key="unified:default")
         session.messages = []
+        sessions.get_or_create.return_value = session
 
         await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
 
@@ -378,6 +379,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
             session = Session(key=key)
             session.messages = []  # empty → exits immediately for both keys
+            sessions.get_or_create.return_value = session
 
             consolidator.archive = AsyncMock()
             await consolidator.maybe_consolidate_by_tokens(

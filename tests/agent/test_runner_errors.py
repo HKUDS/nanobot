@@ -3,6 +3,7 @@ session message isolation, and tool result preservation."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -43,6 +44,39 @@ async def test_runner_returns_structured_tool_error():
     assert result.tool_events == [
         {"name": "list_dir", "status": "error", "detail": "boom"}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control_error", [KeyboardInterrupt, SystemExit])
+async def test_runner_propagates_tool_control_flow_exceptions(control_error: type[BaseException]):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+
+    async def execute(_name, _args):
+        raise control_error("stop")
+
+    tools = SimpleNamespace(
+        get_definitions=lambda: [],
+        execute=execute,
+    )
+    runner = AgentRunner()
+    spec = make_run_spec(
+        provider,
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    with pytest.raises(control_error):
+        await runner._run_tool(
+            spec,
+            ToolCallRequest(id="call_1", name="list_dir", arguments={}),
+            external_lookup_counts={},
+            workspace_violation_counts={},
+        )
 
 
 @pytest.mark.asyncio

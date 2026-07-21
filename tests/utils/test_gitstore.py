@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.utils.gitstore import GitStore
+from nanobot.utils.gitstore import GitStore, GitStoreError
 
 
 @pytest.fixture
@@ -63,11 +63,13 @@ class TestLineAges:
         assert len(ages) == 2
         assert all(a.age_days == 30 for a in ages)
 
-    def test_annotate_failure_returns_empty(self, tmp_path):
-        """If annotate fails, line_ages should return [] gracefully."""
-        git = GitStore(tmp_path, tracked_files=["MEMORY.md"])
-        # Don't init — annotate will fail
-        assert git.line_ages("MEMORY.md") == []
+    def test_annotate_failure_is_explicit(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("important\n", encoding="utf-8")
+        git.auto_commit("initial")
+
+        with patch("dulwich.porcelain.annotate", side_effect=OSError("broken repo")):
+            with pytest.raises(GitStoreError, match="annotation failed"):
+                git.line_ages("MEMORY.md")
 
     def test_partial_edit_only_updates_changed_lines(self, git, tmp_path):
         """Only modified lines should reflect the new commit's timestamp."""

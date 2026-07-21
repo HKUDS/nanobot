@@ -8,6 +8,13 @@ from typing import Any, Literal
 from nanobot.utils.dict_keys import get_camel_snake
 
 
+def _store_int(value: Any, default: int | None = 0) -> int | None:
+    """Coerce JSON numerics to int; treat null/blank like a missing key."""
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
 @dataclass
 class CronSchedule:
     """Schedule definition for a cron job."""
@@ -25,8 +32,8 @@ class CronSchedule:
     def from_store_dict(cls, data: dict[str, Any]) -> CronSchedule:
         return cls(
             kind=data["kind"],
-            at_ms=get_camel_snake(data, "atMs", "at_ms"),
-            every_ms=get_camel_snake(data, "everyMs", "every_ms"),
+            at_ms=_store_int(get_camel_snake(data, "atMs", "at_ms"), None),
+            every_ms=_store_int(get_camel_snake(data, "everyMs", "every_ms"), None),
             expr=data.get("expr"),
             tz=data.get("tz"),
         )
@@ -78,9 +85,9 @@ class CronRunRecord:
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronRunRecord:
         return cls(
-            run_at_ms=int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
+            run_at_ms=_store_int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
             status=data["status"],
-            duration_ms=int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
+            duration_ms=_store_int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
             error=data.get("error"),
         )
 
@@ -98,8 +105,12 @@ class CronJobState:
     def from_store_dict(cls, data: dict[str, Any]) -> CronJobState:
         history = get_camel_snake(data, "runHistory", "run_history", []) or []
         return cls(
-            next_run_at_ms=get_camel_snake(data, "nextRunAtMs", "next_run_at_ms"),
-            last_run_at_ms=get_camel_snake(data, "lastRunAtMs", "last_run_at_ms"),
+            next_run_at_ms=_store_int(
+                get_camel_snake(data, "nextRunAtMs", "next_run_at_ms"), None
+            ),
+            last_run_at_ms=_store_int(
+                get_camel_snake(data, "lastRunAtMs", "last_run_at_ms"), None
+            ),
             last_status=get_camel_snake(data, "lastStatus", "last_status"),
             last_error=get_camel_snake(data, "lastError", "last_error"),
             run_history=[
@@ -146,8 +157,8 @@ class CronJob:
             schedule=CronSchedule.from_store_dict(data["schedule"]),
             payload=CronPayload.from_store_dict(data.get("payload") or {}),
             state=CronJobState.from_store_dict(data.get("state") or {}),
-            created_at_ms=int(get_camel_snake(data, "createdAtMs", "created_at_ms", 0)),
-            updated_at_ms=int(get_camel_snake(data, "updatedAtMs", "updated_at_ms", 0)),
+            created_at_ms=_store_int(get_camel_snake(data, "createdAtMs", "created_at_ms", 0)),
+            updated_at_ms=_store_int(get_camel_snake(data, "updatedAtMs", "updated_at_ms", 0)),
             delete_after_run=bool(
                 get_camel_snake(data, "deleteAfterRun", "delete_after_run", False)
             ),

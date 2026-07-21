@@ -2,7 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  SlashCommand,
+  UIMessage,
+} from "@/lib/types";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -202,6 +207,53 @@ describe("MessageBubble", () => {
 
     expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+  });
+
+  it("highlights skill references without a live skill catalog", () => {
+    const message: UIMessage = {
+      id: "u-skill-reference",
+      role: "user",
+      content: "Ask $github to review this with @zoom",
+      createdAt: Date.now(),
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const skill = screen.getByTestId("message-skill-reference-github");
+    expect(skill).toHaveTextContent("$github");
+    expect(skill).toHaveClass(
+      "font-medium",
+      "transition-[color,text-shadow]",
+      "duration-150",
+    );
+    expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @zoom");
+  });
+
+  it("highlights well-formed skill references and leaves a bare marker plain", () => {
+    const message: UIMessage = {
+      id: "u-plain-skill-reference",
+      role: "user",
+      content: "Try $unknown or $blocked-skill and $",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent("$unknown");
+    expect(screen.getByTestId("message-skill-reference-blocked-skill"))
+      .toHaveTextContent("$blocked-skill");
+    const references = screen.getAllByTestId(/^message-skill-reference-/);
+    expect(references).toHaveLength(2);
+    expect(references[0].parentElement)
+      .toHaveTextContent("Try $unknown or $blocked-skill and $");
   });
 
   it("renders fork control in completed assistant action rows", () => {

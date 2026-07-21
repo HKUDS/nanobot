@@ -260,6 +260,42 @@ class TestConsolidatorArchiveErrorHandling:
         assert len(entries) == 1
         assert "[RAW]" not in entries[0]["content"]
 
+    async def test_archive_propagates_history_write_failure(
+        self, consolidator, mock_provider, runtime
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.",
+            finish_reason="stop",
+        )
+        consolidator.store.append_history = MagicMock(side_effect=OSError("disk full"))
+        consolidator.store.raw_archive = MagicMock()
+
+        with pytest.raises(OSError, match="disk full"):
+            await consolidator.archive(
+                [{"role": "user", "content": "important"}],
+                runtime=runtime,
+            )
+
+        consolidator.store.raw_archive.assert_not_called()
+
+    async def test_archive_propagates_template_failure_without_raw_archive(
+        self, consolidator, mock_provider, runtime, monkeypatch
+    ):
+        consolidator.store.raw_archive = MagicMock()
+        monkeypatch.setattr(
+            "nanobot.agent.memory.render_template",
+            MagicMock(side_effect=RuntimeError("template failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="template failed"):
+            await consolidator.archive(
+                [{"role": "user", "content": "important"}],
+                runtime=runtime,
+            )
+
+        mock_provider.chat_with_retry.assert_not_awaited()
+        consolidator.store.raw_archive.assert_not_called()
+
 
 class TestConsolidatorTokenBudget:
     async def test_prompt_below_threshold_does_not_consolidate(
@@ -275,6 +311,17 @@ class TestConsolidatorTokenBudget:
         consolidator.archive = AsyncMock(return_value=True)
         await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
         consolidator.archive.assert_not_called()
+
+    async def test_token_estimation_failure_propagates(self, consolidator, runtime):
+        session = Session(key="test:estimate-failure")
+        session.add_message("user", "hello")
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=RuntimeError("counter failed")
+        )
+
+        with pytest.raises(RuntimeError, match="counter failed"):
+            await consolidator.maybe_consolidate_by_tokens(session, runtime=runtime)
 
     async def test_estimate_uses_full_unconsolidated_tail(self, consolidator, runtime):
         """Consolidation pressure must see messages hidden by the replay window."""

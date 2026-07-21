@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -54,6 +56,46 @@ class TestSaveFsync:
         with patch("os.fsync") as mock_fsync:
             manager.save(session)
             mock_fsync.assert_not_called()
+
+    def test_save_ignores_unsupported_directory_fsync(
+        self, manager: SessionManager
+    ) -> None:
+        """Shared filesystems may open directories but reject directory fsync."""
+        session = manager.get_or_create("test:unsupported-directory-fsync")
+        session.add_message("user", "hello")
+        directory_fd = 987654
+        with (
+            patch("nanobot.session.manager.os.open", return_value=directory_fd) as open_dir,
+            patch(
+                "nanobot.session.manager.os.fsync",
+                side_effect=[None, OSError(errno.EINVAL, "Invalid argument")],
+            ),
+            patch("nanobot.session.manager.os.close") as close_dir,
+        ):
+            manager.save(session, fsync=True)
+
+        assert manager._get_session_path(session.key).exists()
+        open_dir.assert_called_once_with(str(manager.sessions_dir), os.O_RDONLY)
+        close_dir.assert_called_once_with(directory_fd)
+
+    def test_save_propagates_other_directory_fsync_errors(
+        self, manager: SessionManager
+    ) -> None:
+        """Only EINVAL is an expected unsupported-directory-fsync result."""
+        session = manager.get_or_create("test:directory-fsync-io-error")
+        directory_fd = 987654
+        with (
+            patch("nanobot.session.manager.os.open", return_value=directory_fd),
+            patch(
+                "nanobot.session.manager.os.fsync",
+                side_effect=[None, OSError(errno.EIO, "I/O error")],
+            ),
+            patch("nanobot.session.manager.os.close") as close_dir,
+            pytest.raises(OSError, match="I/O error"),
+        ):
+            manager.save(session, fsync=True)
+
+        close_dir.assert_called_once_with(directory_fd)
 
 
 class TestFlushAll:
@@ -128,3 +170,27 @@ class TestFlushAll:
         assert len(history) == 2
         assert history[0]["content"] == "remember this"
         assert history[1]["content"] == "noted"
+
+
+class TestLoadErrors:
+    @pytest.mark.parametrize(
+        "operation",
+        ("get_or_create", "read_session_file", "read_session_metadata", "list_sessions"),
+    )
+    def test_permission_error_is_not_treated_as_corrupt_data(
+        self,
+        sessions_dir: Path,
+        operation: str,
+    ) -> None:
+        writer = SessionManager(workspace=sessions_dir)
+        session = writer.get_or_create("test:permission")
+        session.add_message("user", "must not disappear")
+        writer.save(session)
+
+        reader = SessionManager(workspace=sessions_dir)
+        with patch("builtins.open", side_effect=PermissionError("access denied")):
+            with pytest.raises(PermissionError, match="access denied"):
+                if operation == "list_sessions":
+                    reader.list_sessions()
+                else:
+                    getattr(reader, operation)("test:permission")

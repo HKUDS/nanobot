@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -353,37 +352,16 @@ class AgentRunner:
         )
 
         for iteration in range(spec.max_iterations):
-            try:
-                # Keep the persisted conversation untouched. Context governance
-                # may repair or compact historical messages for the model, but
-                # those synthetic edits must not shift the append boundary used
-                # later when the caller saves only the new turn.
-                messages_for_model = self.context_governor.prepare_for_model(
-                    governance_config,
-                    messages,
-                    compacted_tool_call_ids,
-                )
-            except Exception:
-                logger.exception(
-                    "Context governance failed on turn {} for {}; applying minimal repair",
-                    iteration,
-                    spec.session_key or "default",
-                )
-                try:
-                    messages_for_model = ContextGovernor.strip_placeholder_assistant_messages(
-                        messages
-                    )
-                    messages_for_model = ContextGovernor.strip_malformed_tool_calls(
-                        messages_for_model
-                    )
-                    messages_for_model = ContextGovernor.drop_orphan_tool_results(
-                        messages_for_model
-                    )
-                    messages_for_model = ContextGovernor.backfill_missing_tool_results(
-                        messages_for_model
-                    )
-                except Exception:
-                    messages_for_model = messages
+            # Keep the persisted conversation untouched. Context governance
+            # may repair or compact historical messages for the model, but
+            # those synthetic edits must not shift the append boundary used
+            # later when the caller saves only the new turn. A governance
+            # failure must stop the run instead of sending an ungoverned copy.
+            messages_for_model = self.context_governor.prepare_for_model(
+                governance_config,
+                messages,
+                compacted_tool_call_ids,
+            )
             context = AgentHookContext(
                 iteration=iteration,
                 messages=messages,
@@ -1167,10 +1145,9 @@ class AgentRunner:
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
-            with suppress(Exception):
-                prepared = prepare_call(tool_call.name, tool_call.arguments)
-                if isinstance(prepared, tuple) and len(prepared) == 3:
-                    tool, params, prep_error = prepared
+            prepared = prepare_call(tool_call.name, tool_call.arguments)
+            if isinstance(prepared, tuple) and len(prepared) == 3:
+                tool, params, prep_error = prepared
         if prep_error:
             event = {
                 "name": tool_call.name,
@@ -1197,7 +1174,7 @@ class AgentRunner:
                 result = await spec.tools.execute(tool_call.name, params)
         except asyncio.CancelledError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             await hook.on_execute_tool_error(context, tool_call, tool, params, exc)
             event = {
                 "name": tool_call.name,

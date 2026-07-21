@@ -2508,6 +2508,36 @@ def test_optional_dependency_groups_falls_back_to_package_metadata(monkeypatch):
     )
 
 
+def test_load_pyproject_propagates_malformed_toml(tmp_path):
+    from nanobot import optional_features
+
+    path = tmp_path / "pyproject.toml"
+    path.write_text("[project\nname = 'nanobot'", encoding="utf-8")
+
+    with pytest.raises(tomllib.TOMLDecodeError):
+        optional_features.load_pyproject(path)
+
+
+def test_optional_dependency_metadata_propagates_malformed_requirement(monkeypatch):
+    from packaging.requirements import InvalidRequirement
+
+    from nanobot import optional_features
+
+    class _Metadata:
+        def get_all(self, key: str):
+            assert key == "Provides-Extra"
+            return ["bedrock"]
+
+    monkeypatch.setattr("importlib.metadata.metadata", lambda _name: _Metadata())
+    monkeypatch.setattr(
+        "importlib.metadata.requires",
+        lambda _name: ["not a valid requirement ???"],
+    )
+
+    with pytest.raises(InvalidRequirement):
+        optional_features.optional_dependency_groups_from_metadata()
+
+
 def test_install_args_for_extra_resolves_metadata_markers_for_current_platform():
     from nanobot import optional_features
 

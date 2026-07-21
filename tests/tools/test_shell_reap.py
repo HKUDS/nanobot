@@ -212,6 +212,62 @@ async def test_exec_session_kill_reaps():
 
 
 @pytest.mark.asyncio
+async def test_exec_session_kill_reaps_if_process_exits_before_kill():
+    process = _mock_session_process(pid=2002, returncode=None)
+    process.kill.side_effect = ProcessLookupError("raced exit")
+    session = _ExecSession(
+        session_id="raced",
+        process=process,
+        command="sleep 1",
+        cwd="/tmp",
+        timeout=30,
+        owner_session_key=None,
+    )
+    try:
+        with patch("nanobot.agent.tools.shell._reap_pid") as reap:
+            await session.kill()
+        reap.assert_called_once_with(2002)
+    finally:
+        await asyncio.gather(session._stdout_task, session._stderr_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_exec_session_kill_waits_for_reader_tasks():
+    process = _mock_session_process(pid=2003, returncode=None)
+    session = _ExecSession(
+        session_id="readers",
+        process=process,
+        command="sleep 1",
+        cwd="/tmp",
+        timeout=30,
+        owner_session_key=None,
+    )
+    await asyncio.gather(session._stdout_task, session._stderr_task)
+
+    release = asyncio.Event()
+
+    async def reader() -> None:
+        await release.wait()
+
+    async def wait_for_process() -> int:
+        release.set()
+        process.returncode = -9
+        return -9
+
+    session._stdout_task = asyncio.create_task(reader())
+    session._stderr_task = asyncio.create_task(reader())
+    process.wait = AsyncMock(side_effect=wait_for_process)
+    try:
+        await session.kill()
+
+        assert session._stdout_task.done()
+        assert session._stderr_task.done()
+    finally:
+        release.set()
+        await asyncio.gather(session._stdout_task, session._stderr_task)
+
+
+@pytest.mark.asyncio
 async def test_exec_session_poll_reaps_after_exit():
     process = _mock_session_process(pid=2002, returncode=0)
     session = _ExecSession(

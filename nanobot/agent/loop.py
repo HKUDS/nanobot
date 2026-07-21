@@ -369,6 +369,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
+        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -1276,11 +1277,25 @@ class AgentLoop:
                 await self._publish_next_deferred_automation_turn(session_key)
 
     async def close_mcp(self) -> None:
-        """Drain pending background archives, then close MCP connections."""
+        """Drain background work, stop exec sessions, then close MCP connections."""
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        await agent_context.close_mcp(self)
+        errors: list[BaseException] = []
+        cleanup_steps = (
+            self.subagents.close,
+            self._exec_session_manager.close_all,
+            lambda: agent_context.close_mcp(self),
+        )
+        for cleanup in cleanup_steps:
+            try:
+                await cleanup()
+            except BaseException as exc:
+                errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("failed to close agent resources", errors)
 
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""

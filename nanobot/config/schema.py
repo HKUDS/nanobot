@@ -163,6 +163,17 @@ class AgentDefaults(Base):
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError:
+            raise ValueError(f"unknown timezone {value!r}") from None
+        return value
+
 
 class AgentsConfig(Base):
     """Agent configuration."""

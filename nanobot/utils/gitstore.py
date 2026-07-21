@@ -16,6 +16,10 @@ from loguru import logger
 _WORKING_TREE_DIFF_MAX_CHARS = 6000
 
 
+class GitStoreError(RuntimeError):
+    """Raised when the memory Git repository cannot complete an operation."""
+
+
 @dataclass
 class CommitInfo:
     sha: str  # Short SHA (8 chars)
@@ -125,9 +129,8 @@ class GitStore:
             )
             logger.info("Git store initialized at {}", self._workspace)
             return True
-        except Exception:
-            logger.exception("Git store init failed for {}", self._workspace)
-            return False
+        except Exception as exc:
+            raise GitStoreError(f"Git store init failed for {self._workspace}") from exc
 
     # -- daily operations ------------------------------------------------------
 
@@ -161,9 +164,8 @@ class GitStore:
             sha = sha_bytes.hex()[:8]
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
-        except Exception:
-            logger.exception("Git auto-commit failed: {}", message)
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git auto-commit failed: {message}") from exc
 
     # -- internal helpers ------------------------------------------------------
 
@@ -190,8 +192,8 @@ class GitStore:
                         break
                     sha = commit.parents[0] if commit.parents else None
             return None
-        except Exception:
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git SHA resolution failed: {short_sha}") from exc
 
     def _is_inside_git_repo(self) -> bool:
         """Check if self._workspace is already inside a git repository.
@@ -268,16 +270,15 @@ class GitStore:
                     sha = commit.parents[0] if commit.parents else None
 
             return entries
-        except Exception:
-            logger.exception("Git log failed")
-            return []
+        except Exception as exc:
+            raise GitStoreError("Git log failed") from exc
 
     def line_ages(self, file_path: str) -> list[LineAge]:
         """Compute the age of each line in a tracked file via git blame.
 
         Returns one LineAge per line, in order.
-        Returns an empty list if the repo is not initialized, the file is
-        empty, or annotation fails.
+        Returns an empty list if the repo is not initialized or the file is
+        empty. Annotation failures raise :class:`GitStoreError`.
         """
 
         if not self.is_initialized():
@@ -291,9 +292,8 @@ class GitStore:
             from dulwich import porcelain
 
             annotated = porcelain.annotate(str(self._workspace), file_path)
-        except Exception:
-            logger.exception("Git line_ages annotate failed for {}", file_path)
-            return []
+        except Exception as exc:
+            raise GitStoreError(f"Git line annotation failed for {file_path}") from exc
 
         if not annotated:
             return []
@@ -321,9 +321,8 @@ class GitStore:
                 outstream=out,
             )
             return out.getvalue().decode("utf-8", errors="replace")
-        except Exception:
-            logger.exception("Git diff_commits failed")
-            return ""
+        except Exception as exc:
+            raise GitStoreError(f"Git diff failed for {sha1}..{sha2}") from exc
 
     def summarize_working_tree(self, paths: list[str]) -> str:
         """Structured summary of working-tree changes vs HEAD for *paths*.
@@ -354,8 +353,8 @@ class GitStore:
             import difflib
 
             from dulwich.repo import Repo
-        except ImportError:
-            return ""
+        except ImportError as exc:
+            raise GitStoreError("Git working-tree summary dependencies are unavailable") from exc
 
         summary_lines: list[str] = []
         diff_lines: list[str] = []
@@ -409,9 +408,8 @@ class GitStore:
                     total_removed += removed
                     summary_lines.append(f"{path}: +{added} -{removed}")
                     diff_lines.extend(hunks)
-        except Exception:
-            logger.exception("Git summarize_working_tree failed")
-            return ""
+        except Exception as exc:
+            raise GitStoreError("Git working-tree summary failed") from exc
 
         if changed == 0:
             return ""
@@ -471,9 +469,8 @@ class GitStore:
                     diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
                     return c, diff
             return None
-        except Exception:
-            logger.exception("Git show_commit_diff failed")
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git commit display failed for {short_sha}") from exc
 
     # -- restore ---------------------------------------------------------------
 
@@ -485,7 +482,8 @@ class GitStore:
         is provided, commits outside that history are rejected before any files
         are changed.
 
-        Returns the new commit SHA, or None on failure.
+        Returns the new commit SHA, or ``None`` when the commit cannot be reverted.
+        Repository and filesystem failures raise :class:`GitStoreError`.
         """
         if not self.is_initialized():
             return None
@@ -534,9 +532,8 @@ class GitStore:
             # Commit the restored state
             msg = f"revert: undo {commit}"
             return self.auto_commit(msg)
-        except Exception:
-            logger.exception("Git revert failed for {}", commit)
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git revert failed for {commit}") from exc
 
     @staticmethod
     def _read_blob_from_tree(repo, tree, filepath: str) -> str | None:

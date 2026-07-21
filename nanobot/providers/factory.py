@@ -88,6 +88,7 @@ def _make_provider_core(
         provider = OpenAICodexProvider(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
+            extra_body=p.extra_body if p else None,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider

@@ -344,8 +344,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         return resp
 
     # -- non-streaming path (original logic) --
-    fallback = EMPTY_FINAL_RESPONSE_MESSAGE
-
     try:
         async with session_lock:
             try:
@@ -360,24 +358,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                     timeout=timeout_s,
                 )
                 response_text = _response_text(response)
-
                 if not response_text or not response_text.strip():
-                    logger.warning("Empty response for session {}, retrying", session_key)
-                    retry_response = await asyncio.wait_for(
-                        agent_loop.process_direct(
-                            content=text,
-                            media=media_paths if media_paths else None,
-                            session_key=session_key,
-                            channel="api",
-                            chat_id=API_CHAT_ID,
-                            persist_user_message=False,
-                        ),
-                        timeout=timeout_s,
-                    )
-                    response_text = _response_text(retry_response)
-                    if not response_text or not response_text.strip():
-                        logger.warning("Empty response after retry, using fallback")
-                        response_text = fallback
+                    logger.warning("Empty response for session {}, using fallback", session_key)
+                    response_text = EMPTY_FINAL_RESPONSE_MESSAGE
 
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")

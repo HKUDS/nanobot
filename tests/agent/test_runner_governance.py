@@ -58,17 +58,11 @@ def _make_loop(tmp_path):
     return loop
 
 
-async def test_runner_uses_raw_messages_when_context_governance_fails():
+async def test_runner_propagates_context_governance_failure():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
-    captured_messages: list[dict] = []
-
-    async def chat_with_retry(*, messages, **kwargs):
-        captured_messages[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage={})
-
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_with_retry = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
     initial_messages = [
@@ -80,16 +74,16 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
     runner.context_governor.prepare_for_model = MagicMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("boom")
     )
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=initial_messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    with pytest.raises(RuntimeError, match="boom"):
+        await runner.run(make_run_spec(provider,
+            initial_messages=initial_messages,
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
 
-    assert result.final_content == "done"
-    assert captured_messages == initial_messages
+    provider.chat_with_retry.assert_not_awaited()
 
 
 def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):

@@ -6,6 +6,8 @@ import asyncio
 import os
 import re
 import shutil
+import signal
+import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -516,6 +518,7 @@ class ExecTool(Tool):
         login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
+        process_tree: bool = False,
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
@@ -563,6 +566,7 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            **({"start_new_session": True} if process_tree else {}),
         )
 
     @staticmethod
@@ -655,6 +659,39 @@ class ExecTool(Tool):
         finally:
             _reap_pid(process.pid)
 
+    @staticmethod
+    async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        """Kill a session process and descendants, then reap the root process."""
+        if process.returncode is not None:
+            _reap_pid(process.pid)
+            return
+        try:
+            if _IS_WINDOWS:
+                with suppress(OSError, asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            subprocess.run,
+                            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        ),
+                        timeout=5.0,
+                    )
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    process.kill()
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+        finally:
+            _reap_pid(process.pid)
+
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
 
@@ -718,9 +755,12 @@ class ExecTool(Tool):
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
-        # from the hardcoded deny list via configuration.
-        explicitly_allowed = bool(self.allow_patterns) and any(
-            re.fullmatch(p, lower) for p in self.allow_patterns
+        # from the hardcoded deny list via configuration. A chained command is
+        # only explicitly allowed when every top-level shell segment matches.
+        segments = self._split_shell_segments(lower)
+        explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
+            any(re.fullmatch(pattern, segment) for pattern in self.allow_patterns)
+            for segment in segments
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
@@ -784,6 +824,84 @@ class ExecTool(Tool):
                     )
 
         return None
+
+    @staticmethod
+    def _split_shell_segments(command: str) -> list[str]:
+        """Split shell commands on top-level chaining operators."""
+        segments: list[str] = []
+        current: list[str] = []
+        quote: str | None = None
+        escaped = False
+        paren_depth = 0
+        i = 0
+
+        while i < len(command):
+            ch = command[i]
+
+            if escaped:
+                current.append(ch)
+                escaped = False
+                i += 1
+                continue
+
+            if ch == "\\" and quote != "'":
+                current.append(ch)
+                escaped = True
+                i += 1
+                continue
+
+            if quote is not None:
+                current.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                continue
+
+            if ch in {"'", '"', "`"}:
+                current.append(ch)
+                quote = ch
+                i += 1
+                continue
+
+            if ch == "(":
+                paren_depth += 1
+                current.append(ch)
+                i += 1
+                continue
+
+            if ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+                current.append(ch)
+                i += 1
+                continue
+
+            operator_len = 0
+            if paren_depth == 0:
+                if command.startswith(("&&", "||"), i):
+                    operator_len = 2
+                elif ch == "&" and not (
+                    (i > 0 and command[i - 1] in "<>") or command.startswith("&>", i)
+                ):
+                    current.append(ch)
+                    operator_len = 1
+                elif ch in {";", "|"}:
+                    operator_len = 1
+
+            if operator_len:
+                segment = "".join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                i += operator_len
+                continue
+
+            current.append(ch)
+            i += 1
+
+        segment = "".join(current).strip()
+        if segment:
+            segments.append(segment)
+        return segments
 
     @classmethod
     def _is_benign_device_path(cls, path: str) -> bool:

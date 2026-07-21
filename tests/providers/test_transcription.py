@@ -157,6 +157,70 @@ def test_resolver_supports_siliconflow_transcription_api_key_env() -> None:
     assert resolved.api_base == "https://api.siliconflow.cn/v1"
 
 
+def test_resolver_interpolates_env_ref_in_api_key() -> None:
+    # load_config() does not interpolate ${VAR}; the transcription path receives
+    # the raw config, so an env reference in the key must be resolved here rather
+    # than sent verbatim to the provider (which yields a 401).
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "${MY_GROQ_KEY}"
+
+    with patch.dict(os.environ, {"MY_GROQ_KEY": "gsk-real-value"}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_key == "gsk-real-value"
+
+
+def test_resolver_env_ref_missing_var_degrades_to_not_configured() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "${MISSING_GROQ_KEY}"
+
+    with patch.dict(os.environ, {}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    # Unresolved reference degrades to a falsy key rather than the literal
+    # "${...}" string, so the config reports itself as not configured.
+    assert not resolved.api_key
+    assert resolved.configured is False
+
+
+def test_resolver_missing_embedded_api_key_ref_degrades_to_not_configured() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "Bearer ${MISSING_GROQ_KEY}"
+
+    with patch.dict(os.environ, {}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert not resolved.api_key
+    assert resolved.configured is False
+
+
+def test_resolver_interpolates_env_ref_in_api_base() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq.api_base = "${MY_GROQ_BASE}"
+
+    with patch.dict(os.environ, {"MY_GROQ_BASE": "https://groq.example/v1"}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_base == "https://groq.example/v1"
+
+
+def test_resolver_missing_embedded_api_base_ref_uses_provider_default() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq.api_base = "https://${MISSING_GROQ_HOST}/openai/v1"
+
+    with patch.dict(os.environ, {}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_base == "https://api.groq.com/openai/v1"
+
+
 def test_resolver_supports_xiaomi_mimo_transcription_provider() -> None:
     config = Config()
     config.transcription.provider = "xiaomi_mimo"

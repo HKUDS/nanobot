@@ -676,6 +676,25 @@ Then run:
 nanobot agent -m "Hello!"
 ```
 
+To opt in to Codex Fast mode, merge this provider setting into `config.json`:
+
+```json
+{
+  "providers": {
+    "openaiCodex": {
+      "extraBody": {
+        "service_tier": "priority"
+      }
+    }
+  }
+}
+```
+
+`priority` is the Responses API request value used by Codex Fast mode. The setting only works
+for models and accounts that support Fast mode; remove `service_tier` to return to standard
+processing. Fast mode consumes Codex credits at a higher rate. See the
+[OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
+
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
 
 </details>
