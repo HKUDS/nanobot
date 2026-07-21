@@ -185,6 +185,18 @@ def test_resolver_env_ref_missing_var_degrades_to_not_configured() -> None:
     assert resolved.configured is False
 
 
+def test_resolver_missing_embedded_api_key_ref_degrades_to_not_configured() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "Bearer ${MISSING_GROQ_KEY}"
+
+    with patch.dict(os.environ, {}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert not resolved.api_key
+    assert resolved.configured is False
+
+
 def test_resolver_interpolates_env_ref_in_api_base() -> None:
     config = Config()
     config.transcription.provider = "groq"
@@ -195,6 +207,18 @@ def test_resolver_interpolates_env_ref_in_api_base() -> None:
         resolved = resolve_transcription_config(config)
 
     assert resolved.api_base == "https://groq.example/v1"
+
+
+def test_resolver_missing_embedded_api_base_ref_uses_provider_default() -> None:
+    config = Config()
+    config.transcription.provider = "groq"
+    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq.api_base = "https://${MISSING_GROQ_HOST}/openai/v1"
+
+    with patch.dict(os.environ, {}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.api_base == "https://api.groq.com/openai/v1"
 
 
 def test_resolver_supports_xiaomi_mimo_transcription_provider() -> None:
