@@ -99,9 +99,20 @@ _THINKING_STYLE_MAP: dict[str, Any] = {
 _GATEWAY_REASONING_STYLE_MAP: dict[str, Any] = {
     "reasoning_effort": lambda effort: {"reasoning": {"effort": effort}},
 }
+_QWEN_THINKING_MODELS: frozenset[str] = frozenset({
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-max-preview",
+    "qwen3.6-plus",
+    "qwen3.6-flash",
+    "qwen3.5-plus",
+    "qwen3.5-flash",
+})
+
 _MODEL_THINKING_STYLES: dict[str, str] = {
     **dict.fromkeys(_KIMI_THINKING_MODELS, "thinking_type"),
     **dict.fromkeys(_MIMO_THINKING_MODELS, "thinking_type"),
+    **dict.fromkeys(_QWEN_THINKING_MODELS, "enable_thinking"),
 }
 
 
