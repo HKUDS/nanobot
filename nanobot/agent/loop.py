@@ -922,25 +922,6 @@ class AgentLoop:
             )
 
         session_metadata = session.metadata if session is not None else None
-
-        async def _model_attempted(
-            model: str,
-            provider: str | None,
-            fallback_index: int,
-        ) -> None:
-            if active_session_key is None:
-                return
-            await self._runtime_events().turn_model_attempted(
-                channel=channel,
-                chat_id=chat_id,
-                session_key=active_session_key,
-                metadata=metadata,
-                model=model,
-                provider=provider,
-                primary_model=runtime.model,
-                fallback_index=fallback_index,
-            )
-
         try:
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
@@ -979,7 +960,6 @@ class AgentLoop:
                 progress_callback=on_progress,
                 stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,
-                model_attempt_callback=_model_attempted,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall

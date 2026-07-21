@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent
-from nanobot.bus.runtime_events import RuntimeEventContext, TurnModelAttempted
+from nanobot.providers.fallback_provider import ModelAttempt
 from nanobot.session import webui_turns as wth
 
 
@@ -76,31 +77,48 @@ async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
 async def test_turn_model_attempt_is_scoped_to_its_websocket_chat() -> None:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
-    coordinator = wth.WebuiTurnCoordinator(
-        bus=bus,
-        sessions=MagicMock(),
-        schedule_background=MagicMock(),
-    )
+    observer = wth.build_webui_model_attempt_observer(bus)
 
-    await coordinator._handle_turn_model_attempted(
-        TurnModelAttempted(
-            context=RuntimeEventContext(
-                channel="websocket",
-                chat_id="chat-model",
-                session_key="websocket:chat-model",
-                metadata={"webui": True},
-            ),
-            model="deepseek/deepseek-chat",
-            provider="deepseek",
-            primary_model="openai/gpt-5",
-            fallback_index=1,
+    with request_context(
+        RequestContext(
+            channel="websocket",
+            chat_id="chat-model",
+            metadata={"webui": True},
         )
-    )
+    ):
+        await observer(
+            ModelAttempt(
+                model="deepseek/deepseek-chat",
+                primary_model="openai/gpt-5",
+                provider="deepseek",
+                fallback_index=1,
+            )
+        )
 
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
     assert outbound.chat_id == "chat-model"
+    assert outbound.metadata == {"webui": True}
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
     assert outbound.event.primary_model == "openai/gpt-5"
     assert outbound.event.fallback_index == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_model_attempt_ignores_non_websocket_requests() -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    observer = wth.build_webui_model_attempt_observer(bus)
+
+    with request_context(RequestContext(channel="telegram", chat_id="chat-model")):
+        await observer(
+            ModelAttempt(
+                model="fallback",
+                primary_model="primary",
+                provider=None,
+                fallback_index=1,
+            )
+        )
+
+    bus.publish_outbound.assert_not_awaited()

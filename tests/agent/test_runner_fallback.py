@@ -10,7 +10,7 @@ from loguru import logger
 
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
-from nanobot.providers.fallback_provider import FallbackProvider
+from nanobot.providers.fallback_provider import FallbackProvider, ModelAttempt
 
 
 def _make_response(
@@ -289,26 +289,27 @@ class TestFallbackOnPrimaryError:
     async def test_reports_primary_and_fallback_attempts_before_each_request(self) -> None:
         primary = _FakeProvider("primary", _error_response())
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        attempts: list[ModelAttempt] = []
+
+        async def _observe(attempt: ModelAttempt) -> None:
+            attempts.append(attempt)
+
         fb = FallbackProvider(
             primary=primary,
             fallback_presets=[_fallback("fallback-a", provider="backup")],
             provider_factory=MagicMock(return_value=fallback),
+            model_attempt_observer=_observe,
         )
-        attempts: list[tuple[str, str | None, int]] = []
-
-        async def _attempt(model: str, provider: str | None, index: int) -> None:
-            attempts.append((model, provider, index))
 
         result = await fb.chat_with_retry(
             messages=[{"role": "user", "content": "hi"}],
             model="primary-model",
-            on_model_attempt=_attempt,
         )
 
         assert result.content == "fallback ok"
         assert attempts == [
-            ("primary-model", None, 0),
-            ("fallback-a", "backup", 1),
+            ModelAttempt("primary-model", "primary-model", None, 0),
+            ModelAttempt("fallback-a", "primary-model", "backup", 1),
         ]
 
     @pytest.mark.asyncio
