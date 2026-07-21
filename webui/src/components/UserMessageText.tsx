@@ -1,45 +1,40 @@
-import { CliAppMentionText } from "@/components/CliAppMentionText";
+import { Fragment } from "react";
+
+import {
+  CliAppMentionToken,
+  McpPresetMentionToken,
+  splitCapabilityMentionSegments,
+  type CapabilityMentionSegment,
+} from "@/components/CliAppMentionText";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
-import type { CliAppInfo, McpPresetInfo, SkillSummary } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo } from "@/lib/types";
 
 type SkillReferenceSegment =
   | { kind: "text"; text: string }
-  | { kind: "skill"; text: string; skill: SkillSummary };
+  | { kind: "skill"; text: string; name: string };
 
-function splitSkillReferenceSegments(
-  value: string,
-  skills: SkillSummary[],
-): SkillReferenceSegment[] {
-  if (!value || skills.length === 0) {
-    return value ? [{ kind: "text", text: value }] : [];
-  }
+type UserMessageSegment =
+  | CapabilityMentionSegment
+  | { kind: "skill"; text: string; name: string };
 
-  const skillsByName = new Map(
-    skills
-      .filter((skill) => skill.available)
-      .map((skill) => [skill.name.toLowerCase(), skill]),
-  );
-  if (skillsByName.size === 0) return [{ kind: "text", text: value }];
-
+function splitSkillReferenceSegments(value: string): SkillReferenceSegment[] {
+  if (!value) return [];
   const segments: SkillReferenceSegment[] = [];
   const referenceRe = /\$([A-Za-z0-9_-]+)/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = referenceRe.exec(value)) !== null) {
     const name = match[1] ?? "";
-    const skill = skillsByName.get(name.toLowerCase());
-    if (!skill) continue;
-
     if (match.index > cursor) {
       segments.push({ kind: "text", text: value.slice(cursor, match.index) });
     }
     segments.push({
       kind: "skill",
       text: value.slice(match.index, referenceRe.lastIndex),
-      skill,
+      name,
     });
     cursor = referenceRe.lastIndex;
   }
@@ -49,41 +44,64 @@ function splitSkillReferenceSegments(
   return segments.length ? segments : [{ kind: "text", text: value }];
 }
 
+function splitUserMessageSegments(
+  value: string,
+  cliApps: CliAppInfo[],
+  mcpPresets: McpPresetInfo[],
+): UserMessageSegment[] {
+  const segments: UserMessageSegment[] = [];
+  for (const segment of splitCapabilityMentionSegments(value, cliApps, mcpPresets)) {
+    if (segment.kind === "text") {
+      segments.push(...splitSkillReferenceSegments(segment.text));
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments;
+}
+
 export function UserMessageText({
   text,
-  skills,
   cliApps,
   mcpPresets,
 }: {
   text: string;
-  skills: SkillSummary[];
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
 }) {
-  const segments = splitSkillReferenceSegments(text, skills);
+  const segments = splitUserMessageSegments(text, cliApps, mcpPresets);
   return (
     <>
       {segments.map((segment, index) => {
         if (segment.kind === "text") {
-          return (
-            <CliAppMentionText
-              key={`text-${index}`}
-              text={segment.text}
-              cliApps={cliApps}
-              mcpPresets={mcpPresets}
-            />
-          );
+          return <Fragment key={`text-${index}`}>{segment.text}</Fragment>;
         }
-        return (
+        if (segment.kind === "skill") return (
           <InlineTokenHighlight
-            key={`skill-${segment.skill.name}-${index}`}
-            testId={`message-skill-reference-${segment.skill.name}`}
-            title={`Skill: ${segment.skill.name}`}
+            key={`skill-${segment.name}-${index}`}
+            testId={`message-skill-reference-${segment.name.toLowerCase()}`}
+            title={`Skill: ${segment.name}`}
             color={INLINE_TOKEN_HIGHLIGHT_COLOR}
             className="font-medium"
           >
             {segment.text}
           </InlineTokenHighlight>
+        );
+        if (segment.kind === "cli") return (
+          <CliAppMentionToken
+            key={`cli-${segment.app.name}-${index}`}
+            app={segment.app}
+            label={segment.text}
+            variant="message"
+          />
+        );
+        return (
+          <McpPresetMentionToken
+            key={`mcp-${segment.preset.name}-${index}`}
+            preset={segment.preset}
+            label={segment.text}
+            variant="message"
+          />
         );
       })}
     </>

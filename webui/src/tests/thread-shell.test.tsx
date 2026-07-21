@@ -484,7 +484,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
-  it("passes skill metadata to sent user messages", async () => {
+  it("highlights sent skill references without skill metadata", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -492,12 +492,6 @@ describe("ThreadShell", () => {
         session={session("skill-reference")}
         title="Skill reference"
         onToggleSidebar={() => {}}
-        skills={[{
-          name: "github",
-          description: "Work with pull requests and issues",
-          source: "builtin",
-          available: true,
-        }]}
       />,
     ));
 

@@ -897,7 +897,6 @@ export function ThreadShell({
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
-            skills={skills}
             forkBoundaryMessageCount={forkBoundaryMessageCount}
             hasMoreBefore={hasMoreBefore}
             loadingOlder={loadingOlder}

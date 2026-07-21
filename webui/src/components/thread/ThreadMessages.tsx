@@ -3,13 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type {
-  CliAppInfo,
-  McpPresetInfo,
-  SlashCommand,
-  SkillSummary,
-  UIMessage,
-} from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -19,7 +13,6 @@ interface ThreadMessagesProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
-  skills?: SkillSummary[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
@@ -60,7 +53,6 @@ export function ThreadMessages({
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
-  skills = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
@@ -123,7 +115,6 @@ export function ThreadMessages({
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   slashCommands={slashCommands}
-                  skills={skills}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromHere={
                     onForkFromMessage && forkIndex !== undefined

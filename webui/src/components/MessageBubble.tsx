@@ -37,7 +37,6 @@ import type {
   CliAppInfo,
   McpPresetInfo,
   SlashCommand,
-  SkillSummary,
   UICliAppAttachment,
   UIMcpPresetAttachment,
   UIImage,
@@ -52,7 +51,6 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
-  skills?: SkillSummary[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
 }
@@ -145,7 +143,6 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
-  skills = [],
   onOpenFilePreview,
   onForkFromHere,
 }: MessageBubbleProps) {
@@ -176,7 +173,6 @@ export function MessageBubble({
         <SlashCommandText command={slashCommand.command} />
         <UserMessageText
           text={message.content.slice(slashCommand.command.length)}
-          skills={skills}
           cliApps={mentionCliApps}
           mcpPresets={mentionMcpPresets}
         />
@@ -184,7 +180,6 @@ export function MessageBubble({
     ) : (
       <UserMessageText
         text={message.content}
-        skills={skills}
         cliApps={mentionCliApps}
         mcpPresets={mentionMcpPresets}
       />
