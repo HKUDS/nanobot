@@ -484,6 +484,35 @@ describe("ThreadShell", () => {
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
   });
 
+  it("passes skill metadata to sent user messages", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("skill-reference")}
+        title="Skill reference"
+        onToggleSidebar={() => {}}
+        skills={[{
+          name: "github",
+          description: "Work with pull requests and issues",
+          source: "builtin",
+          available: true,
+        }]}
+      />,
+    ));
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "Use $github for this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expectSendMessageWithTurn(client, "skill-reference", "Use $github for this"),
+    );
+    expect(screen.getByTestId("message-skill-reference-github"))
+      .toHaveTextContent("$github");
+  });
+
   it("clears the old thread when the active session is removed", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");

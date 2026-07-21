@@ -22,7 +22,13 @@ import {
   promptTop,
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  SlashCommand,
+  SkillSummary,
+  UIMessage,
+} from "@/lib/types";
 
 export interface ThreadViewportHandle {
   jumpToUserPrompt: (promptId: string) => void;
@@ -41,6 +47,7 @@ interface ThreadViewportProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
+  skills?: SkillSummary[];
   forkBoundaryMessageCount?: number | null;
   hasMoreBefore?: boolean;
   loadingOlder?: boolean;
@@ -113,6 +120,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
+  skills = [],
   forkBoundaryMessageCount = null,
   hasMoreBefore = false,
   loadingOlder = false,
@@ -529,6 +537,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   slashCommands={slashCommands}
+                  skills={skills}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}

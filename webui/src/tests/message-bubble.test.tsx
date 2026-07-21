@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  SlashCommand,
+  SkillSummary,
+  UIMessage,
+} from "@/lib/types";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -85,6 +91,21 @@ const SLASH_COMMANDS: SlashCommand[] = [
     icon: "square-pen",
     lifecycle: "finalize_active_turn",
     acceptsArgs: false,
+  },
+];
+
+const SKILLS: SkillSummary[] = [
+  {
+    name: "github",
+    description: "Work with pull requests and issues",
+    source: "builtin",
+    available: true,
+  },
+  {
+    name: "blocked-skill",
+    description: "Needs an unavailable dependency",
+    source: "workspace",
+    available: false,
   },
 ];
 
@@ -202,6 +223,51 @@ describe("MessageBubble", () => {
 
     expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+  });
+
+  it("highlights available skill references while preserving other message tokens", () => {
+    const message: UIMessage = {
+      id: "u-skill-reference",
+      role: "user",
+      content: "Ask $github to review this with @zoom",
+      createdAt: Date.now(),
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        skills={SKILLS}
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const skill = screen.getByTestId("message-skill-reference-github");
+    expect(skill).toHaveTextContent("$github");
+    expect(skill).toHaveClass(
+      "font-medium",
+      "transition-[color,text-shadow]",
+      "duration-150",
+    );
+    expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @zoom");
+  });
+
+  it("keeps unknown and unavailable skill references as plain message text", () => {
+    const message: UIMessage = {
+      id: "u-plain-skill-reference",
+      role: "user",
+      content: "Try $unknown or $blocked-skill",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} skills={SKILLS} />);
+
+    expect(screen.queryByTestId("message-skill-reference-unknown")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("message-skill-reference-blocked-skill"))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("Try $unknown or $blocked-skill")).toBeInTheDocument();
   });
 
   it("renders fork control in completed assistant action rows", () => {

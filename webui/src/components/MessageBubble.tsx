@@ -18,10 +18,10 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
-import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
+import { UserMessageText } from "@/components/UserMessageText";
 import {
   Tooltip,
   TooltipContent,
@@ -37,6 +37,7 @@ import type {
   CliAppInfo,
   McpPresetInfo,
   SlashCommand,
+  SkillSummary,
   UICliAppAttachment,
   UIMcpPresetAttachment,
   UIImage,
@@ -51,6 +52,7 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
+  skills?: SkillSummary[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
 }
@@ -143,6 +145,7 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
+  skills = [],
   onOpenFilePreview,
   onForkFromHere,
 }: MessageBubbleProps) {
@@ -171,15 +174,17 @@ export function MessageBubble({
     const messageText = slashCommand ? (
       <>
         <SlashCommandText command={slashCommand.command} />
-        <CliAppMentionText
+        <UserMessageText
           text={message.content.slice(slashCommand.command.length)}
+          skills={skills}
           cliApps={mentionCliApps}
           mcpPresets={mentionMcpPresets}
         />
       </>
     ) : (
-      <CliAppMentionText
+      <UserMessageText
         text={message.content}
+        skills={skills}
         cliApps={mentionCliApps}
         mcpPresets={mentionMcpPresets}
       />
