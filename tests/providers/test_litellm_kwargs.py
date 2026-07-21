@@ -1716,9 +1716,10 @@ def test_qwen_thinking_enabled_via_model_level_mapping() -> None:
 
 def test_qwen_thinking_disabled_via_model_level_mapping() -> None:
     """reasoning_effort='none' must send enable_thinking: False via model-level
-    mapping on non-DashScope providers."""
+    mapping on non-DashScope providers. OpenRouter also emits its own
+    reasoning.effort alongside the provider-level thinking control."""
     kw = _build_kwargs_for("openrouter", "qwen/qwen3.5-flash", reasoning_effort="none")
-    assert kw["extra_body"] == {"enable_thinking": False}
+    assert kw["extra_body"] == {"enable_thinking": False, "reasoning": {"effort": "none"}}
 
 
 def test_qwen_no_extra_body_when_reasoning_effort_omitted() -> None:
