@@ -4,6 +4,8 @@ import json
 import os
 import re
 import shutil
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -18,6 +20,16 @@ _STRIP_SKILL_FRONTMATTER = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class _CachedSkill:
+    """Parsed skill file cached until its filesystem signature changes."""
+
+    mtime_ns: int
+    size: int
+    content: str
+    metadata: dict[str, object] | None
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
@@ -26,11 +38,17 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self._skill_cache: dict[Path, _CachedSkill] = {}
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -88,8 +106,27 @@ class SkillsLoader:
         for root in roots:
             path = root / name / "SKILL.md"
             if path.exists():
-                return path.read_text(encoding="utf-8")
+                cached = self._read_skill(path)
+                return cached.content if cached else None
         return None
+
+    def validate_skill_names(self, skill_names: list[str]) -> list[str]:
+        """Validate explicitly requested skills and return them without duplicates."""
+        entries = {entry["name"] for entry in self.list_skills(filter_unavailable=False)}
+        validated: list[str] = []
+        for name in skill_names:
+            if name in validated:
+                continue
+            if name in self.disabled_skills:
+                raise ValueError(f"Skill '{name}' is disabled.")
+            if name not in entries:
+                raise ValueError(f"Skill '{name}' was not found.")
+            available, missing = self.get_skill_availability(name)
+            if not available:
+                detail = f": {missing}" if missing else ""
+                raise ValueError(f"Skill '{name}' is unavailable{detail}.")
+            validated.append(name)
+        return validated
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -133,12 +170,13 @@ class SkillsLoader:
             meta = self._get_skill_meta(skill_name)
             available = self._check_requirements(meta)
             desc = self._get_skill_description(skill_name)
+            display_path = (Path("skills") / skill_name / "SKILL.md").as_posix()
             if available:
-                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
+                lines.append(f"- **{skill_name}** — {desc}  `{display_path}`")
             else:
                 missing = self._get_missing_requirements(meta)
                 suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
-                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
+                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{display_path}`")
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
@@ -214,7 +252,7 @@ class SkillsLoader:
         )
 
     def _get_skill_meta(self, name: str) -> dict:
-        """Get nanobot metadata for a skill (cached in frontmatter)."""
+        """Get nanobot metadata for a skill."""
         raw_meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(raw_meta.get("metadata"))
 
@@ -240,8 +278,45 @@ class SkillsLoader:
         Returns:
             Metadata dict or None.
         """
-        content = self.load_skill(name)
-        if not content or not content.startswith("---"):
+        roots = [self.workspace_skills]
+        if self.builtin_skills:
+            roots.append(self.builtin_skills)
+        for root in roots:
+            path = root / name / "SKILL.md"
+            if path.exists():
+                cached = self._read_skill(path)
+                if cached and cached.metadata is not None:
+                    return deepcopy(cached.metadata)
+                return None
+        return None
+
+    def _read_skill(self, path: Path) -> _CachedSkill | None:
+        """Read and parse a skill once, invalidating the cache after file changes."""
+        try:
+            stat = path.stat()
+        except OSError:
+            self._skill_cache.pop(path, None)
+            return None
+
+        cached = self._skill_cache.get(path)
+        if cached and cached.mtime_ns == stat.st_mtime_ns and cached.size == stat.st_size:
+            return cached
+
+        content = path.read_text(encoding="utf-8")
+        metadata = self._parse_frontmatter(content)
+        cached = _CachedSkill(
+            mtime_ns=stat.st_mtime_ns,
+            size=stat.st_size,
+            content=content,
+            metadata=metadata,
+        )
+        self._skill_cache[path] = cached
+        return cached
+
+    @staticmethod
+    def _parse_frontmatter(content: str) -> dict[str, object] | None:
+        """Parse YAML frontmatter while preserving native YAML value types."""
+        if not content.startswith("---"):
             return None
         match = _STRIP_SKILL_FRONTMATTER.match(content)
         if not match:
@@ -252,9 +327,4 @@ class SkillsLoader:
             return None
         if not isinstance(parsed, dict):
             return None
-        # yaml.safe_load returns native types (int, bool, list, etc.);
-        # keep values as-is so downstream consumers get correct types.
-        metadata: dict[str, object] = {}
-        for key, value in parsed.items():
-            metadata[str(key)] = value
-        return metadata
+        return {str(key): value for key, value in parsed.items()}
