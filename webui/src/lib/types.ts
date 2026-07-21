@@ -8,7 +8,6 @@ export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "comple
 
 export interface TurnModelState {
   modelName: string;
-  primaryModel: string;
   provider: string | null;
   fallbackIndex: number;
 }
@@ -1098,7 +1097,6 @@ export type InboundEvent =
       event: "turn_model_updated";
       chat_id: string;
       model_name: string;
-      primary_model: string;
       provider?: string | null;
       fallback_index: number;
     }

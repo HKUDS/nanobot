@@ -1078,7 +1078,6 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
             content="",
             event=TurnModelUpdatedEvent(
                 model="deepseek/deepseek-chat",
-                primary_model="openai/gpt-5",
                 provider="deepseek",
                 fallback_index=1,
             ),
@@ -1090,7 +1089,6 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "event": "turn_model_updated",
         "chat_id": "chat-1",
         "model_name": "deepseek/deepseek-chat",
-        "primary_model": "openai/gpt-5",
         "fallback_index": 1,
         "provider": "deepseek",
     }
@@ -1104,7 +1102,6 @@ async def test_hydrate_replays_the_latest_turn_model_after_refresh() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     channel._turn_models["chat-1"] = TurnModelUpdatedEvent(
         model="deepseek/deepseek-chat",
-        primary_model="openai/gpt-5",
         provider="deepseek",
         fallback_index=1,
     )

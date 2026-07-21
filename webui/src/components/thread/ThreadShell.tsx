@@ -500,15 +500,7 @@ export function ThreadShell({
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })
     : modelBadge.label;
-  const fallbackFromLabel = turnModel && turnModel.fallbackIndex > 0
-    ? toModelBadgeLabel(turnModel.primaryModel)
-    : null;
-  const modelFallbackTitle = fallbackFromLabel
-    ? t("thread.composer.modelFallbackFrom", {
-        model: fallbackFromLabel,
-        defaultValue: "Fallback from {{model}}",
-      })
-    : null;
+  const modelIsFallback = Boolean(turnModel && turnModel.fallbackIndex > 0);
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -559,7 +551,6 @@ export function ThreadShell({
       if (event.event !== "turn_model_updated") return;
       setTurnModel({
         modelName: event.model_name,
-        primaryModel: event.primary_model,
         provider: event.provider ?? null,
         fallbackIndex: Math.max(0, event.fallback_index),
       });
@@ -855,8 +846,7 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          modelFallbackFrom={fallbackFromLabel}
-          modelFallbackTitle={modelFallbackTitle}
+          modelIsFallback={modelIsFallback}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
@@ -894,8 +884,7 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          modelFallbackFrom={fallbackFromLabel}
-          modelFallbackTitle={modelFallbackTitle}
+          modelIsFallback={modelIsFallback}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant="hero"
           slashCommands={slashCommands}

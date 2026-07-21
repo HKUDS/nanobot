@@ -935,7 +935,6 @@
       "quotedContext": "인용한 문맥",
       "removeQuotedContext": "인용한 문맥 제거",
       "modelNotConfigured": "모델이 설정되지 않음",
-      "modelFallbackFrom": "{{model}}에서 대체 모델로 전환",
       "configureModel": "모델 설정",
       "queued": {
         "label": "대기 중인 안내",

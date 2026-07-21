@@ -935,7 +935,6 @@
       "quotedContext": "引用內容",
       "removeQuotedContext": "移除引用內容",
       "modelNotConfigured": "尚未設定模型",
-      "modelFallbackFrom": "已從 {{model}} 回退",
       "configureModel": "設定模型",
       "queued": {
         "label": "佇列中的引導訊息",

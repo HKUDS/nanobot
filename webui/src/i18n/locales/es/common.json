@@ -936,7 +936,6 @@
       "quotedContext": "Contexto citado",
       "removeQuotedContext": "Quitar contexto citado",
       "modelNotConfigured": "Modelo no configurado",
-      "modelFallbackFrom": "Modelo de respaldo tras {{model}}",
       "configureModel": "Configurar modelo",
       "queued": {
         "label": "Guía en cola",

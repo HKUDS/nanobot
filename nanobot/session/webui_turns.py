@@ -291,7 +291,6 @@ def build_webui_model_attempt_observer(bus: MessageBus) -> ModelAttemptObserver:
                 chat_id=chat_id,
                 event=TurnModelUpdatedEvent(
                     model=attempt.model,
-                    primary_model=attempt.primary_model,
                     provider=attempt.provider,
                     fallback_index=attempt.fallback_index,
                 ),

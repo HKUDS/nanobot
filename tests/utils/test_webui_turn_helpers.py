@@ -89,7 +89,6 @@ async def test_turn_model_attempt_is_scoped_to_its_websocket_chat() -> None:
         await observer(
             ModelAttempt(
                 model="deepseek/deepseek-chat",
-                primary_model="openai/gpt-5",
                 provider="deepseek",
                 fallback_index=1,
             )
@@ -101,7 +100,6 @@ async def test_turn_model_attempt_is_scoped_to_its_websocket_chat() -> None:
     assert outbound.metadata == {"webui": True}
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
-    assert outbound.event.primary_model == "openai/gpt-5"
     assert outbound.event.fallback_index == 1
 
 
@@ -115,7 +113,6 @@ async def test_turn_model_attempt_ignores_non_websocket_requests() -> None:
         await observer(
             ModelAttempt(
                 model="fallback",
-                primary_model="primary",
                 provider=None,
                 fallback_index=1,
             )

@@ -534,7 +534,6 @@ export class NanobotClient {
       if (parsed.event === "turn_model_updated") {
         this.turnModelByChatId.set(chatId, {
           modelName: parsed.model_name,
-          primaryModel: parsed.primary_model,
           provider: parsed.provider ?? null,
           fallbackIndex: Math.max(0, parsed.fallback_index),
         });

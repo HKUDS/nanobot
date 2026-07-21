@@ -86,7 +86,6 @@ class TurnModelUpdatedEvent(OutboundEvent):
     """The model currently handling one chat turn, including fallback attempts."""
 
     model: str
-    primary_model: str
     provider: str | None = None
     fallback_index: int = 0
 

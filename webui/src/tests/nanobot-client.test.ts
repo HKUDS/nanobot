@@ -372,14 +372,12 @@ describe("NanobotClient", () => {
       event: "turn_model_updated",
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
-      primary_model: "openai/gpt-5",
       provider: "deepseek",
       fallback_index: 1,
     });
 
     expect(client.getTurnModel("chat-a")).toEqual({
       modelName: "deepseek/deepseek-chat",
-      primaryModel: "openai/gpt-5",
       provider: "deepseek",
       fallbackIndex: 1,
     });

@@ -328,7 +328,6 @@ class WebSocketChannel(BaseChannel):
         await self.send_turn_model_updated(
             chat_id,
             model_name=event.model,
-            primary_model=event.primary_model,
             provider=event.provider,
             fallback_index=event.fallback_index,
         )
@@ -829,7 +828,6 @@ class WebSocketChannel(BaseChannel):
                 await self.send_turn_model_updated(
                     msg.chat_id,
                     model_name=event.model,
-                    primary_model=event.primary_model,
                     provider=event.provider,
                     fallback_index=event.fallback_index,
                 )
@@ -1148,7 +1146,6 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         *,
         model_name: Any,
-        primary_model: Any,
         provider: Any = None,
         fallback_index: Any = 0,
     ) -> None:
@@ -1158,15 +1155,12 @@ class WebSocketChannel(BaseChannel):
             not conns
             or not isinstance(model_name, str)
             or not model_name.strip()
-            or not isinstance(primary_model, str)
-            or not primary_model.strip()
         ):
             return
         body: dict[str, Any] = {
             "event": "turn_model_updated",
             "chat_id": chat_id,
             "model_name": model_name.strip(),
-            "primary_model": primary_model.strip(),
             "fallback_index": (
                 fallback_index
                 if isinstance(fallback_index, int) and not isinstance(fallback_index, bool)

@@ -432,7 +432,6 @@ describe("ThreadShell", () => {
         event: "turn_model_updated",
         chat_id: "fallback-model",
         model_name: "deepseek/deepseek-chat",
-        primary_model: "openai-codex/gpt-5.5",
         provider: "deepseek",
         fallback_index: 1,
       });
@@ -440,7 +439,8 @@ describe("ThreadShell", () => {
 
     const actualModel = await screen.findByText("deepseek-chat");
     const badge = actualModel.closest("span[data-fallback='true']");
-    expect(badge).toHaveAttribute("title", expect.stringContaining("Fallback from gpt-5.5"));
+    expect(badge).toHaveAttribute("title", expect.stringContaining("deepseek-chat"));
+    expect(badge).not.toHaveAttribute("title", expect.stringContaining("gpt-5.5"));
     expect(screen.getByTestId("composer-model-logo-deepseek")).toBeInTheDocument();
     expect(screen.getByTestId("composer-model-fallback-indicator")).toBeInTheDocument();
     expect(badge).toHaveClass("composer-model-fallback");
@@ -450,7 +450,6 @@ describe("ThreadShell", () => {
         event: "turn_model_updated",
         chat_id: "fallback-model",
         model_name: "openai-codex/gpt-5.5",
-        primary_model: "openai-codex/gpt-5.5",
         provider: "openai_codex",
         fallback_index: 0,
       });

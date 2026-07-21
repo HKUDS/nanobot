@@ -308,8 +308,8 @@ class TestFallbackOnPrimaryError:
 
         assert result.content == "fallback ok"
         assert attempts == [
-            ModelAttempt("primary-model", "primary-model", None, 0),
-            ModelAttempt("fallback-a", "primary-model", "backup", 1),
+            ModelAttempt("primary-model", None, 0),
+            ModelAttempt("fallback-a", "backup", 1),
         ]
 
     @pytest.mark.asyncio

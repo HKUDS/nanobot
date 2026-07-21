@@ -170,8 +170,7 @@ interface ThreadComposerProps {
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
-  modelFallbackFrom?: string | null;
-  modelFallbackTitle?: string | null;
+  modelIsFallback?: boolean;
   onModelBadgeClick?: () => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
@@ -817,8 +816,7 @@ export function ThreadComposer({
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
-  modelFallbackFrom = null,
-  modelFallbackTitle = null,
+  modelIsFallback = false,
   onModelBadgeClick,
   variant = "thread",
   slashCommands = [],
@@ -2077,8 +2075,7 @@ export function ThreadComposer({
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
-                fallbackFrom={modelFallbackFrom}
-                fallbackTitle={modelFallbackTitle}
+                isFallback={modelIsFallback}
                 isHero={isHero}
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
@@ -2367,8 +2364,7 @@ function ComposerModelBadge({
   provider,
   providerLabel,
   needsSetup,
-  fallbackFrom,
-  fallbackTitle,
+  isFallback,
   isHero,
   onClick,
 }: {
@@ -2376,8 +2372,7 @@ function ComposerModelBadge({
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
-  fallbackFrom?: string | null;
-  fallbackTitle?: string | null;
+  isFallback?: boolean;
   isHero: boolean;
   onClick?: () => void;
 }) {
@@ -2385,9 +2380,7 @@ function ComposerModelBadge({
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   const showLogo = !!logoUrl;
-  const baseTitle = providerLabel ? `${label} · ${providerLabel}` : label;
-  const title = fallbackTitle ? `${baseTitle} · ${fallbackTitle}` : baseTitle;
-  const isFallback = Boolean(fallbackFrom);
+  const title = providerLabel ? `${label} · ${providerLabel}` : label;
   const interactive = Boolean(onClick);
   const Container = interactive ? "button" : "span";
 
@@ -2450,14 +2443,6 @@ function ComposerModelBadge({
         )}
       </span>
       <span className="relative min-w-0 overflow-hidden">
-        {isFallback ? (
-          <span
-            aria-hidden
-            className="composer-model-fallback-previous pointer-events-none absolute inset-0 truncate text-muted-foreground"
-          >
-            {fallbackFrom}
-          </span>
-        ) : null}
         <span className={cn("block truncate", isFallback && "composer-model-fallback-current")}>
           {label}
         </span>

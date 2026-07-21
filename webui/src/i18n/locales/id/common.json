@@ -935,7 +935,6 @@
       "quotedContext": "Konteks kutipan",
       "removeQuotedContext": "Hapus konteks kutipan",
       "modelNotConfigured": "Model belum dikonfigurasi",
-      "modelFallbackFrom": "Beralih dari {{model}}",
       "configureModel": "Konfigurasi model",
       "queued": {
         "label": "Panduan antrean",
