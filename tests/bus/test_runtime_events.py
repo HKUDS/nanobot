@@ -8,6 +8,7 @@ from nanobot.bus.runtime_events import (
     RuntimeModelChanged,
     SessionTurnStarted,
     TurnCompleted,
+    TurnModelAttempted,
     TurnRunStatusChanged,
 )
 
@@ -86,6 +87,33 @@ async def test_runtime_event_publisher_builds_context_from_inbound_message() -> 
     assert isinstance(running, TurnRunStatusChanged)
     assert running.status == "running"
     assert running.started_at == 12.5
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_publisher_routes_turn_model_attempt() -> None:
+    bus = RuntimeEventBus()
+    seen: list[object] = []
+    publisher = RuntimeEventPublisher(bus)
+    bus.subscribe(seen.append, TurnModelAttempted)
+
+    await publisher.turn_model_attempted(
+        channel="websocket",
+        chat_id="chat-model",
+        session_key="websocket:chat-model",
+        metadata={"webui": True},
+        model="deepseek/deepseek-chat",
+        provider="deepseek",
+        primary_model="openai/gpt-5",
+        fallback_index=1,
+    )
+
+    event = seen[0]
+    assert isinstance(event, TurnModelAttempted)
+    assert event.context.chat_id == "chat-model"
+    assert event.model == "deepseek/deepseek-chat"
+    assert event.primary_model == "openai/gpt-5"
+    assert event.provider == "deepseek"
+    assert event.fallback_index == 1
 
 
 @pytest.mark.asyncio

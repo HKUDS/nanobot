@@ -102,6 +102,7 @@ class FallbackProvider(LLMProvider):
     """
 
     supports_stream_recover_callback = True
+    supports_model_attempt_callback = True
 
     def __init__(
         self,
@@ -141,14 +142,19 @@ class FallbackProvider(LLMProvider):
         return False
 
     async def chat(self, **kwargs: Any) -> LLMResponse:
+        on_model_attempt = kwargs.pop("on_model_attempt", None)
         if not self._has_fallbacks:
             return await self._primary.chat(**kwargs)
         return await self._try_with_fallback(
-            lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
+            lambda p, kw: p.chat(**kw),
+            kwargs,
+            has_streamed=None,
+            on_model_attempt=on_model_attempt,
         )
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
         on_stream_recover = kwargs.pop("on_stream_recover", None)
+        on_model_attempt = kwargs.pop("on_model_attempt", None)
         if not self._has_fallbacks:
             return await self._primary.chat_stream(**kwargs)
 
@@ -167,6 +173,7 @@ class FallbackProvider(LLMProvider):
             kwargs,
             has_streamed=has_streamed,
             on_stream_recover=on_stream_recover,
+            on_model_attempt=on_model_attempt,
         )
 
     async def _try_with_fallback(
@@ -175,6 +182,7 @@ class FallbackProvider(LLMProvider):
         kwargs: dict[str, Any],
         has_streamed: list[bool] | None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
+        on_model_attempt: Callable[[str, str | None, int], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
         primary_was_attempted = False
@@ -182,6 +190,12 @@ class FallbackProvider(LLMProvider):
 
         if self._primary_available():
             primary_was_attempted = True
+            await self._notify_model_attempt(
+                on_model_attempt,
+                model=primary_model,
+                provider=None,
+                fallback_index=0,
+            )
             response = await call(self._primary, kwargs)
             if response.finish_reason != "error":
                 self._primary_failures = 0
@@ -268,6 +282,13 @@ class FallbackProvider(LLMProvider):
                 )
                 continue
 
+            await self._notify_model_attempt(
+                on_model_attempt,
+                model=fallback_model,
+                provider=fallback.provider,
+                fallback_index=idx + 1,
+            )
+
             original_values = {
                 name: kwargs.get(name, _MISSING)
                 for name in ("model", "max_tokens", "temperature", "reasoning_effort")
@@ -314,6 +335,21 @@ class FallbackProvider(LLMProvider):
             content=f"Primary model '{primary_model}' circuit open and no fallbacks available",
             finish_reason="error",
         )
+
+    @staticmethod
+    async def _notify_model_attempt(
+        callback: Callable[[str, str | None, int], Awaitable[None]] | None,
+        *,
+        model: str,
+        provider: str | None,
+        fallback_index: int,
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            await callback(model, provider, fallback_index)
+        except Exception:
+            logger.exception("model attempt callback failed for '{}'", model)
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:

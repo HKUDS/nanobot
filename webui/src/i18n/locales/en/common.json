@@ -949,6 +949,7 @@
       "quotedContext": "Quoted context",
       "removeQuotedContext": "Remove quoted context",
       "modelNotConfigured": "Model not configured",
+      "modelFallbackFrom": "Fallback from {{model}}",
       "configureModel": "Configure model",
       "queued": {
         "label": "Queued guidance",

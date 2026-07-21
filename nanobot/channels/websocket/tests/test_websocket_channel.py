@@ -20,6 +20,7 @@ from nanobot.bus.outbound_events import (
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
+    TurnModelUpdatedEvent,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import (
@@ -1059,6 +1060,63 @@ async def test_send_broadcasts_runtime_model_updates() -> None:
     assert payload["event"] == "runtime_model_updated"
     assert payload["model_name"] == "openai/gpt-4.1"
     assert payload["model_preset"] == "fast"
+
+
+@pytest.mark.asyncio
+async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
+    bus = MessageBus()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    chat_one = AsyncMock()
+    chat_two = AsyncMock()
+    channel._attach(chat_one, "chat-1")
+    channel._attach(chat_two, "chat-2")
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            event=TurnModelUpdatedEvent(
+                model="deepseek/deepseek-chat",
+                primary_model="openai/gpt-5",
+                provider="deepseek",
+                fallback_index=1,
+            ),
+        )
+    )
+
+    payload = json.loads(chat_one.send.call_args.args[0])
+    assert payload == {
+        "event": "turn_model_updated",
+        "chat_id": "chat-1",
+        "model_name": "deepseek/deepseek-chat",
+        "primary_model": "openai/gpt-5",
+        "fallback_index": 1,
+        "provider": "deepseek",
+    }
+    assert channel._turn_models["chat-1"].model == "deepseek/deepseek-chat"
+    chat_two.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hydrate_replays_the_latest_turn_model_after_refresh() -> None:
+    bus = MessageBus()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    channel._turn_models["chat-1"] = TurnModelUpdatedEvent(
+        model="deepseek/deepseek-chat",
+        primary_model="openai/gpt-5",
+        provider="deepseek",
+        fallback_index=1,
+    )
+    refreshed = AsyncMock()
+    channel._attach(refreshed, "chat-1")
+
+    await channel._hydrate_after_subscribe("chat-1")
+
+    payload = json.loads(refreshed.send.call_args.args[0])
+    assert payload["event"] == "turn_model_updated"
+    assert payload["model_name"] == "deepseek/deepseek-chat"
+    assert payload["fallback_index"] == 1
 
 
 @pytest.mark.asyncio

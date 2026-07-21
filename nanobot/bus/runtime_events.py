@@ -70,12 +70,24 @@ class RuntimeModelChanged:
     model_preset: str | None
 
 
+@dataclass(frozen=True)
+class TurnModelAttempted:
+    """A turn is about to request its primary or a fallback model."""
+
+    context: RuntimeEventContext
+    model: str
+    provider: str | None
+    primary_model: str
+    fallback_index: int = 0
+
+
 RuntimeEvent = (
     SessionTurnStarted
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
     | RuntimeModelChanged
+    | TurnModelAttempted
 )
 RuntimeEventType = (
     type[SessionTurnStarted]
@@ -83,6 +95,7 @@ RuntimeEventType = (
     | type[TurnCompleted]
     | type[GoalStateChanged]
     | type[RuntimeModelChanged]
+    | type[TurnModelAttempted]
 )
 RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
 _HandlerEntry = tuple[RuntimeEventType | None, RuntimeEventHandler]
@@ -232,6 +245,33 @@ class RuntimeEventPublisher:
     def runtime_model_changed(self, model: str, model_preset: str | None) -> None:
         self.bus.publish_nowait(
             RuntimeModelChanged(model=model, model_preset=model_preset)
+        )
+
+    async def turn_model_attempted(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        session_key: str,
+        metadata: dict[str, Any] | None,
+        model: str,
+        provider: str | None,
+        primary_model: str,
+        fallback_index: int,
+    ) -> None:
+        await self.bus.publish(
+            TurnModelAttempted(
+                context=self._context(
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_key=session_key,
+                    metadata=metadata,
+                ),
+                model=model,
+                provider=provider,
+                primary_model=primary_model,
+                fallback_index=fallback_index,
+            )
         )
 
 

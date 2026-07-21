@@ -26,6 +26,7 @@ from nanobot.bus.outbound_events import (
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
+    TurnModelUpdatedEvent,
     outbound_event_from_message,
     outbound_message_for_event,
 )
@@ -269,6 +270,7 @@ class WebSocketChannel(BaseChannel):
         self._workspaces = gateway.workspaces
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
+        self._turn_models: dict[str, TurnModelUpdatedEvent] = {}
 
     # -- Subscription bookkeeping -------------------------------------------
 
@@ -318,10 +320,24 @@ class WebSocketChannel(BaseChannel):
             return
         await self.send_goal_status(chat_id, "running", started_at=t0)
 
+    async def _maybe_push_turn_model(self, chat_id: str) -> None:
+        """Replay the latest actual model after refresh or reconnect."""
+        event = self._turn_models.get(chat_id)
+        if event is None:
+            return
+        await self.send_turn_model_updated(
+            chat_id,
+            model_name=event.model,
+            primary_model=event.primary_model,
+            provider=event.provider,
+            fallback_index=event.fallback_index,
+        )
+
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
-        """Replay goal/run strip state after subscribe (same-process refresh)."""
+        """Replay live per-chat state after subscribe (same-process refresh)."""
         await self._maybe_push_active_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
+        await self._maybe_push_turn_model(chat_id)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
@@ -769,6 +785,7 @@ class WebSocketChannel(BaseChannel):
         self._conn_default.clear()
         self._webui_connections.clear()
         self._tokens.clear()
+        self._turn_models.clear()
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
         """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
@@ -785,6 +802,7 @@ class WebSocketChannel(BaseChannel):
         event = outbound_event_from_message(msg)
         progress_event = event if isinstance(event, ProgressEvent) else None
         if isinstance(event, RuntimeModelUpdatedEvent):
+            self._turn_models.clear()
             await self.send_runtime_model_updated(
                 model_name=event.model,
                 model_preset=event.model_preset,
@@ -805,6 +823,17 @@ class WebSocketChannel(BaseChannel):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
+        if isinstance(event, TurnModelUpdatedEvent):
+            self._turn_models[msg.chat_id] = event
+            if conns:
+                await self.send_turn_model_updated(
+                    msg.chat_id,
+                    model_name=event.model,
+                    primary_model=event.primary_model,
+                    provider=event.provider,
+                    fallback_index=event.fallback_index,
+                )
+            return
         if isinstance(event, GoalStateSyncEvent):
             if conns:
                 await self.send_goal_state(msg.chat_id, event.goal_state or {"active": False})
@@ -1113,3 +1142,39 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" runtime_model_updated ")
+
+    async def send_turn_model_updated(
+        self,
+        chat_id: str,
+        *,
+        model_name: Any,
+        primary_model: Any,
+        provider: Any = None,
+        fallback_index: Any = 0,
+    ) -> None:
+        """Notify one chat's subscribers which model is handling its current request."""
+        conns = list(self._subs.get(chat_id, ()))
+        if (
+            not conns
+            or not isinstance(model_name, str)
+            or not model_name.strip()
+            or not isinstance(primary_model, str)
+            or not primary_model.strip()
+        ):
+            return
+        body: dict[str, Any] = {
+            "event": "turn_model_updated",
+            "chat_id": chat_id,
+            "model_name": model_name.strip(),
+            "primary_model": primary_model.strip(),
+            "fallback_index": (
+                fallback_index
+                if isinstance(fallback_index, int) and not isinstance(fallback_index, bool)
+                else 0
+            ),
+        }
+        if isinstance(provider, str) and provider.strip():
+            body["provider"] = provider.strip()
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" turn_model_updated ")

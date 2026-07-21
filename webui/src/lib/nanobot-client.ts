@@ -6,6 +6,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
+  TurnModelState,
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
@@ -136,6 +137,8 @@ export class NanobotClient {
   private runStartedAtByChatId = new Map<string, number>();
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  /** Model currently handling each chat's latest request (primary or fallback). */
+  private turnModelByChatId = new Map<string, TurnModelState>();
   private pendingNewChat: PendingNewChat | null = null;
   private pendingTranscriptions = new Map<string, PendingTranscription>();
   // Frames queued while the socket is not yet OPEN
@@ -224,6 +227,11 @@ export class NanobotClient {
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
   getGoalState(chatId: string): GoalStateWsPayload | undefined {
     return this.goalStateByChatId.get(chatId);
+  }
+
+  /** Latest model attempt for *chatId*, kept isolated from other open chats. */
+  getTurnModel(chatId: string): TurnModelState | undefined {
+    return this.turnModelByChatId.get(chatId);
   }
 
   private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
@@ -480,6 +488,7 @@ export class NanobotClient {
     }
 
     if (parsed.event === "runtime_model_updated") {
+      this.turnModelByChatId.clear();
       this.emitRuntimeModelUpdate(parsed.model_name || null, parsed.model_preset ?? null);
       return;
     }
@@ -522,6 +531,14 @@ export class NanobotClient {
 
     const chatId = (parsed as { chat_id?: string }).chat_id;
     if (chatId) {
+      if (parsed.event === "turn_model_updated") {
+        this.turnModelByChatId.set(chatId, {
+          modelName: parsed.model_name,
+          primaryModel: parsed.primary_model,
+          provider: parsed.provider ?? null,
+          fallbackIndex: Math.max(0, parsed.fallback_index),
+        });
+      }
       this.recordGoalStatusForRunStrip(chatId, parsed);
       this.recordGoalStateSnapshot(chatId, parsed);
       this.dispatch(chatId, parsed);

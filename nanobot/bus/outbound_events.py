@@ -81,6 +81,16 @@ class RuntimeModelUpdatedEvent(OutboundEvent):
     model_preset: str | None = None
 
 
+@dataclass(frozen=True)
+class TurnModelUpdatedEvent(OutboundEvent):
+    """The model currently handling one chat turn, including fallback attempts."""
+
+    model: str
+    primary_model: str
+    provider: str | None = None
+    fallback_index: int = 0
+
+
 def outbound_message_for_event(
     *,
     channel: str,

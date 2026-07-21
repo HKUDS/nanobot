@@ -357,6 +357,45 @@ describe("NanobotClient", () => {
     expect(handler).toHaveBeenCalledWith("openai/gpt-4.1", "fast");
   });
 
+  it("caches actual turn models per chat and clears them on a configured model change", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const chatHandler = vi.fn();
+    client.onChat("chat-a", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "turn_model_updated",
+      chat_id: "chat-a",
+      model_name: "deepseek/deepseek-chat",
+      primary_model: "openai/gpt-5",
+      provider: "deepseek",
+      fallback_index: 1,
+    });
+
+    expect(client.getTurnModel("chat-a")).toEqual({
+      modelName: "deepseek/deepseek-chat",
+      primaryModel: "openai/gpt-5",
+      provider: "deepseek",
+      fallbackIndex: 1,
+    });
+    expect(client.getTurnModel("chat-b")).toBeUndefined();
+    expect(chatHandler).toHaveBeenCalledWith(expect.objectContaining({
+      event: "turn_model_updated",
+      chat_id: "chat-a",
+    }));
+
+    lastSocket().fakeMessage({
+      event: "runtime_model_updated",
+      model_name: "anthropic/claude-sonnet-4-5",
+    });
+    expect(client.getTurnModel("chat-a")).toBeUndefined();
+  });
+
   it("dispatches session updates globally", () => {
     const client = new NanobotClient({
       url: "ws://test",

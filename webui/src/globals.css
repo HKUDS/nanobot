@@ -124,6 +124,64 @@
 }
 
 @layer utilities {
+  @keyframes composer-model-fallback-shell {
+    0% {
+      border-color: hsl(38 92% 50% / 0.2);
+      box-shadow: 0 2px 8px rgb(15 23 42 / 0.045);
+    }
+    38% {
+      border-color: hsl(38 92% 50% / 0.78);
+      box-shadow: 0 0 0 3px hsl(38 92% 50% / 0.13), 0 6px 18px hsl(38 72% 40% / 0.13);
+    }
+    100% {
+      box-shadow: 0 2px 8px rgb(15 23 42 / 0.045);
+    }
+  }
+
+  @keyframes composer-model-fallback-out {
+    from { opacity: 1; transform: translateY(0); filter: blur(0); }
+    to { opacity: 0; transform: translateY(-0.55rem); filter: blur(2px); }
+  }
+
+  @keyframes composer-model-fallback-in {
+    from { opacity: 0; transform: translateY(0.55rem); filter: blur(2px); }
+    to { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+
+  @keyframes composer-model-fallback-indicator {
+    0%, 100% { transform: scale(1); }
+    45% { transform: scale(1.18); }
+  }
+
+  .composer-model-fallback {
+    animation: composer-model-fallback-shell 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .composer-model-fallback-previous {
+    animation: composer-model-fallback-out 360ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  .composer-model-fallback-current {
+    animation: composer-model-fallback-in 500ms 130ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .composer-model-fallback-indicator {
+    animation: composer-model-fallback-indicator 720ms 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .composer-model-fallback,
+    .composer-model-fallback-previous,
+    .composer-model-fallback-current,
+    .composer-model-fallback-indicator {
+      animation: none;
+    }
+
+    .composer-model-fallback-previous {
+      display: none;
+    }
+  }
+
   .host-drag-region {
     -webkit-app-region: drag;
   }

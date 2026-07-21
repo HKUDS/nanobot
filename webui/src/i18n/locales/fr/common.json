@@ -935,6 +935,7 @@
       "quotedContext": "Contexte cité",
       "removeQuotedContext": "Supprimer le contexte cité",
       "modelNotConfigured": "Modèle non configuré",
+      "modelFallbackFrom": "Repli depuis {{model}}",
       "configureModel": "Configurer le modèle",
       "queued": {
         "label": "Guidage en attente",

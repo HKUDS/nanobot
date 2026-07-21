@@ -170,6 +170,8 @@ interface ThreadComposerProps {
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
+  modelFallbackFrom?: string | null;
+  modelFallbackTitle?: string | null;
   onModelBadgeClick?: () => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
@@ -815,6 +817,8 @@ export function ThreadComposer({
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
+  modelFallbackFrom = null,
+  modelFallbackTitle = null,
   onModelBadgeClick,
   variant = "thread",
   slashCommands = [],
@@ -2073,6 +2077,8 @@ export function ThreadComposer({
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
+                fallbackFrom={modelFallbackFrom}
+                fallbackTitle={modelFallbackTitle}
                 isHero={isHero}
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
@@ -2361,6 +2367,8 @@ function ComposerModelBadge({
   provider,
   providerLabel,
   needsSetup,
+  fallbackFrom,
+  fallbackTitle,
   isHero,
   onClick,
 }: {
@@ -2368,6 +2376,8 @@ function ComposerModelBadge({
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
+  fallbackFrom?: string | null;
+  fallbackTitle?: string | null;
   isHero: boolean;
   onClick?: () => void;
 }) {
@@ -2375,7 +2385,9 @@ function ComposerModelBadge({
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   const showLogo = !!logoUrl;
-  const title = providerLabel ? `${label} · ${providerLabel}` : label;
+  const baseTitle = providerLabel ? `${label} · ${providerLabel}` : label;
+  const title = fallbackTitle ? `${baseTitle} · ${fallbackTitle}` : baseTitle;
+  const isFallback = Boolean(fallbackFrom);
   const interactive = Boolean(onClick);
   const Container = interactive ? "button" : "span";
 
@@ -2384,11 +2396,13 @@ function ComposerModelBadge({
       title={title}
       type={interactive ? "button" : undefined}
       onClick={onClick}
+      data-fallback={isFallback ? "true" : undefined}
       className={cn(
         "inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
+        isFallback && "composer-model-fallback border-amber-400/55 bg-amber-50/55 dark:border-amber-300/30 dark:bg-amber-400/[0.08]",
         isHero
           ? "h-8 max-w-[min(7.5rem,32vw)] gap-1.5 px-2 text-[11.5px] sm:max-w-[min(12.5rem,44vw)]"
           : "h-9 max-w-[min(7.5rem,32vw)] gap-2 px-2.5 text-[12px] sm:max-w-[min(12rem,44vw)]",
@@ -2435,7 +2449,28 @@ function ComposerModelBadge({
           <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3 w-3" : "h-3 w-3")} />
         )}
       </span>
-      <span className="truncate">{label}</span>
+      <span className="relative min-w-0 overflow-hidden">
+        {isFallback ? (
+          <span
+            aria-hidden
+            className="composer-model-fallback-previous pointer-events-none absolute inset-0 truncate text-muted-foreground"
+          >
+            {fallbackFrom}
+          </span>
+        ) : null}
+        <span className={cn("block truncate", isFallback && "composer-model-fallback-current")}>
+          {label}
+        </span>
+      </span>
+      {isFallback ? (
+        <span
+          data-testid="composer-model-fallback-indicator"
+          className="composer-model-fallback-indicator grid h-4 w-4 shrink-0 place-items-center rounded-full bg-amber-400/15 text-amber-700 dark:bg-amber-300/10 dark:text-amber-300"
+          aria-hidden
+        >
+          <CornerDownRight className="h-2.5 w-2.5" strokeWidth={2.2} />
+        </span>
+      ) : null}
     </Container>
   );
 }

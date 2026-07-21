@@ -935,6 +935,7 @@
       "quotedContext": "Ngữ cảnh được trích dẫn",
       "removeQuotedContext": "Xóa ngữ cảnh được trích dẫn",
       "modelNotConfigured": "Chưa cấu hình mô hình",
+      "modelFallbackFrom": "Chuyển dự phòng từ {{model}}",
       "configureModel": "Cấu hình mô hình",
       "queued": {
         "label": "Hướng dẫn đang chờ",

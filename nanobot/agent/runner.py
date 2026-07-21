@@ -76,6 +76,7 @@ class AgentRunSpec:
     progress_callback: Any | None = None
     stream_progress_deltas: bool = True
     retry_wait_callback: Any | None = None
+    model_attempt_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
@@ -680,6 +681,8 @@ class AgentRunner:
             "retry_mode": spec.provider_retry_mode,
             "on_retry_wait": spec.retry_wait_callback,
         }
+        if spec.model_attempt_callback is not None:
+            kwargs["on_model_attempt"] = spec.model_attempt_callback
         generation = spec.runtime.generation
         kwargs["temperature"] = generation.temperature
         kwargs["max_tokens"] = generation.max_tokens

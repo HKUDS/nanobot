@@ -948,6 +948,7 @@
       "quotedContext": "引用内容",
       "removeQuotedContext": "移除引用内容",
       "modelNotConfigured": "模型未配置",
+      "modelFallbackFrom": "已从 {{model}} 回退",
       "configureModel": "配置模型",
       "queued": {
         "label": "待引导提示",

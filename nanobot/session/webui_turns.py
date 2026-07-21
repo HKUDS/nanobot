@@ -20,6 +20,7 @@ from nanobot.bus.outbound_events import (
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
+    TurnModelUpdatedEvent,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -30,6 +31,7 @@ from nanobot.bus.runtime_events import (
     RuntimeModelChanged,
     SessionTurnStarted,
     TurnCompleted,
+    TurnModelAttempted,
     TurnRunStatusChanged,
 )
 from nanobot.providers.base import LLMProvider
@@ -304,6 +306,10 @@ class WebuiTurnCoordinator:
                 self._handle_runtime_model_changed,
                 RuntimeModelChanged,
             ),
+            runtime_events.subscribe(
+                self._handle_turn_model_attempted,
+                TurnModelAttempted,
+            ),
         ]
 
         def _unsubscribe() -> None:
@@ -380,6 +386,23 @@ class WebuiTurnCoordinator:
                     model=event.model,
                     model_preset=event.model_preset,
                 ),
+            )
+        )
+
+    async def _handle_turn_model_attempted(self, event: TurnModelAttempted) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=event.context.channel,
+                chat_id=event.context.chat_id,
+                event=TurnModelUpdatedEvent(
+                    model=event.model,
+                    primary_model=event.primary_model,
+                    provider=event.provider,
+                    fallback_index=event.fallback_index,
+                ),
+                metadata=event.context.metadata,
             )
         )
 

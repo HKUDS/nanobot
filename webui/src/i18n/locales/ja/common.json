@@ -935,6 +935,7 @@
       "quotedContext": "引用したコンテキスト",
       "removeQuotedContext": "引用したコンテキストを削除",
       "modelNotConfigured": "モデルが未設定です",
+      "modelFallbackFrom": "{{model}} からフォールバック",
       "configureModel": "モデルを設定",
       "queued": {
         "label": "保留中のガイド",

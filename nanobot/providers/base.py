@@ -197,6 +197,7 @@ class LLMProvider(ABC):
     """Base class for LLM providers."""
 
     supports_progress_deltas = False
+    supports_model_attempt_callback = False
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
     _PERSISTENT_MAX_DELAY = 60
@@ -692,6 +693,7 @@ class LLMProvider(ABC):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_model_attempt: Callable[[str, str | None, int], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
@@ -726,6 +728,8 @@ class LLMProvider(ABC):
         )
         if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
             kw["on_stream_recover"] = _recover_stream
+        if on_model_attempt and getattr(self, "supports_model_attempt_callback", False):
+            kw["on_model_attempt"] = on_model_attempt
         return await self._run_with_retry(
             self._safe_chat_stream,
             kw,
@@ -747,6 +751,7 @@ class LLMProvider(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+        on_model_attempt: Callable[[str, str | None, int], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -769,6 +774,8 @@ class LLMProvider(ABC):
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
+        if on_model_attempt and getattr(self, "supports_model_attempt_callback", False):
+            kw["on_model_attempt"] = on_model_attempt
         return await self._run_with_retry(
             self._safe_chat,
             kw,
