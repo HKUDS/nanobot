@@ -1707,6 +1707,27 @@ def test_dashscope_thinking_disabled_for_none_string() -> None:
     assert "reasoning_effort" not in kw
 
 
+def test_qwen_thinking_enabled_via_model_level_mapping() -> None:
+    """Non-DashScope providers (e.g. OpenRouter) must pick up model-level
+    enable_thinking for Qwen models when reasoning_effort is set."""
+    kw = _build_kwargs_for("openrouter", "qwen/qwen3.6-flash", reasoning_effort="medium")
+    assert kw["extra_body"] == {"enable_thinking": True, "reasoning": {"effort": "medium"}}
+
+
+def test_qwen_thinking_disabled_via_model_level_mapping() -> None:
+    """reasoning_effort='none' must send enable_thinking: False via model-level
+    mapping on non-DashScope providers."""
+    kw = _build_kwargs_for("openrouter", "qwen/qwen3.5-flash", reasoning_effort="none")
+    assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_qwen_no_extra_body_when_reasoning_effort_omitted() -> None:
+    """Without reasoning_effort the model-level mapping must not inject extra_body
+    on its own — the provider default applies."""
+    kw = _build_kwargs_for("openrouter", "qwen/qwen3.6-flash", reasoning_effort=None)
+    assert "extra_body" not in kw
+
+
 def test_deepseek_no_backfill_when_reasoning_effort_none_string() -> None:
     """reasoning_effort='none' must NOT trigger reasoning_content backfill (thinking inactive)."""
     spec = find_by_name("deepseek")
