@@ -457,6 +457,7 @@ class SubagentManager:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self._exec_session_manager.terminate_by_owner(session_key)
         return len(tasks)
 
     async def close(self) -> None:

@@ -334,6 +334,19 @@ class ExecSessionManager:
             )
         return len(sessions)
 
+    async def terminate_by_owner(self, owner_session_key: str) -> int:
+        """Terminate all sessions owned by owner_session_key. Returns count."""
+        async with self._lock:
+            victims = []
+            for sid, s in list(self._sessions.items()):
+                if s.owner_session_key == owner_session_key:
+                    victims.append(self._sessions.pop(sid))
+        await asyncio.gather(
+            *(s.kill() for s in victims),
+            return_exceptions=True,
+        )
+        return len(victims)
+
     async def _cleanup_locked(self) -> None:
         now = time.monotonic()
         stale = [
