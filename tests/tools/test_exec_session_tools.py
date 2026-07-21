@@ -622,6 +622,88 @@ def test_agent_loop_shutdown_attempts_all_cleanup_after_errors(monkeypatch):
     asyncio.run(run())
 
 
+def test_terminate_by_owner_kills_matching_sessions(tmp_path):
+    async def run() -> None:
+        manager = ExecSessionManager()
+        tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
+
+        token_a = bind_request_context(
+            RequestContext(channel="cli", chat_id="a", session_key="cli:a")
+        )
+        try:
+            initial_a = await tool.execute(
+                command=_waiting_shell_command("a_ready"),
+                yield_time_ms=100,
+            )
+        finally:
+            reset_request_context(token_a)
+        sid_a = _session_id(initial_a)
+
+        token_b = bind_request_context(
+            RequestContext(channel="cli", chat_id="b", session_key="cli:b")
+        )
+        try:
+            initial_b = await tool.execute(
+                command=_waiting_shell_command("b_ready"),
+                yield_time_ms=100,
+            )
+        finally:
+            reset_request_context(token_b)
+        sid_b = _session_id(initial_b)
+
+        proc_a = manager._sessions[sid_a].process
+        proc_b = manager._sessions[sid_b].process
+        assert proc_a.returncode is None
+        assert proc_b.returncode is None
+
+        killed = await manager.terminate_by_owner("cli:a")
+
+        assert killed == 1
+        assert proc_a.returncode is not None
+        assert proc_b.returncode is None
+        assert sid_a not in manager._sessions
+        assert sid_b in manager._sessions
+
+        await manager.close_all()
+
+    asyncio.run(run())
+
+
+def test_terminate_by_owner_returns_zero_for_no_match(tmp_path):
+    async def run() -> None:
+        manager = ExecSessionManager()
+        killed = await manager.terminate_by_owner("nonexistent")
+        assert killed == 0
+        assert manager._sessions == {}
+
+    asyncio.run(run())
+
+
+def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
+    async def run() -> None:
+        manager = ExecSessionManager()
+        tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
+
+        # Spawn without owner (no request context)
+        initial = await tool.execute(
+            command=_waiting_shell_command("ready"),
+            yield_time_ms=100,
+        )
+        sid = _session_id(initial)
+        proc = manager._sessions[sid].process
+        assert proc.returncode is None
+
+        killed = await manager.terminate_by_owner("cli:a")
+
+        assert killed == 0
+        assert proc.returncode is None
+        assert sid in manager._sessions
+
+        await manager.close_all()
+
+    asyncio.run(run())
+
+
 def test_agent_loop_shutdown_preserves_single_cleanup_error(monkeypatch):
     async def run() -> None:
         loop = object.__new__(AgentLoop)
