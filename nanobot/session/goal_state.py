@@ -130,3 +130,15 @@ def runner_wall_llm_timeout_s(
     if meta is None and session_key:
         meta = sessions.get_or_create(session_key).metadata
     return 0.0 if sustained_goal_turn(meta, message_metadata=message_metadata) else None
+
+
+def cancel_goal_state(
+    metadata: MutableMapping[str, Any],
+) -> bool:
+    """Cancel the active sustained goal in-place. Returns True if there was one."""
+    if not sustained_goal_active(metadata):
+        return False
+    prior = parse_goal_state(goal_state_raw(metadata)) or {}
+    metadata[GOAL_STATE_KEY] = {**prior, "status": "cancelled"}
+    discard_legacy_goal_state_key(metadata)
+    return True

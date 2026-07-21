@@ -15,6 +15,7 @@ from nanobot import __version__
 from nanobot.agent.goal_permission import goal_mutation_permission
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.session.goal_state import cancel_goal_state, sustained_goal_active
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -157,6 +158,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "List skills",
         "List all enabled skills available to the agent.",
         "wrench",
+    ),
+    BuiltinCommandSpec(
+        "/cancel-goal",
+        "Cancel goal",
+        "Cancel the active sustained goal and stop goal continuations.",
+        "circle-x",
+        lifecycle="side_channel",
     ),
     BuiltinCommandSpec(
         "/help",
@@ -1008,6 +1016,27 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/evaluator-prompt", cmd_evaluator_prompt)
     router.prefix("/evaluator-prompt ", cmd_evaluator_prompt)
     router.exact("/skill", cmd_skill)
+    router.exact("/cancel-goal", cmd_goal_cancel)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
+
+
+async def cmd_goal_cancel(ctx: CommandContext) -> OutboundMessage:
+    """Cancel the active sustained goal so that future turns do not auto-continue."""
+    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    if not cancel_goal_state(session.metadata):
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="No active goal to cancel.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+    ctx.loop.sessions.save(session)
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content="Goal cancelled. The sustained goal has been stopped "
+                "and future turns will not auto-continue.",
+        metadata=dict(ctx.msg.metadata or {}),
+    )
+
+
