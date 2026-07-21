@@ -99,6 +99,10 @@ if TYPE_CHECKING:
     )
     from nanobot.cron.service import CronService
 
+
+_TURN_SKILL_NAMES_META_KEY = "_turn_skill_names"
+
+
 class TurnState(Enum):
     RESTORE = auto()
     COMPACT = auto()
@@ -701,9 +705,11 @@ class AgentLoop:
         assert ctx.session is not None
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+        skill_names = ctx.msg.metadata.get(_TURN_SKILL_NAMES_META_KEY)
         return self.context.build_messages(
             history=ctx.history,
             current_message="" if is_subagent else ctx.msg.content,
+            skill_names=skill_names,
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
             channel=ctx.route.channel,
             chat_id=str(ctx.msg.metadata.get("context_chat_id") or ctx.route.chat_id),
@@ -1939,6 +1945,7 @@ class AgentLoop:
         chat_id: str = "direct",
         sender_id: str = "user",
         media: list[str] | None = None,
+        skill_names: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
@@ -1953,8 +1960,15 @@ class AgentLoop:
         """Process an external message directly and return the outbound payload."""
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
+        if skill_names is not None and (
+            not isinstance(skill_names, list)
+            or any(not isinstance(name, str) or not name for name in skill_names)
+        ):
+            raise ValueError("skill_names must be a list of non-empty strings")
         await self._connect_mcp()
         metadata: dict[str, Any] = {}
+        if skill_names is not None:
+            metadata[_TURN_SKILL_NAMES_META_KEY] = list(skill_names)
         if not persist_user_message:
             metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(

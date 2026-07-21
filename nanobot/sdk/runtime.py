@@ -22,6 +22,7 @@ def build_process_direct_kwargs(
     sender_id: str,
     media: list[str] | None,
     ephemeral: bool,
+    skill_names: list[str] | None = None,
     on_stream: Any | None = None,
     on_stream_end: Any | None = None,
 ) -> dict[str, Any]:
@@ -34,6 +35,8 @@ def build_process_direct_kwargs(
         kwargs["sender_id"] = sender_id
     if media is not None:
         kwargs["media"] = media
+    if skill_names is not None:
+        kwargs["skill_names"] = list(skill_names)
     if ephemeral:
         kwargs["ephemeral"] = True
         kwargs["_run_extra_hooks_for_ephemeral"] = True

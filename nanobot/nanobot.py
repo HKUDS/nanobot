@@ -132,6 +132,7 @@ class Nanobot:
         chat_id: str = "direct",
         sender_id: str = "user",
         media: list[str] | None = None,
+        skill_names: list[str] | None = None,
         ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
@@ -147,6 +148,7 @@ class Nanobot:
             chat_id: Logical chat identifier for runtime context.
             sender_id: Logical sender identifier for runtime context.
             media: Optional local media paths attached to the message.
+            skill_names: Skills to preload for this run only.
             ephemeral: If true, do not persist the turn or compact session history.
             hooks: Optional lifecycle hooks for this run.
             model: Override the model for this run only.
@@ -165,6 +167,7 @@ class Nanobot:
             chat_id=chat_id,
             sender_id=sender_id,
             media=media,
+            skill_names=skill_names,
             ephemeral=ephemeral,
         )
         if runtime is not None:
@@ -186,6 +189,7 @@ class Nanobot:
         chat_id: str = "direct",
         sender_id: str = "user",
         media: list[str] | None = None,
+        skill_names: list[str] | None = None,
         ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
@@ -216,6 +220,7 @@ class Nanobot:
                 chat_id=chat_id,
                 sender_id=sender_id,
                 media=media,
+                skill_names=skill_names,
                 ephemeral=ephemeral,
                 on_stream=_on_stream,
                 on_stream_end=_on_stream_end,
@@ -270,6 +275,7 @@ class Nanobot:
         chat_id: str = "direct",
         sender_id: str = "user",
         media: list[str] | None = None,
+        skill_names: list[str] | None = None,
         ephemeral: bool = False,
         hooks: list[AgentHook] | None = None,
         model: str | None = None,
@@ -283,6 +289,7 @@ class Nanobot:
             chat_id=chat_id,
             sender_id=sender_id,
             media=media,
+            skill_names=skill_names,
             ephemeral=ephemeral,
             hooks=hooks,
             model=model,

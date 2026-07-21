@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -232,6 +233,100 @@ async def test_runtime_context_provider_runs_once_across_tool_iterations(tmp_pat
     assert provider_calls == 1
     for call in provider.chat_with_retry.await_args_list:
         assert "frozen context" in str(call.kwargs["messages"])
+
+
+@pytest.mark.asyncio
+async def test_process_direct_preloads_skills_for_current_turn_only(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    skill_dir = tmp_path / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: review\ndescription: Review code\n---\n\n"
+        "# Per-run Review Instructions\n",
+        encoding="utf-8",
+    )
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first answer", usage={}),
+        LLMResponse(content="second answer", usage={}),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+
+    await loop.process_direct(
+        "first turn",
+        session_key="sdk:skills",
+        skill_names=["review"],
+    )
+    await loop.process_direct("second turn", session_key="sdk:skills")
+
+    first_messages = provider.chat_with_retry.await_args_list[0].kwargs["messages"]
+    second_messages = provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+    first_system = first_messages[0]["content"]
+    second_system = second_messages[0]["content"]
+    assert "### Skill: review" in first_system
+    assert "# Per-run Review Instructions" in first_system
+    assert "- **review**" not in first_system
+    assert "# Per-run Review Instructions" not in second_system
+    assert "- **review**" in second_system
+
+
+@pytest.mark.asyncio
+async def test_process_direct_rejects_malformed_skill_names(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+
+    with pytest.raises(ValueError, match="list of non-empty strings"):
+        await loop.process_direct("test", skill_names="review")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_process_direct_keeps_concurrent_skill_contexts_isolated(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    for name in ("alpha", "beta"):
+        skill_dir = tmp_path / "skills" / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name} skill\n---\n\n"
+            f"# {name.title()} Unique Instructions\n",
+            encoding="utf-8",
+        )
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    captured: dict[str, str] = {}
+
+    async def capture_messages(**kwargs):
+        messages = kwargs["messages"]
+        user_text = str(messages[-1]["content"])
+        captured[user_text] = messages[0]["content"]
+        await asyncio.sleep(0)
+        return LLMResponse(content="done", usage={})
+
+    provider.chat_with_retry = AsyncMock(side_effect=capture_messages)
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+
+    await asyncio.gather(
+        loop.process_direct("alpha turn", session_key="sdk:alpha", skill_names=["alpha"]),
+        loop.process_direct("beta turn", session_key="sdk:beta", skill_names=["beta"]),
+    )
+
+    assert "# Alpha Unique Instructions" in captured["alpha turn"]
+    assert "# Beta Unique Instructions" not in captured["alpha turn"]
+    assert "# Beta Unique Instructions" in captured["beta turn"]
+    assert "# Alpha Unique Instructions" not in captured["beta turn"]
 
 
 @pytest.mark.asyncio
