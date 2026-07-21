@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,17 @@ def test_save_config_round_trips(tmp_path: Path) -> None:
     save_config(Config(), path)
     loaded = load_config(path)
     assert loaded.agents.defaults.model
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX file modes")
+def test_save_config_preserves_existing_file_mode(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o600)
+
+    save_config(Config(), path)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_save_config_preserves_existing_file_when_write_fails(
