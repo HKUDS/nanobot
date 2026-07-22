@@ -976,7 +976,7 @@
       },
       "voiceErrors": {
         "unsupported": "当前浏览器不支持语音输入。",
-        "permission": "Chrome 或系统阻止了麦克风访问。请点击地址栏中的权限图标允许麦克风，然后刷新页面。",
+        "permission": "请在地址栏允许麦克风后重试。",
         "notConfigured": "请先配置转写提供商。",
         "tooLong": "录音时间太长。",
         "tooShort": "请稍微多录一会儿。",

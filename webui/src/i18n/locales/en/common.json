@@ -977,7 +977,7 @@
       },
       "voiceErrors": {
         "unsupported": "Voice input is not supported in this browser.",
-        "permission": "Chrome or your system blocked microphone access. Allow it from the address bar, then reload the page.",
+        "permission": "Allow microphone access in the address bar, then retry.",
         "notConfigured": "Configure a transcription provider first.",
         "tooLong": "Recording is too long.",
         "tooShort": "Hold a little longer to record voice.",

@@ -473,11 +473,11 @@ describe("ThreadComposer", () => {
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
     fireEvent.click(voiceButton);
-    await waitFor(() => expect(screen.getByText("Chrome or your system blocked microphone access. Allow it from the address bar, then reload the page.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Allow microphone access in the address bar, then retry.")).toBeInTheDocument());
 
     fireEvent.click(voiceButton);
 
-    await waitFor(() => expect(screen.queryByText("Chrome or your system blocked microphone access. Allow it from the address bar, then reload the page.")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Allow microphone access in the address bar, then retry.")).not.toBeInTheDocument());
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
   });
