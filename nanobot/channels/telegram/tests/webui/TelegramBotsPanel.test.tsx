@@ -59,7 +59,13 @@ function telegramFeature(instance: NanobotChannelInstanceInfo): NanobotFeatureIn
     key: string,
     kind: string,
     required = false,
-  ) => ({ key, field: key.split(".").at(-1) ?? key, kind, choices: [], required });
+  ) => ({
+    key,
+    field: key.split(".").at(-1) ?? key,
+    kind,
+    choices: key.endsWith(".groupPolicy") ? ["mention", "open"] : [],
+    required,
+  });
   return {
     name: "telegram",
     display_name: "Telegram",
@@ -72,6 +78,7 @@ function telegramFeature(instance: NanobotChannelInstanceInfo): NanobotFeatureIn
     config_values: instance.config_values,
     configured_fields: instance.configured_fields,
     setup: {
+      official_url: "https://t.me/BotFather",
       fields: [
         field("channels.telegram.name", "string"),
         field("channels.telegram.token", "secret", true),
@@ -89,6 +96,26 @@ function telegramFeature(instance: NanobotChannelInstanceInfo): NanobotFeatureIn
   };
 }
 
+function telegramValidation(
+  overrides: Partial<ChannelValidationPayload> = {},
+): ChannelValidationPayload {
+  return {
+    name: "telegram",
+    status: "connected",
+    checks: [],
+    missing_fields: [],
+    can_enable: true,
+    requires_restart: false,
+    ...overrides,
+  };
+}
+
+const savedConfiguration = {
+  name: "telegram",
+  saved: true,
+  saved_keys: [],
+};
+
 describe("TelegramBotsPanel", () => {
   beforeEach(() => {
     apiMocks.configureChannel.mockReset();
@@ -102,7 +129,8 @@ describe("TelegramBotsPanel", () => {
     expect(nextTelegramInstanceId([virtualDefault])).toBe("default");
   });
 
-  it("keeps a customized incomplete instance visible", () => {
+  it("renders one token form for an incomplete bot without setup steps", async () => {
+    const user = userEvent.setup();
     const customDefault = telegramInstance({
       name: "Support bot",
       config_values: {
@@ -112,6 +140,32 @@ describe("TelegramBotsPanel", () => {
     });
 
     expect(isVisibleTelegramInstance(customDefault)).toBe(true);
+    render(
+      <TelegramBotsPanel
+        token="api-token"
+        feature={telegramFeature(customDefault)}
+        showBrandLogos={false}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Support bot" }));
+
+    expect(screen.getAllByLabelText("Bot token", { selector: "input" })).toHaveLength(1);
+    expect(screen.getByLabelText("Bot token", { selector: "input" })).toBeVisible();
+    expect(screen.queryByText("Next steps")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add bot" }));
+    expect(screen.getByRole("link", { name: "Open BotFather" })).toBeVisible();
+    expect(screen.getAllByLabelText("Bot token", { selector: "input" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Support bot" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Support bot" }));
+    expect(screen.queryByRole("link", { name: "Open BotFather" })).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Bot token", { selector: "input" })).toHaveLength(1);
   });
 
   it("keeps configured controls compact and internal metadata out of the panel", async () => {
@@ -150,6 +204,7 @@ describe("TelegramBotsPanel", () => {
       />,
     );
 
+    expect(screen.getByText("Configured: 2 · Running: 2")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "nanobot" }));
 
     const defaultCheck = screen.getByRole("button", { name: "Check connection" });
@@ -165,9 +220,7 @@ describe("TelegramBotsPanel", () => {
     expect(customControls).not.toBeNull();
     expect(within(customControls as HTMLElement).getByText("Running")).toBeVisible();
     expect(screen.queryByText("bot-2")).not.toBeInTheDocument();
-    expect(screen.queryByText("Verify the saved token with Telegram.")).not.toBeInTheDocument();
     expect(screen.queryByText("Next steps")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Use a separate Telegram bot/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open Telegram setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add bot" })).toBeVisible();
     expect(screen.getAllByText("Advanced")).toHaveLength(1);
@@ -187,24 +240,15 @@ describe("TelegramBotsPanel", () => {
     ).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Add bot" }));
-    expect(screen.getByRole("link", { name: "Open Telegram setup" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Open BotFather" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open Telegram setup" })).not.toBeInTheDocument();
   });
 
   it("connects with only the required token and keeps optional settings collapsed", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
-      status: "connected",
-      checks: [],
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       identity: { name: "token_only_bot" },
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
-    apiMocks.configureChannel.mockResolvedValue({
-      name: "telegram",
-      saved: true,
-      saved_keys: [],
-    });
+    }));
+    apiMocks.configureChannel.mockResolvedValue(savedConfiguration);
     const user = userEvent.setup();
     render(
       <TelegramCredentialsForm
@@ -250,14 +294,9 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("does not save a new token when Telegram verification is unavailable", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       status: "configured",
-      checks: [],
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
+    }));
     const user = userEvent.setup();
     render(
       <TelegramCredentialsForm
@@ -282,20 +321,10 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("uses the entered proxy to verify and save a new bot", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
-      status: "connected",
-      checks: [],
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       identity: { name: "proxied_bot" },
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
-    apiMocks.configureChannel.mockResolvedValue({
-      name: "telegram",
-      saved: true,
-      saved_keys: [],
-    });
+    }));
+    apiMocks.configureChannel.mockResolvedValue(savedConfiguration);
     const user = userEvent.setup();
     render(
       <TelegramCredentialsForm
@@ -342,11 +371,7 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("lets an incomplete bot remove a saved proxy before entering a token", async () => {
-    apiMocks.configureChannel.mockResolvedValue({
-      name: "telegram",
-      saved: true,
-      saved_keys: [],
-    });
+    apiMocks.configureChannel.mockResolvedValue(savedConfiguration);
     const user = userEvent.setup();
     render(
       <TelegramCredentialsForm
@@ -374,20 +399,10 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("lets an existing bot replace and remove its masked proxy", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
-      status: "connected",
-      checks: [],
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       identity: { name: "working_bot" },
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
-    apiMocks.configureChannel.mockResolvedValue({
-      name: "telegram",
-      saved: true,
-      saved_keys: [],
-    });
+    }));
+    apiMocks.configureChannel.mockResolvedValue(savedConfiguration);
     const user = userEvent.setup();
     const instance = telegramInstance({
       id: "support",
@@ -431,8 +446,7 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("points a failed saved-bot proxy transport check to its configured proxy", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       status: "configured",
       checks: [{
         id: "proxy_connection",
@@ -440,10 +454,7 @@ describe("TelegramBotsPanel", () => {
         status: "warn",
         message: "Could not reach Telegram through the network proxy.",
       }],
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
+    }));
     const user = userEvent.setup();
     const instance = telegramInstance({
       configured: true,
@@ -459,8 +470,7 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("does not blame a saved proxy for a Telegram HTTP failure", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       status: "configured",
       checks: [{
         id: "get_me",
@@ -468,10 +478,7 @@ describe("TelegramBotsPanel", () => {
         status: "warn",
         message: "Telegram could not verify the token: HTTP 503.",
       }],
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
+    }));
     const user = userEvent.setup();
     const instance = telegramInstance({
       configured: true,
@@ -488,8 +495,7 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("explains when a saved proxy environment variable is not set", async () => {
-    apiMocks.validateChannel.mockResolvedValue({
-      name: "telegram",
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
       status: "invalid",
       checks: [{
         id: "proxy_env",
@@ -497,10 +503,8 @@ describe("TelegramBotsPanel", () => {
         status: "fail",
         message: "Set every environment variable referenced by the network proxy.",
       }],
-      missing_fields: [],
       can_enable: false,
-      requires_restart: false,
-    } satisfies ChannelValidationPayload);
+    }));
     const user = userEvent.setup();
     const instance = telegramInstance({
       configured: true,
@@ -516,15 +520,9 @@ describe("TelegramBotsPanel", () => {
   });
 
   it("clears a checked identity when refreshed instance data arrives", async () => {
-    const validation: ChannelValidationPayload = {
-      name: "telegram",
-      status: "connected",
-      checks: [],
+    const validation = telegramValidation({
       identity: { name: "old_bot" },
-      missing_fields: [],
-      can_enable: true,
-      requires_restart: false,
-    };
+    });
     apiMocks.validateChannel.mockResolvedValue(validation);
     const user = userEvent.setup();
     const instance = telegramInstance({ configured: true });
@@ -545,7 +543,6 @@ describe("TelegramBotsPanel", () => {
     await waitFor(() => {
       expect(screen.queryByText("Connected as @old_bot.")).not.toBeInTheDocument();
     });
-    expect(screen.queryByText("Verify the saved token with Telegram.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check connection" })).toBeVisible();
   });
 });

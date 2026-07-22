@@ -10,14 +10,14 @@ export type ChannelFieldMessages = {
 export type ChannelMessages = {
   displayName?: string;
   description: string;
-  requirements: string;
+  requirements?: string;
   setup: {
     primaryAction?: string;
     docsLabel?: string;
     officialLabel?: string;
     summary?: string;
     tryIt?: string;
-    steps: string[];
+    steps?: string[];
     fields?: Record<string, ChannelFieldMessages>;
     actions?: Record<string, string>;
     presets?: Record<string, string>;

@@ -1,43 +1,25 @@
 {
   "description": "Telegram のチャットから nanobot と会話します。",
-  "requirements": "ボットトークン、許可するユーザー、ゲートウェイ",
   "setup": {
-    "docsLabel": "Telegram 設定ガイドを開く",
     "officialLabel": "BotFather を開く",
-    "tryIt": "Telegram ボットに /start または短い DM を送信します。",
-    "summary": "有効化すると Telegram 対応がオンになります。メッセージの送受信には BotFather トークンが必要です。",
-    "steps": [
-      "BotFather でボットを作成し、トークンをコピーします。",
-      "トークンを追加し、ボットに連絡できるユーザーを選びます。",
-      "保存して Telegram を有効にし、DM を送るかグループでメンションします。"
-    ],
     "fields": {
       "name": {
         "label": "ボット名",
-        "placeholder": "サポートボット",
-        "help": "Telegram ボットを区別するためのローカル名です。"
+        "placeholder": "サポートボット"
       },
       "token": {
         "label": "ボットトークン",
-        "placeholder": "123456:ABC...",
-        "help": "BotFather で作成します。"
-      },
-      "proxy": {
-        "label": "ネットワークプロキシ（任意）",
-        "placeholder": "http://127.0.0.1:7890",
-        "help": "この端末から Telegram に直接接続できない場合に使用します。"
+        "placeholder": "123456:ABC..."
       },
       "allowFrom": {
         "label": "許可するユーザー",
-        "placeholder": "* または Telegram ユーザー ID",
-        "help": "ペアリングコードを使う場合は空欄にします。"
+        "placeholder": "* または Telegram ユーザー ID"
       },
       "groupPolicy": {
         "label": "グループでの動作",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
-          "allowlist": "許可リスト"
+          "open": "すべてのメッセージ"
         }
       }
     }
@@ -48,8 +30,6 @@
     "needsToken": "トークンが必要",
     "finishSetup": "確認して設定を完了",
     "connectFirst": "最初のボットを接続",
-    "addAnother": "別のボットを追加",
-    "connectFirstHint": "BotFather トークンを貼り付けてください。nanobot は保存前に検証します。",
     "addBot": "ボットを追加",
     "connectBot": "確認して接続",
     "advancedOptions": "詳細オプション",
@@ -63,20 +43,16 @@
     "savedProxyPlaceholder": "プロキシは保存済みです",
     "hideProxy": "プロキシを隠す",
     "showProxy": "プロキシを表示",
-    "savedProxyHint": "保存済みのプロキシを維持する場合は空欄にします。置き換えるには新しい URL を入力します。",
-    "proxyHint": "接続確認とボット通信の両方に使用します。HTTP と SOCKS の URL に対応しています。",
     "proxyUnavailable": "このプロキシ経由で Telegram に接続できません。アドレスと認証情報を確認してください。",
     "proxyRequired": "先にプロキシ URL を入力してください。",
     "proxySaved": "プロキシを保存し、接続を確認しました。",
     "proxyRemoved": "保存済みプロキシを削除しました。",
     "proxyConfigured": "設定済み",
-    "proxyOptional": "任意",
     "saveProxy": "確認して保存",
     "removeProxy": "保存済みプロキシを削除",
     "invalidProxy": "http://127.0.0.1:7890 のような完全なプロキシ URL を入力してください。",
     "proxyEnvMissing": "保存済みプロキシが参照する環境変数が設定されていません。",
     "tokenEnvMissing": "保存済みボットトークンが参照する環境変数が設定されていません。",
-    "secretHint": "保存後もトークンはマスクされます。",
     "cancel": "キャンセル",
     "checkConnection": "接続を確認",
     "connectedAs": "{{name}} として接続しました。",
@@ -87,8 +63,6 @@
     "checkFailed": "接続を確認できませんでした。",
     "defaultBotName": "Telegram ボット",
     "numberedBotName": "Telegram ボット {{number}}",
-    "countNone": "設定済みボットはありません",
-    "countOne": "1 個のボットを設定済み · {{running}} 個が実行中",
-    "countMany": "{{count}} 個のボットを設定済み · {{running}} 個が実行中"
+    "count": "設定済み: {{count}} · 実行中: {{running}}"
   }
 }

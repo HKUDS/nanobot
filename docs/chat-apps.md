@@ -109,29 +109,33 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 <details>
 <summary><b>Telegram</b></summary>
 
-**Install the optional channel dependency**
+**Recommended WebUI setup**
+
+1. Create a bot with `@BotFather` and copy its token.
+2. Run `nanobot webui`, then open **Settings → Channels → Telegram**.
+3. If prompted, select **Install** and follow the restart prompt. The local
+   WebUI installs Telegram support in nanobot's Python environment.
+4. Paste the token and select **Check and connect**. The token is the only
+   required field; the local name and network proxy are under **Advanced
+   options**.
+5. Use **Add bot** to connect more Telegram bots. Every entry needs a different
+   BotFather token and has its own connection check and on/off switch.
+
+Existing settings appear automatically under the saved bot name, so you do not
+need to enter the token again. See the
+[step-by-step Telegram guide](./guides/telegram-ai-agent.md) for the full flow
+and connection-status explanations.
+
+**Manual setup**
+
+For a headless deployment or a WebUI that cannot install local packages, enable
+Telegram support on the machine that runs nanobot:
 
 ```bash
 nanobot plugins enable telegram
 ```
 
-For the normal setup path, open **Settings → Channels → Telegram** in the
-WebUI. Paste a BotFather token under **Connect your first bot**; nanobot checks
-the token before saving it. Use **Add bot** to connect more Telegram bots. Each
-bot has its own local name, token, optional network proxy, connection check,
-and on/off switch. The proxy is used for both the check and normal bot traffic.
-
-Existing single-bot settings appear automatically as **Default bot**, so you do
-not need to enter the saved token again. See the
-[step-by-step Telegram guide](./guides/telegram-ai-agent.md) for the full flow
-and connection-status explanations.
-
-**1. Create a bot**
-- Open Telegram, search `@BotFather`
-- Send `/newbot`, follow prompts
-- Copy the token
-
-**2. Configure**
+Then merge the configuration into `~/.nanobot/config.json`:
 
 ```json
 {
@@ -193,7 +197,7 @@ masked and can be replaced or removed separately for each bot.
 > `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
-**3. Run**
+Start the gateway:
 
 ```bash
 nanobot gateway

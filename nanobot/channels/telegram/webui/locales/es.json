@@ -1,43 +1,25 @@
 {
   "description": "Chatea con nanobot desde Telegram.",
-  "requirements": "Token del bot, usuarios permitidos y gateway",
   "setup": {
-    "docsLabel": "Abrir guía de Telegram",
     "officialLabel": "Abrir BotFather",
-    "tryIt": "Envía /start o un DM corto a tu bot de Telegram.",
-    "summary": "Activar habilita Telegram. Aún necesitas un token de BotFather para intercambiar mensajes.",
-    "steps": [
-      "Crea un bot con BotFather y copia su token.",
-      "Añade el token y elige quién puede escribir al bot.",
-      "Guarda y activa Telegram; después envía un DM o menciona el bot en un grupo."
-    ],
     "fields": {
       "name": {
         "label": "Nombre del bot",
-        "placeholder": "Bot de soporte",
-        "help": "Una etiqueta local para distinguir tus bots de Telegram."
+        "placeholder": "Bot de soporte"
       },
       "token": {
         "label": "Token del bot",
-        "placeholder": "123456:ABC...",
-        "help": "Créalo con BotFather."
-      },
-      "proxy": {
-        "label": "Proxy de red (opcional)",
-        "placeholder": "http://127.0.0.1:7890",
-        "help": "Úsalo cuando este equipo no pueda acceder directamente a Telegram."
+        "placeholder": "123456:ABC..."
       },
       "allowFrom": {
         "label": "Usuarios permitidos",
-        "placeholder": "* o ID de usuario de Telegram",
-        "help": "Déjalo vacío para usar códigos de vinculación."
+        "placeholder": "* o ID de usuario de Telegram"
       },
       "groupPolicy": {
         "label": "Comportamiento en grupos",
         "choices": {
           "mention": "Solo menciones",
-          "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "open": "Todos los mensajes"
         }
       }
     }
@@ -48,8 +30,6 @@
     "needsToken": "Necesita token",
     "finishSetup": "Comprobar y finalizar",
     "connectFirst": "Conecta tu primer bot",
-    "addAnother": "Añadir otro bot",
-    "connectFirstHint": "Pega un token de BotFather. nanobot lo verificará antes de guardar nada.",
     "addBot": "Añadir bot",
     "connectBot": "Comprobar y conectar",
     "advancedOptions": "Opciones avanzadas",
@@ -63,20 +43,16 @@
     "savedProxyPlaceholder": "Ya hay un proxy guardado",
     "hideProxy": "Ocultar proxy",
     "showProxy": "Mostrar proxy",
-    "savedProxyHint": "Déjalo vacío para conservar el proxy guardado. Introduce otra URL para sustituirlo.",
-    "proxyHint": "Se usa tanto para comprobar la conexión como para el tráfico del bot. Admite URLs HTTP y SOCKS.",
     "proxyUnavailable": "No se pudo acceder a Telegram mediante este proxy. Revisa la dirección y las credenciales.",
     "proxyRequired": "Introduce primero una URL de proxy.",
     "proxySaved": "Proxy guardado y conexión verificada.",
     "proxyRemoved": "Proxy guardado eliminado.",
     "proxyConfigured": "Configurado",
-    "proxyOptional": "Opcional",
     "saveProxy": "Comprobar y guardar",
     "removeProxy": "Eliminar proxy guardado",
     "invalidProxy": "Introduce una URL de proxy completa, como http://127.0.0.1:7890.",
     "proxyEnvMissing": "El proxy guardado usa una variable de entorno que no está definida.",
     "tokenEnvMissing": "El token de bot guardado usa una variable de entorno que no está definida.",
-    "secretHint": "El token permanece oculto después de guardarlo.",
     "cancel": "Cancelar",
     "checkConnection": "Comprobar conexión",
     "connectedAs": "Conectado como {{name}}.",
@@ -87,8 +63,6 @@
     "checkFailed": "No se pudo comprobar la conexión.",
     "defaultBotName": "Bot de Telegram",
     "numberedBotName": "Bot de Telegram {{number}}",
-    "countNone": "No hay bots configurados",
-    "countOne": "1 bot configurado · {{running}} en ejecución",
-    "countMany": "{{count}} bots configurados · {{running}} en ejecución"
+    "count": "Configurados: {{count}} · En ejecución: {{running}}"
   }
 }

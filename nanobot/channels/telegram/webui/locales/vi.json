@@ -1,43 +1,25 @@
 {
   "description": "Trò chuyện với nanobot từ Telegram.",
-  "requirements": "Token bot, người dùng được phép và gateway",
   "setup": {
-    "docsLabel": "Mở hướng dẫn Telegram",
     "officialLabel": "Mở BotFather",
-    "tryIt": "Gửi /start hoặc tin nhắn riêng ngắn đến bot Telegram.",
-    "summary": "Bật sẽ kích hoạt hỗ trợ Telegram. Bạn vẫn cần token BotFather để trao đổi tin nhắn.",
-    "steps": [
-      "Tạo bot bằng BotFather và sao chép token.",
-      "Thêm token và chọn người có thể nhắn cho bot.",
-      "Lưu và bật Telegram, sau đó gửi tin nhắn riêng hoặc nhắc bot trong nhóm."
-    ],
     "fields": {
       "name": {
         "label": "Tên bot",
-        "placeholder": "Bot hỗ trợ",
-        "help": "Tên cục bộ để phân biệt các bot Telegram."
+        "placeholder": "Bot hỗ trợ"
       },
       "token": {
         "label": "Token bot",
-        "placeholder": "123456:ABC...",
-        "help": "Tạo bằng BotFather."
-      },
-      "proxy": {
-        "label": "Proxy mạng (không bắt buộc)",
-        "placeholder": "http://127.0.0.1:7890",
-        "help": "Dùng khi máy này không thể truy cập trực tiếp Telegram."
+        "placeholder": "123456:ABC..."
       },
       "allowFrom": {
         "label": "Người dùng được phép",
-        "placeholder": "* hoặc ID người dùng Telegram",
-        "help": "Để trống để dùng mã ghép nối."
+        "placeholder": "* hoặc ID người dùng Telegram"
       },
       "groupPolicy": {
         "label": "Hành vi trong nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
-          "open": "Mọi tin nhắn",
-          "allowlist": "Danh sách cho phép"
+          "open": "Mọi tin nhắn"
         }
       }
     }
@@ -48,8 +30,6 @@
     "needsToken": "Cần token",
     "finishSetup": "Kiểm tra và hoàn tất",
     "connectFirst": "Kết nối bot đầu tiên",
-    "addAnother": "Thêm bot khác",
-    "connectFirstHint": "Dán token BotFather. nanobot sẽ xác minh trước khi lưu.",
     "addBot": "Thêm bot",
     "connectBot": "Kiểm tra và kết nối",
     "advancedOptions": "Tùy chọn nâng cao",
@@ -63,20 +43,16 @@
     "savedProxyPlaceholder": "Đã lưu một proxy",
     "hideProxy": "Ẩn proxy",
     "showProxy": "Hiện proxy",
-    "savedProxyHint": "Để trống để giữ proxy đã lưu. Nhập URL mới để thay thế.",
-    "proxyHint": "Được dùng cho cả kiểm tra kết nối và lưu lượng bot. Hỗ trợ URL HTTP và SOCKS.",
     "proxyUnavailable": "Không thể truy cập Telegram qua proxy này. Hãy kiểm tra địa chỉ và thông tin đăng nhập.",
     "proxyRequired": "Hãy nhập URL proxy trước.",
     "proxySaved": "Đã lưu proxy và xác minh kết nối.",
     "proxyRemoved": "Đã xóa proxy đã lưu.",
     "proxyConfigured": "Đã cấu hình",
-    "proxyOptional": "Không bắt buộc",
     "saveProxy": "Kiểm tra và lưu",
     "removeProxy": "Xóa proxy đã lưu",
     "invalidProxy": "Hãy nhập URL proxy đầy đủ, ví dụ http://127.0.0.1:7890.",
     "proxyEnvMissing": "Proxy đã lưu dùng một biến môi trường chưa được đặt.",
     "tokenEnvMissing": "Mã thông báo bot đã lưu dùng một biến môi trường chưa được đặt.",
-    "secretHint": "Token vẫn được che sau khi lưu.",
     "cancel": "Hủy",
     "checkConnection": "Kiểm tra kết nối",
     "connectedAs": "Đã kết nối với tên {{name}}.",
@@ -87,8 +63,6 @@
     "checkFailed": "Không thể kiểm tra kết nối.",
     "defaultBotName": "Bot Telegram",
     "numberedBotName": "Bot Telegram {{number}}",
-    "countNone": "Chưa cấu hình bot",
-    "countOne": "Đã cấu hình 1 bot · {{running}} đang chạy",
-    "countMany": "Đã cấu hình {{count}} bot · {{running}} đang chạy"
+    "count": "Đã cấu hình: {{count}} · Đang chạy: {{running}}"
   }
 }

@@ -1,43 +1,25 @@
 {
   "description": "Mengobrol dengan nanobot dari Telegram.",
-  "requirements": "Token bot, pengguna yang diizinkan, dan gateway",
   "setup": {
-    "docsLabel": "Buka panduan Telegram",
     "officialLabel": "Buka BotFather",
-    "tryIt": "Kirim /start atau DM singkat ke bot Telegram Anda.",
-    "summary": "Mengaktifkan akan menyalakan dukungan Telegram. Token BotFather tetap diperlukan untuk bertukar pesan.",
-    "steps": [
-      "Buat bot dengan BotFather dan salin tokennya.",
-      "Tambahkan token dan pilih siapa yang boleh mengirim pesan ke bot.",
-      "Simpan dan aktifkan Telegram, lalu kirim DM atau sebut bot di grup."
-    ],
     "fields": {
       "name": {
         "label": "Nama bot",
-        "placeholder": "Bot dukungan",
-        "help": "Label lokal untuk membedakan bot Telegram Anda."
+        "placeholder": "Bot dukungan"
       },
       "token": {
         "label": "Token bot",
-        "placeholder": "123456:ABC...",
-        "help": "Buat dengan BotFather."
-      },
-      "proxy": {
-        "label": "Proxy jaringan (opsional)",
-        "placeholder": "http://127.0.0.1:7890",
-        "help": "Gunakan jika mesin ini tidak dapat mengakses Telegram secara langsung."
+        "placeholder": "123456:ABC..."
       },
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
-        "placeholder": "* atau ID pengguna Telegram",
-        "help": "Kosongkan untuk memakai kode pairing."
+        "placeholder": "* atau ID pengguna Telegram"
       },
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {
           "mention": "Hanya sebutan",
-          "open": "Semua pesan",
-          "allowlist": "Daftar izin"
+          "open": "Semua pesan"
         }
       }
     }
@@ -48,8 +30,6 @@
     "needsToken": "Perlu token",
     "finishSetup": "Periksa dan selesaikan",
     "connectFirst": "Hubungkan bot pertama Anda",
-    "addAnother": "Tambahkan bot lain",
-    "connectFirstHint": "Tempel token BotFather. nanobot akan memverifikasinya sebelum menyimpan.",
     "addBot": "Tambah bot",
     "connectBot": "Periksa dan hubungkan",
     "advancedOptions": "Opsi lanjutan",
@@ -63,20 +43,16 @@
     "savedProxyPlaceholder": "Proxy sudah tersimpan",
     "hideProxy": "Sembunyikan proxy",
     "showProxy": "Tampilkan proxy",
-    "savedProxyHint": "Biarkan kosong untuk mempertahankan proxy tersimpan. Masukkan URL baru untuk menggantinya.",
-    "proxyHint": "Digunakan untuk pemeriksaan koneksi dan lalu lintas bot. URL HTTP dan SOCKS didukung.",
     "proxyUnavailable": "Telegram tidak dapat diakses melalui proxy ini. Periksa alamat dan kredensialnya.",
     "proxyRequired": "Masukkan URL proxy terlebih dahulu.",
     "proxySaved": "Proxy disimpan dan koneksi berhasil diverifikasi.",
     "proxyRemoved": "Proxy tersimpan dihapus.",
     "proxyConfigured": "Dikonfigurasi",
-    "proxyOptional": "Opsional",
     "saveProxy": "Periksa dan simpan",
     "removeProxy": "Hapus proxy tersimpan",
     "invalidProxy": "Masukkan URL proxy lengkap, misalnya http://127.0.0.1:7890.",
     "proxyEnvMissing": "Proxy tersimpan memakai variabel lingkungan yang belum ditetapkan.",
     "tokenEnvMissing": "Token bot tersimpan memakai variabel lingkungan yang belum ditetapkan.",
-    "secretHint": "Token tetap disamarkan setelah disimpan.",
     "cancel": "Batal",
     "checkConnection": "Periksa koneksi",
     "connectedAs": "Terhubung sebagai {{name}}.",
@@ -87,8 +63,6 @@
     "checkFailed": "Koneksi tidak dapat diperiksa.",
     "defaultBotName": "Bot Telegram",
     "numberedBotName": "Bot Telegram {{number}}",
-    "countNone": "Belum ada bot yang dikonfigurasi",
-    "countOne": "1 bot dikonfigurasi · {{running}} berjalan",
-    "countMany": "{{count}} bot dikonfigurasi · {{running}} berjalan"
+    "count": "Dikonfigurasi: {{count}} · Berjalan: {{running}}"
   }
 }

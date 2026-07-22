@@ -1,43 +1,25 @@
 {
   "description": "Discutez avec nanobot depuis Telegram.",
-  "requirements": "Jeton du bot, utilisateurs autorisés et passerelle",
   "setup": {
-    "docsLabel": "Ouvrir le guide Telegram",
     "officialLabel": "Ouvrir BotFather",
-    "tryIt": "Envoyez /start ou un court message privé à votre bot Telegram.",
-    "summary": "L’activation ouvre la prise en charge de Telegram. Un jeton BotFather reste nécessaire pour échanger des messages.",
-    "steps": [
-      "Créez un bot avec BotFather et copiez son jeton.",
-      "Ajoutez le jeton et choisissez qui peut contacter le bot.",
-      "Enregistrez et activez Telegram, puis envoyez un message privé ou mentionnez le bot dans un groupe."
-    ],
     "fields": {
       "name": {
         "label": "Nom du bot",
-        "placeholder": "Bot d’assistance",
-        "help": "Un libellé local pour distinguer vos bots Telegram."
+        "placeholder": "Bot d’assistance"
       },
       "token": {
         "label": "Jeton du bot",
-        "placeholder": "123456:ABC...",
-        "help": "Créez-le avec BotFather."
-      },
-      "proxy": {
-        "label": "Proxy réseau (facultatif)",
-        "placeholder": "http://127.0.0.1:7890",
-        "help": "Utilisez-le si cette machine ne peut pas joindre Telegram directement."
+        "placeholder": "123456:ABC..."
       },
       "allowFrom": {
         "label": "Utilisateurs autorisés",
-        "placeholder": "* ou ID utilisateur Telegram",
-        "help": "Laissez vide pour utiliser les codes d’association."
+        "placeholder": "* ou ID utilisateur Telegram"
       },
       "groupPolicy": {
         "label": "Comportement en groupe",
         "choices": {
           "mention": "Mentions uniquement",
-          "open": "Tous les messages",
-          "allowlist": "Liste d’autorisation"
+          "open": "Tous les messages"
         }
       }
     }
@@ -48,8 +30,6 @@
     "needsToken": "Jeton requis",
     "finishSetup": "Vérifier et terminer",
     "connectFirst": "Connectez votre premier bot",
-    "addAnother": "Ajouter un autre bot",
-    "connectFirstHint": "Collez un jeton BotFather. nanobot le vérifiera avant tout enregistrement.",
     "addBot": "Ajouter le bot",
     "connectBot": "Vérifier et connecter",
     "advancedOptions": "Options avancées",
@@ -63,20 +43,16 @@
     "savedProxyPlaceholder": "Un proxy est déjà enregistré",
     "hideProxy": "Masquer le proxy",
     "showProxy": "Afficher le proxy",
-    "savedProxyHint": "Laissez ce champ vide pour conserver le proxy enregistré. Saisissez une nouvelle URL pour le remplacer.",
-    "proxyHint": "Utilisé pour les vérifications de connexion et le trafic du bot. Les URL HTTP et SOCKS sont acceptées.",
     "proxyUnavailable": "Telegram est inaccessible via ce proxy. Vérifiez l’adresse et les identifiants.",
     "proxyRequired": "Saisissez d’abord une URL de proxy.",
     "proxySaved": "Proxy enregistré et connexion vérifiée.",
     "proxyRemoved": "Proxy enregistré supprimé.",
     "proxyConfigured": "Configuré",
-    "proxyOptional": "Facultatif",
     "saveProxy": "Vérifier et enregistrer",
     "removeProxy": "Supprimer le proxy enregistré",
     "invalidProxy": "Saisissez une URL de proxy complète, par exemple http://127.0.0.1:7890.",
     "proxyEnvMissing": "Le proxy enregistré utilise une variable d’environnement non définie.",
     "tokenEnvMissing": "Le jeton du bot enregistré utilise une variable d’environnement non définie.",
-    "secretHint": "Le jeton reste masqué après son enregistrement.",
     "cancel": "Annuler",
     "checkConnection": "Vérifier la connexion",
     "connectedAs": "Connecté en tant que {{name}}.",
@@ -87,8 +63,6 @@
     "checkFailed": "La connexion n’a pas pu être vérifiée.",
     "defaultBotName": "Bot Telegram",
     "numberedBotName": "Bot Telegram {{number}}",
-    "countNone": "Aucun bot configuré",
-    "countOne": "1 bot configuré · {{running}} en cours",
-    "countMany": "{{count}} bots configurés · {{running}} en cours"
+    "count": "Configurés : {{count}} · En cours : {{running}}"
   }
 }

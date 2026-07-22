@@ -30,29 +30,30 @@ different BotFather token.
 
 ## 2. Open Telegram settings in nanobot
 
-Install Telegram support in the same environment where nanobot is installed:
-
-```bash
-nanobot plugins enable telegram
-```
-
-Then start the WebUI:
+Start the WebUI:
 
 ```bash
 nanobot webui
 ```
 
-Open **Settings → Channels → Telegram**. If the page asks you to install or
-restart Telegram support, follow the prompt and return to the Telegram card.
+Open **Settings → Channels → Telegram**. If Telegram support is not installed,
+select **Install** there. The same-machine WebUI installs the optional package
+in nanobot's Python environment; follow any restart prompt, then return to the
+Telegram card.
+
+If WebUI installation is unavailable, for example from a restricted remote
+browser, install it from the machine that runs nanobot:
+
+```bash
+nanobot plugins enable telegram
+```
 
 ## 3. Connect your first bot
 
-1. Enter a short **Bot name**, such as `Personal` or `Support`. This is only a
-   label inside nanobot; it does not rename the bot in Telegram.
-2. Paste the BotFather token.
-3. If this machine cannot reach Telegram directly, enter its HTTP or SOCKS URL
-   under **Network proxy**, for example `http://127.0.0.1:7890`.
-4. Select **Check and connect**.
+1. Paste the BotFather token. This is the only required field.
+2. If needed, expand **Advanced options** to set a local bot name or an HTTP or
+   SOCKS proxy, for example `http://127.0.0.1:7890`.
+3. Select **Check and connect**.
 
 nanobot asks Telegram to verify the token before saving it. A rejected token is
 not saved. After a successful check, the token is stored masked and the bot is
@@ -81,17 +82,19 @@ your normal nanobot model, tools, memory, and workspace.
 ## Add and manage more bots
 
 In **Settings → Channels → Telegram**, select **Add bot** and repeat the same
-name, token, and connection check. Use a separate token for every entry.
+token check. Use a separate token for every entry; set a local name or proxy
+under **Advanced options** only when needed.
 
 Each bot has its own switch. Turning one bot off does not remove its settings or
 stop the other bots. Use **Check connection** on any saved bot to confirm which
 Telegram account its token belongs to.
 
-To add or change a proxy for a saved bot, open **Network proxy** below that bot,
-enter the new URL, and select **Check and save**. The saved URL is never shown
-again. Select **Remove saved proxy** when that bot can connect directly. If an
-older setup shows a saved proxy before its token is complete, you can remove
-the proxy from that same setup form before checking the new token.
+To add or change a proxy for a saved bot, open the bot, expand **Advanced**,
+enter the new URL under **Network proxy**, and select **Check and save**. The
+saved URL is never shown again. Select **Remove saved proxy** when that bot can
+connect directly. If an older setup shows a saved proxy before its token is
+complete, you can remove the proxy from that same setup form before checking
+the new token.
 
 Useful ways to separate bots include:
 
@@ -112,9 +115,9 @@ Useful ways to separate bots include:
 
 ## Existing Telegram setups
 
-An existing single-bot Telegram setup appears automatically as **Default bot**.
-You do not need to paste its token again. You can check it, toggle it, and add
-more bots from the same screen.
+An existing single-bot Telegram setup appears automatically under its saved
+name. You do not need to paste its token again. You can check it, toggle it,
+and add more bots from the same screen.
 
 Before returning to an older nanobot release, back up
 `~/.nanobot/config.json`. Once this version saves or switches a Telegram
@@ -136,8 +139,9 @@ full webhook example.
 
 ## Troubleshooting
 
-- **Telegram is missing from Channels:** run `nanobot plugins enable telegram`
-  again in the Python environment that runs the gateway.
+- **Telegram support is not installed:** select **Install** on its WebUI card.
+  If that action is unavailable, run `nanobot plugins enable telegram` in the
+  Python environment that runs the gateway.
 - **A token is rejected:** open BotFather, select the correct bot, and copy or
   regenerate its token. Do not reuse one token for two entries.
 - **The live check is temporarily unavailable:** confirm the machine can reach

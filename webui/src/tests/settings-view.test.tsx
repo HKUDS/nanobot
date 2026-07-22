@@ -145,7 +145,7 @@ function channelSetupField(
 }
 
 function channelSetupContract(
-  channel: "discord" | "email" | "feishu" | "matrix" | "qq",
+  channel: "discord" | "email" | "feishu" | "matrix" | "qq" | "telegram",
 ): ChannelSetupContract {
   const field = (
     name: string,
@@ -154,6 +154,20 @@ function channelSetupContract(
   ) => channelSetupField(channel, name, kind, options);
 
   switch (channel) {
+    case "telegram":
+      return {
+        official_url: "https://t.me/BotFather",
+        fields: [
+          field("name"),
+          field("token", "secret", { required: true }),
+          field("proxy", "secret"),
+          field("allowFrom", "list"),
+          field("groupPolicy", "enum", {
+            choices: ["mention", "open"],
+            defaultValue: "mention",
+          }),
+        ],
+      };
     case "discord":
       return {
         official_url: "https://discord.com/developers/applications",
@@ -1587,7 +1601,7 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
-  it("shows an actionable credential guide for Telegram", async () => {
+  it("links Telegram setup to BotFather without adding a docs link", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -1608,6 +1622,7 @@ describe("SettingsView Apps catalog", () => {
               status: "not_enabled",
               install_supported: true,
               requires_restart: true,
+              setup: channelSetupContract("telegram"),
             }],
             enabled_count: 0,
           });
@@ -1619,16 +1634,16 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "channels" });
 
     expect(await screen.findByRole("button", { name: "View Telegram settings" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Telegram setup" })).toHaveAttribute(
-      "href",
-      "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#telegram",
+    expect(screen.getByRole("link", { name: "Open BotFather" })).toHaveAttribute(
+      "href", "https://t.me/BotFather",
     );
+    expect(screen.queryByRole("link", { name: "Open Telegram setup" })).not.toBeInTheDocument();
   });
 
   it("shows branded setup guide links for supported WebUI channels", async () => {
     const channels = [
       ["websocket", "WebSocket", "Open WebSocket setup"],
-      ["telegram", "Telegram", "Open Telegram setup"],
+      ["telegram", "Telegram", "Open BotFather"],
       ["feishu", "Feishu", "Open Feishu setup"],
       ["slack", "Slack", "Open Slack setup"],
       ["discord", "Discord", "Open Discord setup"],
@@ -1665,6 +1680,7 @@ describe("SettingsView Apps catalog", () => {
               status: name === "websocket" ? "enabled" : "not_enabled",
               install_supported: true,
               requires_restart: true,
+              ...(name === "telegram" ? { setup: channelSetupContract("telegram") } : {}),
             })).concat(hiddenChannels.map(([name, displayName]) => ({
               name,
               display_name: displayName,

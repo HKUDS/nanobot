@@ -47,6 +47,7 @@ export type ChannelInstancesPanelCustomization = {
   renderInstanceSummary?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   renderInstanceAction?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   showSetupSteps?: (instance: NanobotChannelInstanceInfo) => boolean;
+  showInstanceFields?: (instance: NanobotChannelInstanceInfo) => boolean;
   renderInstanceAdvanced?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   footer?: ReactNode;
 };
@@ -57,6 +58,8 @@ export function ChannelInstancesPanel({
   showBrandLogos,
   chatAppsDocsUrl,
   instances: providedInstances,
+  selectedInstanceId,
+  onSelectedInstanceChange,
   onFeaturesUpdate,
   customization = {},
 }: {
@@ -65,6 +68,8 @@ export function ChannelInstancesPanel({
   showBrandLogos: boolean;
   chatAppsDocsUrl?: string;
   instances?: NanobotChannelInstanceInfo[];
+  selectedInstanceId?: string | null;
+  onSelectedInstanceChange?: (instanceId: string | null) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   customization?: ChannelInstancesPanelCustomization;
 }) {
@@ -72,7 +77,10 @@ export function ChannelInstancesPanel({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
+  const selectedId = selectedInstanceId === undefined
+    ? internalSelectedId
+    : selectedInstanceId;
   const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
@@ -99,9 +107,12 @@ export function ChannelInstancesPanel({
 
   useEffect(() => {
     if (selectedId && !instances.some((instance) => instance.id === selectedId)) {
-      setSelectedId(null);
+      if (selectedInstanceId === undefined) {
+        setInternalSelectedId(null);
+      }
+      onSelectedInstanceChange?.(null);
     }
-  }, [instances, selectedId]);
+  }, [instances, onSelectedInstanceChange, selectedId, selectedInstanceId]);
 
   useEffect(() => {
     setFieldValues(defaultChannelFieldValues(instanceFields, selected?.config_values));
@@ -182,6 +193,8 @@ export function ChannelInstancesPanel({
             ? customization.renderInstanceAction?.(instance)
             : null;
           const showSetupSteps = customization.showSetupSteps?.(instance) ?? true;
+          const showInstanceFields = customization.showInstanceFields?.(instance) ?? true;
+          const hasInstanceFields = showInstanceFields && instanceFields.length > 0;
           const instanceAdvanced = customization.renderInstanceAdvanced?.(instance);
           return (
             <article
@@ -197,9 +210,13 @@ export function ChannelInstancesPanel({
                 <button
                   type="button"
                   className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  onClick={() =>
-                    setSelectedId((current) => (current === instance.id ? null : instance.id))
-                  }
+                  onClick={() => {
+                    const nextSelectedId = expanded ? null : instance.id;
+                    if (selectedInstanceId === undefined) {
+                      setInternalSelectedId(nextSelectedId);
+                    }
+                    onSelectedInstanceChange?.(nextSelectedId);
+                  }}
                   aria-expanded={expanded}
                 >
                   <ChannelInstanceAvatar
@@ -273,7 +290,7 @@ export function ChannelInstancesPanel({
                       }
                     />
                   ) : null}
-                  {instanceFields.length || instanceAdvanced ? (
+                  {hasInstanceFields || instanceAdvanced ? (
                     <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
                       <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
                         <span className="inline-flex items-center gap-1.5">
@@ -284,7 +301,7 @@ export function ChannelInstancesPanel({
                           />
                         </span>
                       </summary>
-                      {instanceFields.length ? (
+                      {hasInstanceFields ? (
                         <form
                           className="mt-3"
                           onSubmit={(event) => {
@@ -324,7 +341,7 @@ export function ChannelInstancesPanel({
                       {instanceAdvanced ? (
                         <div className={cn(
                           "mt-3",
-                          instanceFields.length && "border-t border-border/50 pt-4",
+                          hasInstanceFields && "border-t border-border/50 pt-4",
                         )}>
                           {instanceAdvanced}
                         </div>

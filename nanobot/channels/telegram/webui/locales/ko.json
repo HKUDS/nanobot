@@ -1,43 +1,25 @@
 {
   "description": "Telegram 채팅에서 nanobot과 대화합니다.",
-  "requirements": "봇 토큰, 허용된 사용자 및 게이트웨이",
   "setup": {
-    "docsLabel": "Telegram 설정 가이드 열기",
     "officialLabel": "BotFather 열기",
-    "tryIt": "Telegram 봇에 /start 또는 짧은 DM을 보내세요.",
-    "summary": "활성화하면 Telegram 지원이 켜집니다. 메시지를 주고받으려면 BotFather 토큰이 필요합니다.",
-    "steps": [
-      "BotFather로 봇을 만들고 토큰을 복사하세요.",
-      "토큰을 추가하고 봇에 메시지를 보낼 사용자를 선택하세요.",
-      "저장하고 Telegram을 활성화한 다음 DM을 보내거나 그룹에서 멘션하세요."
-    ],
     "fields": {
       "name": {
         "label": "봇 이름",
-        "placeholder": "지원 봇",
-        "help": "Telegram 봇을 구분하기 위한 로컬 이름입니다."
+        "placeholder": "지원 봇"
       },
       "token": {
         "label": "봇 토큰",
-        "placeholder": "123456:ABC...",
-        "help": "BotFather에서 생성하세요."
-      },
-      "proxy": {
-        "label": "네트워크 프록시(선택 사항)",
-        "placeholder": "http://127.0.0.1:7890",
-        "help": "이 컴퓨터에서 Telegram에 직접 연결할 수 없을 때 사용합니다."
+        "placeholder": "123456:ABC..."
       },
       "allowFrom": {
         "label": "허용된 사용자",
-        "placeholder": "* 또는 Telegram 사용자 ID",
-        "help": "페어링 코드를 사용하려면 비워 두세요."
+        "placeholder": "* 또는 Telegram 사용자 ID"
       },
       "groupPolicy": {
         "label": "그룹 동작",
         "choices": {
           "mention": "멘션만",
-          "open": "모든 메시지",
-          "allowlist": "허용 목록"
+          "open": "모든 메시지"
         }
       }
     }
@@ -48,8 +30,6 @@
     "needsToken": "토큰 필요",
     "finishSetup": "확인하고 설정 완료",
     "connectFirst": "첫 번째 봇 연결",
-    "addAnother": "다른 봇 추가",
-    "connectFirstHint": "BotFather 토큰을 붙여 넣으세요. nanobot이 저장 전에 확인합니다.",
     "addBot": "봇 추가",
     "connectBot": "확인하고 연결",
     "advancedOptions": "고급 옵션",
@@ -63,20 +43,16 @@
     "savedProxyPlaceholder": "프록시가 저장되어 있습니다",
     "hideProxy": "프록시 숨기기",
     "showProxy": "프록시 표시",
-    "savedProxyHint": "저장된 프록시를 유지하려면 비워 두세요. 바꾸려면 새 URL을 입력하세요.",
-    "proxyHint": "연결 확인과 봇 트래픽에 모두 사용됩니다. HTTP 및 SOCKS URL을 지원합니다.",
     "proxyUnavailable": "이 프록시를 통해 Telegram에 연결할 수 없습니다. 주소와 자격 증명을 확인하세요.",
     "proxyRequired": "먼저 프록시 URL을 입력하세요.",
     "proxySaved": "프록시를 저장하고 연결을 확인했습니다.",
     "proxyRemoved": "저장된 프록시를 삭제했습니다.",
     "proxyConfigured": "설정됨",
-    "proxyOptional": "선택 사항",
     "saveProxy": "확인 후 저장",
     "removeProxy": "저장된 프록시 삭제",
     "invalidProxy": "http://127.0.0.1:7890 같은 전체 프록시 URL을 입력하세요.",
     "proxyEnvMissing": "저장된 프록시가 참조하는 환경 변수가 설정되지 않았습니다.",
     "tokenEnvMissing": "저장된 봇 토큰이 참조하는 환경 변수가 설정되지 않았습니다.",
-    "secretHint": "저장 후에도 토큰은 마스킹됩니다.",
     "cancel": "취소",
     "checkConnection": "연결 확인",
     "connectedAs": "{{name}}(으)로 연결되었습니다.",
@@ -87,8 +63,6 @@
     "checkFailed": "연결을 확인할 수 없습니다.",
     "defaultBotName": "Telegram 봇",
     "numberedBotName": "Telegram 봇 {{number}}",
-    "countNone": "설정된 봇 없음",
-    "countOne": "봇 1개 설정됨 · {{running}}개 실행 중",
-    "countMany": "봇 {{count}}개 설정됨 · {{running}}개 실행 중"
+    "count": "설정됨: {{count}} · 실행 중: {{running}}"
   }
 }
