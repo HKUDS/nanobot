@@ -714,3 +714,19 @@ def test_group_require_mention_accepts_camel_case_alias() -> None:
     )
     assert config.group_require_mention is True
     assert config.group_allow_from == ["C_OK"]
+
+
+def test_to_mrkdwn_keeps_fenced_markdown_tables_intact() -> None:
+    text = "Intro\n\n```\n| a | b |\n| - | - |\n| 1 | 2 |\n```\n\nOutro"
+    out = SlackChannel._to_mrkdwn(text)
+
+    assert "```\n| a | b |\n| - | - |\n| 1 | 2 |\n```" in out
+    assert "**a**: 1" not in out
+    assert "*a*: 1" not in out
+
+
+def test_to_mrkdwn_still_converts_unfenced_markdown_tables() -> None:
+    out = SlackChannel._to_mrkdwn("| a | b |\n| - | - |\n| 1 | 2 |")
+
+    assert "| a | b |" not in out
+    assert "a" in out and "1" in out and "b" in out and "2" in out
