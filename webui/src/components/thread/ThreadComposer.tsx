@@ -1800,8 +1800,8 @@ export function ThreadComposer({
           "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           "after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:border after:border-blue-300/75 after:opacity-0 after:transition-opacity after:duration-200 focus-within:after:opacity-100 dark:after:border-blue-400/55",
           isHero
-            ? "max-w-[58rem] rounded-[28px] border border-black/[0.055] bg-card dark:border-white/[0.08]"
-            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.055] bg-card dark:border-white/[0.08]",
+            ? "max-w-[58rem] rounded-[28px] bg-card"
+            : "max-w-[49.5rem] rounded-[22px] bg-card",
           "focus-within:border-blue-300/75 dark:focus-within:border-blue-400/55",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
