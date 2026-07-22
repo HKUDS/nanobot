@@ -730,6 +730,7 @@ class WebSocketChannel(BaseChannel):
 
     async def stop(self) -> None:
         if not self._running:
+            await asyncio.to_thread(self._transcripts.close)
             return
         self._running = False
         if self._stop_event:
@@ -748,6 +749,7 @@ class WebSocketChannel(BaseChannel):
         self._conn_chats.clear()
         self._conn_default.clear()
         self._tokens.clear()
+        await asyncio.to_thread(self._transcripts.close)
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
         """Send a raw frame to one connection, cleaning up on ConnectionClosed."""

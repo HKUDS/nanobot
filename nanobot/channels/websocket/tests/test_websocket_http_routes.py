@@ -4,6 +4,7 @@ import asyncio
 import json
 import random
 import socket
+import sqlite3
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -28,6 +29,7 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
+from nanobot.webui.transcript import WebUITranscriptRecorder
 
 from .ws_test_client import InProcessHttpChannel
 from .ws_test_client import http_get as _http_get
@@ -285,6 +287,48 @@ async def test_sessions_routes_require_bearer_token(
         assert body["key"] == "websocket:abc"
         assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
     finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_navigation_survives_unsupported_transcript_schema(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    sm = _seed_session(tmp_path / "sessions", key="websocket:recoverable")
+    session_path = sm._get_session_path("websocket:recoverable")
+    transcript_path = tmp_path / "webui" / "transcripts.sqlite3"
+    transcript_path.parent.mkdir(parents=True)
+    with sqlite3.connect(transcript_path) as connection:
+        connection.execute("PRAGMA user_version = 99")
+
+    transcripts = WebUITranscriptRecorder(store_path=transcript_path)
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, port=port)
+    channel.gateway.http.transcripts = transcripts
+    channel.gateway.http._log = MagicMock()
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        listing = await _http_get(f"http://127.0.0.1:{port}/api/sessions", headers=auth)
+        assert listing.status_code == 200
+        assert [row["key"] for row in listing.json()["sessions"]] == [
+            "websocket:recoverable"
+        ]
+
+        deleted = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/websocket:recoverable/delete",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert deleted.json() == {"deleted": True}
+        assert not session_path.exists()
+        assert channel.gateway.http._log.warning.call_count == 2
+    finally:
+        transcripts.close()
         await channel.stop()
         await server_task
 
