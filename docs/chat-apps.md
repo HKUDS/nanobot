@@ -111,10 +111,14 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 
 **Recommended WebUI setup**
 
-1. Create a bot with `@BotFather` and copy its token.
-2. Run `nanobot webui`, then open **Settings → Channels → Telegram**.
-3. If prompted, select **Install** and follow the restart prompt. The local
-   WebUI installs Telegram support in nanobot's Python environment.
+1. Install Telegram support in the Python environment that runs nanobot:
+
+   ```bash
+   nanobot plugins enable telegram
+   ```
+
+2. Create a bot with `@BotFather` and copy its token.
+3. Run `nanobot webui`, then open **Settings → Channels → Telegram**.
 4. Paste the token and select **Check and connect**. The token is the only
    required field; the local name and network proxy are under **Advanced
    options**.
@@ -126,16 +130,10 @@ need to enter the token again. See the
 [step-by-step Telegram guide](./guides/telegram-ai-agent.md) for the full flow
 and connection-status explanations.
 
-**Manual setup**
+**Manual configuration**
 
-For a headless deployment or a WebUI that cannot install local packages, enable
-Telegram support on the machine that runs nanobot:
-
-```bash
-nanobot plugins enable telegram
-```
-
-Then merge the configuration into `~/.nanobot/config.json`:
+For a headless deployment, merge the configuration into
+`~/.nanobot/config.json` after installing Telegram support:
 
 ```json
 {
