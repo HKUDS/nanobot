@@ -598,6 +598,77 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("keeps the welcome composer above a mobile soft keyboard", async () => {
+    const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
+    try {
+      const { container } = render(
+        <ThreadViewport
+          messages={emptyMessages}
+          isStreaming={false}
+          composer={<textarea aria-label="Message input" />}
+          emptyState={<div>welcome</div>}
+          showScrollToBottomButton={false}
+        />,
+      );
+      const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
+      const input = screen.getByLabelText("Message input");
+
+      act(() => {
+        input.focus();
+        fireEvent.focusIn(input);
+      });
+
+      await waitFor(() => expect(scroller).toHaveStyle({ bottom: "320px" }));
+    } finally {
+      visualViewport.restore();
+    }
+  });
+
+  it("separates the mobile welcome copy and composer into responsive rows", () => {
+    render(
+      <ThreadViewport
+        messages={emptyMessages}
+        isStreaming={false}
+        composer={<div>composer</div>}
+        emptyState={<div>welcome</div>}
+      />,
+    );
+
+    const layout = screen.getByTestId("thread-welcome-layout");
+    expect(layout).toHaveClass(
+      "grid",
+      "gap-8",
+      "grid-rows-[minmax(min-content,1fr)_auto]",
+    );
+    expect(screen.getByText("welcome").parentElement).toHaveClass("min-h-0");
+    expect(screen.getByText("welcome").parentElement?.className).toContain(
+      "sm:bottom-[calc(100%+2rem)]",
+    );
+  });
+
+  it("allows the welcome view to scroll when a short viewport overflows", async () => {
+    const { container } = render(
+      <ThreadViewport
+        messages={emptyMessages}
+        isStreaming={false}
+        composer={<div>composer</div>}
+        emptyState={<div>welcome</div>}
+        showScrollToBottomButton={false}
+      />,
+    );
+    const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 620 },
+      clientHeight: { configurable: true, value: 320 },
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => expect(scroller).toHaveClass("overflow-y-auto"));
+  });
+
   it("scrolls recent messages into view when the composer receives focus", async () => {
     const scrollTo = vi.fn();
     const { container } = render(
