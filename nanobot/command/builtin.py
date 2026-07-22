@@ -160,7 +160,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "wrench",
     ),
     BuiltinCommandSpec(
-        "/cancel-goal",
+        "/goal stop",
         "Cancel goal",
         "Cancel the active sustained goal and stop goal continuations.",
         "circle-x",
@@ -1016,7 +1016,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/evaluator-prompt", cmd_evaluator_prompt)
     router.prefix("/evaluator-prompt ", cmd_evaluator_prompt)
     router.exact("/skill", cmd_skill)
-    router.exact("/cancel-goal", cmd_goal_cancel)
+    router.exact("/goal stop", cmd_goal_cancel)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
