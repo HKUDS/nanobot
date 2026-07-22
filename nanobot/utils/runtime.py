@@ -41,6 +41,8 @@ SUSTAINED_GOAL_CONTINUE_PROMPT = (
     "You have an active sustained goal. Please continue working toward the "
     "objective using your tools, or call update_goal with action='complete' "
     "if the work is truly finished."
+    " If a user message explicitly asks you to cancel or stop, acknowledge their "
+    "request and call complete_goal with a summary of what was accomplished."
 )
 
 

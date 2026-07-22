@@ -53,6 +53,18 @@ def explicit_goal_requested(message_metadata: Mapping[str, Any] | None) -> bool:
     return str(message_metadata.get("original_command") or "").strip() == GOAL_COMMAND
 
 
+def cancel_goal_state(
+    metadata: MutableMapping[str, Any],
+) -> bool:
+    """Cancel the active sustained goal in-place. Returns True if there was one."""
+    if not sustained_goal_active(metadata):
+        return False
+    prior = parse_goal_state(goal_state_raw(metadata)) or {}
+    metadata[GOAL_STATE_KEY] = {**prior, "status": "cancelled"}
+    discard_legacy_goal_state_key(metadata)
+    return True
+
+
 def sustained_goal_turn(
     metadata: Mapping[str, Any] | None,
     *,

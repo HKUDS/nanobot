@@ -18,6 +18,7 @@ from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
+from nanobot.session.goal_state import cancel_goal_state, sustained_goal_active
 
 # WebUI protocol contract for how a slash command participates in turn state:
 # - side_channel: returns control text without starting or ending an agent turn.
@@ -107,6 +108,14 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "<goal>",
         lifecycle="agent_turn_with_args",
         accepts_args=True,
+    ),
+    BuiltinCommandSpec(
+        "/goal stop",
+        "Cancel sustained goal",
+        "Cancel the active sustained-goal loop.",
+        "stop-circle",
+        "",
+        lifecycle="side_channel",
     ),
     BuiltinCommandSpec(
         "/trigger",
@@ -835,6 +844,32 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_goal_cancel(ctx: CommandContext) -> OutboundMessage:
+    """Cancel an active sustained goal."""
+    if ctx.session is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="No active session to cancel a goal from.",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+    meta = ctx.session.metadata
+    if not sustained_goal_active(meta):
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="No active goal to cancel.",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+    cancel_goal_state(meta)
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="✅ Sustained goal has been cancelled.",
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
     """Mark this turn as an explicit sustained-goal request."""
     goal = ctx.args.strip()
@@ -995,6 +1030,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
     router.exact("/goal", cmd_goal)
+    router.exact("/goal stop", cmd_goal_cancel)
     router.prefix("/goal ", cmd_goal)
     router.exact("/trigger", cmd_trigger)
     router.prefix("/trigger ", cmd_trigger)
