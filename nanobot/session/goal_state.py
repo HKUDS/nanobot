@@ -121,7 +121,9 @@ def goal_state_ws_blob(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
             objective = objective[:_MAX_OBJECTIVE_WS].rstrip() + "…"
         summary = str(goal.get("ui_summary") or "").strip()[:120]
         blob: dict[str, Any] = {"active": True}
-        if goal_id:
+        # Keep the public WebSocket payload compatible with the original
+        # /goal contract. Durable IDs and versions are internal metadata.
+        if goal_id and not objective:
             blob["goal_id"] = goal_id
             if isinstance(goal.get("version"), int):
                 blob["version"] = goal["version"]

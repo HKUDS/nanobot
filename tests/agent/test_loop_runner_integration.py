@@ -80,6 +80,58 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
             usage={},
         ),
         LLMResponse(
+            content="planning the durable work",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_plan",
+                    name="plan_goal",
+                    arguments={
+                        "expected_version": 1,
+                        "nodes": [
+                            {
+                                "id": "implement",
+                                "title": "Implement and test",
+                                "outcome": "Migration is implemented and tests pass",
+                                "depends_on": [],
+                            }
+                        ],
+                    },
+                )
+            ],
+            usage={},
+        ),
+        LLMResponse(
+            content="starting the ready node",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_begin",
+                    name="update_goal_node",
+                    arguments={
+                        "expected_version": 2,
+                        "node_id": "implement",
+                        "action": "begin",
+                    },
+                )
+            ],
+            usage={},
+        ),
+        LLMResponse(
+            content="recording the verified result",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_succeed",
+                    name="update_goal_node",
+                    arguments={
+                        "expected_version": 3,
+                        "node_id": "implement",
+                        "action": "succeed",
+                        "result": "Implemented and tests passed.",
+                    },
+                )
+            ],
+            usage={},
+        ),
+        LLMResponse(
             content="closing goal",
             tool_calls=[
                 ToolCallRequest(

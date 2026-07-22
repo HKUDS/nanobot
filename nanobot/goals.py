@@ -221,7 +221,7 @@ class GoalStore:
             if status == "completed":
                 nodes = _nodes(current.state)
                 retained = [node for node in nodes.values() if node["status"] != "superseded"]
-                if not retained or any(node["status"] != "succeeded" for node in retained):
+                if retained and any(node["status"] != "succeeded" for node in retained):
                     raise GoalError("goal cannot complete until every retained node succeeds")
             version, now = current.version + 1, _now()
             state = {**current.state, "recap": recap[:8000]}
@@ -297,6 +297,7 @@ class GoalStore:
             state = {
                 "schema": 1,
                 "objective": objective,
+                "previous_objective": str(old.state.get("objective") or "")[:4000],
                 "revision": 0,
                 "nodes": {},
                 "needs_replan": False,
@@ -579,14 +580,21 @@ def _project_node(node: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def compact_ref(goal: Goal, workspace: str | Path) -> dict[str, Any]:
-    return {
+    ref = {
         "schema": 1,
         "goal_id": goal.id,
         "workspace": workspace_fingerprint(workspace),
         "status": goal.status,
         "version": goal.version,
+        # Compatibility/display snapshot only; GoalStore remains authoritative.
+        "objective": str(goal.state.get("objective") or "")[:4000],
         "ui_summary": goal.summary,
     }
+    for field in ("previous_objective", "recap"):
+        value = str(goal.state.get(field) or "")
+        if value:
+            ref[field] = value[:8000]
+    return ref
 
 
 def _validate_graph(nodes: Mapping[str, Mapping[str, Any]]) -> None:
