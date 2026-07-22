@@ -113,6 +113,17 @@ def get_xai_oauth_login_status() -> XAIToken | None:
     return _load_token()
 
 
+def logout_xai_oauth() -> bool:
+    """Remove this instance's credentials while excluding token refreshes."""
+    path = get_xai_oauth_storage_path()
+    with _token_lock():
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+    return True
+
+
 def login_xai_oauth(
     *,
     print_fn: Callable[[str], None] = print,
@@ -215,7 +226,11 @@ def get_xai_oauth_token(
         )
 
     with _token_lock():
-        latest = _load_token() or token
+        latest = _load_token()
+        if latest is None:
+            raise XAIOAuthError(
+                "xAI is not signed in. Run `nanobot provider login xai-oauth` first."
+            )
         if not force_refresh and _token_is_fresh(latest, min_ttl_ms):
             return latest
         if not latest.refresh:

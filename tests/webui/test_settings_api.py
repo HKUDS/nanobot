@@ -1218,7 +1218,7 @@ def test_xai_oauth_login_reports_upstream_failure_as_bad_gateway(
     assert exc.value.__cause__ is failure
 
 
-def test_xai_oauth_logout_removes_token_and_lock(
+def test_xai_oauth_logout_removes_token_through_shared_lock(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1237,7 +1237,6 @@ def test_xai_oauth_logout_removes_token_and_lock(
     logout_oauth_provider({"provider": ["xai-oauth"]})
 
     assert not token_path.exists()
-    assert not token_path.with_suffix(".lock").exists()
 
 
 def test_provider_models_payload_fetches_openai_compatible_models(

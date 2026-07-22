@@ -1356,9 +1356,10 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
             ) from None
         token_path = get_storage().get_token_path()
     elif spec.name == "xai_oauth":
-        from nanobot.providers.xai_oauth import get_xai_oauth_storage_path
+        from nanobot.providers.xai_oauth import logout_xai_oauth
 
-        token_path = get_xai_oauth_storage_path()
+        logout_xai_oauth()
+        return settings_payload()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
 

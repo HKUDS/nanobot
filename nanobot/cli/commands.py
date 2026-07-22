@@ -2781,6 +2781,7 @@ def provider_logout(
         ...,
         help="OAuth provider (e.g. 'openai-codex', 'xai-oauth', 'github-copilot')",
     ),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Log out from an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -2789,6 +2790,13 @@ def provider_logout(
     if not handler:
         console.print(f"[red]Logout not implemented for {spec.label}[/red]")
         raise typer.Exit(1)
+
+    if config:
+        from nanobot.config.loader import set_config_path
+
+        resolved_config_path = Path(config).expanduser().resolve()
+        set_config_path(resolved_config_path)
+        console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
     console.print(f"{__logo__} OAuth Logout - {spec.label}\n")
     handler()
@@ -2878,9 +2886,15 @@ def _login_xai_oauth() -> None:
 @_register_logout("xai_oauth")
 def _logout_xai_oauth() -> None:
     """Clear local xAI OAuth credentials for this nanobot instance."""
-    from nanobot.providers.xai_oauth import get_xai_oauth_storage_path
+    from nanobot.providers.xai_oauth import get_xai_oauth_storage_path, logout_xai_oauth
 
-    _delete_oauth_files(get_xai_oauth_storage_path(), _PROVIDER_DISPLAY["xai_oauth"])
+    token_path = get_xai_oauth_storage_path()
+    provider_label = _PROVIDER_DISPLAY["xai_oauth"]
+    if logout_xai_oauth():
+        console.print(f"[green]✓ Logged out from {provider_label}[/green]")
+        console.print(f"[dim]Removed: {token_path}[/dim]")
+    else:
+        console.print(f"[yellow]! No local OAuth credentials found for {provider_label}[/yellow]")
 
 
 @_register_logout("github_copilot")

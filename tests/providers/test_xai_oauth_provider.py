@@ -474,5 +474,25 @@ def test_plain_error_body_is_single_line_and_bounded() -> None:
     assert len(detail) == 1001
 
 
+def test_large_json_error_body_redacts_camel_case_credentials_before_bounding() -> None:
+    detail = _bounded_error_body(
+        json.dumps(
+            {
+                "accessToken": "access-must-not-leak",
+                "refresh-token": "refresh-must-not-leak",
+                "padding": "x" * 33_000,
+            }
+        )
+    )
+
+    assert detail is not None
+    assert '"accessToken":"[REDACTED]"' in detail
+    assert '"refresh-token":"[REDACTED]"' in detail
+    assert "access-must-not-leak" not in detail
+    assert "refresh-must-not-leak" not in detail
+    assert detail.endswith("…")
+    assert len(detail) == 1001
+
+
 async def _append(target: list[str], value: str) -> None:
     target.append(value)

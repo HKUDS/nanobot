@@ -290,7 +290,7 @@ remain accepted as no-op compatibility aliases.
 | `nanobot provider login xai-oauth --set-main` | Authenticate an eligible X Premium / Grok subscription and select Grok 4.5; hosted X Search is enabled for models that advertise support |
 | `nanobot provider login github-copilot --set-main` | Authenticate GitHub Copilot and select its current default model |
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |
-| `nanobot provider logout xai-oauth` | Remove this nanobot instance's xAI OAuth state |
+| `nanobot provider logout xai-oauth --config <path>` | Remove the selected nanobot instance's xAI OAuth state |
 | `nanobot provider logout github-copilot` | Remove GitHub Copilot OAuth state |
 
 See [`providers.md`](./providers.md#oauth-providers) for when OAuth providers need explicit provider/model selection.

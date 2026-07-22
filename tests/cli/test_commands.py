@@ -557,8 +557,30 @@ def test_provider_logout_xai_oauth_removes_instance_credentials(tmp_path, monkey
 
     assert result.exit_code == 0
     assert not token_path.exists()
-    assert not lock_path.exists()
     assert "Logged out from xAI (X Premium)" in result.stdout
+
+
+def test_provider_logout_xai_oauth_uses_explicit_config_path(tmp_path, monkeypatch):
+    from nanobot.config import loader
+
+    default_config = tmp_path / "default" / "config.json"
+    selected_config = tmp_path / "selected" / "config.json"
+    default_token = default_config.parent / "auth" / "xai.json"
+    selected_token = selected_config.parent / "auth" / "xai.json"
+    for token_path in (default_token, selected_token):
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(loader, "_current_config_path", default_config)
+
+    result = runner.invoke(
+        app,
+        ["provider", "logout", "xai-oauth", "--config", str(selected_config)],
+    )
+
+    assert result.exit_code == 0
+    assert default_token.exists()
+    assert not selected_token.exists()
+    assert "Using config:" in result.stdout
 
 
 def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):

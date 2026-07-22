@@ -81,14 +81,20 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
-    if config.providers.openai_codex.proxy is not None:
-        data.setdefault("providers", {})["openaiCodex"] = {
-            "proxy": config.providers.openai_codex.proxy,
-        }
-    if config.providers.xai_oauth.proxy is not None:
-        data.setdefault("providers", {})["xaiOauth"] = {
-            "proxy": config.providers.xai_oauth.proxy,
-        }
+    # OAuth credentials live in dedicated token stores. Persist only the
+    # non-credential request settings consumed by these provider backends.
+    for alias, provider in (
+        ("openaiCodex", config.providers.openai_codex),
+        ("xaiOauth", config.providers.xai_oauth),
+    ):
+        settings = provider.model_dump(
+            mode="json",
+            by_alias=True,
+            include={"proxy", "extra_body"},
+            exclude_none=True,
+        )
+        if settings:
+            data.setdefault("providers", {})[alias] = settings
 
     # Temp + replace so a crash mid-write cannot leave a truncated config.json.
     _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))

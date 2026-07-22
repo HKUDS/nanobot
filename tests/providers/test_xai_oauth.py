@@ -25,6 +25,7 @@ from nanobot.providers.xai_oauth import (
     get_xai_oauth_storage_path,
     get_xai_oauth_token,
     login_xai_oauth,
+    logout_xai_oauth,
 )
 
 
@@ -194,3 +195,109 @@ def test_missing_credentials_returns_actionable_login_command(
 
     with pytest.raises(XAIOAuthError, match="nanobot provider login xai-oauth"):
         get_xai_oauth_token()
+
+
+def test_logout_waits_for_inflight_refresh_and_removes_rotated_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _use_temp_credentials(monkeypatch, tmp_path)
+    expired = XAIToken(
+        access="old-access",
+        refresh="old-refresh",
+        expires=int(time.time() * 1000) - 1,
+    )
+    xai_oauth._write_token(expired)
+    refresh_started = threading.Event()
+    finish_refresh = threading.Event()
+    logout_started = threading.Event()
+    logout_finished = threading.Event()
+    refresh_errors: list[Exception] = []
+    logout_results: list[bool] = []
+
+    def fake_refresh(token: XAIToken, _proxy: str | None) -> XAIToken:
+        refresh_started.set()
+        assert finish_refresh.wait(timeout=2)
+        return XAIToken(
+            access="new-access",
+            refresh=token.refresh,
+            expires=int(time.time() * 1000) + 3_600_000,
+        )
+
+    def refresh() -> None:
+        try:
+            get_xai_oauth_token()
+        except Exception as exc:  # pragma: no cover - asserted below
+            refresh_errors.append(exc)
+
+    def logout() -> None:
+        logout_started.set()
+        logout_results.append(logout_xai_oauth())
+        logout_finished.set()
+
+    monkeypatch.setattr(xai_oauth, "_refresh_token", fake_refresh)
+    refresh_thread = threading.Thread(target=refresh)
+    refresh_thread.start()
+    assert refresh_started.wait(timeout=2)
+
+    logout_thread = threading.Thread(target=logout)
+    logout_thread.start()
+    assert logout_started.wait(timeout=2)
+    assert not logout_finished.wait(timeout=0.05)
+    finish_refresh.set()
+    refresh_thread.join(timeout=2)
+    logout_thread.join(timeout=2)
+
+    assert not refresh_thread.is_alive()
+    assert not logout_thread.is_alive()
+    assert refresh_errors == []
+    assert logout_results == [True]
+    assert not get_xai_oauth_storage_path().exists()
+
+
+def test_refresh_does_not_restore_credentials_removed_after_its_initial_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _use_temp_credentials(monkeypatch, tmp_path)
+    expired = XAIToken(
+        access="old-access",
+        refresh="old-refresh",
+        expires=int(time.time() * 1000) - 1,
+    )
+    xai_oauth._write_token(expired)
+    real_load_token = xai_oauth._load_token
+    initial_read_finished = threading.Event()
+    continue_refresh = threading.Event()
+    refresh_errors: list[Exception] = []
+    first_load = True
+
+    def gated_load_token() -> XAIToken | None:
+        nonlocal first_load
+        token = real_load_token()
+        if first_load:
+            first_load = False
+            initial_read_finished.set()
+            assert continue_refresh.wait(timeout=2)
+        return token
+
+    def refresh() -> None:
+        try:
+            get_xai_oauth_token()
+        except Exception as exc:
+            refresh_errors.append(exc)
+
+    monkeypatch.setattr(xai_oauth, "_load_token", gated_load_token)
+    refresh_thread = threading.Thread(target=refresh)
+    refresh_thread.start()
+    assert initial_read_finished.wait(timeout=2)
+
+    assert logout_xai_oauth() is True
+    continue_refresh.set()
+    refresh_thread.join(timeout=2)
+
+    assert not refresh_thread.is_alive()
+    assert len(refresh_errors) == 1
+    assert isinstance(refresh_errors[0], XAIOAuthError)
+    assert "not signed in" in str(refresh_errors[0])
+    assert not get_xai_oauth_storage_path().exists()

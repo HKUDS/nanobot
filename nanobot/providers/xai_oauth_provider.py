@@ -37,14 +37,12 @@ DEFAULT_XAI_OAUTH_MODELS_URL = "https://cli-chat-proxy.grok.com/v1/models"
 DEFAULT_XAI_OAUTH_MODEL = "xai-oauth/grok-4.5"
 _MODEL_CAPABILITIES_TTL_S = 5 * 60
 _MAX_ERROR_BODY_CHARS = 1000
-_MAX_JSON_ERROR_BODY_CHARS = 32_000
 _SENSITIVE_ERROR_KEYS = {
-    "access_token",
-    "api_key",
+    "accesstoken",
     "apikey",
     "authorization",
-    "id_token",
-    "refresh_token",
+    "idtoken",
+    "refreshtoken",
 }
 
 
@@ -444,17 +442,16 @@ def _bounded_error_body(raw: str) -> str | None:
     if not text:
         return None
 
-    if len(text) <= _MAX_JSON_ERROR_BODY_CHARS:
-        try:
-            payload = json.loads(text)
-        except (TypeError, ValueError):
-            pass
-        else:
-            text = json.dumps(
-                _redact_error_payload(payload),
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        pass
+    else:
+        text = json.dumps(
+            _redact_error_payload(payload),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
     text = re.sub(r"(?i)(bearer\s+)[a-z0-9._~+/=-]+", r"\1[REDACTED]", text)
     text = " ".join(text.split())
@@ -466,12 +463,17 @@ def _bounded_error_body(raw: str) -> str | None:
 def _redact_error_payload(payload: Any) -> Any:
     if isinstance(payload, dict):
         return {
-            key: "[REDACTED]" if key.lower() in _SENSITIVE_ERROR_KEYS else _redact_error_payload(value)
+            key: "[REDACTED]" if _is_sensitive_error_key(key) else _redact_error_payload(value)
             for key, value in payload.items()
         }
     if isinstance(payload, list):
         return [_redact_error_payload(value) for value in payload]
     return payload
+
+
+def _is_sensitive_error_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+    return normalized in _SENSITIVE_ERROR_KEYS
 
 
 def _friendly_error(status_code: int, response_body: str | None = None) -> str:
