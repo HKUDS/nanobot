@@ -2953,7 +2953,6 @@ function ProvidersSettings({
     };
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
-    const isXaiOauthProvider = provider.name === "xai_oauth";
     const supportsOauthProxy = isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
@@ -2992,9 +2991,7 @@ function ProvidersSettings({
                 {provider.label}
               </span>
               <span className="block truncate text-[12px] text-muted-foreground">
-                {isXaiOauthProvider
-                  ? tx("settings.oauth.xaiSubtitle", "X Premium · Capability-aware X Search")
-                  : provider.api_base || provider.default_api_base || provider.name}
+                {provider.api_base || provider.default_api_base || provider.name}
               </span>
             </span>
           </span>
@@ -3028,17 +3025,9 @@ function ProvidersSettings({
               <>
                 <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-[13px] font-semibold text-foreground">
-                        {tx("settings.oauth.authentication", "OAuth authentication")}
-                      </p>
-                      {isXaiOauthProvider ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-foreground/75">
-                          <Search className="h-3 w-3" aria-hidden />
-                          {tx("settings.oauth.xaiBadge", "X Search when supported")}
-                        </span>
-                      ) : null}
-                    </div>
+                    <p className="text-[13px] font-semibold text-foreground">
+                      {tx("settings.oauth.authentication", "OAuth authentication")}
+                    </p>
                     <p className="mt-1 text-[12px] text-muted-foreground">
                       {provider.configured
                         ? t("settings.oauth.signedInAs", {
@@ -3047,14 +3036,6 @@ function ProvidersSettings({
                           })
                         : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
                     </p>
-                    {isXaiOauthProvider ? (
-                      <p className="mt-1.5 max-w-xl text-[12px] leading-5 text-muted-foreground">
-                        {tx(
-                          "settings.oauth.xaiHelp",
-                          "Use your X Premium / Grok subscription. Nanobot enables hosted X Search only when the selected model advertises support; OAuth credentials stay on this device.",
-                        )}
-                      </p>
-                    ) : null}
                   </div>
                   <div className="flex shrink-0 justify-end gap-2">
                     {provider.configured ? (
@@ -3096,27 +3077,16 @@ function ProvidersSettings({
                 </div>
                 {supportsOauthProxy ? (
                   <div className="rounded-[18px] border border-border/45 bg-background/75 px-4 py-3.5">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                         <Globe2 className="h-4 w-4" aria-hidden />
                       </span>
-                      <div className="min-w-0">
-                        <label
-                          htmlFor={`provider-${provider.name}-proxy`}
-                          className="text-[13px] font-semibold text-foreground"
-                        >
-                          {tx("settings.oauth.proxyLabel", "Network proxy")}
-                        </label>
-                        <p
-                          id={`provider-${provider.name}-proxy-help`}
-                          className="mt-0.5 max-w-2xl text-[12px] leading-5 text-muted-foreground"
-                        >
-                          {tx(
-                            "settings.oauth.proxyHelp",
-                            "Optional. Used for OAuth sign-in, token refresh, and model requests. Save changes before signing in; leave blank for a direct connection.",
-                          )}
-                        </p>
-                      </div>
+                      <label
+                        htmlFor={`provider-${provider.name}-proxy`}
+                        className="text-[13px] font-semibold text-foreground"
+                      >
+                        {tx("settings.oauth.proxyLabel", "Network proxy")}
+                      </label>
                     </div>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                       <Input
@@ -3126,7 +3096,6 @@ function ProvidersSettings({
                           onChangeProviderForm(provider.name, { proxy: event.target.value })
                         }
                         placeholder="http://127.0.0.1:7890"
-                        aria-describedby={`provider-${provider.name}-proxy-help`}
                         autoCapitalize="none"
                         autoComplete="off"
                         autoCorrect="off"

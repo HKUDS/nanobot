@@ -709,11 +709,7 @@
       "signInBeforeSaving": "この OAuth プロバイダーをアクティブなモデルプロバイダーとして保存する前にサインインしてください。",
       "signedIn": "サインイン済み",
       "notSignedIn": "未サインイン",
-      "xaiSubtitle": "X Premium · モデル対応時の X 検索",
-      "xaiBadge": "対応モデルで X 検索",
-      "xaiHelp": "X Premium / Grok サブスクリプションを使用します。nanobot は選択したモデルが対応を明示した場合にのみホスト型 X 検索を有効にし、OAuth 認証情報はこのデバイスにのみ保存されます。",
       "proxyLabel": "ネットワークプロキシ",
-      "proxyHelp": "任意。OAuth サインイン、トークン更新、モデルリクエストに使用します。サインイン前に変更を保存してください。空欄の場合は直接接続します。",
       "proxySaveBeforeSignIn": "サインイン前にプロキシの変更を保存してください。",
       "saveProxy": "プロキシを保存"
     },

@@ -709,11 +709,7 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sudah masuk",
       "notSignedIn": "Belum masuk",
-      "xaiSubtitle": "X Premium · Pencarian X sesuai kemampuan model",
-      "xaiBadge": "Pencarian X jika didukung",
-      "xaiHelp": "Gunakan langganan X Premium / Grok Anda. nanobot hanya mengaktifkan pencarian X terkelola saat model yang dipilih menyatakan dukungan; kredensial OAuth hanya disimpan di perangkat ini.",
       "proxyLabel": "Proksi jaringan",
-      "proxyHelp": "Opsional. Digunakan untuk login OAuth, penyegaran token, dan permintaan model. Simpan perubahan sebelum login; kosongkan untuk koneksi langsung.",
       "proxySaveBeforeSignIn": "Simpan perubahan proksi sebelum login.",
       "saveProxy": "Simpan proksi"
     },

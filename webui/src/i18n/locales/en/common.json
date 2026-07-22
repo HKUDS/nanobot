@@ -723,11 +723,7 @@
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in",
-      "xaiSubtitle": "X Premium · Capability-aware X Search",
-      "xaiBadge": "X Search when supported",
-      "xaiHelp": "Use your X Premium / Grok subscription. Nanobot enables hosted X Search only when the selected model advertises support; OAuth credentials stay on this device.",
       "proxyLabel": "Network proxy",
-      "proxyHelp": "Optional. Used for OAuth sign-in, token refresh, and model requests. Save changes before signing in; leave blank for a direct connection.",
       "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
       "saveProxy": "Save proxy"
     },

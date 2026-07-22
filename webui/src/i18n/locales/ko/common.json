@@ -709,11 +709,7 @@
       "signInBeforeSaving": "이 OAuth 제공자를 활성 모델 제공자로 저장하기 전에 로그인하세요.",
       "signedIn": "로그인됨",
       "notSignedIn": "로그인 안 됨",
-      "xaiSubtitle": "X Premium · 모델 지원 기반 X 검색",
-      "xaiBadge": "지원 모델에서 X 검색",
-      "xaiHelp": "X Premium / Grok 구독을 사용합니다. nanobot은 선택한 모델이 지원을 명시한 경우에만 호스팅 X 검색을 활성화하며 OAuth 인증 정보는 이 기기에만 저장됩니다.",
       "proxyLabel": "네트워크 프록시",
-      "proxyHelp": "선택 사항입니다. OAuth 로그인, 토큰 갱신 및 모델 요청에 사용됩니다. 로그인 전에 변경 사항을 저장하세요. 비워 두면 직접 연결합니다.",
       "proxySaveBeforeSignIn": "로그인하기 전에 프록시 변경 사항을 저장하세요.",
       "saveProxy": "프록시 저장"
     },
