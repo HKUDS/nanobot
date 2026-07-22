@@ -169,6 +169,37 @@ def test_runtime_expansion_skips_a_duplicate_enabled_webhook_listener() -> None:
     assert [spec.instance_id for spec in specs] == ["default"]
 
 
+def test_runtime_expansion_treats_wildcard_webhook_host_as_a_conflict() -> None:
+    section = {
+        "instances": [
+            {
+                "id": "default",
+                "enabled": True,
+                "token": "123456:abcdefghijklmnopqrstuvwxyz",
+                "mode": "webhook",
+                "webhookListenHost": "0.0.0.0",
+                "webhookListenPort": 8081,
+            },
+            {
+                "id": "product",
+                "enabled": True,
+                "token": "654321:zyxwvutsrqponmlkjihgfedcba",
+                "mode": "webhook",
+                "webhookListenHost": "127.0.0.1",
+                "webhookListenPort": 8081,
+            },
+        ],
+    }
+
+    specs = telegram_instance_specs(
+        section,
+        telegram_default_config(),
+        enabled_only=True,
+    )
+
+    assert [spec.instance_id for spec in specs] == ["default"]
+
+
 def test_upsert_rejects_an_enabled_webhook_listener_shared_by_multiple_bots() -> None:
     first_token = "123456:abcdefghijklmnopqrstuvwxyz"
     second_token = "654321:zyxwvutsrqponmlkjihgfedcba"
@@ -199,6 +230,35 @@ def test_upsert_rejects_an_enabled_webhook_listener_shared_by_multiple_bots() ->
 
     assert first_token not in str(exc_info.value)
     assert second_token not in str(exc_info.value)
+
+
+def test_upsert_rejects_loopback_aliases_on_the_same_webhook_port() -> None:
+    section = {
+        "instances": [
+            {
+                "id": "default",
+                "enabled": True,
+                "token": "123456:abcdefghijklmnopqrstuvwxyz",
+                "mode": "webhook",
+                "webhookListenHost": "localhost",
+                "webhookListenPort": 8081,
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="webhook listener 127.0.0.1:8081"):
+        upsert_telegram_instance(
+            section,
+            telegram_default_config(),
+            "product",
+            {
+                "enabled": True,
+                "token": "654321:zyxwvutsrqponmlkjihgfedcba",
+                "mode": "webhook",
+                "webhookListenHost": "127.0.0.1",
+                "webhookListenPort": 8081,
+            },
+        )
 
 
 def test_upsert_allows_enabled_webhook_bots_on_different_ports() -> None:

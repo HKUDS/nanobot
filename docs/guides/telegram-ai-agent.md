@@ -104,9 +104,10 @@ An existing single-bot Telegram setup appears automatically as **Default bot**.
 You do not need to paste its token again. You can check it, toggle it, and add
 more bots from the same screen.
 
-After you save a multi-bot setup, older nanobot releases that only support one
-Telegram bot cannot read all of those entries. Back up `~/.nanobot/config.json`
-before downgrading.
+Before returning to an older nanobot release, back up
+`~/.nanobot/config.json`. Once this version saves or switches a Telegram
+bot—even if you only use one—older releases may no longer recognize the
+Telegram settings.
 
 ## Polling and webhook deployments
 

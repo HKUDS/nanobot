@@ -13,6 +13,8 @@ from nanobot.config.loader import merge_missing_defaults
 
 DEFAULT_INSTANCE_ID = "default"
 _INSTANCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_WILDCARD_WEBHOOK_HOSTS = {"*", "0.0.0.0", "::", "[::]"}
+_LOOPBACK_WEBHOOK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def validate_instance_id(value: str) -> str:
@@ -118,6 +120,31 @@ def _webhook_listener(config: dict[str, Any]) -> tuple[str, int] | None:
     return host, port
 
 
+def _webhook_listeners_conflict(
+    left: tuple[str, int],
+    right: tuple[str, int],
+) -> bool:
+    left_host, left_port = left
+    right_host, right_port = right
+    if left_port != right_port:
+        return False
+    if left_host == right_host:
+        return True
+    if left_host in _WILDCARD_WEBHOOK_HOSTS or right_host in _WILDCARD_WEBHOOK_HOSTS:
+        return True
+    return left_host in _LOOPBACK_WEBHOOK_HOSTS and right_host in _LOOPBACK_WEBHOOK_HOSTS
+
+
+def _webhook_listener_owner(
+    listener: tuple[str, int],
+    owners: list[tuple[tuple[str, int], str]],
+) -> str | None:
+    for existing_listener, owner in owners:
+        if _webhook_listeners_conflict(listener, existing_listener):
+            return owner
+    return None
+
+
 def telegram_instance_specs(
     section: Any,
     defaults: dict[str, Any],
@@ -130,7 +157,7 @@ def telegram_instance_specs(
     specs: list[ChannelInstanceSpec] = []
     instance_ids: set[str] = set()
     token_owners: dict[str, str] = {}
-    webhook_owners: dict[tuple[str, int], str] = {}
+    webhook_owners: list[tuple[tuple[str, int], str]] = []
     for index, raw in enumerate(raw_specs):
         if not isinstance(raw, dict):
             logger.warning("Skipping invalid Telegram instance at index {}: expected an object", index)
@@ -179,21 +206,22 @@ def telegram_instance_specs(
                 )
                 continue
             if listener is not None:
-                if listener in webhook_owners:
+                owner = _webhook_listener_owner(listener, webhook_owners)
+                if owner is not None:
                     host, port = listener
                     logger.warning(
                         "Skipping Telegram instance '{}' because webhook listener {}:{} is already used by instance '{}'",
                         instance_id,
                         host,
                         port,
-                        webhook_owners[listener],
+                        owner,
                     )
                     continue
 
         if enabled_only and token:
             token_owners[token] = instance_id
         if listener is not None:
-            webhook_owners[listener] = instance_id
+            webhook_owners.append((listener, instance_id))
 
         specs.append(ChannelInstanceSpec(instance_id=instance_id, config=config))
 
@@ -206,7 +234,7 @@ def canonical_telegram_section(section: Any, defaults: dict[str, Any]) -> dict[s
     instances: list[dict[str, Any]] = []
     instance_ids: set[str] = set()
     token_owners: dict[str, str] = {}
-    webhook_owners: dict[tuple[str, int], str] = {}
+    webhook_owners: list[tuple[tuple[str, int], str]] = []
 
     for index, raw in enumerate(raw_specs):
         if not isinstance(raw, dict):
@@ -236,14 +264,14 @@ def canonical_telegram_section(section: Any, defaults: dict[str, Any]) -> dict[s
         if bool(config.get("enabled", defaults.get("enabled", False))):
             listener = _webhook_listener(config)
             if listener is not None:
-                if listener in webhook_owners:
+                owner = _webhook_listener_owner(listener, webhook_owners)
+                if owner is not None:
                     host, port = listener
-                    owner = webhook_owners[listener]
                     raise ValueError(
                         f"Telegram webhook listener {host}:{port} is already used by instance "
                         f"'{owner}'"
                     )
-                webhook_owners[listener] = instance_id
+                webhook_owners.append((listener, instance_id))
         instances.append(config)
 
     return {"instances": instances}
