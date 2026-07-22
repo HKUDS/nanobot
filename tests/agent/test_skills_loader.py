@@ -282,6 +282,48 @@ def test_disabled_skills_empty_set_no_effect(tmp_path: Path) -> None:
     assert len(entries) == 2
 
 
+def test_validate_skill_names_rejects_disabled_missing_and_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "disabled", body="# Disabled")
+    _write_skill(
+        ws_skills,
+        "unavailable",
+        metadata_json={"requires": {"bins": ["nanobot_test_fake_binary"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    monkeypatch.setattr("nanobot.agent.skills.shutil.which", lambda _cmd: None)
+
+    loader = SkillsLoader(
+        workspace,
+        builtin_skills_dir=builtin,
+        disabled_skills={"disabled"},
+    )
+    with pytest.raises(ValueError, match="disabled"):
+        loader.validate_skill_names(["disabled"])
+    with pytest.raises(ValueError, match="not found"):
+        loader.validate_skill_names(["missing"])
+    with pytest.raises(ValueError, match="CLI: nanobot_test_fake_binary"):
+        loader.validate_skill_names(["unavailable"])
+
+
+def test_validate_skill_names_preserves_order_and_removes_duplicates(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "alpha")
+    _write_skill(ws_skills, "beta")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    assert loader.validate_skill_names(["beta", "alpha", "beta"]) == ["beta", "alpha"]
+
+
 def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
@@ -339,6 +381,72 @@ def test_build_skills_summary_folded_description(tmp_path: Path) -> None:
     summary = loader.build_skills_summary()
     assert "pdf" in summary
     assert "visual quality" in summary
+
+
+def test_build_skills_summary_uses_stable_workspace_relative_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    skill_path = _write_skill(ws_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    summary = loader.build_skills_summary()
+    assert "`skills/alpha/SKILL.md`" in summary
+    assert str(skill_path) not in summary
+
+
+def test_skill_file_is_read_once_until_it_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    skill_path = _write_skill(ws_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    original_read_text = Path.read_text
+    reads = 0
+
+    def tracked_read_text(path: Path, *args, **kwargs) -> str:
+        nonlocal reads
+        if path == skill_path:
+            reads += 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    loader.build_skills_summary()
+    loader.get_skill_metadata("alpha")
+    loader.load_skill("alpha")
+    assert reads == 1
+
+    skill_path.write_text("---\ndescription: Updated description\n---\n\n# Alpha\n", encoding="utf-8")
+    assert "Updated description" in loader.build_skills_summary()
+    assert reads == 2
+
+
+def test_cached_metadata_is_not_mutated_by_callers(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(
+        ws_skills,
+        "alpha",
+        metadata_json={"requires": {"bins": ["original"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    metadata = loader.get_skill_metadata("alpha")
+    assert metadata is not None
+    metadata["metadata"]["nanobot"]["requires"]["bins"].append("mutated")
+
+    requirements = loader.get_skill_requirements("alpha")
+    assert requirements["bins"] == ["original"]
 
 
 def test_build_skills_summary_literal_description(tmp_path: Path) -> None:

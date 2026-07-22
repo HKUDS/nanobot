@@ -263,6 +263,28 @@ class TestBuildSystemPrompt:
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
 
+    def test_requested_skill_is_loaded_and_removed_from_summary(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "review"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: review\ndescription: Review code\n---\n\n# Review Instructions\n",
+            encoding="utf-8",
+        )
+        builder = _builder(tmp_path)
+
+        result = builder.build_system_prompt(skill_names=["review"])
+
+        assert "# Active Skills" in result
+        assert "### Skill: review" in result
+        assert "# Review Instructions" in result
+        assert "- **review**" not in result
+
+    def test_requested_skill_must_exist(self, tmp_path):
+        builder = _builder(tmp_path)
+
+        with pytest.raises(ValueError, match="not found"):
+            builder.build_system_prompt(skill_names=["missing"])
+
 
 # ---------------------------------------------------------------------------
 # build_messages

@@ -450,6 +450,41 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_preloads_requested_skill_in_provider_system_prompt(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import GenerationSettings, LLMResponse
+
+    skill_dir = tmp_path / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: review\ndescription: Review code\n---\n\n"
+        "# SDK Review Instructions\n",
+        encoding="utf-8",
+    )
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[], usage={})
+    )
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+
+    result = await bot.run("review this", skill_names=["review"])
+
+    assert result.content == "done"
+    messages = provider.chat_with_retry.await_args.kwargs["messages"]
+    assert "### Skill: review" in messages[0]["content"]
+    assert "# SDK Review Instructions" in messages[0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_run_forwards_non_default_runtime_options(tmp_path):
     from nanobot.bus.events import OutboundMessage
 
@@ -466,6 +501,7 @@ async def test_run_forwards_non_default_runtime_options(tmp_path):
         chat_id="chat-a",
         sender_id="alice",
         media=["/tmp/image.png"],
+        skill_names=["review"],
         ephemeral=True,
     )
 
@@ -476,6 +512,7 @@ async def test_run_forwards_non_default_runtime_options(tmp_path):
         chat_id="chat-a",
         sender_id="alice",
         media=["/tmp/image.png"],
+        skill_names=["review"],
         ephemeral=True,
         _run_extra_hooks_for_ephemeral=True,
         hooks=ANY,
@@ -905,6 +942,7 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
         chat_id="chat-a",
         sender_id="alice",
         media=["/tmp/image.png"],
+        skill_names=["review"],
         ephemeral=True,
     )
     await run.wait()
@@ -917,6 +955,7 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
     assert kwargs["chat_id"] == "chat-a"
     assert kwargs["sender_id"] == "alice"
     assert kwargs["media"] == ["/tmp/image.png"]
+    assert kwargs["skill_names"] == ["review"]
     assert kwargs["ephemeral"] is True
     assert callable(kwargs["on_stream"])
     assert callable(kwargs["on_stream_end"])
