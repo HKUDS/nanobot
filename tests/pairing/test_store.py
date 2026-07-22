@@ -240,3 +240,20 @@ class TestStoreDurability:
         # Should recover gracefully and act as empty store
         assert store.list_pending() == []
         assert store.is_approved("telegram", "123") is False
+
+
+def test_load_treats_null_approved_channel_list_as_empty(tmp_path, monkeypatch):
+    """Null approved channel lists must not crash pairing checks.
+
+    JSON stores can contain ``"telegram": null`` after partial edits; treat
+    that like an empty allow-list, matching corrupt-JSON reset behavior.
+    """
+    path = tmp_path / "pairing.json"
+    path.write_text(
+        '{"approved": {"telegram": null, "discord": ["456"]}, "pending": {}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(store, "_store_path", lambda: path)
+    assert store.is_approved("telegram", "123") is False
+    assert store.is_approved("discord", "456") is True
+    assert store.get_approved("telegram") == []

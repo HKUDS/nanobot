@@ -46,6 +46,8 @@ def _load() -> dict[str, Any]:
 
     # Convert approved lists to str sets for O(1) lookup.
     for channel, users in data.get("approved", {}).items():
+        if not isinstance(users, list):
+            users = []
         data["approved"][channel] = {str(u) for u in users}
     return data
 
