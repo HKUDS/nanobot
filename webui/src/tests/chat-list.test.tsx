@@ -56,6 +56,32 @@ describe("ChatList", () => {
     expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
   });
 
+  it("shows a pin indicator for pinned chats", () => {
+    const sessions = [
+      session({ chatId: "pinned", title: "Pinned chat" }),
+      session({ chatId: "normal", title: "Normal chat" }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        pinnedKeys={["websocket:pinned"]}
+      />,
+    );
+
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
+    expect(within(pinnedSection).getByRole("img", { name: "Pinned" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Earlier" })).queryByRole("img", { name: "Pinned" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("groups WebUI chats by workspace project while preserving in-project sorting and activity", () => {
     const sessions = [
       session({
