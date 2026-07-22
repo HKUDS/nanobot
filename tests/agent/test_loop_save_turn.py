@@ -147,6 +147,80 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert message["cron_prompt_ref"] == prompt_ref
 
 
+def _automation_metadata(source: str) -> dict:
+    """Metadata as the cron / local-trigger coordinators stamp it on an inbound."""
+    from nanobot.cron.session_turns import CRON_TRIGGER_META
+    from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+    if source == "cron":
+        return {CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "job-1:1"}}
+    if source == "trigger":
+        return {LOCAL_TRIGGER_META: {"trigger_id": "trg-1", "delivery_id": "d-1"}}
+    return {}
+
+
+@pytest.mark.parametrize(
+    ("source", "sender_id", "runner_substituted", "expect_delivered"),
+    [
+        # AgentRunner normally substitutes the placeholder itself on blank text,
+        # so both shapes reach _state_save in practice and both must be handled.
+        ("interactive", "user", False, True),   # manufacture the placeholder
+        ("interactive", "user", True, True),    # keep the runner's placeholder
+        ("cron", "cron", False, False),         # scheduled job: stay silent
+        ("cron", "cron", True, False),          # scheduled job: drop the placeholder
+        ("trigger", "trigger", False, False),   # local trigger: stay silent
+        ("trigger", "trigger", True, False),    # local trigger: drop the placeholder
+        # sender_id is a per-trigger setting, so the gate must not depend on it.
+        ("trigger", "ci-bot", True, False),
+    ],
+)
+async def test_empty_final_placeholder_skipped_for_background_turns(
+    tmp_path: Path, source: str, sender_id: str, runner_substituted: bool, expect_delivered: bool
+) -> None:
+    """A background (cron / local-trigger) turn that ends empty stays silent, while an
+    interactive turn still gets the 'couldn't produce a final answer' placeholder so the
+    waiting user has a reply. Both are auto-published to a bound chat, so an empty result
+    must not be turned into a spurious message on every no-op run.
+
+    Note these are all ``TurnKind.USER`` turns: automation turns arrive on the origin
+    channel, not on ``system``, so the kind split does not identify them."""
+    from nanobot.agent.loop import TurnContext, TurnKind, TurnRoute, TurnState
+    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+
+    loop = _make_full_loop(tmp_path)
+    session_key = f"telegram:{source}"
+    session = loop.sessions.get_or_create(session_key)
+
+    ctx = TurnContext(
+        msg=InboundMessage(
+            channel="telegram",
+            sender_id=sender_id,
+            chat_id="c1",
+            content="run watch",
+            metadata=_automation_metadata(source),
+        ),
+        session=session,
+        session_key=session_key,
+        state=TurnState.SAVE,
+        turn_id=f"{session_key}:1",
+        runtime=loop.llm_runtime(),
+        kind=TurnKind.USER,
+        route=TurnRoute(channel="telegram", chat_id="c1"),
+        final_content=EMPTY_FINAL_RESPONSE_MESSAGE if runner_substituted else "",
+        stop_reason="empty_final_response",
+        ephemeral=True,  # skip file-cap / consolidation side effects
+    )
+
+    await loop._state_save(ctx)
+    await loop._state_respond(ctx)
+
+    if expect_delivered:
+        assert ctx.outbound is not None
+        assert ctx.outbound.content == EMPTY_FINAL_RESPONSE_MESSAGE
+    else:
+        assert ctx.outbound is None
+
+
 def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
