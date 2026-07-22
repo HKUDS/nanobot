@@ -46,6 +46,8 @@ export type ChannelInstancesPanelCustomization = {
   needsSetupLabel?: string;
   renderInstanceSummary?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   renderInstanceAction?: (instance: NanobotChannelInstanceInfo) => ReactNode;
+  showSetupSteps?: (instance: NanobotChannelInstanceInfo) => boolean;
+  renderInstanceAdvanced?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   footer?: ReactNode;
 };
 
@@ -173,6 +175,8 @@ export function ChannelInstancesPanel({
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id;
+          const showSetupSteps = customization.showSetupSteps?.(instance) ?? true;
+          const instanceAdvanced = customization.renderInstanceAdvanced?.(instance);
           return (
             <article
               key={instance.id}
@@ -244,18 +248,20 @@ export function ChannelInstancesPanel({
                     </div>
                     {customization.renderInstanceAction?.(instance)}
                   </section>
-                  <ChannelSetupSteps
-                    steps={setup.steps}
-                    action={
-                      <ChannelGuideLink
-                        feature={feature}
-                        setup={setup}
-                        chatAppsDocsUrl={chatAppsDocsUrl}
-                        compact
-                      />
-                    }
-                  />
-                  {instanceFields.length ? (
+                  {showSetupSteps ? (
+                    <ChannelSetupSteps
+                      steps={setup.steps}
+                      action={
+                        <ChannelGuideLink
+                          feature={feature}
+                          setup={setup}
+                          chatAppsDocsUrl={chatAppsDocsUrl}
+                          compact
+                        />
+                      }
+                    />
+                  ) : null}
+                  {instanceFields.length || instanceAdvanced ? (
                     <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
                       <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
                         <span className="inline-flex items-center gap-1.5">
@@ -266,41 +272,51 @@ export function ChannelInstancesPanel({
                           />
                         </span>
                       </summary>
-                      <form
-                        className="mt-3"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void saveSelectedInstanceSettings();
-                        }}
-                      >
-                        <CredentialForm
-                          fields={instanceFields}
-                          values={fieldValues}
-                          configuredFields={selectedConfiguredFields}
-                          visibleSecrets={visibleSecrets}
-                          onChange={(key, value) =>
-                            setFieldValues((current) => ({ ...current, [key]: value }))
-                          }
-                          onToggleSecret={(key) =>
-                            setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))
-                          }
-                          compact
-                        />
-                        <div className="mt-3 flex justify-end">
-                          <Button
-                            type="submit"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
-                            disabled={savingFields}
-                          >
-                            {savingFields ? (
-                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                            ) : null}
-                            {tx("settings.channels.saveSettings", "Save settings")}
-                          </Button>
+                      {instanceFields.length ? (
+                        <form
+                          className="mt-3"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveSelectedInstanceSettings();
+                          }}
+                        >
+                          <CredentialForm
+                            fields={instanceFields}
+                            values={fieldValues}
+                            configuredFields={selectedConfiguredFields}
+                            visibleSecrets={visibleSecrets}
+                            onChange={(key, value) =>
+                              setFieldValues((current) => ({ ...current, [key]: value }))
+                            }
+                            onToggleSecret={(key) =>
+                              setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))
+                            }
+                            compact
+                          />
+                          <div className="mt-3 flex justify-end">
+                            <Button
+                              type="submit"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                              disabled={savingFields}
+                            >
+                              {savingFields ? (
+                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                              ) : null}
+                              {tx("settings.channels.saveSettings", "Save settings")}
+                            </Button>
+                          </div>
+                        </form>
+                      ) : null}
+                      {instanceAdvanced ? (
+                        <div className={cn(
+                          "mt-3",
+                          instanceFields.length && "border-t border-border/50 pt-4",
+                        )}>
+                          {instanceAdvanced}
                         </div>
-                      </form>
+                      ) : null}
                     </details>
                   ) : null}
                 </div>

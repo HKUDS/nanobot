@@ -5,12 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ChannelValidationPayload,
   NanobotChannelInstanceInfo,
+  NanobotFeatureInfo,
 } from "@/lib/types";
 
 import {
   isVisibleTelegramInstance,
   nextTelegramInstanceId,
   TELEGRAM_PROXY_CLEAR_VALUE,
+  TelegramBotsPanel,
   TelegramConnectionCheck,
   TelegramCredentialsForm,
   TelegramProxySettings,
@@ -52,6 +54,41 @@ function telegramInstance(
   };
 }
 
+function telegramFeature(instance: NanobotChannelInstanceInfo): NanobotFeatureInfo {
+  const field = (
+    key: string,
+    kind: string,
+    required = false,
+  ) => ({ key, field: key.split(".").at(-1) ?? key, kind, choices: [], required });
+  return {
+    name: "telegram",
+    display_name: "Telegram",
+    webui: "webui/index.ts",
+    type: "channel",
+    enabled: instance.enabled,
+    running: instance.runtime_status === "running",
+    runtime_status: instance.runtime_status,
+    configured: instance.configured,
+    config_values: instance.config_values,
+    configured_fields: instance.configured_fields,
+    setup: {
+      fields: [
+        field("channels.telegram.name", "string"),
+        field("channels.telegram.token", "secret", true),
+        field("channels.telegram.proxy", "secret"),
+        field("channels.telegram.allowFrom", "list"),
+        field("channels.telegram.groupPolicy", "enum"),
+      ],
+    },
+    instances: [instance],
+    installed: true,
+    ready: true,
+    status: "enabled",
+    install_supported: false,
+    requires_restart: false,
+  };
+}
+
 describe("TelegramBotsPanel", () => {
   beforeEach(() => {
     apiMocks.configureChannel.mockReset();
@@ -75,6 +112,51 @@ describe("TelegramBotsPanel", () => {
     });
 
     expect(isVisibleTelegramInstance(customDefault)).toBe(true);
+  });
+
+  it("keeps a configured bot compact and moves its proxy into Advanced", async () => {
+    const user = userEvent.setup();
+    const instance = telegramInstance({
+      enabled: true,
+      configured: true,
+      runtime_status: "running",
+      configured_fields: [...defaultFields, "channels.telegram.token", "channels.telegram.proxy"],
+    });
+    render(
+      <TelegramBotsPanel
+        token="api-token"
+        feature={telegramFeature(instance)}
+        showBrandLogos={false}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "nanobot" }));
+
+    expect(screen.getByRole("button", { name: "Check connection" })).toBeVisible();
+    expect(screen.queryByText("Verify the saved token with Telegram.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Next steps")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Use a separate Telegram bot/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Telegram setup" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add bot" })).toBeVisible();
+    expect(screen.getAllByText("Advanced")).toHaveLength(1);
+
+    const advanced = screen.getByText("Advanced").closest("details");
+    expect(advanced).not.toHaveAttribute("open");
+    expect(
+      screen.getByLabelText("Network proxy (optional)", { selector: "input" }),
+    ).not.toBeVisible();
+
+    const advancedSummary = advanced?.querySelector("summary");
+    expect(advancedSummary).not.toBeNull();
+    await user.click(advancedSummary!);
+    expect(advanced).toHaveAttribute("open");
+    expect(
+      screen.getByLabelText("Network proxy (optional)", { selector: "input" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Add bot" }));
+    expect(screen.getByRole("link", { name: "Open Telegram setup" })).toBeVisible();
   });
 
   it("connects with only the required token and keeps optional settings collapsed", async () => {
@@ -292,7 +374,6 @@ describe("TelegramBotsPanel", () => {
     );
 
     expect(screen.getByText("Configured")).toBeInTheDocument();
-    await user.click(screen.getByText("Network proxy (optional)"));
     const proxy = "http://127.0.0.1:7890";
     await user.type(
       screen.getByLabelText("Network proxy (optional)", { selector: "input" }),
@@ -433,6 +514,7 @@ describe("TelegramBotsPanel", () => {
     await waitFor(() => {
       expect(screen.queryByText("Connected as @old_bot.")).not.toBeInTheDocument();
     });
-    expect(screen.getByText("Verify the saved token with Telegram.")).toBeInTheDocument();
+    expect(screen.queryByText("Verify the saved token with Telegram.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check connection" })).toBeVisible();
   });
 });

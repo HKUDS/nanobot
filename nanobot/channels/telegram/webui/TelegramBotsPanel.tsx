@@ -72,12 +72,7 @@ export function TelegramBotsPanel({
             : tx("custom.instanceId", "Instance {{id}}", { id: instance.id })
         ),
         renderInstanceAction: (instance) => instance.configured ? (
-          <TelegramConfiguredBotActions
-            key={instance.id}
-            token={token}
-            instance={instance}
-            onFeaturesUpdate={onFeaturesUpdate}
-          />
+          <TelegramConnectionCheck key={instance.id} token={token} instance={instance} />
         ) : (
           <TelegramCredentialsForm
             key={instance.id}
@@ -91,6 +86,15 @@ export function TelegramBotsPanel({
             onFeaturesUpdate={onFeaturesUpdate}
           />
         ),
+        showSetupSteps: (instance) => !instance.configured,
+        renderInstanceAdvanced: (instance) => instance.configured ? (
+          <TelegramProxySettings
+            key={instance.id}
+            token={token}
+            instance={instance}
+            onFeaturesUpdate={onFeaturesUpdate}
+          />
+        ) : null,
         footer: (
           <TelegramBotCreator
             token={token}
@@ -144,22 +148,21 @@ function TelegramBotCreator({
               ? tx("custom.connectFirst", "Connect your first bot")
               : tx("custom.addAnother", "Add another bot")}
           </div>
-          <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
-            {firstBot
-              ? tx(
+          {firstBot ? (
+            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
+              {tx(
                 "custom.connectFirstHint",
                 "Paste a BotFather token. nanobot will verify it before saving anything.",
-              )
-              : tx(
-                "custom.addAnotherHint",
-                "Use a separate Telegram bot for another role, audience, or workflow.",
               )}
-          </p>
-          <ChannelSetupLinks
-            feature={feature}
-            setup={setup}
-            chatAppsDocsUrl={chatAppsDocsUrl}
-          />
+            </p>
+          ) : null}
+          {firstBot || open ? (
+            <ChannelSetupLinks
+              feature={feature}
+              setup={setup}
+              chatAppsDocsUrl={chatAppsDocsUrl}
+            />
+          ) : null}
         </div>
         {!open ? (
           <Button
@@ -510,27 +513,6 @@ export function TelegramCredentialsForm({
   );
 }
 
-function TelegramConfiguredBotActions({
-  token,
-  instance,
-  onFeaturesUpdate,
-}: {
-  token: string;
-  instance: NanobotChannelInstanceInfo;
-  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
-}) {
-  return (
-    <>
-      <TelegramConnectionCheck token={token} instance={instance} />
-      <TelegramProxySettings
-        token={token}
-        instance={instance}
-        onFeaturesUpdate={onFeaturesUpdate}
-      />
-    </>
-  );
-}
-
 export function TelegramProxySettings({
   token,
   instance,
@@ -628,8 +610,8 @@ export function TelegramProxySettings({
   };
 
   return (
-    <details className="mt-3 rounded-[12px] border border-border/60 bg-muted/20 px-3 py-2.5">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium text-foreground [&::-webkit-details-marker]:hidden">
+    <section aria-label={tx("custom.networkProxy", "Network proxy (optional)")}>
+      <div className="flex items-center justify-between gap-3 text-[12px] font-medium text-foreground">
         <span>{tx("custom.networkProxy", "Network proxy (optional)")}</span>
         <span className={cn(
           "rounded-full px-2 py-0.5 text-[10px] font-semibold",
@@ -641,8 +623,8 @@ export function TelegramProxySettings({
             ? tx("custom.proxyConfigured", "Configured")
             : tx("custom.proxyOptional", "Optional")}
         </span>
-      </summary>
-      <div className="mt-3 border-t border-border/50 pt-3">
+      </div>
+      <div className="mt-2">
         <p className="text-[11px] leading-4 text-muted-foreground">
           {tx(
             "custom.proxyHint",
@@ -709,7 +691,7 @@ export function TelegramProxySettings({
           </p>
         ) : null}
       </div>
-    </details>
+    </section>
   );
 }
 
@@ -762,21 +744,27 @@ export function TelegramConnectionCheck({
       )
       : validationMessage(validation, tx)
     : null;
+  const feedback = error ?? status;
   return (
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-      <div
-        role={status || error ? "status" : undefined}
-        className={cn(
-          "min-w-0 flex-1 text-[12px] leading-5",
-          validation?.status === "connected"
-            ? "text-emerald-700 dark:text-emerald-200"
-            : validation?.status === "invalid" || error
-              ? "text-destructive"
-              : "text-muted-foreground",
-        )}
-      >
-        {error ?? status ?? tx("custom.checkHint", "Verify the saved token with Telegram.")}
-      </div>
+    <div className={cn(
+      "mt-3 flex flex-wrap items-center gap-3",
+      feedback ? "justify-between" : "justify-end",
+    )}>
+      {feedback ? (
+        <div
+          role="status"
+          className={cn(
+            "min-w-0 flex-1 text-[12px] leading-5",
+            validation?.status === "connected"
+              ? "text-emerald-700 dark:text-emerald-200"
+              : validation?.status === "invalid" || error
+                ? "text-destructive"
+                : "text-muted-foreground",
+          )}
+        >
+          {feedback}
+        </div>
+      ) : null}
       <Button
         type="button"
         size="sm"
