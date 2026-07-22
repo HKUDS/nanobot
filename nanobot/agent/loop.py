@@ -51,6 +51,7 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.goal_driver import GoalDriver
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -71,7 +72,7 @@ from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
-    sustained_goal_active,
+    sustained_goal_runnable,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY
@@ -401,6 +402,12 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
+        self.goal_driver = GoalDriver(
+            workspace,
+            bus,
+            self.sessions,
+            session_busy=lambda key: key in self._pending_queues,
+        )
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
@@ -984,7 +991,7 @@ class AgentLoop:
                     metadata=session_metadata,
                     message_metadata=metadata,
                 ),
-                goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
+                goal_active_predicate=lambda: sustained_goal_runnable(session.metadata) if session is not None else False,
                 goal_continue_message=_goal_continue,
                 finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
                     pending_queue_available=pending_queue is not None and session is not None,
@@ -1020,6 +1027,7 @@ class AgentLoop:
         self._running = True
         try:
             await self._connect_mcp()
+            self._schedule_background(self.goal_driver.run(lambda: self._running))
             logger.info("Agent loop started")
 
             while self._running:
@@ -1113,6 +1121,8 @@ class AgentLoop:
                     else None
                 )
         finally:
+            self._running = False
+            self.goal_driver.close()
             # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
             await self.close_mcp()
 
@@ -1275,6 +1285,9 @@ class AgentLoop:
                 )
                 self._runtime_events().clear_turn(session_key)
                 await self._publish_next_deferred_automation_turn(session_key)
+            if self._running:
+                with suppress(Exception):
+                    await self.goal_driver.after_turn(msg)
 
     async def close_mcp(self) -> None:
         """Drain background work, stop exec sessions, then close MCP connections."""

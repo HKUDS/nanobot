@@ -14,7 +14,7 @@ from loguru import logger
 
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
-    sustained_goal_active,
+    sustained_goal_runnable,
     sustained_goal_turn,
 )
 
@@ -169,7 +169,7 @@ def _continuation_available(
 
 def clear_internal_continuation_state(metadata: MutableMapping[str, Any]) -> None:
     """Reset policy bookkeeping once its owning runtime mode is inactive."""
-    if not sustained_goal_active(metadata):
+    if not sustained_goal_runnable(metadata):
         reset_goal_continuation_rounds(metadata)
 
 
@@ -206,7 +206,7 @@ def _goal_continuation_available(
 ) -> bool:
     if not sustained_goal_turn(session_metadata, message_metadata=message_metadata):
         return False
-    if not sustained_goal_active(session_metadata):
+    if not sustained_goal_runnable(session_metadata):
         return False
     try:
         rounds = int((session_metadata or {}).get(_GOAL_CONTINUATION_ROUNDS_KEY) or 0)

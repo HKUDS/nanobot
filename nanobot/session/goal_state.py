@@ -18,6 +18,7 @@ MAX_GOAL_OBJECTIVE_CHARS = 4000
 # Older builds stored the same JSON blob under this key.
 _LEGACY_GOAL_STATE_SESSION_KEY = "thread_goal"
 _MAX_OBJECTIVE_WS = 600
+_CURRENT_GOAL_STATUSES = {"active", "waiting", "blocked"}
 
 
 def _session_goal_raw(metadata: Mapping[str, Any] | None) -> Any:
@@ -39,7 +40,13 @@ def goal_state_raw(metadata: Mapping[str, Any] | None) -> Any:
 
 
 def sustained_goal_active(metadata: Mapping[str, Any] | None) -> bool:
-    """True when this session has an active sustained objective."""
+    """True while this session has a current sustained objective."""
+    goal = parse_goal_state(goal_state_raw(metadata))
+    return isinstance(goal, dict) and goal.get("status") in _CURRENT_GOAL_STATUSES
+
+
+def sustained_goal_runnable(metadata: Mapping[str, Any] | None) -> bool:
+    """True only while a sustained objective may continue automatically."""
     goal = parse_goal_state(goal_state_raw(metadata))
     return isinstance(goal, dict) and goal.get("status") == "active"
 
@@ -81,8 +88,17 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     if not metadata:
         return []
     goal = parse_goal_state(_session_goal_raw(metadata))
-    if not isinstance(goal, dict) or goal.get("status") != "active":
+    if not isinstance(goal, dict) or goal.get("status") not in _CURRENT_GOAL_STATUSES:
         return []
+    status = str(goal.get("status"))
+    goal_id = str(goal.get("goal_id") or "").strip()
+    if goal_id:
+        version = goal.get("version")
+        suffix = f", version {version}" if isinstance(version, int) else ""
+        return [
+            f"Goal: {status} durable reference {goal_id}{suffix}.",
+            "Use Goal Runtime Context or get_goal_plan for the authoritative objective and graph.",
+        ]
     objective = str(goal.get("objective") or "").strip()
     if not objective:
         return ["Goal: active (no objective text stored)."]
@@ -98,12 +114,17 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
 def goal_state_ws_blob(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """JSON-safe snapshot for WebSocket ``goal_state`` events (one chat_id per frame)."""
     goal = parse_goal_state(_session_goal_raw(metadata)) if metadata else None
-    if isinstance(goal, dict) and goal.get("status") == "active":
+    if isinstance(goal, dict) and goal.get("status") in _CURRENT_GOAL_STATUSES:
+        goal_id = str(goal.get("goal_id") or "").strip()
         objective = str(goal.get("objective") or "").strip()
         if len(objective) > _MAX_OBJECTIVE_WS:
             objective = objective[:_MAX_OBJECTIVE_WS].rstrip() + "…"
         summary = str(goal.get("ui_summary") or "").strip()[:120]
         blob: dict[str, Any] = {"active": True}
+        if goal_id:
+            blob["goal_id"] = goal_id
+            if isinstance(goal.get("version"), int):
+                blob["version"] = goal["version"]
         if summary:
             blob["ui_summary"] = summary
         if objective:
