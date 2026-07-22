@@ -19,6 +19,7 @@ from nanobot.providers.xai_oauth_provider import (
     _bounded_error_body,
     _build_headers,
     _build_model_headers,
+    _build_reasoning_options,
     _fetch_xai_model_capabilities,
     _parse_xai_model_capabilities,
     _request_xai,
@@ -66,6 +67,10 @@ def test_xai_oauth_registry_exposes_curated_x_search_model() -> None:
     assert spec.builtin_models[0].id == DEFAULT_XAI_OAUTH_MODEL
     assert spec.builtin_models[0].context_window == 500000
     assert "when supported" in spec.builtin_models[0].description
+
+
+def test_reasoning_options_omit_disabled_effort() -> None:
+    assert _build_reasoning_options("none") == {"summary": "concise"}
 
 
 @pytest.mark.asyncio

@@ -249,7 +249,7 @@ def _strip_model_prefix(model: str) -> str:
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str]:
     options = {"summary": "concise"}
-    if reasoning_effort:
+    if reasoning_effort and reasoning_effort.lower() != "none":
         options["effort"] = reasoning_effort
     return options
 
