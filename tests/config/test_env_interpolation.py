@@ -111,6 +111,7 @@ class TestResolveConfig:
                     "agents": {"defaults": {"dream": {"cron": "0 */4 * * *"}}},
                     "providers": {
                         "openaiCodex": {"apiKey": "codex-secret"},
+                        "xaiOauth": {"apiKey": "xai-secret"},
                         "githubCopilot": {"apiKey": "copilot-secret"},
                         "groq": {"apiKey": "groq-secret"},
                     },
@@ -125,6 +126,7 @@ class TestResolveConfig:
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["agents"]["defaults"]["dream"]["cron"] == "0 */4 * * *"
         assert "openaiCodex" not in saved["providers"]
+        assert "xaiOauth" not in saved["providers"]
         assert "githubCopilot" not in saved["providers"]
         assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
 
@@ -152,6 +154,30 @@ class TestResolveConfig:
         reloaded = load_config(config_path)
         assert reloaded.providers.openai_codex.proxy == proxy
         assert reloaded.providers.openai_codex.api_key is None
+
+    def test_save_preserves_xai_oauth_proxy_but_never_credentials(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        proxy = "http://127.0.0.1:23458"
+        config = Config.model_validate(
+            {
+                "providers": {
+                    "xaiOauth": {
+                        "apiKey": "must-not-be-saved",
+                        "proxy": proxy,
+                    }
+                }
+            }
+        )
+
+        save_config(config, config_path)
+
+        saved = json.loads(config_path.read_text(encoding="utf-8"))
+        assert saved["providers"]["xaiOauth"] == {"proxy": proxy}
+        assert "must-not-be-saved" not in config_path.read_text(encoding="utf-8")
+
+        reloaded = load_config(config_path)
+        assert reloaded.providers.xai_oauth.proxy == proxy
+        assert reloaded.providers.xai_oauth.api_key is None
 
     def test_preserves_excluded_fields_when_no_env_refs(self, tmp_path):
         """Regression: fields with ``exclude=True`` (e.g. ProviderConfig.openai_codex)

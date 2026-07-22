@@ -18,6 +18,7 @@ from nanobot.webui.settings_api import (
     _reasoning_effort_values_for,
     create_model_configuration,
     login_oauth_provider,
+    logout_oauth_provider,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -396,7 +397,7 @@ def test_update_context_window_rejects_unknown_values(
 
     with pytest.raises(
         WebUISettingsError,
-        match="context_window_tokens must be 65536, 200000, 262144, or 1048576",
+        match="context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576",
     ):
         update_agent_settings({"context_window_tokens": ["128000"]})
 
@@ -1020,6 +1021,30 @@ def test_openai_codex_oauth_status_rejects_unavailable_token(
     assert status["account"] is None
 
 
+def test_xai_oauth_status_accepts_refreshable_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = SimpleNamespace(
+        access="access-token",
+        refresh="refresh-token",
+        expires=1,
+        account_id="user@example.com",
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.get_xai_oauth_login_status",
+        lambda: token,
+    )
+
+    status = _oauth_provider_status(find_by_name("xai_oauth"))
+
+    assert status == {
+        "configured": True,
+        "account": "user@example.com",
+        "expires_at": 1,
+        "login_supported": True,
+    }
+
+
 def test_openai_codex_oauth_login_passes_configured_proxy(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1089,6 +1114,51 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
 
 
+def test_xai_oauth_login_starts_fresh_browser_flow_with_proxy(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = "http://127.0.0.1:23458"
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {"xaiOauth": {"proxy": proxy}}}), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    captured: dict[str, object] = {}
+
+    def fake_login(*, print_fn, prompt_fn, proxy=None):
+        captured.update(print_fn=print_fn, prompt_fn=prompt_fn, proxy=proxy)
+        return SimpleNamespace(access="access-token", account_id="user@example.com")
+
+    monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
+
+    login_oauth_provider({"provider": ["xai-oauth"]})
+
+    assert captured["proxy"] == proxy
+    assert captured["prompt_fn"] is None
+    assert callable(captured["print_fn"])
+
+
+def test_xai_oauth_logout_removes_token_and_lock(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    token_path = tmp_path / "auth" / "xai.json"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("{}", encoding="utf-8")
+    token_path.with_suffix(".lock").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.get_xai_oauth_storage_path",
+        lambda: token_path,
+    )
+
+    logout_oauth_provider({"provider": ["xai-oauth"]})
+
+    assert not token_path.exists()
+    assert not token_path.with_suffix(".lock").exists()
+
+
 def test_provider_models_payload_fetches_openai_compatible_models(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1141,6 +1211,22 @@ def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
         "openai-codex/gpt-5.6-sol",
         "openai-codex/gpt-5.6-terra",
         "openai-codex/gpt-5.6-luna",
+    ]
+
+
+def test_provider_models_payload_returns_xai_oauth_x_search_model() -> None:
+    payload = provider_models_payload({"provider": ["xai_oauth"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "builtin"
+    assert payload["models"] == [
+        {
+            "id": "xai-oauth/grok-4.5",
+            "label": "Grok 4.5",
+            "description": "Grok with live, server-hosted X Search.",
+            "owned_by": "xAI (X Premium)",
+            "context_window": 500000,
+        }
     ]
 
 

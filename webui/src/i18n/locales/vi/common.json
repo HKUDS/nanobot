@@ -708,7 +708,10 @@
       "signInRequired": "Cần đăng nhập",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Đã đăng nhập",
-      "notSignedIn": "Chưa đăng nhập"
+      "notSignedIn": "Chưa đăng nhập",
+      "xaiSubtitle": "X Premium · Tìm kiếm X trực tiếp",
+      "xaiBadge": "Tìm kiếm X trực tiếp",
+      "xaiHelp": "Sử dụng gói đăng ký X Premium / Grok của bạn. Grok 4.5 hỗ trợ tìm kiếm X trực tiếp; thông tin xác thực OAuth chỉ được lưu trên thiết bị này."
     },
     "skills": {
       "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",

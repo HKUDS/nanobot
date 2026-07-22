@@ -121,7 +121,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 1_048_576}
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -301,6 +301,32 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
             "configured": bool(token and token.access and token.expires > int(time.time() * 1000)),
             "account": getattr(token, "account_id", None) if token else None,
             "expires_at": getattr(token, "expires", None) if token else None,
+            "login_supported": True,
+        }
+
+    if spec.name == "xai_oauth":
+        try:
+            from nanobot.providers.xai_oauth import get_xai_oauth_login_status
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = get_xai_oauth_login_status()
+        expires_at = getattr(token, "expires", None) if token else None
+        now_ms = int(time.time() * 1000)
+        return {
+            "configured": bool(
+                token
+                and token.access
+                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
+            ),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": expires_at,
             "login_supported": True,
         }
 
@@ -635,7 +661,7 @@ def _parse_context_window_tokens(value: str | None) -> int | None:
         raise WebUISettingsError("context_window_tokens must be an integer") from None
     if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
         raise WebUISettingsError(
-            "context_window_tokens must be 65536, 200000, 262144, or 1048576"
+            "context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576"
         )
     return parsed
 
@@ -1263,6 +1289,25 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("OAuth login failed", status=401)
         return settings_payload()
 
+    if spec.name == "xai_oauth":
+        from nanobot.providers.xai_oauth import login_xai_oauth
+
+        try:
+            proxy = resolve_config_env_vars(load_config()).providers.xai_oauth.proxy or None
+        except ValueError as e:
+            raise WebUISettingsError(str(e), status=400) from e
+        try:
+            token = login_xai_oauth(
+                print_fn=lambda _message: None,
+                prompt_fn=None,
+                proxy=proxy,
+            )
+        except Exception as e:
+            raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=401) from e
+        if not (token and token.access):
+            raise WebUISettingsError("OAuth login failed", status=401)
+        return settings_payload()
+
     raise WebUISettingsError("OAuth login is not supported for this provider")
 
 
@@ -1291,6 +1336,10 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
             ) from None
         token_path = get_storage().get_token_path()
+    elif spec.name == "xai_oauth":
+        from nanobot.providers.xai_oauth import get_xai_oauth_storage_path
+
+        token_path = get_xai_oauth_storage_path()
     else:
         raise WebUISettingsError("OAuth logout is not supported for this provider")
 

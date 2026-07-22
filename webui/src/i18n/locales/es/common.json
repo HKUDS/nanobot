@@ -709,7 +709,10 @@
       "signInRequired": "Inicio de sesión requerido",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sesión iniciada",
-      "notSignedIn": "Sin sesión"
+      "notSignedIn": "Sin sesión",
+      "xaiSubtitle": "X Premium · Búsqueda en X en tiempo real",
+      "xaiBadge": "Búsqueda en X en tiempo real",
+      "xaiHelp": "Usa tu suscripción a X Premium / Grok. Grok 4.5 ofrece búsqueda en X en tiempo real; las credenciales OAuth permanecen en este dispositivo."
     },
     "skills": {
       "description": "Revisa las habilidades de instrucciones que este agente puede cargar durante una conversación.",

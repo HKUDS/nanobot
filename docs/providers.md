@@ -63,11 +63,11 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers and OpenAI Codex. |
+| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers, OpenAI Codex, and xAI OAuth. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex`, including Codex OAuth token exchange/refresh and Codex Responses API requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_oauth`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 ## Common Provider Patterns
 
@@ -432,6 +432,23 @@ For OpenAI Codex:
 ```bash
 nanobot provider login openai-codex --set-main
 ```
+
+For an eligible X Premium / Grok subscription with live X Search:
+
+```bash
+nanobot provider login xai-oauth --set-main
+```
+
+This selects `xai-oauth/grok-4.5`. The provider always exposes xAI's hosted
+`x_search` tool, so Grok can search current X posts and return inline source
+links without invoking a local nanobot tool. Credentials are stored under the
+active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
+`config.json` and not in Grok Build's credential file.
+
+The login is xAI subscription OAuth, not X Developer OAuth. It follows the
+public client contract documented and implemented by
+[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md);
+xAI may change that upstream contract independently of nanobot.
 
 For GitHub Copilot:
 

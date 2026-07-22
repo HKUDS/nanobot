@@ -708,7 +708,10 @@
       "signInRequired": "로그인이 필요합니다",
       "signInBeforeSaving": "이 OAuth 제공자를 활성 모델 제공자로 저장하기 전에 로그인하세요.",
       "signedIn": "로그인됨",
-      "notSignedIn": "로그인 안 됨"
+      "notSignedIn": "로그인 안 됨",
+      "xaiSubtitle": "X Premium · 실시간 X 검색",
+      "xaiBadge": "실시간 X 검색",
+      "xaiHelp": "X Premium / Grok 구독을 사용합니다. Grok 4.5에서 실시간 X 검색을 이용할 수 있으며 OAuth 인증 정보는 이 기기에만 저장됩니다."
     },
     "skills": {
       "description": "이 에이전트가 대화 중에 불러올 수 있는 지시 스킬을 확인합니다.",

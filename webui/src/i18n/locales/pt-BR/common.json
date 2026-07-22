@@ -722,7 +722,10 @@
       "signInRequired": "Login necessário",
       "signInBeforeSaving": "Entre antes de salvar este provedor OAuth como provedor de modelo ativo.",
       "signedIn": "Conectado",
-      "notSignedIn": "Desconectado"
+      "notSignedIn": "Desconectado",
+      "xaiSubtitle": "X Premium · Busca no X em tempo real",
+      "xaiBadge": "Busca no X em tempo real",
+      "xaiHelp": "Use sua assinatura X Premium / Grok. O Grok 4.5 oferece busca no X em tempo real; as credenciais OAuth permanecem neste dispositivo."
     },
     "skills": {
       "description": "Revise as skills de instrução que este agente pode carregar durante uma conversa.",

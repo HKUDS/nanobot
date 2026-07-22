@@ -2662,11 +2662,13 @@ _LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
 
 _PROVIDER_DISPLAY: dict[str, str] = {
     "openai_codex": "OpenAI Codex",
+    "xai_oauth": "xAI (X Premium)",
     "github_copilot": "GitHub Copilot",
 }
 
 _OAUTH_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "openai_codex": "openai-codex/gpt-5.6-sol",
+    "xai_oauth": "xai-oauth/grok-4.5",
     "github_copilot": "github-copilot/gpt-5.4-mini",
 }
 
@@ -2720,6 +2722,8 @@ def _set_oauth_provider_as_main(
     config.agents.defaults.model_preset = None
     config.agents.defaults.provider = provider_name
     config.agents.defaults.model = selected_model
+    if provider_name == "xai_oauth" and selected_model == "xai-oauth/grok-4.5":
+        config.agents.defaults.context_window_tokens = 500_000
     save_config(config, resolved_config_path)
 
     saved_path = resolved_config_path or get_config_path()
@@ -2732,7 +2736,10 @@ def _set_oauth_provider_as_main(
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ...,
+        help="OAuth provider (e.g. 'openai-codex', 'xai-oauth', 'github-copilot')",
+    ),
     set_main: bool = typer.Option(
         False,
         "--set-main",
@@ -2770,7 +2777,10 @@ def provider_login(
 
 @provider_app.command("logout")
 def provider_logout(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ...,
+        help="OAuth provider (e.g. 'openai-codex', 'xai-oauth', 'github-copilot')",
+    ),
 ):
     """Log out from an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -2828,6 +2838,47 @@ def _logout_openai_codex() -> None:
 
     storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["openai_codex"])
+
+
+@_register_login("xai_oauth")
+def _login_xai_oauth() -> None:
+    """Authenticate with xAI using the Grok subscription OAuth contract."""
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+    from nanobot.providers.xai_oauth import get_xai_oauth_token, login_xai_oauth
+
+    try:
+        proxy = resolve_config_env_vars(load_config()).providers.xai_oauth.proxy or None
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    token = None
+    with suppress(Exception):
+        token = get_xai_oauth_token(proxy=proxy)
+    if not (token and token.access):
+        console.print(
+            "[cyan]Starting xAI browser sign-in for your X Premium / Grok subscription...[/cyan]\n"
+        )
+        try:
+            token = login_xai_oauth(
+                print_fn=lambda message: console.print(message),
+                prompt_fn=lambda prompt: typer.prompt(prompt),
+                proxy=proxy,
+            )
+        except Exception as exc:
+            console.print(f"[red]Authentication error: {exc}[/red]")
+            raise typer.Exit(1) from exc
+    account = token.account_id or "xAI account"
+    console.print(f"[green]✓ Authenticated with xAI[/green]  [dim]{account}[/dim]")
+    console.print("[dim]Grok 4.5 can now use live X Search in nanobot.[/dim]")
+
+
+@_register_logout("xai_oauth")
+def _logout_xai_oauth() -> None:
+    """Clear local xAI OAuth credentials for this nanobot instance."""
+    from nanobot.providers.xai_oauth import get_xai_oauth_storage_path
+
+    _delete_oauth_files(get_xai_oauth_storage_path(), _PROVIDER_DISPLAY["xai_oauth"])
 
 
 @_register_logout("github_copilot")

@@ -722,7 +722,10 @@
       "signInRequired": "Sign in required",
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
-      "notSignedIn": "Not signed in"
+      "notSignedIn": "Not signed in",
+      "xaiSubtitle": "X Premium · Live X Search",
+      "xaiBadge": "Live X Search",
+      "xaiHelp": "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device."
     },
     "skills": {
       "description": "Review the instruction skills this agent can load during a conversation.",

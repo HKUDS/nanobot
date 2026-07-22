@@ -85,6 +85,10 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         data.setdefault("providers", {})["openaiCodex"] = {
             "proxy": config.providers.openai_codex.proxy,
         }
+    if config.providers.xai_oauth.proxy is not None:
+        data.setdefault("providers", {})["xaiOauth"] = {
+            "proxy": config.providers.xai_oauth.proxy,
+        }
 
     # Temp + replace so a crash mid-write cannot leave a truncated config.json.
     _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))

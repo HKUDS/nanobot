@@ -708,7 +708,10 @@
       "signInRequired": "Perlu masuk",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sudah masuk",
-      "notSignedIn": "Belum masuk"
+      "notSignedIn": "Belum masuk",
+      "xaiSubtitle": "X Premium · Pencarian X langsung",
+      "xaiBadge": "Pencarian X langsung",
+      "xaiHelp": "Gunakan langganan X Premium / Grok Anda. Grok 4.5 menyediakan pencarian X langsung; kredensial OAuth hanya disimpan di perangkat ini."
     },
     "skills": {
       "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",

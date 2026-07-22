@@ -226,7 +226,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 1_048_576] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -2827,11 +2827,13 @@ function ModelsSettings({
                 label:
                   tokens === 1_048_576
                     ? "1M"
-                    : tokens === 262_144
-                      ? "256K"
-                      : tokens === 200_000
-                        ? "200K"
-                        : "64K",
+                    : tokens === 500_000
+                      ? "500K"
+                      : tokens === 262_144
+                        ? "256K"
+                        : tokens === 200_000
+                          ? "200K"
+                          : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({
@@ -2926,6 +2928,7 @@ function ProvidersSettings({
     };
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
+    const isXaiOauthProvider = provider.name === "xai_oauth";
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
@@ -2959,7 +2962,9 @@ function ProvidersSettings({
                 {provider.label}
               </span>
               <span className="block truncate text-[12px] text-muted-foreground">
-                {provider.api_base || provider.default_api_base || provider.name}
+                {isXaiOauthProvider
+                  ? tx("settings.oauth.xaiSubtitle", "X Premium · Live X Search")
+                  : provider.api_base || provider.default_api_base || provider.name}
               </span>
             </span>
           </span>
@@ -2992,10 +2997,18 @@ function ProvidersSettings({
             {isOauthProvider ? (
               <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="text-[13px] font-semibold text-foreground">
-                    {tx("settings.oauth.authentication", "OAuth authentication")}
-                  </p>
-                  <p className="mt-1 truncate text-[12px] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[13px] font-semibold text-foreground">
+                      {tx("settings.oauth.authentication", "OAuth authentication")}
+                    </p>
+                    {isXaiOauthProvider ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-foreground/75">
+                        <Search className="h-3 w-3" aria-hidden />
+                        {tx("settings.oauth.xaiBadge", "Live X Search")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-[12px] text-muted-foreground">
                     {provider.configured
                       ? t("settings.oauth.signedInAs", {
                           account: provider.oauth_account || provider.label,
@@ -3003,6 +3016,14 @@ function ProvidersSettings({
                         })
                       : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
                   </p>
+                  {isXaiOauthProvider ? (
+                    <p className="mt-1.5 max-w-xl text-[12px] leading-5 text-muted-foreground">
+                      {tx(
+                        "settings.oauth.xaiHelp",
+                        "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
+                      )}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 justify-end gap-2">
                   {provider.configured ? (

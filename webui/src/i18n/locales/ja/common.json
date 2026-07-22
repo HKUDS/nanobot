@@ -708,7 +708,10 @@
       "signInRequired": "サインインが必要です",
       "signInBeforeSaving": "この OAuth プロバイダーをアクティブなモデルプロバイダーとして保存する前にサインインしてください。",
       "signedIn": "サインイン済み",
-      "notSignedIn": "未サインイン"
+      "notSignedIn": "未サインイン",
+      "xaiSubtitle": "X Premium · リアルタイム X 検索",
+      "xaiBadge": "リアルタイム X 検索",
+      "xaiHelp": "X Premium / Grok サブスクリプションを使用します。Grok 4.5 でリアルタイム X 検索を利用でき、OAuth 認証情報はこのデバイスにのみ保存されます。"
     },
     "skills": {
       "description": "このエージェントが会話中に読み込める指示スキルを確認します。",

@@ -1973,7 +1973,69 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+  });
+
+  it("explains xAI subscription login and live X Search before signing in", async () => {
+    const base = settingsPayload();
+    const xaiProvider = {
+      name: "xai_oauth",
+      label: "xAI (X Premium)",
+      configured: false,
+      auth_type: "oauth" as const,
+      api_key_required: false,
+      api_key_hint: null,
+      api_base: null,
+      default_api_base: "https://cli-chat-proxy.grok.com/v1",
+      model_catalog: "builtin",
+      oauth_account: null,
+      oauth_expires_at: null,
+      oauth_login_supported: true,
+    };
+    const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
+    const signedIn: SettingsPayload = {
+      ...payload,
+      providers: [{ ...xaiProvider, configured: true, oauth_account: "user@example.com" }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/provider/oauth-login?provider=xai_oauth") {
+        return jsonResponse(signedIn);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const providerLabel = await screen.findByText("xAI (X Premium)");
+    expect(screen.getByText("X Premium · Live X Search")).toBeInTheDocument();
+    fireEvent.click(providerLabel.closest("button")!);
+
+    expect(screen.getAllByText("Live X Search").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/oauth-login?provider=xai_oauth",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    expect(await screen.findByText("Signed in as user@example.com")).toBeInTheDocument();
   });
 
   it("keeps the default model distinct from the active named configuration", async () => {

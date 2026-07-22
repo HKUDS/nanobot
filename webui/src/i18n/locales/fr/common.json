@@ -708,7 +708,10 @@
       "signInRequired": "Connexion requise",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Connecté",
-      "notSignedIn": "Non connecté"
+      "notSignedIn": "Non connecté",
+      "xaiSubtitle": "X Premium · Recherche X en direct",
+      "xaiBadge": "Recherche X en direct",
+      "xaiHelp": "Utilisez votre abonnement X Premium / Grok. Grok 4.5 accède à la recherche X en direct ; les identifiants OAuth restent sur cet appareil."
     },
     "skills": {
       "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",

@@ -260,7 +260,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
 > - **Custom OpenAI-compatible providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own OpenAI-compatible endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. This named-custom path uses the OpenAI-compatible request format only. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` with `provider: "anthropic"`.
-> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers and `openai_codex`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
+> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, `openai_codex`, and `xai_oauth`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -305,6 +305,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `nvidia` | LLM (NVIDIA NIM) | [build.nvidia.com](https://build.nvidia.com/) |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex --set-main` |
+| `xai_oauth` | LLM (X Premium / Grok OAuth + hosted X Search) | `nanobot provider login xai-oauth --set-main` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
@@ -698,6 +699,49 @@ processing. Fast mode consumes Codex credits at a higher rate. See the
 [OpenAI Codex rate card](https://help.openai.com/en/articles/20001106) for current details.
 
 For proxy, remote/headless login, model-name, or config-key errors, see [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems).
+
+</details>
+
+
+<details>
+<summary><b>xAI (X Premium / Grok OAuth + X Search)</b></summary>
+
+Use an eligible X Premium / Grok subscription without putting an API key in
+`config.json`:
+
+```bash
+nanobot provider login xai-oauth --set-main
+nanobot agent -m "Search X for today's discussion about nanobot and cite the posts."
+```
+
+The default model is `xai-oauth/grok-4.5` with a 500,000-token context window.
+Every request includes xAI's server-hosted `x_search` tool. Keyword, semantic,
+user, and thread searches run inside xAI's Responses API; citations arrive as
+inline links in the model's answer.
+
+This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
+public OAuth client and proxy contract used by
+[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md).
+The browser flow uses a random loopback callback and PKCE. The resulting token
+is stored in the active instance's `auth/xai.json` (normally
+`~/.nanobot/auth/xai.json`), separately from Grok Build so rotating refresh
+tokens cannot invalidate one another.
+
+To use a provider-specific proxy, merge this into `config.json` before login:
+
+```json
+{
+  "providers": {
+    "xaiOauth": {
+      "proxy": "http://127.0.0.1:7890"
+    }
+  }
+}
+```
+
+The proxy applies to OAuth discovery, token exchange/refresh, and subscription
+model requests. Because this integration depends on xAI's public Grok Build
+client contract, an upstream contract change may require a nanobot update.
 
 </details>
 

@@ -722,7 +722,10 @@
       "signInRequired": "需要登录",
       "signInBeforeSaving": "将此 OAuth 提供商设为当前模型提供商前，请先登录。",
       "signedIn": "已登录",
-      "notSignedIn": "未登录"
+      "notSignedIn": "未登录",
+      "xaiSubtitle": "X Premium · 实时 X 搜索",
+      "xaiBadge": "实时 X 搜索",
+      "xaiHelp": "使用你的 X Premium / Grok 订阅。Grok 4.5 可直接进行实时 X 搜索；OAuth 凭据仅保存在这台设备上。"
     },
     "skills": {
       "description": "查看此 agent 在对话中可以加载的指令技能。",
