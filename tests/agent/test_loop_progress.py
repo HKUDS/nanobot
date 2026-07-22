@@ -54,6 +54,53 @@ def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
     coordinator.subscribe(loop.runtime_events)
 
 
+def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path)
+    _attach_webui_runtime_events(loop, loop.bus)
+    session_key = "websocket:chat-a"
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id=session_key,
+        content="Background research completed",
+        session_key_override=session_key,
+        metadata={
+            "injected_event": "subagent_result",
+            "subagent_task_id": "sub-1",
+        },
+    )
+
+    hidden_route = loop._turn_route(msg, session_key)
+
+    assert hidden_route.channel == "websocket"
+    assert hidden_route.chat_id == "chat-a"
+    assert hidden_route.metadata == {}
+    assert hidden_route.publish_lifecycle is False
+
+    session = loop.sessions.get_or_create(session_key)
+    session.metadata["webui"] = True
+    first_visible_route = loop._turn_route(msg, session_key)
+    second_visible_route = loop._turn_route(msg, session_key)
+
+    assert first_visible_route.publish_lifecycle is True
+    assert set(first_visible_route.metadata) == {
+        "webui",
+        "_wants_stream",
+        WEBUI_TURN_METADATA_KEY,
+    }
+    assert first_visible_route.metadata["webui"] is True
+    assert first_visible_route.metadata["_wants_stream"] is True
+    first_turn_id = first_visible_route.metadata[WEBUI_TURN_METADATA_KEY]
+    second_turn_id = second_visible_route.metadata[WEBUI_TURN_METADATA_KEY]
+    assert first_turn_id.startswith("subagent:")
+    assert second_turn_id.startswith("subagent:")
+    assert first_turn_id != second_turn_id
+    assert msg.metadata == {
+        "injected_event": "subagent_result",
+        "subagent_task_id": "sub-1",
+    }
+
+
 class TestToolEventProgress:
     """_run_agent_loop emits structured tool_events via on_progress."""
 
@@ -598,7 +645,7 @@ class TestToolEventProgress:
             },
         )))
 
-        await first_request_started.wait()
+        await asyncio.wait_for(first_request_started.wait(), timeout=1)
         await loop._pending_queues[session_key].put(InboundMessage(
             channel="websocket",
             sender_id="user",
@@ -607,7 +654,7 @@ class TestToolEventProgress:
             session_key_override=session_key,
         ))
         release_first_request.set()
-        await dispatch
+        await asyncio.wait_for(dispatch, timeout=2)
 
         outbound = []
         while bus.outbound_size > 0:

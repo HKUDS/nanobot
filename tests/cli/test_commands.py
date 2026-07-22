@@ -24,6 +24,7 @@ from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.webui.metadata import (
     WEBUI_MESSAGE_SOURCE_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
@@ -1822,8 +1823,8 @@ def test_heartbeat_empty_response_still_retains_recent_messages(
             self.sessions = kwargs["session_manager"]
             self.tools = {}
 
-        def register_turn_route_provider(self, provider) -> None:
-            seen["turn_route_provider"] = provider
+        def register_turn_route_provider(self, _provider) -> None:
+            return None
 
         async def process_direct(self, *_args, **_kwargs):
             return SimpleNamespace(content="")
@@ -2408,8 +2409,8 @@ def test_gateway_unbound_agent_cron_is_skipped(
             self.tools = {}
             seen["agent"] = self
 
-        def register_turn_route_provider(self, provider) -> None:
-            seen["turn_route_provider"] = provider
+        def register_turn_route_provider(self, _provider) -> None:
+            return None
 
         async def process_direct(self, *_args, **_kwargs):
             raise AssertionError("unbound cron job must not use process_direct")
@@ -2527,8 +2528,8 @@ def test_gateway_bound_cron_runs_as_session_turn(
             self.tools = {}
             seen["agent"] = self
 
-        def register_turn_route_provider(self, provider) -> None:
-            seen["turn_route_provider"] = provider
+        def register_turn_route_provider(self, _provider) -> None:
+            return None
 
         async def submit_cron_turn(self, msg: InboundMessage):
             seen["cron_msg"] = msg
@@ -2802,6 +2803,11 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     assert kwargs["submit_turn"] is agent.submit_local_trigger_turn
     assert kwargs["is_channel_enabled"]("websocket") is True
     assert kwargs["is_channel_enabled"]("telegram") is False
+    route_provider = seen["turn_route_provider"]
+    coordinator = getattr(route_provider, "__self__", None)
+    assert isinstance(coordinator, WebuiTurnCoordinator)
+    assert coordinator.bus is bus
+    assert coordinator.sessions is agent.sessions
 
 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
@@ -2987,8 +2993,8 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             self.sessions = _FakeSessionManager()
             self.runtime_resolver = MagicMock()
 
-        def register_turn_route_provider(self, provider) -> None:
-            captured["turn_route_provider"] = provider
+        def register_turn_route_provider(self, _provider) -> None:
+            return None
 
         def llm_runtime(self) -> None:
             return None
@@ -3184,8 +3190,8 @@ def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
             self.sessions = _FakeSessionManager()
             self.runtime_resolver = MagicMock()
 
-        def register_turn_route_provider(self, provider) -> None:
-            seen["turn_route_provider"] = provider
+        def register_turn_route_provider(self, _provider) -> None:
+            return None
 
         def llm_runtime(self) -> None:
             return None
@@ -3286,8 +3292,8 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
             self.sessions = _FakeSessionManager()
             self.runtime_resolver = MagicMock()
 
-        def register_turn_route_provider(self, provider) -> None:
-            seen["turn_route_provider"] = provider
+        def register_turn_route_provider(self, _provider) -> None:
+            return None
 
         def llm_runtime(self) -> None:
             return None

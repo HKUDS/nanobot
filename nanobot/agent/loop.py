@@ -117,7 +117,7 @@ class TurnKind(Enum):
 
 @dataclass(frozen=True)
 class TurnRoute:
-    """Where a turn response is delivered, separate from its execution input."""
+    """Turn delivery destination and lifecycle policy, separate from execution input."""
 
     channel: str
     chat_id: str
@@ -160,7 +160,7 @@ class TurnContext:
     stop_reason: str = ""
     had_injections: bool = False
 
-    user_persisted_early: bool = False
+    input_persisted_early: bool = False
     save_skip: int = 0
 
     outbound: OutboundMessage | None = None
@@ -594,12 +594,12 @@ class AgentLoop:
             self._runtime_context_providers.append(provider)
 
     def register_turn_route_provider(self, provider: TurnRouteProvider) -> None:
-        """Register an edge-owned provider that can decorate response routing."""
+        """Register an edge-owned provider that can decorate turn delivery."""
         if provider not in self._turn_route_providers:
             self._turn_route_providers.append(provider)
 
     def _turn_route(self, msg: InboundMessage, session_key: str) -> TurnRoute:
-        """Resolve response routing without mixing it into execution metadata."""
+        """Resolve turn delivery without mixing it into execution metadata."""
         if msg.channel != "system":
             route = TurnRoute(
                 channel=msg.channel,
@@ -1140,11 +1140,10 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
-        route = self._turn_route(msg, session_key)
-        delivery_msg = self._message_for_route(msg, route)
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
+        lifecycle_msg = msg
         pending: asyncio.Queue | None = None
         try:
             async with lock, gate:
@@ -1153,6 +1152,13 @@ class AgentLoop:
                 pending = asyncio.Queue(maxsize=20)
                 self._pending_queues[session_key] = pending
                 try:
+                    route = self._turn_route(msg, session_key)
+                    delivery_msg = self._message_for_route(msg, route)
+                    # Keep internal system lifecycle events on ``system`` unless
+                    # an edge-owned route explicitly exposes this turn.
+                    if route.publish_lifecycle:
+                        lifecycle_msg = delivery_msg
+
                     on_stream = on_stream_end = None
                     if delivery_msg.metadata.get("_wants_stream"):
                         # Split one answer into distinct stream segments.
@@ -1194,16 +1200,16 @@ class AgentLoop:
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
                         pending_queue=pending, route=route,
                     )
-                    completed_channel = delivery_msg.channel
-                    completed_chat_id = delivery_msg.chat_id
+                    completed_channel = lifecycle_msg.channel
+                    completed_chat_id = lifecycle_msg.chat_id
                     if response is not None:
                         await self.bus.publish_outbound(response)
                         completed_channel = response.channel
                         completed_chat_id = response.chat_id
-                    elif delivery_msg.channel == "cli":
+                    elif lifecycle_msg.channel == "cli":
                         await self.bus.publish_outbound(OutboundMessage(
-                            channel=delivery_msg.channel, chat_id=delivery_msg.chat_id,
-                            content="", metadata=delivery_msg.metadata or {},
+                            channel=lifecycle_msg.channel, chat_id=lifecycle_msg.chat_id,
+                            content="", metadata=lifecycle_msg.metadata or {},
                         ))
                     continuing = turn_continuation.internal_continuation_pending(msg.metadata)
                     if not continuing:
@@ -1211,7 +1217,7 @@ class AgentLoop:
                             channel=completed_channel,
                             chat_id=completed_chat_id,
                             session_key=session_key,
-                            metadata=delivery_msg.metadata,
+                            metadata=lifecycle_msg.metadata,
                         )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
@@ -1246,16 +1252,16 @@ class AgentLoop:
                 except Exception as exc:
                     logger.exception("Error processing message for session {}", session_key)
                     await self.bus.publish_outbound(OutboundMessage(
-                        channel=delivery_msg.channel, chat_id=delivery_msg.chat_id,
+                        channel=lifecycle_msg.channel, chat_id=lifecycle_msg.chat_id,
                         content="Sorry, I encountered an error.",
-                        metadata=dict(delivery_msg.metadata),
+                        metadata=dict(lifecycle_msg.metadata),
                     ))
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await self._runtime_events().turn_completed(
-                            channel=delivery_msg.channel,
-                            chat_id=delivery_msg.chat_id,
+                            channel=lifecycle_msg.channel,
+                            chat_id=lifecycle_msg.chat_id,
                             session_key=session_key,
-                            metadata=delivery_msg.metadata,
+                            metadata=lifecycle_msg.metadata,
                         )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=exc)
@@ -1286,7 +1292,7 @@ class AgentLoop:
                             )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await self._runtime_events().run_status_changed(
-                            delivery_msg if route.publish_lifecycle else msg,
+                            lifecycle_msg,
                             session_key,
                             "idle",
                         )
@@ -1295,7 +1301,7 @@ class AgentLoop:
         finally:
             if pending is None:
                 await self._runtime_events().run_status_changed(
-                    delivery_msg if route.publish_lifecycle else msg,
+                    lifecycle_msg,
                     session_key,
                     "idle",
                 )
@@ -1362,7 +1368,8 @@ class AgentLoop:
             key = session_key or msg.session_key_override or f"{destination[0]}:{destination[1]}"
         else:
             key = session_key or msg.session_key
-        route = route or self._turn_route(msg, key)
+        if route is None:
+            route = self._turn_route(msg, key)
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,
@@ -1562,7 +1569,7 @@ class AgentLoop:
             # them out of LLM context.  /new is excluded because it
             # intentionally clears the session.
             if cmd_ctx.raw.lower() != "/new":
-                ctx.user_persisted_early = self._persist_user_message_early(
+                ctx.input_persisted_early = self._persist_user_message_early(
                     ctx.msg, ctx.session, _command=True
                 )
                 ctx.session.add_message(
@@ -1598,13 +1605,13 @@ class AgentLoop:
         if is_subagent:
             # Keep the durable internal delivery as an assistant record, but
             # present this completion to the model as fresh follow-up input.
-            # OpenAI-compatible providers drop trailing assistant messages,
-            # so using the persisted record as the current prompt would hide
-            # the subagent result whenever it starts an independent turn.
+            # Providers without assistant-prefill support drop trailing
+            # assistant messages, so using the persisted record as the current
+            # prompt would hide an independently dispatched subagent result.
             if self._persist_subagent_followup(ctx.session, ctx.msg):
                 logger.debug("Subagent result persisted for session {}", ctx.session_key)
                 self.sessions.save(ctx.session)
-            ctx.user_persisted_early = True
+            ctx.input_persisted_early = True
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
             ctx.runtime,
@@ -1615,7 +1622,7 @@ class AgentLoop:
             ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
         ctx.initial_messages = self._build_initial_messages(ctx)
         if ctx.kind is TurnKind.USER:
-            ctx.user_persisted_early = self._persist_user_message_early(
+            ctx.input_persisted_early = self._persist_user_message_early(
                 ctx.msg,
                 ctx.session,
                 runtime_context_blocks=ctx.runtime_context_blocks,

@@ -689,6 +689,8 @@ async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
     from nanobot.bus.events import InboundMessage
 
     loop = _make_loop(tmp_path)
+    route_provider = MagicMock(side_effect=lambda _msg, _key, route: route)
+    loop.register_turn_route_provider(route_provider)
     session_key = "cli:c"
     lock = loop._session_locks.setdefault(session_key, asyncio.Lock())
     await lock.acquire()
@@ -712,10 +714,12 @@ async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
         await asyncio.wait_for(waiting_at_lock.wait(), timeout=2.0)
 
     assert loop._pending_queues[session_key] is active_pending
+    route_provider.assert_not_called()
 
     waiting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiting
+    route_provider.assert_not_called()
     lock.release()
 
 
