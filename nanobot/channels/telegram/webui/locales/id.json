@@ -46,7 +46,6 @@
     "toggleBot": "Bot {{name}}",
     "running": "Berjalan",
     "needsToken": "Perlu token",
-    "defaultInstance": "Bot default",
     "finishSetup": "Periksa dan selesaikan",
     "connectFirst": "Hubungkan bot pertama Anda",
     "addAnother": "Tambahkan bot lain",

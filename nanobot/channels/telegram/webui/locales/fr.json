@@ -46,7 +46,6 @@
     "toggleBot": "Bot {{name}}",
     "running": "En cours",
     "needsToken": "Jeton requis",
-    "defaultInstance": "Bot par défaut",
     "finishSetup": "Vérifier et terminer",
     "connectFirst": "Connectez votre premier bot",
     "addAnother": "Ajouter un autre bot",

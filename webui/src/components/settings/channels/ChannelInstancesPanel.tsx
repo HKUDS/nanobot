@@ -175,9 +175,12 @@ export function ChannelInstancesPanel({
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id;
-          const instanceSummary = customization.renderInstanceSummary
-            ? customization.renderInstanceSummary(instance)
-            : instance.id;
+          const instanceSummary = expanded
+            ? customization.renderInstanceSummary?.(instance)
+            : null;
+          const instanceAction = expanded
+            ? customization.renderInstanceAction?.(instance)
+            : null;
           const showSetupSteps = customization.showSetupSteps?.(instance) ?? true;
           const instanceAdvanced = customization.renderInstanceAdvanced?.(instance);
           return (
@@ -238,10 +241,10 @@ export function ChannelInstancesPanel({
 
               {expanded ? (
                 <div className="border-t border-border/60">
-                  <section className="px-4 py-4">
+                  <section className={cn("px-4", instance.configured ? "py-3" : "py-4")}>
                     <div className={cn(
-                      "mb-3 flex items-start gap-3",
-                      instanceSummary == null ? "justify-end" : "justify-between",
+                      "flex flex-wrap items-center justify-between gap-3",
+                      !instance.configured && instanceAction != null && "mb-3",
                     )}>
                       {instanceSummary != null ? (
                         <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
@@ -253,8 +256,9 @@ export function ChannelInstancesPanel({
                         configuredLabel={customization.configuredLabel}
                         needsSetupLabel={customization.needsSetupLabel}
                       />
+                      {instance.configured ? instanceAction : null}
                     </div>
-                    {customization.renderInstanceAction?.(instance)}
+                    {!instance.configured ? instanceAction : null}
                   </section>
                   {showSetupSteps ? (
                     <ChannelSetupSteps

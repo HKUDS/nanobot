@@ -46,7 +46,6 @@
     "toggleBot": "{{name}} 機器人",
     "running": "執行中",
     "needsToken": "需要權杖",
-    "defaultInstance": "預設機器人",
     "finishSetup": "檢查並完成設定",
     "connectFirst": "連接第一個機器人",
     "addAnother": "新增另一個機器人",

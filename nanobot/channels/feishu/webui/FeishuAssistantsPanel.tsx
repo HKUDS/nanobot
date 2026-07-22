@@ -124,30 +124,28 @@ function FeishuInstanceAction({
   };
 
   return (
-    <>
-      <div className="mt-3 flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
-          onClick={() => void reconnect()}
-          disabled={busy || !instance.enabled}
-        >
-          {busy ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          )}
-          {tx("custom.reconnect", "Reconnect")}
-        </Button>
-      </div>
+    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
       {error ? (
-        <div className="mt-3 rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
+        <div className="min-w-0 flex-1 rounded-[12px] border border-destructive/20 px-3 py-2 text-[12px] leading-5 text-destructive">
           {error}
         </div>
       ) : null}
-    </>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 shrink-0 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+        onClick={() => void reconnect()}
+        disabled={busy || !instance.enabled}
+      >
+        {busy ? (
+          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+        ) : (
+          <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+        )}
+        {tx("custom.reconnect", "Reconnect")}
+      </Button>
+    </div>
   );
 }
 

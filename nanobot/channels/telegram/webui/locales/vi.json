@@ -46,7 +46,6 @@
     "toggleBot": "Bot {{name}}",
     "running": "Đang chạy",
     "needsToken": "Cần token",
-    "defaultInstance": "Bot mặc định",
     "finishSetup": "Kiểm tra và hoàn tất",
     "connectFirst": "Kết nối bot đầu tiên",
     "addAnother": "Thêm bot khác",

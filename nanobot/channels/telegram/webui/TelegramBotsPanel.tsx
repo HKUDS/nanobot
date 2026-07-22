@@ -66,11 +66,6 @@ export function TelegramBotsPanel({
         }),
         configuredLabel: tx("panel.running", "Running"),
         needsSetupLabel: tx("panel.needsToken", "Needs token"),
-        renderInstanceSummary: (instance) => (
-          instance.id === "default"
-            ? tx("panel.defaultInstance", "Default bot")
-            : null
-        ),
         renderInstanceAction: (instance) => instance.configured ? (
           <TelegramConnectionCheck key={instance.id} token={token} instance={instance} />
         ) : (
@@ -747,7 +742,7 @@ export function TelegramConnectionCheck({
   const feedback = error ?? status;
   return (
     <div className={cn(
-      "mt-3 flex flex-wrap items-center gap-3",
+      "flex min-w-0 flex-1 flex-wrap items-center gap-3",
       feedback ? "justify-between" : "justify-end",
     )}>
       {feedback ? (

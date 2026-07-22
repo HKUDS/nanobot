@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -114,9 +114,20 @@ describe("TelegramBotsPanel", () => {
     expect(isVisibleTelegramInstance(customDefault)).toBe(true);
   });
 
-  it("keeps a configured bot compact and moves its proxy into Advanced", async () => {
+  it("keeps configured controls compact and internal metadata out of the panel", async () => {
     const user = userEvent.setup();
-    const instance = telegramInstance({
+    const configuredFields = [
+      ...defaultFields,
+      "channels.telegram.token",
+      "channels.telegram.proxy",
+    ];
+    const defaultInstance = telegramInstance({
+      enabled: true,
+      configured: true,
+      runtime_status: "running",
+      configured_fields: configuredFields,
+    });
+    const customInstance = telegramInstance({
       id: "bot-2",
       name: "nano_test0001bot",
       enabled: true,
@@ -126,21 +137,34 @@ describe("TelegramBotsPanel", () => {
         "channels.telegram.name": "nano_test0001bot",
         "channels.telegram.groupPolicy": "mention",
       },
-      configured_fields: [...defaultFields, "channels.telegram.token", "channels.telegram.proxy"],
+      configured_fields: configuredFields,
     });
+    const feature = telegramFeature(defaultInstance);
+    feature.instances = [defaultInstance, customInstance];
     render(
       <TelegramBotsPanel
         token="api-token"
-        feature={telegramFeature(instance)}
+        feature={feature}
         showBrandLogos={false}
         onFeaturesUpdate={vi.fn()}
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "nanobot" }));
+
+    const defaultCheck = screen.getByRole("button", { name: "Check connection" });
+    const defaultControls = defaultCheck.closest("section")?.firstElementChild;
+    expect(defaultControls).not.toBeNull();
+    expect(within(defaultControls as HTMLElement).getByText("Running")).toBeVisible();
+    expect(screen.queryByText("Default bot")).not.toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "nano_test0001bot" }));
 
-    expect(screen.queryByText("Instance bot-2")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check connection" })).toBeVisible();
+    const checkConnection = screen.getByRole("button", { name: "Check connection" });
+    const customControls = checkConnection.closest("section")?.firstElementChild;
+    expect(customControls).not.toBeNull();
+    expect(within(customControls as HTMLElement).getByText("Running")).toBeVisible();
+    expect(screen.queryByText("bot-2")).not.toBeInTheDocument();
     expect(screen.queryByText("Verify the saved token with Telegram.")).not.toBeInTheDocument();
     expect(screen.queryByText("Next steps")).not.toBeInTheDocument();
     expect(screen.queryByText(/Use a separate Telegram bot/)).not.toBeInTheDocument();

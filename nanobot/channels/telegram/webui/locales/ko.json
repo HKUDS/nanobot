@@ -46,7 +46,6 @@
     "toggleBot": "{{name}} 봇",
     "running": "실행 중",
     "needsToken": "토큰 필요",
-    "defaultInstance": "기본 봇",
     "finishSetup": "확인하고 설정 완료",
     "connectFirst": "첫 번째 봇 연결",
     "addAnother": "다른 봇 추가",
