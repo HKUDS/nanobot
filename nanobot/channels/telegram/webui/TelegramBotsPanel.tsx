@@ -69,7 +69,7 @@ export function TelegramBotsPanel({
         renderInstanceSummary: (instance) => (
           instance.id === "default"
             ? tx("panel.defaultInstance", "Default bot")
-            : tx("panel.instanceId", "Instance {{id}}", { id: instance.id })
+            : null
         ),
         renderInstanceAction: (instance) => instance.configured ? (
           <TelegramConnectionCheck key={instance.id} token={token} instance={instance} />

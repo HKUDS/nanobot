@@ -47,7 +47,6 @@
     "running": "Running",
     "needsToken": "Needs token",
     "defaultInstance": "Default bot",
-    "instanceId": "Instance {{id}}",
     "finishSetup": "Check and finish setup",
     "connectFirst": "Connect your first bot",
     "addAnother": "Add another bot",

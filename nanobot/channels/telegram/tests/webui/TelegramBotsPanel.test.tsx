@@ -117,9 +117,15 @@ describe("TelegramBotsPanel", () => {
   it("keeps a configured bot compact and moves its proxy into Advanced", async () => {
     const user = userEvent.setup();
     const instance = telegramInstance({
+      id: "bot-2",
+      name: "nano_test0001bot",
       enabled: true,
       configured: true,
       runtime_status: "running",
+      config_values: {
+        "channels.telegram.name": "nano_test0001bot",
+        "channels.telegram.groupPolicy": "mention",
+      },
       configured_fields: [...defaultFields, "channels.telegram.token", "channels.telegram.proxy"],
     });
     render(
@@ -131,8 +137,9 @@ describe("TelegramBotsPanel", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "nanobot" }));
+    await user.click(screen.getByRole("button", { name: "nano_test0001bot" }));
 
+    expect(screen.queryByText("Instance bot-2")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check connection" })).toBeVisible();
     expect(screen.queryByText("Verify the saved token with Telegram.")).not.toBeInTheDocument();
     expect(screen.queryByText("Next steps")).not.toBeInTheDocument();

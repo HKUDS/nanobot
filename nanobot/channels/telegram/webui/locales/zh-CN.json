@@ -47,7 +47,6 @@
     "running": "运行中",
     "needsToken": "需要令牌",
     "defaultInstance": "默认机器人",
-    "instanceId": "实例 {{id}}",
     "finishSetup": "检查并完成配置",
     "connectFirst": "连接第一个机器人",
     "addAnother": "添加另一个机器人",

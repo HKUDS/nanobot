@@ -175,6 +175,9 @@ export function ChannelInstancesPanel({
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id;
+          const instanceSummary = customization.renderInstanceSummary
+            ? customization.renderInstanceSummary(instance)
+            : instance.id;
           const showSetupSteps = customization.showSetupSteps?.(instance) ?? true;
           const instanceAdvanced = customization.renderInstanceAdvanced?.(instance);
           return (
@@ -236,10 +239,15 @@ export function ChannelInstancesPanel({
               {expanded ? (
                 <div className="border-t border-border/60">
                   <section className="px-4 py-4">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
-                        {customization.renderInstanceSummary?.(instance) ?? instance.id}
-                      </p>
+                    <div className={cn(
+                      "mb-3 flex items-start gap-3",
+                      instanceSummary == null ? "justify-end" : "justify-between",
+                    )}>
+                      {instanceSummary != null ? (
+                        <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
+                          {instanceSummary}
+                        </p>
+                      ) : null}
                       <ChannelInstanceStatusBadge
                         instance={instance}
                         configuredLabel={customization.configuredLabel}

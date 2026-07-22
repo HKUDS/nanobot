@@ -47,7 +47,6 @@
     "running": "実行中",
     "needsToken": "トークンが必要",
     "defaultInstance": "既定のボット",
-    "instanceId": "インスタンス {{id}}",
     "finishSetup": "確認して設定を完了",
     "connectFirst": "最初のボットを接続",
     "addAnother": "別のボットを追加",

@@ -47,7 +47,6 @@
     "running": "Đang chạy",
     "needsToken": "Cần token",
     "defaultInstance": "Bot mặc định",
-    "instanceId": "Phiên bản {{id}}",
     "finishSetup": "Kiểm tra và hoàn tất",
     "connectFirst": "Kết nối bot đầu tiên",
     "addAnother": "Thêm bot khác",

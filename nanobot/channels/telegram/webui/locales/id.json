@@ -47,7 +47,6 @@
     "running": "Berjalan",
     "needsToken": "Perlu token",
     "defaultInstance": "Bot default",
-    "instanceId": "Instans {{id}}",
     "finishSetup": "Periksa dan selesaikan",
     "connectFirst": "Hubungkan bot pertama Anda",
     "addAnother": "Tambahkan bot lain",
