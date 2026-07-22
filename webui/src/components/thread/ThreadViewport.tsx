@@ -573,9 +573,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           </div>
         ) : (
           <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[72rem] flex-col px-3 sm:px-4">
-            <div className="flex w-full flex-1 items-center justify-center py-6 sm:py-12">
-              <div className="relative flex w-full max-w-[58rem] flex-col items-center gap-5 sm:block">
-                <div className="flex justify-center sm:absolute sm:inset-x-0 sm:bottom-[calc(100%+1.5rem)]">
+            <div className="flex w-full flex-1 flex-col items-center pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-6 sm:justify-center sm:py-12">
+              <div className="relative flex w-full max-w-[58rem] flex-1 flex-col items-center justify-end gap-5 sm:block sm:flex-none">
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center sm:pointer-events-auto sm:static sm:block">
                   {emptyState}
                 </div>
                 <div className="w-full">{composer}</div>
