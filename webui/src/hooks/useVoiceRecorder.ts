@@ -182,6 +182,7 @@ export function useVoiceRecorder({
 
   const startRecording = useCallback(async () => {
     if (!onTranscribeAudio || state !== "idle" || startPendingRef.current) return;
+    onClearError();
     const mediaDevices = navigator.mediaDevices;
     const MediaRecorderCtor = mediaRecorderConstructor();
     if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {

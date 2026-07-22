@@ -459,6 +459,29 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("clears a previous voice error when retrying microphone access", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    getUserMedia.mockRejectedValueOnce(new Error("permission denied"));
+    const onTranscribeAudio = vi.fn(async () => "voice retry");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.click(voiceButton);
+    await waitFor(() => expect(screen.getByText("Chrome or your system blocked microphone access. Allow it from the address bar, then reload the page.")).toBeInTheDocument());
+
+    fireEvent.click(voiceButton);
+
+    await waitFor(() => expect(screen.queryByText("Chrome or your system blocked microphone access. Allow it from the address bar, then reload the page.")).not.toBeInTheDocument());
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+  });
+
   it("supports press-and-hold voice recording", async () => {
     mockVoiceRecorder();
     const onSend = vi.fn();
