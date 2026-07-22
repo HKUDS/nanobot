@@ -18,7 +18,7 @@
 - Use `fixed_strings=true` for literal keywords containing regex characters.
 - Use `output_mode="count"` to size a broad search before reading full matches.
 - Use `head_limit` and `offset` to page across large result sets.
-- Binary or oversized files may be skipped to keep results readable.
+- Search tools enforce binary and file-size limits and report skipped files in the result.
 
 ## File and Coding Workflows
 

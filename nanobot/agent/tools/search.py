@@ -296,8 +296,8 @@ class GrepTool(_SearchTool):
             "Default output_mode is files_with_matches (file paths only); "
             "use content mode for matching lines with context. Prefer this "
             "over shell grep for ordinary workspace searches. "
-            "Skips binary files. Directory searches skip files >2 MB; "
-            "an explicitly named file can be up to 100 MB. Supports glob/type filtering."
+            "Binary and file-size limits are enforced by the tool; explicit file paths "
+            "use a larger bounded limit than directory searches. Supports glob/type filtering."
         )
 
     @property

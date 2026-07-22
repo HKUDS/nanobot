@@ -319,6 +319,14 @@ async def test_grep_uses_a_larger_bounded_limit_for_an_explicit_file(
     assert "skipped 1 large files" in capped_result
 
 
+def test_grep_description_keeps_size_thresholds_implementation_specific(tmp_path: Path) -> None:
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    assert "limits are enforced by the tool" in tool.description
+    assert "2 MB" not in tool.description
+    assert "100 MB" not in tool.description
+
+
 @pytest.mark.asyncio
 async def test_search_tools_reject_paths_outside_workspace(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside-search.txt"
