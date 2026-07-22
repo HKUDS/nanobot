@@ -1086,3 +1086,53 @@ def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
     assert jobs[0].state.run_history[0].status == "ok"
     assert jobs[0].created_at_ms == 0
     assert jobs[0].updated_at_ms == 0
+
+
+def test_load_jobs_accepts_null_schedule_without_quarantining_siblings(tmp_path) -> None:
+    """Null schedule on one job must not quarantine the whole jobs.json store.
+
+    ``from_dict`` already defaults missing schedule to ``kind=every``; the
+    jobs.json loader must match so a partial write does not drop sibling jobs.
+    """
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "good",
+                        "name": "good",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {},
+                    },
+                    {
+                        "id": "bad",
+                        "name": "bad",
+                        "enabled": True,
+                        "schedule": None,
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "yo",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert store_path.exists()
+    assert {j.id for j in jobs} == {"good", "bad"}
+    assert jobs[1].schedule.kind == "every"
