@@ -7656,16 +7656,12 @@ function ProviderPicker({
   value,
   emptyLabel,
   showProviderLogos = false,
-  triggerClassName,
-  contentClassName,
   onChange,
 }: {
   providers: Array<{ name: string; label: string }>;
   value: string;
   emptyLabel: string;
   showProviderLogos?: boolean;
-  triggerClassName?: string;
-  contentClassName?: string;
   onChange: (provider: string) => void;
 }) {
   const selectedProvider = providers.find((provider) => provider.name === value) ?? null;
@@ -7682,7 +7678,6 @@ function ProviderPicker({
             "h-8 w-[210px] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
             "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
-            triggerClassName,
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
@@ -7699,10 +7694,7 @@ function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className={cn(
-          "max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent",
-          contentClassName,
-        )}
+        className="max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
         {providers.map((provider) => {
           const selected = provider.name === value;
