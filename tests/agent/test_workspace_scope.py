@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +34,24 @@ PNG_BYTES = (
     b"\x00\x00\x00\x0bIDATx\xdacd\xfc\xff\x1f\x00\x03\x03"
     b"\x02\x00\xef\xbf\xa7\xdb\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+def _make_directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"directory junction unavailable: {result.stderr or result.stdout}")
+        return
+
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
 
 
 def test_workspace_scope_defaults_match_legacy_config(tmp_path: Path) -> None:
@@ -175,6 +195,43 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     assert "outside allowed directory" in history_write_result
     assert skill_file.read_text(encoding="utf-8") == "global skill"
     assert history_file.read_text(encoding="utf-8") == '{"content":"global history"}\n'
+
+
+@pytest.mark.asyncio
+async def test_restricted_project_reads_history_from_linked_agent_workspace(
+    tmp_path: Path,
+) -> None:
+    real_agent_workspace = tmp_path / "real-agent"
+    linked_agent_workspace = tmp_path / "agent-link"
+    project = tmp_path / "project"
+    history_file = real_agent_workspace / "memory" / "history.jsonl"
+    history_file.parent.mkdir(parents=True)
+    project.mkdir()
+    history_file.write_text('{"content":"linked history"}\n', encoding="utf-8")
+    _make_directory_link(linked_agent_workspace, real_agent_workspace)
+
+    ctx = ToolContext(
+        config=ToolsConfig(restrict_to_workspace=True),
+        workspace=str(linked_agent_workspace),
+    )
+    grep_tool = GrepTool.create(ctx)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "restricted"},
+        default_workspace=linked_agent_workspace,
+        default_restrict_to_workspace=True,
+    )
+
+    token = bind_workspace_scope(scope)
+    try:
+        result = await grep_tool.execute(
+            pattern="linked history",
+            path=str(history_file.resolve()),
+            output_mode="content",
+        )
+    finally:
+        reset_workspace_scope(token)
+
+    assert "linked history" in result
 
 
 @pytest.mark.asyncio

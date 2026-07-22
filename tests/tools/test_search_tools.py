@@ -295,6 +295,31 @@ async def test_grep_reports_skipped_binary_and_large_files(
 
 
 @pytest.mark.asyncio
+async def test_grep_uses_a_larger_bounded_limit_for_an_explicit_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    large_file = tmp_path / "history.jsonl"
+    large_file.write_text("needle\n" + "x" * 20, encoding="utf-8")
+    monkeypatch.setattr(GrepTool, "_MAX_FILE_BYTES", 10)
+    monkeypatch.setattr(GrepTool, "_MAX_EXPLICIT_FILE_BYTES", 100)
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    explicit_result = await tool.execute(
+        pattern="needle",
+        path=str(large_file),
+        output_mode="content",
+    )
+    directory_result = await tool.execute(pattern="needle", path=".")
+    monkeypatch.setattr(GrepTool, "_MAX_EXPLICIT_FILE_BYTES", 10)
+    capped_result = await tool.execute(pattern="needle", path=str(large_file))
+
+    assert "needle" in explicit_result
+    assert "skipped 1 large files" in directory_result
+    assert "skipped 1 large files" in capped_result
+
+
+@pytest.mark.asyncio
 async def test_search_tools_reject_paths_outside_workspace(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside-search.txt"
     outside.write_text("secret\n", encoding="utf-8")

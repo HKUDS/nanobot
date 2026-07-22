@@ -283,6 +283,7 @@ class GrepTool(_SearchTool):
 
     _MAX_RESULT_CHARS = 128_000
     _MAX_FILE_BYTES = 2_000_000
+    _MAX_EXPLICIT_FILE_BYTES = 100_000_000
 
     @property
     def name(self) -> str:
@@ -295,7 +296,8 @@ class GrepTool(_SearchTool):
             "Default output_mode is files_with_matches (file paths only); "
             "use content mode for matching lines with context. Prefer this "
             "over shell grep for ordinary workspace searches. "
-            "Skips binary and files >2 MB. Supports glob/type filtering."
+            "Skips binary files. Directory searches skip files >2 MB; "
+            "an explicitly named file can be up to 100 MB. Supports glob/type filtering."
         )
 
     @property
@@ -456,6 +458,9 @@ class GrepTool(_SearchTool):
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
             root = target if target.is_dir() else target.parent
+            max_file_bytes = (
+                self._MAX_EXPLICIT_FILE_BYTES if target.is_file() else self._MAX_FILE_BYTES
+            )
 
             for file_path in self._iter_files(target):
                 rel_path = file_path.relative_to(root).as_posix()
@@ -464,8 +469,9 @@ class GrepTool(_SearchTool):
                 if not _matches_type(file_path.name, type):
                     continue
 
-                raw = file_path.read_bytes()
-                if len(raw) > self._MAX_FILE_BYTES:
+                with file_path.open("rb") as file:
+                    raw = file.read(max_file_bytes + 1)
+                if len(raw) > max_file_bytes:
                     skipped_large += 1
                     continue
                 if _is_binary(raw):

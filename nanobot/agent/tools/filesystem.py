@@ -80,13 +80,13 @@ class _FsTool(Tool):
     def create(cls, ctx: Any) -> Tool:
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
+        agent_workspace = Path(ctx.workspace).expanduser().resolve(strict=False)
         restrict = (
             ctx.config.restrict_to_workspace
             or ctx.config.exec.sandbox
         )
         sandbox_restricts = bool(ctx.config.exec.sandbox)
-        allowed_dir = Path(ctx.workspace) if restrict else None
-        agent_workspace = Path(ctx.workspace)
+        allowed_dir = agent_workspace if restrict else None
         # Agent-owned skills stay available from project scopes. History is a narrower
         # capability: expose only the append-only log, not the surrounding memory directory.
         return cls(
