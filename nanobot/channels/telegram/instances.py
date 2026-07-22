@@ -12,6 +12,7 @@ from nanobot.channels.telegram.config import telegram_default_config
 from nanobot.config.loader import merge_missing_defaults
 
 DEFAULT_INSTANCE_ID = "default"
+PROXY_CLEAR_VALUE = "__nanobot_clear_telegram_proxy__"
 _INSTANCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _WILDCARD_WEBHOOK_HOSTS = {"*", "0.0.0.0", "::", "[::]"}
 _LOOPBACK_WEBHOOK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
@@ -47,6 +48,9 @@ def update_managed_telegram_instance(
     instance_id: str = DEFAULT_INSTANCE_ID,
 ) -> dict[str, Any]:
     existing = section if isinstance(section, dict) else {}
+    values = dict(values)
+    if values.get("proxy") == PROXY_CLEAR_VALUE:
+        values["proxy"] = None
     return upsert_telegram_instance(
         existing,
         telegram_default_config(),
@@ -319,6 +323,7 @@ TELEGRAM_MANAGEMENT = ChannelManagementSpec(
 
 __all__ = [
     "DEFAULT_INSTANCE_ID",
+    "PROXY_CLEAR_VALUE",
     "TELEGRAM_MANAGEMENT",
     "canonical_telegram_section",
     "runtime_channel_name",

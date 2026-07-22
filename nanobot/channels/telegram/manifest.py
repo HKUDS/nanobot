@@ -10,6 +10,7 @@ SETUP_SPEC = ChannelSetupSpec(
     fields={
         "name": field(),
         "token": field("secret"),
+        "proxy": field("secret"),
         "allowFrom": field("list"),
         "groupPolicy": field("enum", choices=DIRECT_GROUP_POLICIES, default="mention"),
     },

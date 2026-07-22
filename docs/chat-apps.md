@@ -118,7 +118,8 @@ nanobot plugins enable telegram
 For the normal setup path, open **Settings → Channels → Telegram** in the
 WebUI. Paste a BotFather token under **Connect your first bot**; nanobot checks
 the token before saving it. Use **Add bot** to connect more Telegram bots. Each
-bot has its own local name, token, connection check, and on/off switch.
+bot has its own local name, token, optional network proxy, connection check,
+and on/off switch. The proxy is used for both the check and normal bot traffic.
 
 Existing single-bot settings appear automatically as **Default bot**, so you do
 not need to enter the saved token again. See the
@@ -173,6 +174,19 @@ ID, name, and BotFather token:
 
 Use letters, numbers, `_`, or `-` in an ID. The name is only a label shown in
 nanobot. Turning off one entry leaves the other bots running.
+
+If the machine cannot reach Telegram directly, set a proxy on the affected bot:
+
+```json
+{
+  "token": "YOUR_BOT_TOKEN",
+  "proxy": "http://127.0.0.1:7890"
+}
+```
+
+HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted. A proxy URL may
+contain credentials, so do not share it. In the WebUI, saved proxy values stay
+masked and can be replaced or removed separately for each bot.
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
 >

@@ -50,11 +50,15 @@ restart Telegram support, follow the prompt and return to the Telegram card.
 1. Enter a short **Bot name**, such as `Personal` or `Support`. This is only a
    label inside nanobot; it does not rename the bot in Telegram.
 2. Paste the BotFather token.
-3. Select **Check and connect**.
+3. If this machine cannot reach Telegram directly, enter its HTTP or SOCKS URL
+   under **Network proxy**, for example `http://127.0.0.1:7890`.
+4. Select **Check and connect**.
 
 nanobot asks Telegram to verify the token before saving it. A rejected token is
 not saved. After a successful check, the token is stored masked and the bot is
-enabled.
+enabled. When you enter a proxy, the same proxy is used for both this check and
+the bot's normal Telegram traffic. Proxy credentials remain masked in the
+WebUI after saving.
 
 ## 4. Send a test message and pair your account
 
@@ -83,6 +87,12 @@ Each bot has its own switch. Turning one bot off does not remove its settings or
 stop the other bots. Use **Check connection** on any saved bot to confirm which
 Telegram account its token belongs to.
 
+To add or change a proxy for a saved bot, open **Network proxy** below that bot,
+enter the new URL, and select **Check and save**. The saved URL is never shown
+again. Select **Remove saved proxy** when that bot can connect directly. If an
+older setup shows a saved proxy before its token is complete, you can remove
+the proxy from that same setup form before checking the new token.
+
 Useful ways to separate bots include:
 
 - a private bot and a team bot
@@ -96,6 +106,8 @@ Useful ways to separate bots include:
 | **Connected as @name** | Telegram accepted the saved token. | Send a test message. |
 | **Telegram rejected this bot token** | The token is wrong, revoked, or belongs to a deleted bot. | Copy the current token from BotFather, or create a new one. |
 | **Could not verify this token right now** | nanobot could not reach Telegram during first setup. | Check internet/proxy access and try again; the new token was not saved. |
+| **Telegram could not be reached through this proxy** | The proxy is offline, its address is wrong, or its credentials were rejected. | Check the proxy URL and credentials, then try **Check and save** again. |
+| **Enter a full proxy URL** | The proxy address is missing a supported scheme or host. | Use a complete URL beginning with `http://`, `https://`, `socks5://`, or `socks5h://`. |
 | **A saved token was found, but Telegram could not verify it right now** | Settings already exist, but the live check could not reach Telegram. | Keep the gateway running and retry **Check connection** later. |
 
 ## Existing Telegram setups
@@ -129,7 +141,8 @@ full webhook example.
 - **A token is rejected:** open BotFather, select the correct bot, and copy or
   regenerate its token. Do not reuse one token for two entries.
 - **The live check is temporarily unavailable:** confirm the machine can reach
-  `api.telegram.org` and that any configured proxy works, then retry.
+  `api.telegram.org`. If direct access is blocked, open **Network proxy** for
+  that bot, enter the proxy URL, and select **Check and save**.
 - **A bot is connected but receives nothing:** confirm its switch is on and the
   nanobot gateway is still running.
 - **The first DM returns a pairing code:** this is expected. Approve the code,
@@ -143,6 +156,7 @@ full webhook example.
 - Do not use `allowFrom: ["*"]` unless the bot is intentionally public.
 - Rotate a token immediately if it appears in logs, screenshots, or shared
   files.
+- Treat a proxy URL containing a username or password like any other secret.
 - Review tool access before inviting a bot into group chats or adding more
   users.
 

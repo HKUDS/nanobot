@@ -23,7 +23,9 @@ import { cn } from "@/lib/utils";
 
 const NAME_KEY = "channels.telegram.name";
 const TOKEN_KEY = "channels.telegram.token";
+const PROXY_KEY = "channels.telegram.proxy";
 const GROUP_POLICY_KEY = "channels.telegram.groupPolicy";
+export const TELEGRAM_PROXY_CLEAR_VALUE = "__nanobot_clear_telegram_proxy__";
 
 export function TelegramBotsPanel({
   token,
@@ -39,6 +41,7 @@ export function TelegramBotsPanel({
     : [defaultTelegramInstance(feature)];
   const instances = allInstances.filter(isVisibleTelegramInstance);
   const configuredCount = instances.filter((instance) => instance.configured).length;
+  const panelFeature = useMemo(() => withoutGenericProxyField(feature), [feature]);
   const setup = useMemo(
     () => channelSetup(feature, i18n.resolvedLanguage ?? i18n.language),
     [feature.name, feature.setup, i18n.language, i18n.resolvedLanguage],
@@ -47,7 +50,7 @@ export function TelegramBotsPanel({
   return (
     <ChannelInstancesPanel
       token={token}
-      feature={feature}
+      feature={panelFeature}
       showBrandLogos={showBrandLogos}
       chatAppsDocsUrl={chatAppsDocsUrl}
       instances={instances}
@@ -69,10 +72,11 @@ export function TelegramBotsPanel({
             : tx("custom.instanceId", "Instance {{id}}", { id: instance.id })
         ),
         renderInstanceAction: (instance) => instance.configured ? (
-          <TelegramConnectionCheck
+          <TelegramConfiguredBotActions
             key={instance.id}
             token={token}
             instance={instance}
+            onFeaturesUpdate={onFeaturesUpdate}
           />
         ) : (
           <TelegramCredentialsForm
@@ -80,6 +84,8 @@ export function TelegramBotsPanel({
             token={token}
             instanceId={instance.id}
             initialName={instance.config_values?.[NAME_KEY] ?? instanceDisplayName(instance)}
+            proxyConfigured={hasConfiguredProxy(instance)}
+            instanceEnabled={instance.enabled}
             submitLabel={tx("custom.finishSetup", "Check and finish setup")}
             tx={tx}
             onFeaturesUpdate={onFeaturesUpdate}
@@ -194,6 +200,8 @@ export function TelegramCredentialsForm({
   token,
   instanceId,
   initialName = "",
+  proxyConfigured = false,
+  instanceEnabled = false,
   submitLabel,
   tx,
   onFeaturesUpdate,
@@ -203,6 +211,8 @@ export function TelegramCredentialsForm({
   token: string;
   instanceId: string;
   initialName?: string;
+  proxyConfigured?: boolean;
+  instanceEnabled?: boolean;
   submitLabel: string;
   tx: ChannelTranslator;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
@@ -212,18 +222,25 @@ export function TelegramCredentialsForm({
   const [name, setName] = useState(initialName);
   const [botToken, setBotToken] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [proxy, setProxy] = useState("");
+  const [showProxy, setShowProxy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setName(initialName);
     setBotToken("");
     setShowToken(false);
+    setProxy("");
+    setShowProxy(false);
     setError(null);
+    setMessage(null);
   }, [initialName, instanceId]);
 
   const submit = async () => {
     const nextToken = botToken.trim();
+    const nextProxy = proxy.trim();
     if (!nextToken) {
       setError(tx("custom.tokenRequired", "Enter the BotFather token first."));
       return;
@@ -231,19 +248,29 @@ export function TelegramCredentialsForm({
 
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
+      const values = {
+        [TOKEN_KEY]: nextToken,
+        ...(nextProxy ? { [PROXY_KEY]: nextProxy } : {}),
+      };
       const validation = await validateChannel(
         token,
         "telegram",
-        { [TOKEN_KEY]: nextToken },
+        values,
         { instanceId },
       );
       if (!validation.can_enable || validation.status !== "connected") {
         setError(validation.status === "configured"
-          ? tx(
-            "custom.verificationUnavailable",
-            "Telegram could not verify this token right now. Try again before connecting.",
-          )
+          ? proxyConnectionFailed(validation)
+            ? tx(
+              "custom.proxyUnavailable",
+              "Telegram could not be reached through this proxy. Check the address and credentials.",
+            )
+            : tx(
+              "custom.verificationUnavailable",
+              "Telegram could not verify this token right now. Try again before connecting.",
+            )
           : validationMessage(validation, tx));
         return;
       }
@@ -257,6 +284,7 @@ export function TelegramCredentialsForm({
         {
           [NAME_KEY]: resolvedName,
           [TOKEN_KEY]: nextToken,
+          ...(nextProxy ? { [PROXY_KEY]: nextProxy } : {}),
         },
         { enable: true, instanceId },
       );
@@ -265,6 +293,30 @@ export function TelegramCredentialsForm({
       }
       setBotToken("");
       onComplete?.();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeProxy = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const configured = await configureChannel(
+        token,
+        "telegram",
+        { [PROXY_KEY]: TELEGRAM_PROXY_CLEAR_VALUE },
+        { enable: instanceEnabled, instanceId },
+      );
+      if (configured.nanobot_features) {
+        onFeaturesUpdate(configured.nanobot_features);
+      }
+      setProxy("");
+      setShowProxy(false);
+      setMessage(tx("custom.proxyRemoved", "Saved proxy removed."));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -325,6 +377,68 @@ export function TelegramCredentialsForm({
         </label>
       </div>
 
+      <div className="block">
+        <span className="text-[11px] font-medium text-foreground/85">
+          {tx("custom.networkProxy", "Network proxy (optional)")}
+        </span>
+        <span className="relative mt-1 block">
+          <Input
+            aria-label={tx("custom.networkProxy", "Network proxy (optional)")}
+            type={showProxy ? "text" : "password"}
+            autoComplete="off"
+            value={proxy}
+            onChange={(event) => setProxy(event.target.value)}
+            placeholder={proxyConfigured
+              ? tx("custom.savedProxyPlaceholder", "A proxy is already saved")
+              : "http://127.0.0.1:7890"}
+            className="h-9 rounded-[10px] border-border/60 bg-muted/35 pr-9 font-mono text-[12px]"
+          />
+          <button
+            type="button"
+            aria-label={showProxy
+              ? tx("custom.hideProxy", "Hide proxy")
+              : tx("custom.showProxy", "Show proxy")}
+            onClick={() => setShowProxy((current) => !current)}
+            className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+          >
+            {showProxy ? (
+              <EyeOff className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <Eye className="h-3.5 w-3.5" aria-hidden />
+            )}
+          </button>
+        </span>
+        <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+          {proxyConfigured && !proxy
+            ? tx(
+              "custom.savedProxyHint",
+              "Leave this blank to keep the saved proxy. Enter a new URL to replace it.",
+            )
+            : tx(
+              "custom.proxyHint",
+              "Used for both connection checks and bot traffic. HTTP and SOCKS URLs are supported.",
+            )}
+        </span>
+        {proxyConfigured && !proxy ? (
+          <button
+            type="button"
+            className="mt-1.5 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => void removeProxy()}
+            disabled={busy}
+          >
+            {tx("custom.removeProxy", "Remove saved proxy")}
+          </button>
+        ) : null}
+        {message ? (
+          <span
+            role="status"
+            className="mt-1 block text-[11px] text-emerald-700 dark:text-emerald-200"
+          >
+            {message}
+          </span>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[11.5px] leading-5 text-muted-foreground">
           {tx("custom.secretHint", "The token stays masked after it is saved.")}
@@ -372,6 +486,209 @@ export function TelegramCredentialsForm({
   );
 }
 
+function TelegramConfiguredBotActions({
+  token,
+  instance,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  instance: NanobotChannelInstanceInfo;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  return (
+    <>
+      <TelegramConnectionCheck token={token} instance={instance} />
+      <TelegramProxySettings
+        token={token}
+        instance={instance}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />
+    </>
+  );
+}
+
+export function TelegramProxySettings({
+  token,
+  instance,
+  onFeaturesUpdate,
+}: {
+  token: string;
+  instance: NanobotChannelInstanceInfo;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = channelTranslator(t, "telegram");
+  const configured = hasConfiguredProxy(instance);
+  const [proxy, setProxy] = useState("");
+  const [showProxy, setShowProxy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProxy("");
+    setShowProxy(false);
+    setBusy(false);
+    setError(null);
+    setMessage(null);
+  }, [configured, instance.id]);
+
+  const applyProxy = async () => {
+    const nextProxy = proxy.trim();
+    if (!nextProxy) {
+      setError(tx("custom.proxyRequired", "Enter a proxy URL first."));
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const validation = await validateChannel(
+        token,
+        "telegram",
+        { [PROXY_KEY]: nextProxy },
+        { instanceId: instance.id },
+      );
+      if (!validation.can_enable || validation.status !== "connected") {
+        setError(validation.status === "configured" && proxyConnectionFailed(validation)
+          ? tx(
+            "custom.proxyUnavailable",
+            "Telegram could not be reached through this proxy. Check the address and credentials.",
+          )
+          : validationMessage(validation, tx));
+        return;
+      }
+
+      const configuredPayload = await configureChannel(
+        token,
+        "telegram",
+        { [PROXY_KEY]: nextProxy },
+        { enable: instance.enabled, instanceId: instance.id },
+      );
+      if (configuredPayload.nanobot_features) {
+        onFeaturesUpdate(configuredPayload.nanobot_features);
+      }
+      setProxy("");
+      setShowProxy(false);
+      setMessage(tx("custom.proxySaved", "Proxy saved and connection verified."));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeProxy = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const configuredPayload = await configureChannel(
+        token,
+        "telegram",
+        { [PROXY_KEY]: TELEGRAM_PROXY_CLEAR_VALUE },
+        { enable: instance.enabled, instanceId: instance.id },
+      );
+      if (configuredPayload.nanobot_features) {
+        onFeaturesUpdate(configuredPayload.nanobot_features);
+      }
+      setProxy("");
+      setShowProxy(false);
+      setMessage(tx("custom.proxyRemoved", "Saved proxy removed."));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <details className="mt-3 rounded-[12px] border border-border/60 bg-muted/20 px-3 py-2.5">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium text-foreground [&::-webkit-details-marker]:hidden">
+        <span>{tx("custom.networkProxy", "Network proxy (optional)")}</span>
+        <span className={cn(
+          "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+          configured
+            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+            : "bg-muted text-muted-foreground",
+        )}>
+          {configured
+            ? tx("custom.proxyConfigured", "Configured")
+            : tx("custom.proxyOptional", "Optional")}
+        </span>
+      </summary>
+      <div className="mt-3 border-t border-border/50 pt-3">
+        <p className="text-[11px] leading-4 text-muted-foreground">
+          {tx(
+            "custom.proxyHint",
+            "Used for both connection checks and bot traffic. HTTP and SOCKS URLs are supported.",
+          )}
+        </p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <span className="relative block min-w-0 flex-1">
+            <Input
+              aria-label={tx("custom.networkProxy", "Network proxy (optional)")}
+              type={showProxy ? "text" : "password"}
+              autoComplete="off"
+              value={proxy}
+              onChange={(event) => setProxy(event.target.value)}
+              placeholder={configured
+                ? tx("custom.savedProxyPlaceholder", "A proxy is already saved")
+                : "http://127.0.0.1:7890"}
+              className="h-9 rounded-[10px] border-border/60 bg-background pr-9 font-mono text-[12px]"
+            />
+            <button
+              type="button"
+              aria-label={showProxy
+                ? tx("custom.hideProxy", "Hide proxy")
+                : tx("custom.showProxy", "Show proxy")}
+              onClick={() => setShowProxy((current) => !current)}
+              className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {showProxy ? (
+                <EyeOff className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <Eye className="h-3.5 w-3.5" aria-hidden />
+              )}
+            </button>
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-9 shrink-0 rounded-[10px] px-3 text-[12px] font-semibold"
+            onClick={() => void applyProxy()}
+            disabled={busy || !proxy.trim()}
+          >
+            {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {tx("custom.saveProxy", "Check and save")}
+          </Button>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            className="mt-2 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => void removeProxy()}
+            disabled={busy}
+          >
+            {tx("custom.removeProxy", "Remove saved proxy")}
+          </button>
+        ) : null}
+        {error ? (
+          <p role="alert" className="mt-2 text-[11.5px] leading-5 text-destructive">
+            {error}
+          </p>
+        ) : message ? (
+          <p role="status" className="mt-2 text-[11.5px] leading-5 text-emerald-700 dark:text-emerald-200">
+            {message}
+          </p>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 export function TelegramConnectionCheck({
   token,
   instance,
@@ -413,7 +730,14 @@ export function TelegramConnectionCheck({
     }
   };
 
-  const status = validation ? validationMessage(validation, tx) : null;
+  const status = validation
+    ? proxyConnectionFailed(validation)
+      ? tx(
+        "custom.proxyUnavailable",
+        "Telegram could not be reached through this proxy. Check the address and credentials.",
+      )
+      : validationMessage(validation, tx)
+    : null;
   return (
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
       <div
@@ -452,6 +776,24 @@ function validationMessage(
   validation: ChannelValidationPayload,
   tx: ChannelTranslator,
 ): string {
+  if (validation.checks.some((check) => check.id === "proxy_env" && check.status === "fail")) {
+    return tx(
+      "custom.proxyEnvMissing",
+      "The saved proxy uses an environment variable that is not set.",
+    );
+  }
+  if (validation.checks.some((check) => check.id === "token_env" && check.status === "fail")) {
+    return tx(
+      "custom.tokenEnvMissing",
+      "The saved bot token uses an environment variable that is not set.",
+    );
+  }
+  if (validation.checks.some((check) => check.id === "proxy_format" && check.status === "fail")) {
+    return tx(
+      "custom.invalidProxy",
+      "Enter a full proxy URL, such as http://127.0.0.1:7890.",
+    );
+  }
   if (validation.status === "connected") {
     const identity = normalizedBotHandle(validation.identity?.name);
     return identity
@@ -471,6 +813,12 @@ function validationMessage(
     return tx("custom.invalidToken", "Telegram rejected this bot token.");
   }
   return tx("custom.checkFailed", "The connection could not be checked.");
+}
+
+function proxyConnectionFailed(validation: ChannelValidationPayload): boolean {
+  return validation.checks.some(
+    (check) => check.id === "proxy_connection" && check.status !== "pass",
+  );
 }
 
 function normalizedBotHandle(value: string | undefined): string {
@@ -507,6 +855,21 @@ export function isVisibleTelegramInstance(instance: NanobotChannelInstanceInfo):
     }
     return true;
   });
+}
+
+function withoutGenericProxyField(feature: NanobotFeatureInfo): NanobotFeatureInfo {
+  if (!feature.setup?.fields.some((field) => field.key === PROXY_KEY)) return feature;
+  return {
+    ...feature,
+    setup: {
+      ...feature.setup,
+      fields: feature.setup.fields.filter((field) => field.key !== PROXY_KEY),
+    },
+  };
+}
+
+function hasConfiguredProxy(instance: NanobotChannelInstanceInfo): boolean {
+  return instance.configured_fields.includes(PROXY_KEY);
 }
 
 export function nextTelegramInstanceId(instances: NanobotChannelInstanceInfo[]): string {
