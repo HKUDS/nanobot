@@ -963,11 +963,12 @@
       },
       "voiceErrors": {
         "unsupported": "La saisie vocale n'est pas prise en charge par ce navigateur.",
-        "permission": "L'autorisation du microphone est requise.",
+        "permission": "Autorisez le microphone dans la barre d'adresse, puis réessayez.",
         "notConfigured": "Configurez d'abord un fournisseur de transcription.",
         "tooLong": "L'enregistrement est trop long.",
         "tooShort": "Maintenez un peu plus longtemps pour enregistrer la voix.",
         "noInput": "Aucune entrée microphone détectée.",
+        "noDevice": "Aucun microphone trouvé. Connectez-en un, puis réessayez.",
         "failed": "Impossible de transcrire l'audio."
       },
       "slash": {

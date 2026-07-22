@@ -977,11 +977,12 @@
       },
       "voiceErrors": {
         "unsupported": "A entrada de voz não é compatível com este navegador.",
-        "permission": "É necessária permissão do microfone.",
+        "permission": "Permita o microfone na barra de endereço e tente novamente.",
         "notConfigured": "Configure primeiro um provedor de transcrição.",
         "tooLong": "A gravação é longa demais.",
         "tooShort": "Segure um pouco mais para gravar voz.",
         "noInput": "Não foi detectada entrada do microfone.",
+        "noDevice": "Nenhum microfone encontrado. Conecte um e tente novamente.",
         "failed": "Não foi possível transcrever o áudio."
       },
       "slash": {

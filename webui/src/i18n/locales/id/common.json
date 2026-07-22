@@ -963,11 +963,12 @@
       },
       "voiceErrors": {
         "unsupported": "Input suara tidak didukung di browser ini.",
-        "permission": "Izin mikrofon diperlukan.",
+        "permission": "Izinkan mikrofon di bilah alamat, lalu coba lagi.",
         "notConfigured": "Konfigurasikan penyedia transkripsi terlebih dahulu.",
         "tooLong": "Rekaman terlalu panjang.",
         "tooShort": "Tahan sedikit lebih lama untuk merekam suara.",
         "noInput": "Tidak ada input mikrofon yang terdeteksi.",
+        "noDevice": "Mikrofon tidak ditemukan. Hubungkan mikrofon lalu coba lagi.",
         "failed": "Tidak dapat mentranskripsi audio."
       },
       "slash": {

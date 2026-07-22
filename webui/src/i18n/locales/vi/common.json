@@ -963,11 +963,12 @@
       },
       "voiceErrors": {
         "unsupported": "Trình duyệt này không hỗ trợ nhập bằng giọng nói.",
-        "permission": "Cần quyền truy cập micrô.",
+        "permission": "Cho phép micrô trong thanh địa chỉ rồi thử lại.",
         "notConfigured": "Hãy cấu hình nhà cung cấp chép lời trước.",
         "tooLong": "Bản ghi âm quá dài.",
         "tooShort": "Giữ lâu hơn một chút để ghi âm giọng nói.",
         "noInput": "Không phát hiện đầu vào micrô.",
+        "noDevice": "Không tìm thấy micrô. Hãy kết nối rồi thử lại.",
         "failed": "Không thể chép lời âm thanh."
       },
       "slash": {

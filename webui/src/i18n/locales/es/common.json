@@ -964,11 +964,12 @@
       },
       "voiceErrors": {
         "unsupported": "Este navegador no admite entrada de voz.",
-        "permission": "Se requiere permiso de micrófono.",
+        "permission": "Permite el micrófono en la barra de direcciones y vuelve a intentarlo.",
         "notConfigured": "Configura primero un proveedor de transcripción.",
         "tooLong": "La grabación es demasiado larga.",
         "tooShort": "Mantén pulsado un poco más para grabar voz.",
         "noInput": "No se detectó entrada del micrófono.",
+        "noDevice": "No se encontró ningún micrófono. Conéctalo y vuelve a intentarlo.",
         "failed": "No se pudo transcribir el audio."
       },
       "slash": {

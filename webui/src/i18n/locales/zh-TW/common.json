@@ -963,11 +963,12 @@
       },
       "voiceErrors": {
         "unsupported": "目前瀏覽器不支援語音輸入。",
-        "permission": "需要麥克風權限。",
+        "permission": "請在網址列允許麥克風後重試。",
         "notConfigured": "請先設定轉寫供應商。",
         "tooLong": "錄音時間太長。",
         "tooShort": "請延長錄音時間。",
         "noInput": "沒有偵測到麥克風輸入。",
+        "noDevice": "找不到可用的麥克風，請連接後重試。",
         "failed": "語音轉寫失敗。"
       },
       "slash": {
