@@ -1194,6 +1194,30 @@ def test_xai_oauth_login_starts_fresh_browser_flow_with_proxy(
     assert callable(captured["print_fn"])
 
 
+def test_xai_oauth_login_reports_upstream_failure_as_bad_gateway(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    failure = RuntimeError("Could not reach xAI sign-in: ConnectError.")
+
+    def fake_login(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
+
+    with pytest.raises(WebUISettingsError) as exc:
+        login_oauth_provider({"provider": ["xai-oauth"]})
+
+    assert exc.value.status == 502
+    assert str(exc.value) == (
+        "xAI OAuth login failed: Could not reach xAI sign-in: ConnectError."
+    )
+    assert exc.value.__cause__ is failure
+
+
 def test_xai_oauth_logout_removes_token_and_lock(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

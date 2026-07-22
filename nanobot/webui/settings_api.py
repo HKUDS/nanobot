@@ -1322,7 +1322,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 proxy=proxy,
             )
         except Exception as e:
-            raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=401) from e
+            raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=502) from e
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
         return settings_payload()
