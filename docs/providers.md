@@ -433,15 +433,17 @@ For OpenAI Codex:
 nanobot provider login openai-codex --set-main
 ```
 
-For an eligible X Premium / Grok subscription with live X Search:
+For an eligible X Premium / Grok subscription:
 
 ```bash
 nanobot provider login xai-oauth --set-main
 ```
 
-This selects `xai-oauth/grok-4.5`. The provider always exposes xAI's hosted
-`x_search` tool, so Grok can search current X posts and return inline source
-links without invoking a local nanobot tool. Credentials are stored under the
+This selects `xai-oauth/grok-4.5`. The provider reads xAI's model catalog and
+exposes the hosted `x_search` tool only when the selected model advertises
+`supportsBackendSearch`; otherwise the model runs without hosted X Search.
+When enabled, Grok can search current X posts and return inline source links
+without invoking a local nanobot tool. Credentials are stored under the
 active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
 `config.json` and not in Grok Build's credential file.
 

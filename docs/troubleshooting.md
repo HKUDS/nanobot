@@ -144,6 +144,7 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | xAI OAuth needs a proxy | Set `providers.xaiOauth.proxy` before login. It applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
 | xAI login runs on a remote/headless machine | Run `nanobot provider login xai-oauth` in an interactive terminal. If no browser opens, open the printed URL elsewhere and paste the final callback URL or authorization code when prompted. |
 | xAI returns 403 or subscription access denied | Confirm the signed-in account has an eligible X Premium / Grok subscription, then run `nanobot provider login xai-oauth` again. This provider does not use an xAI API key or X Developer OAuth. |
+| xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
 | xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
 
 ## Langfuse Problems

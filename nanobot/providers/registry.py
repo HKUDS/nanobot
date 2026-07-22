@@ -421,7 +421,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://chatgpt.com/backend-api",
         is_oauth=True,
     ),
-    # xAI subscription: OAuth-based, with server-hosted X Search.
+    # xAI subscription: OAuth-based, with capability-gated server-hosted X Search.
     ProviderSpec(
         name="xai_oauth",
         keywords=("xai-oauth", "xai_oauth"),
@@ -432,7 +432,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             ProviderModelSpec(
                 id="xai-oauth/grok-4.5",
                 label="Grok 4.5",
-                description="Grok with live, server-hosted X Search.",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
                 context_window=500000,
             ),
         ),

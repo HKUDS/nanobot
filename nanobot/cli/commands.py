@@ -2870,7 +2870,9 @@ def _login_xai_oauth() -> None:
             raise typer.Exit(1) from exc
     account = token.account_id or "xAI account"
     console.print(f"[green]✓ Authenticated with xAI[/green]  [dim]{account}[/dim]")
-    console.print("[dim]Grok 4.5 can now use live X Search in nanobot.[/dim]")
+    console.print(
+        "[dim]Hosted X Search is enabled automatically when the selected model supports it.[/dim]"
+    )
 
 
 @_register_logout("xai_oauth")

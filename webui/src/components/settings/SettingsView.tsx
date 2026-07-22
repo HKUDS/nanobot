@@ -2993,7 +2993,7 @@ function ProvidersSettings({
               </span>
               <span className="block truncate text-[12px] text-muted-foreground">
                 {isXaiOauthProvider
-                  ? tx("settings.oauth.xaiSubtitle", "X Premium · Live X Search")
+                  ? tx("settings.oauth.xaiSubtitle", "X Premium · Capability-aware X Search")
                   : provider.api_base || provider.default_api_base || provider.name}
               </span>
             </span>
@@ -3035,7 +3035,7 @@ function ProvidersSettings({
                       {isXaiOauthProvider ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-foreground/75">
                           <Search className="h-3 w-3" aria-hidden />
-                          {tx("settings.oauth.xaiBadge", "Live X Search")}
+                          {tx("settings.oauth.xaiBadge", "X Search when supported")}
                         </span>
                       ) : null}
                     </div>
@@ -3051,7 +3051,7 @@ function ProvidersSettings({
                       <p className="mt-1.5 max-w-xl text-[12px] leading-5 text-muted-foreground">
                         {tx(
                           "settings.oauth.xaiHelp",
-                          "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
+                          "Use your X Premium / Grok subscription. Nanobot enables hosted X Search only when the selected model advertises support; OAuth credentials stay on this device.",
                         )}
                       </p>
                     ) : null}

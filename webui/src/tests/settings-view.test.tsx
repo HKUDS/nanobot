@@ -1977,7 +1977,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
   });
 
-  it("explains xAI subscription login and live X Search before signing in", async () => {
+  it("explains capability-gated X Search before xAI sign-in", async () => {
     const base = settingsPayload();
     const xaiProvider = {
       name: "xai_oauth",
@@ -2017,13 +2017,13 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
     const providerLabel = await screen.findByText("xAI (X Premium)");
-    expect(screen.getByText("X Premium · Live X Search")).toBeInTheDocument();
+    expect(screen.getByText("X Premium · Capability-aware X Search")).toBeInTheDocument();
     fireEvent.click(providerLabel.closest("button")!);
 
-    expect(screen.getAllByText("Live X Search").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("X Search when supported").length).toBeGreaterThan(0);
     expect(
       screen.getByText(
-        "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
+        "Use your X Premium / Grok subscription. Nanobot enables hosted X Search only when the selected model advertises support; OAuth credentials stay on this device.",
       ),
     ).toBeInTheDocument();
 

@@ -1295,7 +1295,7 @@ def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
     ]
 
 
-def test_provider_models_payload_returns_xai_oauth_x_search_model() -> None:
+def test_provider_models_payload_returns_xai_oauth_model() -> None:
     payload = provider_models_payload({"provider": ["xai_oauth"]})
 
     assert payload["status"] == "available"
@@ -1304,7 +1304,7 @@ def test_provider_models_payload_returns_xai_oauth_x_search_model() -> None:
         {
             "id": "xai-oauth/grok-4.5",
             "label": "Grok 4.5",
-            "description": "Grok with live, server-hosted X Search.",
+            "description": "Grok via xAI subscription; X Search is enabled when supported.",
             "owned_by": "xAI (X Premium)",
             "context_window": 500000,
         }

@@ -305,7 +305,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `nvidia` | LLM (NVIDIA NIM) | [build.nvidia.com](https://build.nvidia.com/) |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex --set-main` |
-| `xai_oauth` | LLM (X Premium / Grok OAuth + hosted X Search) | `nanobot provider login xai-oauth --set-main` |
+| `xai_oauth` | LLM (X Premium / Grok OAuth + capability-gated hosted X Search) | `nanobot provider login xai-oauth --set-main` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
@@ -711,13 +711,14 @@ Use an eligible X Premium / Grok subscription without putting an API key in
 
 ```bash
 nanobot provider login xai-oauth --set-main
-nanobot agent -m "Search X for today's discussion about nanobot and cite the posts."
+nanobot agent -m "Hello from Grok."
 ```
 
 The default model is `xai-oauth/grok-4.5` with a 500,000-token context window.
-Every request includes xAI's server-hosted `x_search` tool. Keyword, semantic,
-user, and thread searches run inside xAI's Responses API; citations arrive as
-inline links in the model's answer.
+The provider reads xAI's model catalog and includes the server-hosted `x_search`
+tool only when the selected model advertises `supportsBackendSearch`. Models
+without that capability continue normally without hosted X Search. When enabled,
+searches run inside xAI's Responses API and citations arrive as inline links.
 
 This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
 public OAuth client and proxy contract used by
@@ -739,9 +740,10 @@ To use a provider-specific proxy, merge this into `config.json` before login:
 }
 ```
 
-The proxy applies to OAuth discovery, token exchange/refresh, and subscription
-model requests. Because this integration depends on xAI's public Grok Build
-client contract, an upstream contract change may require a nanobot update.
+The proxy applies to OAuth discovery, token exchange/refresh, model-catalog
+lookups, and subscription model requests. Because this integration depends on
+xAI's public Grok Build client contract, an upstream contract change may require
+a nanobot update.
 
 </details>
 

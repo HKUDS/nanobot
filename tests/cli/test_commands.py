@@ -871,7 +871,7 @@ def test_provider_login_xai_oauth_runs_browser_flow_with_configured_proxy(monkey
     assert captured["proxy"] == proxy
     assert callable(captured["print_fn"])
     assert callable(captured["prompt_fn"])
-    assert "Grok 4.5 can now use live X Search" in result.stdout
+    assert "Hosted X Search is enabled automatically when the selected model supports it" in result.stdout
 
 
 def test_config_matches_explicit_ollama_prefix_without_api_key():
