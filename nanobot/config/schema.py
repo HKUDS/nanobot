@@ -154,6 +154,10 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    idle_compact_check_interval_seconds: int = Field(
+        default=0,
+        ge=0,
+    )  # Minimum interval in seconds between scans for idle sessions
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
