@@ -1,3 +1,6 @@
+import sys
+from unittest.mock import patch
+
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
 from nanobot.agent.tools.exec_session import ListExecSessionsTool, WriteStdinTool
 from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
@@ -44,3 +47,30 @@ def test_coding_tool_descriptions_steer_discovery_and_shell_usage() -> None:
     assert "do not use this to start new commands" in write_stdin
     assert "wait_for" in write_stdin
     assert "recover a session_id" in list_sessions
+
+
+def test_exec_tool_shell_guidance_matches_platform() -> None:
+    with patch("nanobot.agent.tools.shell._IS_WINDOWS", False):
+        unix_description = ExecTool().description.lower()
+    assert "on unix" in unix_description
+    assert "powershell" not in unix_description
+    assert "cmd-specific" not in unix_description
+
+    with patch("nanobot.agent.tools.shell._IS_WINDOWS", True):
+        windows_description = ExecTool().description.lower()
+    assert "powershell syntax" in windows_description
+    assert "shell='cmd'" in windows_description
+
+    shell_parameter = ExecTool().parameters["properties"]["shell"]["description"].lower()
+    if sys.platform == "win32":
+        assert "override the windows shell only when needed" in shell_parameter
+        assert "omit to use powershell by default" in shell_parameter
+        assert "powershell" in shell_parameter
+        assert "cmd" in shell_parameter
+        assert "unix" not in shell_parameter
+    else:
+        assert "override the unix shell only when needed" in shell_parameter
+        assert "omit to use bash by default" in shell_parameter
+        assert "unix" in shell_parameter
+        assert "powershell" not in shell_parameter
+        assert "cmd" not in shell_parameter

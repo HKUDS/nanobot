@@ -90,6 +90,17 @@
         } catch {}
       })();
     </script>
+    <title>nanobot</title>
+  </head>
+  <body class="bg-background text-foreground antialiased">
+    <div id="root">
+      <div class="boot-splash">
+        <div class="boot-splash-inner">
+          <span class="boot-dot" aria-hidden="true"></span>
+          <span data-boot-copy>Loading nanobot…</span>
+        </div>
+      </div>
+    </div>
     <script>
       (function () {
         var localeKey = "nanobot.locale";
@@ -122,6 +133,10 @@
             boot: "Cargando nanobot…",
             description: "Interfaz web de nanobot: conversa con tu espacio de trabajo de nanobot."
           },
+          "pt-BR": {
+            boot: "Carregando nanobot…",
+            description: "Interface web do nanobot — converse com o seu workspace do nanobot."
+          },
           vi: {
             boot: "Đang tải nanobot…",
             description: "Giao diện web nanobot — trò chuyện với workspace nanobot của bạn."
@@ -149,6 +164,9 @@
           ) {
             return "zh-TW";
           }
+          if (lower === "pt" || lower.indexOf("pt-") === 0) {
+            return "pt-BR";
+          }
           var base = lower.split("-")[0];
           return copy[base] ? base : "en";
         }
@@ -170,17 +188,6 @@
         } catch {}
       })();
     </script>
-    <title>nanobot</title>
-  </head>
-  <body class="bg-background text-foreground antialiased">
-    <div id="root">
-      <div class="boot-splash">
-        <div class="boot-splash-inner">
-          <span class="boot-dot" aria-hidden="true"></span>
-          <span data-boot-copy>Loading nanobot…</span>
-        </div>
-      </div>
-    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

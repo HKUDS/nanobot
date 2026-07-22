@@ -33,6 +33,9 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
         "/lib64",
         "/etc/alternatives",
         "/etc/ssl/certs",
+        "/etc/pki/tls/certs",
+        "/etc/pki/ca-trust",
+        "/etc/crypto-policies",
         "/etc/resolv.conf",
         "/etc/ld.so.cache",
     ]

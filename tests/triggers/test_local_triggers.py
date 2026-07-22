@@ -13,7 +13,12 @@ from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.triggers.local_runner import run_local_trigger_queue
 from nanobot.triggers.local_store import LocalTriggerStore, TriggerDisabledError
+from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+
+
+def _channel_is_enabled(_name: str) -> bool:
+    return True
 
 
 def _write_delivery_file(path: Path, *, trigger_id: str, delivery_id: str) -> None:
@@ -256,7 +261,12 @@ async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="done")
 
     task = asyncio.create_task(
-        run_local_trigger_queue(store=store, submit_turn=_submit_turn, poll_interval_s=0.01)
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=_submit_turn,
+            is_channel_enabled=_channel_is_enabled,
+            poll_interval_s=0.01,
+        )
     )
     try:
         for _ in range(100):
@@ -299,6 +309,52 @@ async def test_local_trigger_queue_submits_bound_inbound_message(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_local_trigger_queue_rejects_unavailable_target_channel(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="PR review",
+        channel="telegram",
+        chat_id="chat-1",
+        session_key="telegram:chat-1",
+    )
+    delivery = store.enqueue(trigger.id, "Review PR #4502")
+    submitted: list[InboundMessage] = []
+
+    async def _submit_turn(msg: InboundMessage):
+        submitted.append(msg)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="done")
+
+    task = asyncio.create_task(
+        run_local_trigger_queue(
+            store=store,
+            submit_turn=_submit_turn,
+            is_channel_enabled=lambda name: name == "websocket",
+            poll_interval_s=0.01,
+        )
+    )
+    try:
+        for _ in range(100):
+            stored = store.get(trigger.id)
+            if stored and stored.last_status == "error":
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    stored = store.get(trigger.id)
+    assert submitted == []
+    assert stored is not None
+    assert stored.last_status == "error"
+    assert stored.last_error == "target channel is not enabled: telegram"
+    assert store.claim_deliveries() == []
+    record = _read_run_record(store, delivery.id)
+    assert record["status"] == "error"
+    assert record["error"] == "target channel is not enabled: telegram"
+
+
+@pytest.mark.asyncio
 async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
     tmp_path: Path,
 ) -> None:
@@ -322,6 +378,7 @@ async def test_local_trigger_queue_waits_for_submitted_turn_before_ack(
         run_local_trigger_queue(
             store=store,
             submit_turn=_submit_turn,
+            is_channel_enabled=_channel_is_enabled,
             poll_interval_s=0.01,
         )
     )
@@ -381,6 +438,7 @@ async def test_local_trigger_queue_requeues_when_submitted_turn_is_interrupted(
         run_local_trigger_queue(
             store=store,
             submit_turn=_submit_turn,
+            is_channel_enabled=_channel_is_enabled,
             poll_interval_s=0.01,
         )
     )
@@ -426,6 +484,7 @@ async def test_local_trigger_queue_does_not_retry_completed_agent_failure(
         run_local_trigger_queue(
             store=store,
             submit_turn=_submit_turn,
+            is_channel_enabled=_channel_is_enabled,
             poll_interval_s=0.01,
         )
     )
@@ -474,7 +533,12 @@ async def test_local_trigger_queue_recovers_processing_delivery_on_start(
 
     restarted = LocalTriggerStore(tmp_path)
     task = asyncio.create_task(
-        run_local_trigger_queue(store=restarted, submit_turn=_submit_turn, poll_interval_s=0.01)
+        run_local_trigger_queue(
+            store=restarted,
+            submit_turn=_submit_turn,
+            is_channel_enabled=_channel_is_enabled,
+            poll_interval_s=0.01,
+        )
     )
     try:
         for _ in range(100):
@@ -490,3 +554,34 @@ async def test_local_trigger_queue_recovers_processing_delivery_on_start(
     assert submitted[0].content == "Review PR #4591"
     assert submitted[0].metadata["_local_trigger"]["trigger_id"] == trigger.id
     assert restarted.claim_deliveries() == []
+
+
+def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
+    trigger = LocalTrigger.from_dict(
+        {
+            "id": "t1",
+            "name": "n",
+            "enabled": True,
+            "channel": "websocket",
+            "chatId": "c1",
+            "sessionKey": "websocket:c1",
+            "runHistory": [{"runAtMs": None, "status": "ok"}],
+            "createdAtMs": None,
+            "updatedAtMs": None,
+        }
+    )
+    assert trigger.run_history[0].run_at_ms == 0
+    assert trigger.created_at_ms == 0
+    assert trigger.updated_at_ms == 0
+
+    delivery = TriggerDelivery.from_dict(
+        {
+            "id": "d1",
+            "triggerId": "t1",
+            "content": "hi",
+            "createdAtMs": None,
+            "attempts": None,
+        }
+    )
+    assert delivery.created_at_ms == 0
+    assert delivery.attempts == 0

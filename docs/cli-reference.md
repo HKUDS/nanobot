@@ -8,14 +8,17 @@ Use this page when you know what you want to run and need the command shape. For
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
+| Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
-| Check config without calling a model | `nanobot status` | Reads the default config and summarizes the active model/provider |
+| Open the browser workbench | `nanobot webui` | Prepares local WebUI settings, starts the gateway, and opens the browser |
+| Check config without calling a model | `nanobot status` | Summarizes the selected config, workspace, active model, and providers |
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
-| Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running, or use `nanobot gateway --background` |
+| Run the gateway directly | `nanobot gateway` | Service/ops command for WebUI, chat apps, cron, and heartbeat |
 | Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
+| Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
 | Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OAuth providers such as OpenAI Codex and GitHub Copilot |
 
@@ -56,6 +59,7 @@ with `--background`, use `nanobot gateway stop`.
 | Command | Description |
 |---|---|
 | `nanobot onboard` | Initialize or refresh the default config and workspace |
+| `nanobot onboard --refresh` | Refresh an existing config without prompting, preserving existing values |
 | `nanobot onboard --wizard` | Use the interactive setup wizard |
 | `nanobot onboard --config <path> --workspace <path>` | Initialize or refresh a specific instance |
 
@@ -78,11 +82,26 @@ Default paths:
 | `nanobot agent --no-markdown` | Print plain text instead of Rich-rendered Markdown |
 | `nanobot agent --logs` | Show runtime logs while chatting |
 
+In interactive mode, `Enter` sends the current message. Press `Alt+Enter` to add a newline before sending.
+
 Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+## WebUI
+
+| Command | Description |
+|---|---|
+| `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, and open `http://127.0.0.1:8765` |
+| `nanobot webui --background` | Start or reuse a background gateway, then open the WebUI |
+| `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
+| `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
+| `nanobot webui --gateway-port <port>` | Override the gateway health port |
+| `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; provider credentials still require interactive setup |
+
+First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
 ## Gateway
 
-`nanobot gateway` starts enabled chat channels, WebUI/WebSocket when configured, cron-backed system jobs, Dream, heartbeat, and the health endpoint. By default it runs in the foreground, which keeps existing scripts and terminal workflows unchanged. Use `--background` when you want a local macOS, Linux, or Windows process that you can manage from the CLI.
+`nanobot gateway` starts enabled chat channels, WebUI/WebSocket when configured, cron-backed system jobs, Dream, heartbeat, and the health endpoint. Most local browser users should start with `nanobot webui`; use `gateway` directly for service management, chat app operation, and advanced deployment. By default it runs in the foreground, which keeps existing scripts and terminal workflows unchanged. Use `--background` when you want a local macOS, Linux, or Windows process that you can manage from the CLI.
 
 | Command | Description |
 |---|---|
@@ -169,6 +188,9 @@ rename, delete, search, and copy the command for each trigger.
 For webhooks or other external systems, run your own small service and have it
 call this CLI after it decides what message nanobot should receive.
 
+See [Automations](./automations.md) for the broader automation model, WebUI
+management, and delivery behavior.
+
 ## OpenAI-Compatible API
 
 | Command | Description |
@@ -187,6 +209,8 @@ Default API endpoint:
 http://127.0.0.1:8900
 ```
 
+Public binds (`0.0.0.0` or `::`) require `api.apiKey`; send it as a Bearer token on API routes.
+
 See [`openai-api.md`](./openai-api.md) for request examples.
 
 ## Status
@@ -195,7 +219,13 @@ See [`openai-api.md`](./openai-api.md) for request examples.
 nanobot status
 ```
 
-Shows the default config path, workspace path, active model, and provider summary. This command does not currently accept `--config`; use explicit `--config` and `--workspace` on `agent`, `gateway`, or `serve` when debugging a specific instance.
+Shows the config path, workspace path, active model, and provider summary without calling a model.
+
+| Command | Description |
+|---|---|
+| `nanobot status` | Inspect the default instance |
+| `nanobot status --config <path>` | Inspect a specific config |
+| `nanobot status --config <path> --workspace <path>` | Inspect a specific config with a workspace override |
 
 ## Channels
 
@@ -206,6 +236,7 @@ Shows the default config path, workspace path, active model, and provider summar
 | `nanobot channels login <channel>` | Run interactive login for supported channels |
 | `nanobot channels login <channel> --force` | Re-authenticate even if credentials already exist |
 | `nanobot channels login <channel> --config <path>` | Use a specific config file |
+| `nanobot plugins list --config <path>` | Show plugin/channel enabled state for a specific config |
 
 Examples:
 
@@ -217,12 +248,46 @@ nanobot channels status
 
 See [`chat-apps.md`](./chat-apps.md) for channel-specific setup.
 
+## Optional Features
+
+Use these commands when you want nanobot to add or remove a built-in capability
+without hand-editing JSON. Enabling may install the support package first.
+Disabling is for channels such as Telegram, Matrix, or Slack; it keeps your
+saved settings and turns the channel off.
+
+The `plugins` command name is retained for compatibility, but these entries are
+nanobot runtime support packages, not the user-invokable tools shown in WebUI
+Apps. They cannot be attached to a chat turn with `@`.
+
+| Feature name | What it enables |
+|---|---|
+| `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
+| `azure` | Azure identity support for Azure-hosted models |
+| `bedrock` | AWS Bedrock model provider support |
+| `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
+| `olostep` | Olostep web search provider support |
+| A channel name such as `telegram` or `slack` | The connector package and saved channel enablement |
+
+| Command | Description |
+|---|---|
+| `nanobot plugins list` | Show available channels and optional capabilities |
+| `nanobot plugins enable <name>` | Install missing support and enable the feature or channel |
+| `nanobot plugins enable <name> --logs` | Show package install logs while enabling |
+| `nanobot plugins disable <channel>` | Turn off a channel without deleting its saved settings |
+| `nanobot plugins list --config <path>` | Read a specific config file |
+| `nanobot plugins enable <name> --config <path>` | Update a specific config file |
+| `nanobot plugins disable <channel> --config <path>` | Turn off a channel in a specific config file |
+
+Document and PDF reading are included in the standard installation. The old
+`nanobot plugins enable documents` and `nanobot plugins enable pdf` commands
+remain accepted as no-op compatibility aliases.
+
 ## Provider OAuth
 
 | Command | Description |
 |---|---|
-| `nanobot provider login openai-codex` | Authenticate OpenAI Codex provider |
-| `nanobot provider login github-copilot` | Authenticate GitHub Copilot provider |
+| `nanobot provider login openai-codex --set-main` | Authenticate Codex and select its current default model |
+| `nanobot provider login github-copilot --set-main` | Authenticate GitHub Copilot and select its current default model |
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |
 | `nanobot provider logout github-copilot` | Remove GitHub Copilot OAuth state |
 

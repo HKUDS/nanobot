@@ -1,4 +1,4 @@
-"""Session metadata helpers for sustained goals (e.g. ``long_task`` / ``complete_goal``).
+"""Session metadata helpers for explicit sustained goals.
 
 Tools set ``metadata[GOAL_STATE_KEY]``. Reads accept the legacy session key ``thread_goal``
 for older sessions. Callers use ``goal_state_runtime_lines``, ``goal_state_ws_blob``, and
@@ -13,9 +13,10 @@ from typing import Any, Mapping, MutableMapping
 from nanobot.session.manager import SessionManager
 
 GOAL_STATE_KEY = "goal_state"
+GOAL_COMMAND = "/goal"
+MAX_GOAL_OBJECTIVE_CHARS = 4000
 # Older builds stored the same JSON blob under this key.
 _LEGACY_GOAL_STATE_SESSION_KEY = "thread_goal"
-_MAX_OBJECTIVE_IN_RUNTIME = 4000
 _MAX_OBJECTIVE_WS = 600
 
 
@@ -38,9 +39,18 @@ def goal_state_raw(metadata: Mapping[str, Any] | None) -> Any:
 
 
 def sustained_goal_active(metadata: Mapping[str, Any] | None) -> bool:
-    """True when this session has an active sustained objective (``long_task`` bookkeeping)."""
+    """True when this session has an active sustained objective."""
     goal = parse_goal_state(goal_state_raw(metadata))
     return isinstance(goal, dict) and goal.get("status") == "active"
+
+
+def explicit_goal_requested(message_metadata: Mapping[str, Any] | None) -> bool:
+    """True when this turn was explicitly started by the ``/goal`` command."""
+    if not message_metadata:
+        return False
+    if message_metadata.get("goal_requested") is True:
+        return True
+    return str(message_metadata.get("original_command") or "").strip() == GOAL_COMMAND
 
 
 def sustained_goal_turn(
@@ -49,11 +59,7 @@ def sustained_goal_turn(
     message_metadata: Mapping[str, Any] | None = None,
 ) -> bool:
     """True when this turn should use sustained-goal runtime limits."""
-    if sustained_goal_active(metadata):
-        return True
-    if not message_metadata:
-        return False
-    return str(message_metadata.get("original_command") or "").strip() == "/goal"
+    return sustained_goal_active(metadata) or explicit_goal_requested(message_metadata)
 
 
 def parse_goal_state(blob: Any) -> dict[str, Any] | None:
@@ -80,8 +86,8 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     objective = str(goal.get("objective") or "").strip()
     if not objective:
         return ["Goal: active (no objective text stored)."]
-    if len(objective) > _MAX_OBJECTIVE_IN_RUNTIME:
-        objective = objective[:_MAX_OBJECTIVE_IN_RUNTIME].rstrip() + "\n… (truncated)"
+    if len(objective) > MAX_GOAL_OBJECTIVE_CHARS:
+        objective = objective[:MAX_GOAL_OBJECTIVE_CHARS].rstrip() + "\n… (truncated)"
     out = ["Goal (active):", objective]
     hint = str(goal.get("ui_summary") or "").strip()
     if hint:

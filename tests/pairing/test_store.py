@@ -42,6 +42,15 @@ class TestGenerateCode:
         assert store.approve_code(code2) is None
 
 
+class TestFormatPairingReply:
+    def test_points_owner_to_webui_with_command_fallback(self) -> None:
+        reply = store.format_pairing_reply("ABCD-EFGH")
+
+        assert "nanobot WebUI" in reply
+        assert "ABCD-EFGH" in reply
+        assert "/pairing approve ABCD-EFGH" in reply
+
+
 class TestApproveDeny:
     def test_approve_moves_to_approved(self) -> None:
         code = store.generate_code("telegram", "123")
@@ -81,6 +90,21 @@ class TestRevoke:
 
     def test_revoke_unknown_returns_false(self) -> None:
         assert store.revoke("telegram", "999") is False
+
+    def test_clear_channel_removes_approved_and_pending(self) -> None:
+        code = store.generate_code("telegram", "123")
+        store.approve_code(code)
+        store.generate_code("telegram", "456")
+        store.generate_code("discord", "789")
+
+        assert store.clear_channel("telegram") == {"approved": 1, "pending": 1}
+
+        assert store.is_approved("telegram", "123") is False
+        pending = store.list_pending()
+        assert [item["channel"] for item in pending] == ["discord"]
+
+    def test_clear_channel_unknown_returns_zero_counts(self) -> None:
+        assert store.clear_channel("telegram") == {"approved": 0, "pending": 0}
 
 
 class TestListPending:

@@ -137,6 +137,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   ]),
   minimax: brand("minimax.io", "#111827", "MM"),
   mistral: brand("mistral.ai", "#FA520F", "M"),
+  modelscope: brand("modelscope.cn", "#5B5BF6", "MS"),
   moonshot: brand("moonshot.ai", "#111827", "MS"),
   novita: brand("novita.ai", "#7C3AED", "N"),
   olostep: brand("olostep.com", "#111827", "O"),
@@ -189,6 +190,7 @@ export function inferProviderFromModelName(modelName: string | null | undefined)
   if (/gpt-|^o\d|chatgpt|openai/.test(normalized)) return "openai";
   if (/deepseek/.test(normalized)) return "deepseek";
   if (/gemini/.test(normalized)) return "gemini";
+  if (/modelscope/.test(normalized)) return "modelscope";
   if (/qwen|dashscope/.test(normalized)) return "dashscope";
   if (/kimi|moonshot/.test(normalized)) return "moonshot";
   if (/minimax/.test(normalized)) return "minimax";

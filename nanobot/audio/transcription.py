@@ -20,6 +20,7 @@ from nanobot.audio.transcription_registry import (
     get_transcription_provider,
     resolve_transcription_provider,
 )
+from nanobot.config.loader import resolve_env_refs
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.registry import find_by_name
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
@@ -82,7 +83,7 @@ def _provider_default_api_base(provider: str) -> str | None:
 
 
 def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
-    api_key = getattr(provider_cfg, "api_key", None) if provider_cfg else None
+    api_key = resolve_env_refs(getattr(provider_cfg, "api_key", None) or "") if provider_cfg else ""
     if api_key:
         return api_key
 
@@ -97,7 +98,7 @@ def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
 
 
 def _resolve_transcription_api_base(provider: str, provider_cfg: Any) -> str:
-    api_base = getattr(provider_cfg, "api_base", None) if provider_cfg else None
+    api_base = resolve_env_refs(getattr(provider_cfg, "api_base", None) or "") if provider_cfg else ""
     if api_base:
         return api_base
     return _provider_default_api_base(provider) or ""

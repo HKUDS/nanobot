@@ -138,6 +138,9 @@ class _LegacyErrorPrefixTool(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._wrapped.parameters
 
+    def runtime_context_provider(self):
+        return self._wrapped.runtime_context_provider()
+
     @property
     def read_only(self) -> bool:
         return self._wrapped.read_only

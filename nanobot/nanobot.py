@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.hook import AgentHook, SDKCaptureHook
+from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.loop import AgentLoop
 from nanobot.config.schema import Config
 from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
-    SDKRuntimeController,
     build_process_direct_kwargs,
     ensure_single_model_selector,
 )
@@ -73,7 +73,6 @@ class Nanobot:
     def __init__(self, loop: AgentLoop, *, config: Config | None = None) -> None:
         self._loop = loop
         self._config = config
-        self._runtime_overrides = SDKRuntimeController(loop, config=config)
         self.sessions = SessionClient(loop)
         self.memory = MemoryClient(loop)
         self.runtime = RuntimeClient(loop)
@@ -120,6 +119,7 @@ class Nanobot:
         loop = AgentLoop.from_config(
             config,
             image_generation_provider_configs=image_gen_provider_configs(config),
+            hook_factories=[create_file_edit_activity_hook],
         )
         return cls(loop, config=config)
 
@@ -154,20 +154,26 @@ class Nanobot:
         """
         capture = SDKCaptureHook()
         per_run_hooks = [capture, *(hooks or [])]
-        async with self._runtime_overrides.override(model=model, model_preset=model_preset):
-            kwargs = build_process_direct_kwargs(
-                session_key=session_key,
-                channel=channel,
-                chat_id=chat_id,
-                sender_id=sender_id,
-                media=media,
-                ephemeral=ephemeral,
-            )
-            response = await self._loop.process_direct(
-                message,
-                **kwargs,
-                hooks=per_run_hooks,
-            )
+        runtime = self._loop.runtime_resolver.resolve_override(
+            model=model,
+            model_preset=model_preset,
+            config=self._config,
+        )
+        kwargs = build_process_direct_kwargs(
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+            sender_id=sender_id,
+            media=media,
+            ephemeral=ephemeral,
+        )
+        if runtime is not None:
+            kwargs["runtime"] = runtime
+        response = await self._loop.process_direct(
+            message,
+            **kwargs,
+            hooks=per_run_hooks,
+        )
 
         return result_from_response(response, capture)
 
@@ -186,7 +192,11 @@ class Nanobot:
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
-        ensure_single_model_selector(model=model, model_preset=model_preset)
+        runtime = self._loop.runtime_resolver.resolve_override(
+            model=model,
+            model_preset=model_preset,
+            config=self._config,
+        ) or self._loop.llm_runtime()
         queue: asyncio.Queue[StreamEvent | object] = asyncio.Queue(maxsize=256)
         emitter = SDKStreamEmitter(queue)
         stream_hook = SDKStreamingHook(emitter)
@@ -200,55 +210,53 @@ class Nanobot:
             await emitter.text_completed(resuming=resuming)
 
         async def _run() -> RunResult:
-            async with self._runtime_overrides.override(model=model, model_preset=model_preset):
-                kwargs = build_process_direct_kwargs(
-                    session_key=session_key,
-                    channel=channel,
-                    chat_id=chat_id,
-                    sender_id=sender_id,
-                    media=media,
-                    ephemeral=ephemeral,
-                    on_stream=_on_stream,
-                    on_stream_end=_on_stream_end,
+            kwargs = build_process_direct_kwargs(
+                session_key=session_key,
+                channel=channel,
+                chat_id=chat_id,
+                sender_id=sender_id,
+                media=media,
+                ephemeral=ephemeral,
+                on_stream=_on_stream,
+                on_stream_end=_on_stream_end,
+            )
+            kwargs["runtime"] = runtime
+            await emitter.emit(StreamEvent(
+                type=STREAM_EVENT_RUN_STARTED,
+                metadata={
+                    "session_key": session_key,
+                    "channel": channel,
+                    "chat_id": chat_id,
+                    "sender_id": sender_id,
+                    "model": runtime.model,
+                    "model_preset": runtime.model_preset,
+                },
+            ))
+            try:
+                response = await self._loop.process_direct(
+                    message,
+                    **kwargs,
+                    hooks=per_run_hooks,
                 )
+                await emitter.text_completed(resuming=False, force=False)
+                result = result_from_response(response, capture)
                 await emitter.emit(StreamEvent(
-                    type=STREAM_EVENT_RUN_STARTED,
-                    metadata={
-                        "session_key": session_key,
-                        "channel": channel,
-                        "chat_id": chat_id,
-                        "sender_id": sender_id,
-                        "model": self._loop.model,
-                        "model_preset": (
-                            model_preset if model_preset is not None else self._loop.model_preset
-                        ),
-                    },
+                    type=STREAM_EVENT_RUN_COMPLETED,
+                    content=result.content,
+                    result=result,
+                    usage=dict(result.usage),
+                    metadata=dict(result.metadata),
                 ))
-                try:
-                    response = await self._loop.process_direct(
-                        message,
-                        **kwargs,
-                        hooks=per_run_hooks,
-                    )
-                    await emitter.text_completed(resuming=False, force=False)
-                    result = result_from_response(response, capture)
-                    await emitter.emit(StreamEvent(
-                        type=STREAM_EVENT_RUN_COMPLETED,
-                        content=result.content,
-                        result=result,
-                        usage=dict(result.usage),
-                        metadata=dict(result.metadata),
-                    ))
-                    return result
-                except Exception as exc:
-                    await emitter.emit(StreamEvent(
-                        type=STREAM_EVENT_RUN_FAILED,
-                        error=str(exc),
-                        metadata={"exception_type": type(exc).__name__},
-                    ))
-                    raise
-                finally:
-                    emitter.close()
+                return result
+            except Exception as exc:
+                await emitter.emit(StreamEvent(
+                    type=STREAM_EVENT_RUN_FAILED,
+                    error=str(exc),
+                    metadata={"exception_type": type(exc).__name__},
+                ))
+                raise
+            finally:
+                emitter.close()
 
         task = asyncio.create_task(_run())
         return RunStream(task, queue)

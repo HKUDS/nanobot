@@ -1,7 +1,9 @@
 """Document text extraction utilities for nanobot."""
 
 import mimetypes
+from dataclasses import dataclass
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 from loguru import logger
 
@@ -37,6 +39,60 @@ SUPPORTED_EXTENSIONS: set[str] = {
 }
 
 _MAX_TEXT_LENGTH = 200_000
+_MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+_MAX_OFFICE_ARCHIVE_MEMBERS = 10_000
+_MAX_OFFICE_UNCOMPRESSED_SIZE = 256 * 1024 * 1024  # 256 MB
+_MAX_OFFICE_MEMBER_SIZE = 128 * 1024 * 1024  # 128 MB
+_MAX_PDF_CONTENT_STREAM_SIZE = 32 * 1024 * 1024  # 32 MB per page
+_MAX_PDF_ATTACHMENT_PAGES = 100
+
+
+class _TextCollector:
+    """Build bounded parser output without retaining the full document text."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.parts: list[str] = []
+        self.length = 0
+        self.truncated = False
+
+    def add(self, text: str, *, separator: str = "") -> bool:
+        if not text:
+            return True
+        prefix = separator if self.parts else ""
+        chunk = prefix + text
+        remaining = self.limit - self.length
+        if len(chunk) > remaining:
+            if remaining > 0:
+                self.parts.append(chunk[:remaining])
+                self.length += remaining
+            self.truncated = True
+            return False
+        self.parts.append(chunk)
+        self.length += len(chunk)
+        return True
+
+    def render(self) -> str:
+        text = "".join(self.parts)
+        if self.truncated:
+            text += f"... (truncated at {self.limit} chars)"
+        return text
+
+
+class PdfSafetyError(Exception):
+    """Raised when a PDF exceeds a parser safety boundary."""
+
+
+class PdfPageRangeError(Exception):
+    """Raised when a requested PDF page range is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class PdfExtraction:
+    text: str
+    total_pages: int
+    start_page: int
+    end_page: int
 
 
 def extract_text(path: Path) -> str | None:
@@ -54,12 +110,16 @@ def extract_text(path: Path) -> str | None:
 
     if not path.exists():
         return f"[error: file not found: {path}]"
+    try:
+        if path.stat().st_size > _MAX_EXTRACT_FILE_SIZE:
+            return f"[error: file exceeds {_MAX_EXTRACT_FILE_SIZE // (1024 * 1024)} MB limit]"
+    except OSError as e:
+        return f"[error: failed to inspect file: {e!s}]"
 
     ext = path.suffix.lower()
 
-    # Document formats -- each branch lazily imports its parser so that
-    # startup does not pay the ~25 MB cost of loading openpyxl /
-    # python-docx / python-pptx / pypdf up front (see issue #3422).
+    # Parsers stay lazy even though they are bundled so idle processes do not
+    # retain their import cost (see issue #3422).
     if ext == ".pdf":
         return _extract_pdf(path)
     elif ext == ".docx":
@@ -81,19 +141,69 @@ def extract_text(path: Path) -> str | None:
 def _extract_pdf(path: Path) -> str:
     """Extract text from PDF using pypdf."""
     try:
-        from pypdf import PdfReader
-    except ImportError:
-        return "[error: pypdf not installed]"
-    try:
-        reader = PdfReader(path)
-        pages: list[str] = []
-        for i, page in enumerate(reader.pages, 1):
-            text = page.extract_text() or ""
-            pages.append(f"--- Page {i} ---\n{text}")
-        return _truncate("\n\n".join(pages), _MAX_TEXT_LENGTH)
+        result = extract_pdf_pages(
+            path,
+            max_pages=_MAX_PDF_ATTACHMENT_PAGES,
+            max_chars=_MAX_TEXT_LENGTH,
+        )
+        text = result.text
+        if result.end_page < result.total_pages - 1:
+            text += f"\n\n(Showing pages 1-{result.end_page + 1} of {result.total_pages}.)"
+        return text
     except Exception as e:
         logger.exception("Failed to extract PDF {}", path)
         return f"[error: failed to extract PDF: {e!s}]"
+
+
+def extract_pdf_pages(
+    path: Path,
+    *,
+    pages: str | None = None,
+    max_pages: int = _MAX_PDF_ATTACHMENT_PAGES,
+    max_chars: int = _MAX_TEXT_LENGTH,
+) -> PdfExtraction:
+    """Extract a bounded PDF page range using the bundled pypdf reader."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(path, strict=False)
+    total_pages = len(reader.pages)
+    if total_pages == 0:
+        return PdfExtraction("", 0, 0, -1)
+
+    start, end = _parse_pdf_page_range(pages, total_pages)
+    end = min(end, start + max_pages - 1)
+    collector = _TextCollector(max_chars)
+    for index in range(start, end + 1):
+        page = reader.pages[index]
+        contents = page.get_contents()
+        if contents is not None:
+            stream_size = len(contents.get_data())
+            if stream_size > _MAX_PDF_CONTENT_STREAM_SIZE:
+                raise PdfSafetyError(
+                    f"page {index + 1} content stream exceeds "
+                    f"{_MAX_PDF_CONTENT_STREAM_SIZE // (1024 * 1024)} MB limit"
+                )
+        text = (page.extract_text() or "").strip()
+        if text and not collector.add(f"--- Page {index + 1} ---\n{text}", separator="\n\n"):
+            end = index
+            break
+    return PdfExtraction(collector.render(), total_pages, start, end)
+
+
+def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int]:
+    if not pages:
+        return 0, total_pages - 1
+    values = pages.strip().split("-")
+    if len(values) not in {1, 2}:
+        raise PdfPageRangeError(f"invalid page range: {pages}")
+    try:
+        start = int(values[0])
+        end = int(values[-1])
+    except ValueError as e:
+        raise PdfPageRangeError(f"invalid page range: {pages}") from e
+    if start < 1 or end < start or start > total_pages:
+        raise PdfPageRangeError(f"invalid page range: {pages}")
+    return start - 1, min(end, total_pages) - 1
 
 
 def _extract_docx(path: Path) -> str:
@@ -103,9 +213,15 @@ def _extract_docx(path: Path) -> str:
     except ImportError:
         return "[error: python-docx not installed]"
     try:
+        if error := _office_archive_error(path):
+            return error
         doc = DocxDocument(path)
-        paragraphs: list[str] = [p.text for p in doc.paragraphs if p.text.strip()]
-        return _truncate("\n\n".join(paragraphs), _MAX_TEXT_LENGTH)
+        collector = _TextCollector(_MAX_TEXT_LENGTH)
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if text and not collector.add(text, separator="\n\n"):
+                break
+        return collector.render()
     except Exception as e:
         logger.exception("Failed to extract DOCX {}", path)
         return f"[error: failed to extract DOCX: {e!s}]"
@@ -118,19 +234,27 @@ def _extract_xlsx(path: Path) -> str:
     except ImportError:
         return "[error: openpyxl not installed]"
     try:
+        if error := _office_archive_error(path):
+            return error
         wb = load_workbook(path, read_only=True, data_only=True)
         try:
-            sheets: list[str] = []
+            collector = _TextCollector(_MAX_TEXT_LENGTH)
             for sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
-                rows: list[str] = []
+                wrote_header = False
                 for row in ws.iter_rows(values_only=True):
                     row_text = "\t".join(str(cell) if cell is not None else "" for cell in row)
                     if row_text.strip():
-                        rows.append(row_text)
-                if rows:
-                    sheets.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
-            return _truncate("\n\n".join(sheets), _MAX_TEXT_LENGTH)
+                        if not wrote_header:
+                            if not collector.add(
+                                f"--- Sheet: {sheet_name} ---",
+                                separator="\n\n",
+                            ):
+                                return collector.render()
+                            wrote_header = True
+                        if not collector.add(row_text, separator="\n"):
+                            return collector.render()
+            return collector.render()
         finally:
             wb.close()
     except Exception as e:
@@ -145,15 +269,21 @@ def _extract_pptx(path: Path) -> str:
     except ImportError:
         return "[error: python-pptx not installed]"
     try:
+        if error := _office_archive_error(path):
+            return error
         prs = PptxPresentation(path)
-        slides: list[str] = []
+        collector = _TextCollector(_MAX_TEXT_LENGTH)
         for i, slide in enumerate(prs.slides, 1):
             slide_text: list[str] = []
             for shape in slide.shapes:
                 _collect_pptx_shape_text(shape, slide_text)
             if slide_text:
-                slides.append(f"--- Slide {i} ---\n" + "\n".join(slide_text))
-        return _truncate("\n\n".join(slides), _MAX_TEXT_LENGTH)
+                if not collector.add(
+                    f"--- Slide {i} ---\n" + "\n".join(slide_text),
+                    separator="\n\n",
+                ):
+                    break
+        return collector.render()
     except Exception as e:
         logger.exception("Failed to extract PPTX {}", path)
         return f"[error: failed to extract PPTX: {e!s}]"
@@ -182,6 +312,28 @@ def _collect_pptx_shape_text(shape, out: list[str]) -> None:
     text = getattr(shape, "text", "")
     if text:
         out.append(text)
+
+
+def _office_archive_error(path: Path) -> str | None:
+    """Reject oversized or encrypted OOXML containers before parsing XML."""
+    try:
+        with ZipFile(path) as archive:
+            members = archive.infolist()
+    except (BadZipFile, OSError) as e:
+        return f"[error: invalid Office document: {e!s}]"
+    if len(members) > _MAX_OFFICE_ARCHIVE_MEMBERS:
+        return f"[error: Office document contains too many files ({len(members)})]"
+    total_size = 0
+    for member in members:
+        if member.flag_bits & 0x1:
+            return "[error: encrypted Office documents are not supported]"
+        if member.file_size > _MAX_OFFICE_MEMBER_SIZE:
+            return "[error: Office document contains an oversized internal file]"
+        total_size += member.file_size
+        if total_size > _MAX_OFFICE_UNCOMPRESSED_SIZE:
+            limit_mb = _MAX_OFFICE_UNCOMPRESSED_SIZE / (1024 * 1024)
+            return f"[error: Office document expands beyond the {limit_mb:g} MB safety limit]"
+    return None
 
 
 def _extract_text_file(path: Path) -> str:
@@ -227,8 +379,6 @@ def _is_text_extension(ext: str) -> bool:
 # ---------------------------------------------------------------------------
 # High-level helper: split media into images + extracted document text
 # ---------------------------------------------------------------------------
-
-_MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 def is_image_file(path: str) -> bool:

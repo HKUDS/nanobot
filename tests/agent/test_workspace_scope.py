@@ -2,10 +2,12 @@ import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
 from nanobot.agent.tools.message import MessageTool
@@ -150,7 +152,12 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(command="printf ok > scoped-marker.txt")
+        result = await tool.execute(
+            command=(
+                'python -c "from pathlib import Path; '
+                "Path('scoped-marker.txt').write_text('ok')\""
+            )
+        )
     finally:
         reset_workspace_scope(token)
 
@@ -172,7 +179,13 @@ async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Pat
     )
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(command="printf ok > outside-marker.txt", working_dir=str(outside))
+        result = await tool.execute(
+            command=(
+                'python -c "from pathlib import Path; '
+                "Path('outside-marker.txt').write_text('ok')\""
+            ),
+            working_dir=str(outside),
+        )
     finally:
         reset_workspace_scope(token)
 
@@ -362,7 +375,12 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
     tool = SpawnTool(manager)  # type: ignore[arg-type]
     token = bind_workspace_scope(scope)
     try:
-        result = await tool.execute(task="inspect")
+        with request_context(RequestContext(
+            channel="test",
+            chat_id="chat",
+            runtime=MagicMock(),
+        )):
+            result = await tool.execute(task="inspect")
     finally:
         reset_workspace_scope(token)
 

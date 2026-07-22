@@ -14,7 +14,7 @@ Two modes are supported, selected automatically:
    falls back to :class:`azure.identity.aio.DefaultAzureCredential` and
    acquires a bearer token scoped to
    ``https://cognitiveservices.azure.com/.default``.  ``azure-identity``
-   is an optional dependency installed via ``pip install nanobot-ai[azure]``.
+   is an optional dependency installed via ``nanobot plugins enable azure``.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class _AzureTokenProvider:
         except ImportError as exc:
             raise RuntimeError(
                 "Azure OpenAI AAD authentication requires the 'azure-identity' package. "
-                "Install it with: pip install 'nanobot-ai[azure]'"
+                "Run: nanobot plugins enable azure"
             ) from exc
 
         self._scope = scope

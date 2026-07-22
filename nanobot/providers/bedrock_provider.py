@@ -71,7 +71,7 @@ class BedrockProvider(LLMProvider):
             import boto3
         except ImportError as exc:  # pragma: no cover - exercised only without boto3 installed
             raise RuntimeError(
-                "AWS Bedrock provider requires boto3. Install it with `pip install boto3`."
+                "AWS Bedrock provider requires boto3. Run `nanobot plugins enable bedrock`."
             ) from exc
 
         session_kwargs: dict[str, Any] = {}

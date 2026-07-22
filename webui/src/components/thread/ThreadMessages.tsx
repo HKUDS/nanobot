@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -12,27 +12,13 @@ interface ThreadMessagesProps {
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
 export type DisplayUnit = TurnUnit;
-
-/** True when this unit index is the last assistant text slice before the next user message (or end of thread). */
-export function isFinalAssistantSliceBeforeNextUser(
-  units: DisplayUnit[],
-  index: number,
-): boolean {
-  const u = units[index];
-  if (u.type !== "message" || u.message.role !== "assistant") return true;
-  for (let j = index + 1; j < units.length; j++) {
-    const v = units[j];
-    if (v.type === "message" && v.message.role === "user") break;
-    return false;
-  }
-  return true;
-}
 
 export function buildDisplayUnits(
   messages: UIMessage[],
@@ -43,7 +29,7 @@ export function buildDisplayUnits(
   });
 }
 
-export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
+export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
   const flags = new Array<boolean>(units.length).fill(true);
   let hasLaterUnitBeforeUser = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
@@ -66,6 +52,7 @@ export function ThreadMessages({
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
+  slashCommands = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
@@ -76,7 +63,7 @@ export function ThreadMessages({
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
   );
-  const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
+  const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
@@ -103,7 +90,7 @@ export function ThreadMessages({
             ? unit.message.id
             : undefined;
         const forkIndex =
-          unit.type === "message" && unit.message.role === "assistant" && copyFlags[index]
+          unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
         if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
@@ -117,6 +104,7 @@ export function ThreadMessages({
                   isTurnStreaming={liveActivityClusterIndices.has(index)}
                   hasBodyBelow={hasBodyBelow}
                   turnLatencyMs={unit.turnLatencyMs}
+                  startedAtMs={unit.startedAtMs}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   onOpenFilePreview={onOpenFilePreview}
@@ -124,13 +112,9 @@ export function ThreadMessages({
               ) : (
                 <MessageBubble
                   message={unit.message}
-                  showAssistantCopyAction={
-                    unit.message.role === "assistant"
-                      ? copyFlags[index]
-                      : true
-                  }
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  slashCommands={slashCommands}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromHere={
                     onForkFromMessage && forkIndex !== undefined

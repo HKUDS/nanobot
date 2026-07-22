@@ -18,14 +18,15 @@ def runtime_lines(message: Any, workspace: Path, *, skip: bool = False) -> list[
         return []
     text = message.content if isinstance(getattr(message, "content", None), str) else ""
     metadata = message.metadata if isinstance(getattr(message, "metadata", None), Mapping) else None
-    return _cli_app_runtime_lines(text, metadata, workspace)
+    return runtime_lines_for_request(text, metadata, workspace)
 
 
-def _cli_app_runtime_lines(
+def runtime_lines_for_request(
     text: str,
     metadata: Mapping[str, Any] | None,
     workspace: Path,
 ) -> list[str]:
+    """Return CLI App annotations from an immutable request snapshot."""
     structured = metadata.get("cli_apps") if isinstance(metadata, Mapping) else None
     if isinstance(structured, list):
         mentions = [

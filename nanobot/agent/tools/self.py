@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.runtime_state import RuntimeState
 from nanobot.config_base import Base
 
@@ -41,7 +41,7 @@ def _is_subagent_status(value: Any) -> bool:
     return isinstance(value, SubagentStatus)
 
 
-class MyTool(Tool, ContextAware):
+class MyTool(Tool):
     """Check and set the agent loop's runtime configuration."""
 
     _plugin_discoverable = False  # Requires AgentLoop reference; registered manually
@@ -57,7 +57,7 @@ class MyTool(Tool, ContextAware):
 
     BLOCKED = frozenset({
         # Core infrastructure
-        "bus", "provider", "_running", "tools",
+        "bus", "provider", "runtime_resolver", "_running", "tools",
         # Config management
         "_runtime_vars",
         # Subsystems
@@ -68,7 +68,7 @@ class MyTool(Tool, ContextAware):
         "_session_locks", "_active_tasks", "_background_tasks",
         # Security boundaries (inspect + modify both blocked)
         "restrict_to_workspace", "channels_config",
-        "_concurrency_gate", "_unified_session", "_extra_hooks",
+        "_concurrency_gate", "_unified_session", "_extra_hooks", "_hook_factories",
     })
 
     READ_ONLY = frozenset({
@@ -77,7 +77,10 @@ class MyTool(Tool, ContextAware):
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
         "workspace_sandbox",  # read-only view of workspace enforcement level
+        "request",  # current message routing metadata
     })
+
+    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id")
 
     _DENIED_ATTRS = frozenset({
         "__class__", "__dict__", "__bases__", "__subclasses__", "__mro__",
@@ -107,12 +110,15 @@ class MyTool(Tool, ContextAware):
     }
 
     _MAX_RUNTIME_KEYS = 64
+    _MODEL_RUNTIME_FIELDS = frozenset({
+        "model",
+        "model_preset",
+        "context_window_tokens",
+    })
 
     def __init__(self, runtime_state: RuntimeState, modify_allowed: bool = True) -> None:
         self._runtime_state = runtime_state
         self._modify_allowed = modify_allowed
-        self._channel = ""
-        self._chat_id = ""
 
     def __deepcopy__(self, memo: dict[int, Any]) -> MyTool:
         cls = self.__class__
@@ -120,13 +126,7 @@ class MyTool(Tool, ContextAware):
         memo[id(self)] = result
         result._runtime_state = self._runtime_state
         result._modify_allowed = self._modify_allowed
-        result._channel = self._channel
-        result._chat_id = self._chat_id
         return result
-
-    def set_context(self, ctx: RequestContext) -> None:
-        self._channel = ctx.channel
-        self._chat_id = ctx.chat_id
 
     @property
     def name(self) -> str:
@@ -144,6 +144,8 @@ class MyTool(Tool, ContextAware):
             "Scratchpad keys persist across turns but not restarts.\n"
             "Key values: _current_iteration (current progress), "
             "max_iterations - _current_iteration = remaining iterations.\n"
+            "Current routing metadata is available read-only via request.channel, "
+            "request.chat_id, and request.sender_id.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
             "\n"
             "When to use:\n"
@@ -176,6 +178,7 @@ class MyTool(Tool, ContextAware):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
+                    "Use 'request.channel', 'request.chat_id', or 'request.sender_id' for current routing metadata. "
                     "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
                 "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
@@ -184,7 +187,12 @@ class MyTool(Tool, ContextAware):
         }
 
     def _audit(self, action: str, detail: str) -> None:
-        session = f"{self._channel}:{self._chat_id}" if self._channel else "unknown"
+        ctx = current_request_context()
+        session = (
+            ctx.session_key or f"{ctx.channel}:{ctx.chat_id}"
+            if ctx is not None and ctx.channel
+            else "unknown"
+        )
         logger.info("self.{} | {} | session:{}", action, detail, session)
 
     # ------------------------------------------------------------------
@@ -328,9 +336,33 @@ class MyTool(Tool, ContextAware):
 
     # -- inspect --
 
+    def _current_runtime_value(self, key: str) -> tuple[bool, Any]:
+        request_ctx = current_request_context()
+        runtime = request_ctx.runtime if request_ctx is not None else None
+        if runtime is None or key not in self._MODEL_RUNTIME_FIELDS:
+            return False, None
+        return True, getattr(runtime, key)
+
     def _inspect(self, key: str | None) -> str:
         if not key:
             return self._inspect_all()
+        if key == "request" or key.startswith("request."):
+            request_ctx = current_request_context()
+            if request_ctx is None:
+                return ToolResult.error("Error: current request context is unavailable")
+            if key == "request":
+                return self._format_value(
+                    {field: getattr(request_ctx, field) for field in self._REQUEST_FIELDS},
+                    key,
+                )
+            field = key.removeprefix("request.")
+            if field not in self._REQUEST_FIELDS:
+                return ToolResult.error(f"Error: '{key}' not found")
+            return self._format_value(getattr(request_ctx, field), key)
+        if "." not in key:
+            found, value = self._current_runtime_value(key)
+            if found:
+                return self._format_value(value, key)
         top = key.split(".")[0]
         if top in self._DENIED_ATTRS or top.startswith("__"):
             return ToolResult.error(f"Error: '{top}' is not accessible")
@@ -356,8 +388,13 @@ class MyTool(Tool, ContextAware):
         parts: list[str] = []
         # RESTRICTED keys
         for k in self.RESTRICTED:
-            parts.append(self._format_value(getattr(state, k, None), k))
-        parts.append(self._format_value(state.model_preset, "model_preset"))
+            found, value = self._current_runtime_value(k)
+            parts.append(self._format_value(value if found else getattr(state, k, None), k))
+        found, value = self._current_runtime_value("model_preset")
+        parts.append(self._format_value(
+            value if found else state.model_preset,
+            "model_preset",
+        ))
         # Other useful top-level keys shown in description
         for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "workspace_sandbox", "subagents"):
             if _has_real_attr(state, k):
@@ -435,13 +472,16 @@ class MyTool(Tool, ContextAware):
             return ToolResult.error(f"Error: '{key}' must be <= {spec['max']}")
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
             return ToolResult.error(f"Error: '{key}' must be at least {spec['min_len']} characters")
-        setattr(self._runtime_state, key, value)
         if key == "model":
-            self._runtime_state._active_preset = None
-        sync_replay = getattr(self._runtime_state, "_sync_replay_max_messages", None)
-        if key == "context_window_tokens" and callable(sync_replay):
-            sync_replay()
-        if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
+            self._runtime_state.set_runtime_model(value)
+        elif key == "context_window_tokens":
+            self._runtime_state.set_runtime_context_window(value)
+        else:
+            setattr(self._runtime_state, key, value)
+        if key == "max_iterations" and hasattr(
+            self._runtime_state,
+            "_sync_subagent_runtime_limits",
+        ):
             self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
         return f"Set {key} = {value!r} (was {old!r})"

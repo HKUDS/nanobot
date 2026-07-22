@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.runtime_context import RuntimeContextBlock
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -13,42 +13,6 @@ from nanobot.session.goal_state import GOAL_STATE_KEY
 
 def _builder(tmp_path: Path, **kw) -> ContextBuilder:
     return ContextBuilder(workspace=tmp_path, **kw)
-
-
-# ---------------------------------------------------------------------------
-# _build_runtime_context (static)
-# ---------------------------------------------------------------------------
-
-
-class TestBuildRuntimeContext:
-    def test_time_only(self):
-        ctx = ContextBuilder._build_runtime_context(None, None)
-        assert "[Runtime Context" in ctx
-        assert "[/Runtime Context]" in ctx
-        assert "Current Time:" in ctx
-        assert "Channel:" not in ctx
-
-    def test_with_channel_and_chat_id(self):
-        ctx = ContextBuilder._build_runtime_context("telegram", "chat123")
-        assert "Channel: telegram" in ctx
-        assert "Chat ID: chat123" in ctx
-
-    def test_with_sender_id(self):
-        ctx = ContextBuilder._build_runtime_context("cli", "direct", sender_id="user1")
-        assert "Sender ID: user1" in ctx
-
-    def test_with_timezone(self):
-        ctx = ContextBuilder._build_runtime_context(None, None, timezone="Asia/Shanghai")
-        assert "Current Time:" in ctx
-
-    def test_no_channel_no_chat_id_omits_both(self):
-        ctx = ContextBuilder._build_runtime_context(None, None)
-        assert "Channel:" not in ctx
-        assert "Chat ID:" not in ctx
-
-    def test_no_sender_id_omits(self):
-        ctx = ContextBuilder._build_runtime_context("cli", "direct")
-        assert "Sender ID:" not in ctx
 
 
 # ---------------------------------------------------------------------------
@@ -314,68 +278,32 @@ class TestBuildMessages:
         assert messages[1]["role"] == "user"
         assert "hello" in str(messages[1]["content"])
 
-    def test_runtime_context_injected(self, tmp_path):
+    def test_runtime_context_is_not_injected_by_default(self, tmp_path):
         builder = _builder(tmp_path)
         messages = builder.build_messages([], "hello", channel="cli", chat_id="direct")
         user_msg = str(messages[-1]["content"])
-        assert "[Runtime Context" in user_msg
-        assert "hello" in user_msg
+        assert user_msg == "hello"
 
-    def test_session_metadata_injects_active_goal_state(self, tmp_path):
-        builder = _builder(tmp_path)
-        meta = {
-            GOAL_STATE_KEY: {"status": "active", "objective": "Finish docs migration."},
-        }
-        messages = builder.build_messages(
-            [],
-            "hi",
-            channel="cli",
-            chat_id="x",
-            session_metadata=meta,
-        )
-        user_msg = str(messages[-1]["content"])
-        assert "Goal (active):" in user_msg
-        assert "Finish docs migration." in user_msg
-
-    def test_goal_state_does_not_leak_without_session_metadata(self, tmp_path):
-        builder = _builder(tmp_path)
-        other_session_meta = {
-            GOAL_STATE_KEY: {"status": "active", "objective": "Other chat goal."},
-        }
-
-        with_goal = builder.build_messages(
-            [],
-            "hi",
-            channel="websocket",
-            chat_id="chat-a",
-            session_metadata=other_session_meta,
-        )
-        without_goal = builder.build_messages(
-            [],
-            "hi",
-            channel="websocket",
-            chat_id="chat-b",
-            session_metadata={},
-        )
-
-        assert "Other chat goal." in str(with_goal[-1]["content"])
-        assert "Other chat goal." not in str(without_goal[-1]["content"])
-        assert "Goal (active):" not in str(without_goal[-1]["content"])
-
-    def test_current_runtime_lines_are_injected(self, tmp_path):
+    def test_explicit_runtime_context_blocks_are_appended(self, tmp_path):
         builder = _builder(tmp_path)
         messages = builder.build_messages(
             [],
             "please use @zoom tonight",
-            current_runtime_lines=[
-                "CLI App Attachment: @zoom (installed; tool=run_cli_app; entry_point=cli-anything-zoom).",
+            runtime_context_blocks=[
+                RuntimeContextBlock(
+                    source="cli_apps",
+                    content="CLI App Attachment: @zoom (installed; tool=run_cli_app).",
+                ),
             ],
         )
         user_msg = str(messages[-1]["content"])
 
         assert "CLI App Attachment: @zoom" in user_msg
         assert "tool=run_cli_app" in user_msg
-        assert "entry_point=cli-anything-zoom" in user_msg
+        assert user_msg.index("please use @zoom tonight") < user_msg.index(
+            "CLI App Attachment: @zoom"
+        )
+        assert messages[-1]["_meta"]["runtime_context"]["sources"] == ["cli_apps"]
 
     def test_consecutive_same_role_merged(self, tmp_path):
         builder = _builder(tmp_path)

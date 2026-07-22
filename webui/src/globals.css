@@ -22,45 +22,47 @@
     --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
+    --border: 40 8% 90.5%;
+    --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
+    --inline-token-highlight: 221 70% 50%;
     --radius: 0.4375rem;
-    --sidebar: 0 0% 98.5%;
+    --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
-    --sidebar-border: 0 0% 89.8%;
+    --sidebar-border: 40 8% 90.5%;
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
   .dark {
     color-scheme: dark;
-    --background: 0 0% 10%;
+    --background: 0 0% 12%;
     --foreground: 240 4% 96%;
-    --card: 0 0% 12%;
+    --card: 0 0% 14%;
     --card-foreground: 240 4% 96%;
-    --popover: 0 0% 12%;
+    --popover: 0 0% 14%;
     --popover-foreground: 240 4% 96%;
     --primary: 240 5% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 12%;
+    --secondary: 0 0% 14%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 13%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 15%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 18%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
     --ring: 0 0% 83.1%;
-    --sidebar: 0 0% 11.5%;
+    --inline-token-highlight: 217 92% 72%;
+    --sidebar: 0 0% 10.5%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-accent: 0 0% 15.5%;
+    --sidebar-accent: 0 0% 15%;
     --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 0 0% 18%;
+    --sidebar-border: 0 0% 20%;
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
@@ -79,6 +81,7 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    overflow: hidden;
   }
 
   * {
@@ -157,10 +160,7 @@
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
     backdrop-filter: saturate(145%) blur(18px);
-    box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.32),
-      inset 1px 0 0 hsl(var(--background) / 0.52),
-      14px 0 32px -30px rgb(0 0 0 / 0.22);
+    box-shadow: 14px 0 32px -30px rgb(0 0 0 / 0.12);
   }
 
   .dark .host-window-shell,
@@ -172,10 +172,7 @@
 
   .dark .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.96);
-    box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.42),
-      inset 1px 0 0 hsl(var(--foreground) / 0.05),
-      14px 0 34px -30px rgb(0 0 0 / 0.62);
+    box-shadow: 14px 0 34px -30px rgb(0 0 0 / 0.34);
   }
 
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -522,5 +519,72 @@
   }
   .scrollbar-track-transparent::-webkit-scrollbar-track {
     background: transparent;
+  }
+
+  /*
+   * Mobile responsive safety net — keep the chat viewport + composer inside a
+   * narrow viewport (see #4693). These are containment rules: long markdown
+   * (URLs, branch names, file paths, code, tables) wraps or scrolls inside its
+   * own box instead of forcing the whole column — and thus the page — wider
+   * than 100vw. Desktop layout is unchanged; the rules only engage when content
+   * would otherwise overflow. Fenced code blocks keep their own internal
+   * horizontal scroll (CodeBlock and the markdown <pre> wrappers already set
+   * overflow-x: auto), so clipping the thread column horizontally is safe.
+   */
+
+  /* Prose container: allow it to shrink within its column and break long words
+     so long URLs / paths never stretch the conversation wider than 100vw. */
+  .markdown-content {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Long links and inline code break rather than stretch the column. */
+  .markdown-content a,
+  .markdown-content code {
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+  }
+
+  /* Fenced / pre blocks scroll inside their own box, never the page. */
+  .markdown-content pre,
+  .not-prose pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Wide markdown tables scroll horizontally within the conversation column.
+     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
+     custom `table` component (see MarkdownTextRenderer); min-w-max on the
+     <table> keeps natural column widths so it scrolls instead of shrinking. */
+
+  /* Clip any residual horizontal bleed at the thread column edge. Vertical
+     scrolling and internal code-block scroll are unaffected. */
+  .thread-viewport-scrollbar {
+    overflow-x: hidden;
+  }
+
+  .thread-viewport {
+    container-name: thread-viewport;
+    container-type: inline-size;
+  }
+
+  .thread-prompt-rail {
+    display: none;
+    left: 1.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .thread-prompt-rail {
+      display: block;
+    }
+  }
+
+  @container thread-viewport (max-width: 59rem) {
+    .thread-prompt-rail {
+      display: none;
+    }
   }
 }

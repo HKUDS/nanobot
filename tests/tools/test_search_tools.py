@@ -16,6 +16,8 @@ from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
+from nanobot.providers.base import GenerationSettings
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 @pytest.mark.asyncio
@@ -320,8 +322,8 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,
@@ -341,7 +343,14 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     mgr._announce_result = AsyncMock()
 
     status = SubagentStatus(task_id="sub-1", label="label", task_description="search task", started_at=time.monotonic())
-    await mgr._run_subagent("sub-1", "search task", "label", {"channel": "cli", "chat_id": "direct"}, status)
+    await mgr._run_subagent(
+        "sub-1",
+        "search task",
+        "label",
+        {"channel": "cli", "chat_id": "direct"},
+        status,
+        LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    )
 
     assert "find_files" in captured["tool_names"]
     assert "grep" in captured["tool_names"]
@@ -349,8 +358,6 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
 
 def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
     bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
     skills_dir = tmp_path / "skills"
     (skills_dir / "alpha").mkdir(parents=True)
     (skills_dir / "alpha" / "SKILL.md").write_text("# Alpha\n\nhidden\n", encoding="utf-8")
@@ -358,7 +365,6 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
     (skills_dir / "beta" / "SKILL.md").write_text("# Beta\n\nshown\n", encoding="utf-8")
 
     mgr = SubagentManager(
-        provider=provider,
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,

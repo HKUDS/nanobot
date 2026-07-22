@@ -11,6 +11,7 @@ if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
     from nanobot.agent.tools.context import ToolContext
+    from nanobot.runtime_context import RuntimeContextProvider
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
@@ -205,6 +206,10 @@ class Tool(ABC):
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
         return cls()
+
+    def runtime_context_provider(self) -> RuntimeContextProvider | None:
+        """Return optional per-turn prompt context owned by this tool."""
+        return None
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:

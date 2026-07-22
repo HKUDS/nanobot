@@ -126,7 +126,7 @@ export function PromptRail({
       ref={railRef}
       aria-label="User prompt navigation"
       className={cn(
-        "group pointer-events-auto absolute left-7 top-3 z-20 hidden w-9 opacity-100 md:block",
+        "thread-prompt-rail group pointer-events-auto absolute top-3 z-20 w-9 opacity-100",
         "transition-opacity duration-200",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
       )}
@@ -170,8 +170,8 @@ export function PromptRail({
               aria-hidden
               className={cn(
                 "pointer-events-none absolute left-10 top-1/2 z-30 w-[34rem] max-w-[calc(100vw-4rem)] -translate-y-1/2 rounded-[20px] px-4 py-3 text-left",
-                "border border-border/70 bg-popover/95 text-popover-foreground shadow-[0_18px_45px_rgba(0,0,0,0.12)] backdrop-blur-xl",
-                "dark:border-white/10 dark:bg-[#2f2f2f]/95 dark:text-white dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)]",
+                "bg-popover/95 text-popover-foreground shadow-[0_18px_45px_rgba(0,0,0,0.12)] backdrop-blur-xl",
+                "dark:bg-[#2f2f2f]/95 dark:text-white dark:shadow-[0_18px_45px_rgba(0,0,0,0.45)]",
                 "-translate-x-2 scale-[0.98] opacity-0 transition-[opacity,transform] duration-150",
                 "group-hover/marker:translate-x-0 group-hover/marker:scale-100 group-hover/marker:opacity-100",
                 "group-focus-visible/marker:translate-x-0 group-focus-visible/marker:scale-100 group-focus-visible/marker:opacity-100",

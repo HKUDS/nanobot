@@ -93,3 +93,35 @@ async def test_handle_message_group_ignores_unknown() -> None:
 
     assert channel._sent == []
 
+
+@pytest.mark.asyncio
+async def test_handle_message_uses_authorization_id_without_changing_sender() -> None:
+    bus = MessageBus()
+    channel = _DummyChannel({"allowFrom": ["group@g.us"]}, bus)
+
+    await channel._handle_message(
+        sender_id="member-lid",
+        authorization_id="group@g.us",
+        chat_id="group@g.us",
+        content="hello",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "member-lid"
+    assert msg.chat_id == "group@g.us"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_rejects_when_authorization_id_is_not_allowed() -> None:
+    bus = MessageBus()
+    channel = _DummyChannel({"allowFrom": ["member-lid"]}, bus)
+
+    await channel._handle_message(
+        sender_id="member-lid",
+        authorization_id="other-group@g.us",
+        chat_id="other-group@g.us",
+        content="hello",
+    )
+
+    assert bus.inbound_size == 0
+

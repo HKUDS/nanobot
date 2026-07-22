@@ -131,7 +131,7 @@ def test_save_config_drops_legacy_max_messages(tmp_path) -> None:
 
 
 def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
-    from types import SimpleNamespace
+    from nanobot.channels.plugin import load_channel_package
 
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
@@ -154,18 +154,12 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
     monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda: {"qq": load_channel_package("qq")},
+    )
+    monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
-        lambda: {
-            "qq": SimpleNamespace(
-                default_config=lambda: {
-                    "enabled": False,
-                    "appId": "",
-                    "secret": "",
-                    "allowFrom": [],
-                    "msgFormat": "plain",
-                }
-            )
-        },
+        lambda: pytest.fail("onboarding must not import channel runtimes"),
     )
 
     from typer.testing import CliRunner
@@ -283,3 +277,28 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
     config = load_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is False
+
+
+def test_load_config_defaults_remote_package_install_to_disabled(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.tools.webui_allow_remote_package_install is False
+
+
+def test_load_config_accepts_remote_package_install_aliases(tmp_path) -> None:
+    camel_path = tmp_path / "camel.json"
+    camel_path.write_text(
+        json.dumps({"tools": {"webuiAllowRemotePackageInstall": True}}),
+        encoding="utf-8",
+    )
+    snake_path = tmp_path / "snake.json"
+    snake_path.write_text(
+        json.dumps({"tools": {"webui_allow_remote_package_install": True}}),
+        encoding="utf-8",
+    )
+
+    assert load_config(camel_path).tools.webui_allow_remote_package_install is True
+    assert load_config(snake_path).tools.webui_allow_remote_package_install is True

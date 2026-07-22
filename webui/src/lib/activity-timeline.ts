@@ -35,7 +35,13 @@ export interface ActivityGroup {
 }
 
 export type TurnUnit =
-  | { type: "activity"; messages: UIMessage[]; items: ActivityItem[]; turnLatencyMs?: number }
+  | {
+      type: "activity";
+      messages: UIMessage[];
+      items: ActivityItem[];
+      turnLatencyMs?: number;
+      startedAtMs?: number;
+    }
   | { type: "message"; message: UIMessage };
 
 interface NormalizeActivityTimelineOptions {
@@ -91,11 +97,16 @@ export function normalizeActivityTimeline(
   const units: TurnUnit[] = [];
   let turnMessages: UIMessage[] = [];
   let activeTurnId: string | undefined;
+  let activeTurnStartedAtMs: number | undefined;
 
   const flushTurn = (flushOptions: NormalizeActivityTimelineOptions = {}) => {
-    if (turnMessages.length === 0) return;
+    if (turnMessages.length === 0) {
+      activeTurnId = undefined;
+      return;
+    }
 
     const turnUnits: TurnUnit[] = [];
+    const turnStartedAtMs = activeTurnStartedAtMs;
     const orderedTurnMessages = orderMessagesByTurnSeq(turnMessages);
     const visibleMessages = visibleMessagesForTurn(orderedTurnMessages);
     let visibleIndex = 0;
@@ -103,7 +114,12 @@ export function normalizeActivityTimeline(
 
     const flushActivityMessages = () => {
       if (!activityMessages.length) return;
-      pushActivityUnits(turnUnits, activityMessages, visibleMessages.slice(visibleIndex));
+      pushActivityUnits(
+        turnUnits,
+        activityMessages,
+        visibleMessages.slice(visibleIndex),
+        turnStartedAtMs,
+      );
       activityMessages = [];
     };
 
@@ -130,6 +146,7 @@ export function normalizeActivityTimeline(
     units.push(...normalizeCompletedTurnUnits(turnUnits, flushOptions));
     turnMessages = [];
     activeTurnId = undefined;
+    activeTurnStartedAtMs = undefined;
   };
 
   for (const message of messages) {
@@ -137,6 +154,7 @@ export function normalizeActivityTimeline(
       flushTurn();
       units.push({ type: "message", message });
       activeTurnId = message.turnId;
+      activeTurnStartedAtMs = validCreatedAtMs(message.createdAt);
       continue;
     }
 
@@ -206,7 +224,16 @@ function visibleMessagesForTurn(messages: UIMessage[]): UIMessage[] {
   return visibleMessages;
 }
 
-function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], visibleMessages: UIMessage[]) {
+function validCreatedAtMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function pushActivityUnits(
+  units: TurnUnit[],
+  activityMessages: UIMessage[],
+  visibleMessages: UIMessage[],
+  startedAtMs?: number,
+) {
   let runMessages: UIMessage[] = [];
   let runBucket: "file" | "other" | undefined;
   let runSegmentId: string | undefined;
@@ -218,6 +245,7 @@ function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], vis
       messages: runMessages,
       items: runMessages.flatMap(activityItemsForMessage),
       turnLatencyMs: activityTurnLatencyMs(runMessages, visibleMessages),
+      startedAtMs,
     });
     runMessages = [];
     runBucket = undefined;

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import re
 import socket
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from urllib.parse import urlparse
+from urllib.request import getproxies, proxy_bypass
+
+import httpx
 
 _BLOCKED_NETWORKS = [
     ipaddress.ip_network("0.0.0.0/8"),
@@ -22,8 +26,19 @@ _BLOCKED_NETWORKS = [
 ]
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
-
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return whether a bind target is explicitly limited to loopback."""
+    normalized = host.strip().rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    with suppress(ValueError):
+        return ipaddress.ip_address(normalized).is_loopback
+    return False
 
 
 def configure_ssrf_whitelist(cidrs: list[str]) -> None:
@@ -58,7 +73,7 @@ def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(normalized in net for net in _BLOCKED_NETWORKS)
 
 
-def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str]:
+def resolve_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str, tuple[str, ...]]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs.
 
     ``allow_loopback`` is intentionally narrow: it only permits literal
@@ -66,26 +81,27 @@ def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool
     loopback. It does not allow RFC1918, link-local, metadata, or public DNS
     names that happen to resolve to loopback.
 
-    Returns (ok, error_message).  When ok is True, error_message is empty.
+    Returns (ok, error_message, resolved_ips).  When ok is True,
+    resolved_ips contains the public IPs that were validated for this URL.
     """
     try:
         p = urlparse(url)
     except Exception as e:
-        return False, str(e)
+        return False, str(e), ()
 
     if p.scheme not in ("http", "https"):
-        return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
+        return False, f"Only http/https allowed, got '{p.scheme or 'none'}'", ()
     if not p.netloc:
-        return False, "Missing domain"
+        return False, "Missing domain", ()
 
     hostname = p.hostname
     if not hostname:
-        return False, "Missing hostname"
+        return False, "Missing hostname", ()
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
-        return False, f"Cannot resolve hostname: {hostname}"
+        return False, f"Cannot resolve hostname: {hostname}", ()
 
     addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for info in infos:
@@ -95,12 +111,148 @@ def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool
             continue
         addrs.append(addr)
     if allow_loopback and _is_allowed_loopback_target(hostname, addrs):
-        return True, ""
+        return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
     for addr in addrs:
         if _is_private(addr):
-            return False, f"Blocked: {hostname} resolves to private/internal address {addr}"
+            return False, f"Blocked: {hostname} resolves to private/internal address {addr}", ()
 
-    return True, ""
+    return True, "", tuple(dict.fromkeys(str(_normalize_addr(addr)) for addr in addrs))
+
+
+def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str]:
+    """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs."""
+    ok, error, _ = resolve_url_target(url, allow_loopback=allow_loopback)
+    return ok, error
+
+
+def env_proxy_applies_to_url(url: str) -> bool:
+    """Return True when process proxy settings would proxy this URL."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+
+    proxies = getproxies()
+    proxy_url = proxies.get(parsed.scheme) or proxies.get("all")
+    if not proxy_url:
+        return False
+
+    host = parsed.hostname
+    if parsed.port is not None:
+        host = f"[{host}]:{parsed.port}" if ":" in host else f"{host}:{parsed.port}"
+    return not proxy_bypass(host)
+
+
+def httpx_env_proxy_mounts() -> dict[str, httpx.AsyncBaseTransport | None]:
+    """Build HTTPX proxy mounts while leaving direct routes to the base transport."""
+    proxies = getproxies()
+    mounts: dict[str, httpx.AsyncBaseTransport | None] = {}
+    for scheme in ("http", "https", "all"):
+        proxy_url = proxies.get(scheme)
+        if proxy_url:
+            if "://" not in proxy_url:
+                proxy_url = f"http://{proxy_url}"
+            mounts[f"{scheme}://"] = httpx.AsyncHTTPTransport(proxy=httpx.Proxy(proxy_url))
+
+    if not mounts:
+        return {}
+
+    no_proxy = proxies.get("no", "")
+    if no_proxy == "*":
+        return {}
+    for entry in no_proxy.split(","):
+        pattern = _no_proxy_mount_pattern(entry.strip())
+        if pattern:
+            mounts[pattern] = None
+    return mounts
+
+
+def _no_proxy_mount_pattern(hostname: str) -> str | None:
+    if not hostname:
+        return None
+    if "://" in hostname:
+        return hostname
+
+    unbracketed = hostname.strip("[]")
+    with suppress(ValueError):
+        addr = ipaddress.ip_address(unbracketed)
+        return f"all://[{addr}]" if addr.version == 6 else f"all://{addr}"
+
+    if hostname.lower() == "localhost":
+        return "all://localhost"
+    return f"all://*{hostname}"
+
+
+@contextmanager
+def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
+    """Pin DNS lookups for the URL hostname to previously validated IPs.
+
+    This temporarily overrides process-global resolver state. Do not use it
+    directly across awaits unless the caller serializes access; prefer
+    PinnedDNSAsyncTransport for HTTP requests.
+    """
+    try:
+        hostname = urlparse(url).hostname
+    except Exception:
+        hostname = None
+    if not hostname or not resolved_ips:
+        yield
+        return
+
+    pinned_host = hostname.rstrip(".").lower()
+    original_getaddrinfo = socket.getaddrinfo
+
+    def _getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+        if str(host).rstrip(".").lower() != pinned_host:
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+        infos = []
+        for ip in resolved_ips:
+            addr = ipaddress.ip_address(ip)
+            addr_family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
+            if family not in (0, socket.AF_UNSPEC, addr_family):
+                continue
+            sockaddr = (ip, port or 0, 0, 0) if addr_family == socket.AF_INET6 else (ip, port or 0)
+            infos.append((addr_family, type or socket.SOCK_STREAM, proto, "", sockaddr))
+        return infos
+
+    socket.getaddrinfo = _getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
+
+
+class UnsafeURLRequestError(httpx.RequestError):
+    """Raised when an outgoing request is rejected by URL safety validation."""
+
+
+class PinnedDNSAsyncTransport(httpx.AsyncBaseTransport):
+    """HTTPX transport that pins each request to the IPs validated for its URL."""
+
+    _resolver_lock = asyncio.Lock()
+
+    def __init__(
+        self,
+        *,
+        allow_loopback: bool = False,
+        inner: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._allow_loopback = allow_loopback
+        self._inner = inner or httpx.AsyncHTTPTransport()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        ok, error, resolved_ips = resolve_url_target(url, allow_loopback=self._allow_loopback)
+        if not ok:
+            raise UnsafeURLRequestError(error, request=request)
+        async with self._resolver_lock:
+            with pin_resolved_url_dns(url, resolved_ips):
+                return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
 
 
 def validate_resolved_url(url: str) -> tuple[bool, str]:

@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -16,7 +17,9 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.apps.cli.utils import runtime_lines_for_request
 from nanobot.config_base import Base
+from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.security.workspace_access import current_tool_workspace
 
 
@@ -111,6 +114,23 @@ class CliAppsTool(Tool):
             "unknown names are rejected. Execution uses argv, not shell."
             + installed_note
         )
+
+    def runtime_context_provider(self):
+        return self._provide_runtime_context
+
+    async def _provide_runtime_context(
+        self,
+        request: RequestContext,
+    ) -> RuntimeContextBlock | None:
+        lines = runtime_lines_for_request(
+            request.original_user_text or "",
+            request.metadata,
+            request.workspace or self.workspace,
+        )
+        content = wrap_runtime_context_lines(lines)
+        if not content:
+            return None
+        return RuntimeContextBlock(source="cli_apps", content=content)
 
     async def execute(
         self,

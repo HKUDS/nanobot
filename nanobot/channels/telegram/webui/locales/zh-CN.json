@@ -1,0 +1,35 @@
+{
+  "description": "通过 Telegram 会话与 nanobot 聊天。",
+  "requirements": "机器人令牌、允许的用户和网关",
+  "setup": {
+    "docsLabel": "打开 Telegram 配置指南",
+    "officialLabel": "打开 BotFather",
+    "tryIt": "向 Telegram 机器人发送 /start 或一条简短私信。",
+    "summary": "启用只会打开 Telegram 支持；收发消息前仍需填写 BotFather 令牌。",
+    "steps": [
+      "使用 BotFather 创建机器人并复制令牌。",
+      "填写令牌并选择哪些用户可以向机器人发送消息。",
+      "保存并启用 Telegram，然后向机器人发送私信或在群组中提及它。"
+    ],
+    "fields": {
+      "token": {
+        "label": "机器人令牌",
+        "placeholder": "123456:ABC...",
+        "help": "使用 BotFather 创建。"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "* 或 Telegram 用户 ID",
+        "help": "留空则使用配对码。"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      }
+    }
+  }
+}

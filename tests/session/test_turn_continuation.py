@@ -8,7 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
-from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.goal_state import (
+    GOAL_STATE_KEY,
+    explicit_goal_requested,
+    sustained_goal_turn,
+)
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_KIND_META,
     INTERNAL_CONTINUATION_META,
@@ -50,6 +54,8 @@ async def test_maybe_continue_turn_queues_internal_message():
                 "origin_message_id": "msg-0",
                 "_wants_stream": True,
                 "webui": True,
+                "original_command": "/goal",
+                "goal_requested": True,
             },
         ),
         session_key="feishu:c1",
@@ -74,6 +80,8 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert queued.metadata["message_id"] == "msg-1"
     assert queued.metadata["origin_message_id"] == "msg-0"
     assert queued.metadata["_wants_stream"] is True
+    assert not explicit_goal_requested(queued.metadata)
+    assert sustained_goal_turn(meta, message_metadata=queued.metadata)
     assert "Finish the migration." in queued.content
     assert ctx.all_messages == messages[:-1]
     assert ctx.final_content == ""

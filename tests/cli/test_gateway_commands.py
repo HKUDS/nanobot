@@ -88,13 +88,22 @@ def _test_app(tmp_path: Path, config: Config | None = None):
     app = typer.Typer()
     fake_runtime = FakeRuntime(tmp_path)
     fake_service = FakeServiceInstaller(tmp_path)
-    run_calls: list[tuple[Config, int | None]] = []
+    run_calls: list[tuple[Config, int | None, str | None]] = []
+    prepare_calls: list[tuple[Config, str]] = []
 
     def load_runtime_config(_config_path: str | None, _workspace: str | None) -> Config:
         return config or Config()
 
-    def run_gateway(config: Config, *, port: int | None = None) -> None:
-        run_calls.append((config, port))
+    def run_gateway(
+        config: Config,
+        *,
+        port: int | None = None,
+        webui_bundle_mode: str | None = None,
+    ) -> None:
+        run_calls.append((config, port, webui_bundle_mode))
+
+    def prepare_webui_bundle(config: Config, mode: str) -> None:
+        prepare_calls.append((config, mode))
 
     app.add_typer(
         create_gateway_app(
@@ -104,36 +113,39 @@ def _test_app(tmp_path: Path, config: Config | None = None):
             run_gateway=run_gateway,
             runtime_factory=lambda **_kwargs: fake_runtime,
             service_factory=lambda: fake_service,
+            prepare_webui_bundle=prepare_webui_bundle,
         ),
         name="gateway",
     )
-    return app, fake_runtime, fake_service, run_calls
+    return app, fake_runtime, fake_service, run_calls, prepare_calls
 
 
 def test_gateway_default_still_runs_foreground(tmp_path):
-    app, _runtime, _service, calls = _test_app(tmp_path)
+    app, _runtime, _service, calls, _prepare_calls = _test_app(tmp_path)
 
     result = runner.invoke(app, ["gateway", "--port", "18791"])
 
     assert result.exit_code == 0
     assert len(calls) == 1
     assert calls[0][1] == 18791
+    assert calls[0][2] == "warn"
 
 
 def test_gateway_background_starts_detached_runtime(tmp_path):
     config = Config()
     config.gateway.port = 18792
-    app, fake_runtime, _service, _calls = _test_app(tmp_path, config=config)
+    app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config)
 
     result = runner.invoke(app, ["gateway", "--background"])
 
     assert result.exit_code == 0
     assert "Gateway started in the background" in result.stdout
     assert fake_runtime.started_options == GatewayStartOptions(port=18792)
+    assert prepare_calls == [(config, "warn")]
 
 
 def test_gateway_rejects_conflicting_modes(tmp_path):
-    app, _runtime, _service, _calls = _test_app(tmp_path)
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
 
     result = runner.invoke(app, ["gateway", "--foreground", "--background"])
 
@@ -142,7 +154,7 @@ def test_gateway_rejects_conflicting_modes(tmp_path):
 
 
 def test_gateway_status_uses_runtime(tmp_path):
-    app, _runtime, _service, _calls = _test_app(tmp_path)
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
 
     result = runner.invoke(app, ["gateway", "status"])
 
@@ -152,7 +164,7 @@ def test_gateway_status_uses_runtime(tmp_path):
 
 
 def test_gateway_logs_can_read_without_following(tmp_path):
-    app, _runtime, _service, _calls = _test_app(tmp_path)
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
 
     result = runner.invoke(app, ["gateway", "logs", "--tail", "12", "--no-follow"])
 
@@ -161,7 +173,7 @@ def test_gateway_logs_can_read_without_following(tmp_path):
 
 
 def test_gateway_stop_treats_not_running_as_clean(tmp_path):
-    app, fake_runtime, _service, _calls = _test_app(tmp_path)
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
 
     def fake_stop(*, timeout_s: int) -> RuntimeResult:
         fake_runtime.stop_timeout = timeout_s
@@ -179,7 +191,7 @@ def test_gateway_stop_treats_not_running_as_clean(tmp_path):
 def test_gateway_restart_starts_background_runtime(tmp_path):
     config = Config()
     config.gateway.port = 18793
-    app, fake_runtime, _service, _calls = _test_app(tmp_path, config=config)
+    app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config)
 
     result = runner.invoke(app, ["gateway", "restart", "--timeout", "9", "--verbose"])
 
@@ -187,12 +199,13 @@ def test_gateway_restart_starts_background_runtime(tmp_path):
     assert "Gateway restarted in the background" in result.stdout
     assert fake_runtime.stop_timeout == 9
     assert fake_runtime.restarted_options == GatewayStartOptions(port=18793, verbose=True)
+    assert prepare_calls == [(config, "warn")]
 
 
 def test_gateway_install_service_uses_service_installer(tmp_path):
     config = Config()
     config.gateway.port = 18794
-    app, _runtime, service, _calls = _test_app(tmp_path, config=config)
+    app, _runtime, service, _calls, _prepare_calls = _test_app(tmp_path, config=config)
 
     result = runner.invoke(app, ["gateway", "install-service", "--dry-run", "--manager", "systemd"])
 
@@ -205,7 +218,7 @@ def test_gateway_install_service_uses_service_installer(tmp_path):
 
 
 def test_gateway_uninstall_service_uses_service_installer(tmp_path):
-    app, _runtime, service, _calls = _test_app(tmp_path)
+    app, _runtime, service, _calls, _prepare_calls = _test_app(tmp_path)
 
     result = runner.invoke(
         app,

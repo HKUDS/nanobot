@@ -118,6 +118,9 @@ Manage triggers from the WebUI Automations view. You can search, pause/resume,
 rename, delete, and copy the trigger command there. A session may have multiple
 triggers, just like it may have multiple scheduled automations.
 
+See [Automations](./automations.md) for how local triggers fit with scheduled
+automations, heartbeat, and gateway delivery.
+
 ## Periodic Tasks
 
 Periodic background checks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). When `nanobot gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers only results that pass the notification gate to your most recently active chat channel. If there are no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.

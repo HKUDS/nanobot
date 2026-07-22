@@ -9,6 +9,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+
 RESTART_NOTIFY_CHANNEL_ENV = "NANOBOT_RESTART_NOTIFY_CHANNEL"
 RESTART_NOTIFY_CHAT_ID_ENV = "NANOBOT_RESTART_NOTIFY_CHAT_ID"
 RESTART_NOTIFY_METADATA_ENV = "NANOBOT_RESTART_NOTIFY_METADATA"
@@ -40,9 +42,14 @@ def set_restart_notice_to_env(
     os.environ[RESTART_NOTIFY_CHANNEL_ENV] = channel
     os.environ[RESTART_NOTIFY_CHAT_ID_ENV] = chat_id
     os.environ[RESTART_STARTED_AT_ENV] = str(time.time())
-    if metadata:
+    persisted_metadata = dict(metadata or {})
+    persisted_metadata.pop(WEBUI_TURN_METADATA_KEY, None)
+    if persisted_metadata:
         try:
-            os.environ[RESTART_NOTIFY_METADATA_ENV] = json.dumps(metadata, default=str)
+            os.environ[RESTART_NOTIFY_METADATA_ENV] = json.dumps(
+                persisted_metadata,
+                default=str,
+            )
         except (TypeError, ValueError):
             os.environ.pop(RESTART_NOTIFY_METADATA_ENV, None)
     else:

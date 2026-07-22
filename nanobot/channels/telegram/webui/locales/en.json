@@ -1,0 +1,35 @@
+{
+  "description": "Chat with nanobot from Telegram chats.",
+  "requirements": "Bot token, allowed users, gateway",
+  "setup": {
+    "docsLabel": "Open Telegram setup",
+    "officialLabel": "Open BotFather",
+    "tryIt": "Send /start or a short DM to your Telegram bot.",
+    "summary": "Enable turns on Telegram support. Telegram still needs a BotFather token before messages can flow.",
+    "steps": [
+      "Create a bot with BotFather and copy its token.",
+      "Add the token and choose who can message the bot.",
+      "Save and enable Telegram, then send the bot a direct message or mention it in a group."
+    ],
+    "fields": {
+      "token": {
+        "label": "Bot token",
+        "placeholder": "123456:ABC...",
+        "help": "Create it with BotFather."
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "* or Telegram user IDs",
+        "help": "Leave empty to use pairing codes."
+      },
+      "groupPolicy": {
+        "label": "Group behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      }
+    }
+  }
+}

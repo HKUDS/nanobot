@@ -291,6 +291,8 @@ class FallbackProvider(LLMProvider):
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:
+        if LLMProvider.is_arrearage_response(response):
+            return True
         if response.error_should_retry is False:
             return False
         status = response.error_status_code

@@ -19,6 +19,8 @@ const COMMANDS: SlashCommand[] = [
     title: "Stop current task",
     description: "Cancel the active agent turn.",
     icon: "square",
+    lifecycle: "stop_active_turn",
+    acceptsArgs: false,
   },
   {
     command: "/history",
@@ -26,6 +28,8 @@ const COMMANDS: SlashCommand[] = [
     description: "Print the last N persisted messages.",
     icon: "history",
     argHint: "[n]",
+    lifecycle: "side_channel",
+    acceptsArgs: true,
   },
 ];
 
@@ -331,8 +335,8 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
-    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
-    expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
+    expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
+    expect(screen.getByRole("button", { name: "Attach files" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
@@ -433,6 +437,49 @@ describe("ThreadComposer", () => {
 
     await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
+  });
+
+  it("distinguishes a missing microphone from a blocked permission", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    getUserMedia.mockRejectedValue(Object.assign(new Error("no microphone"), {
+      name: "NotFoundError",
+    }));
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No microphone was found. Connect a microphone and try again.")).toBeInTheDocument();
+    });
+  });
+
+  it("clears a previous voice error when retrying microphone access", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    getUserMedia.mockRejectedValueOnce(new Error("permission denied"));
+    const onTranscribeAudio = vi.fn(async () => "voice retry");
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    fireEvent.click(voiceButton);
+    await waitFor(() => expect(screen.getByText("Allow microphone access in the address bar, then retry.")).toBeInTheDocument());
+
+    fireEvent.click(voiceButton);
+
+    await waitFor(() => expect(screen.queryByText("Allow microphone access in the address bar, then retry.")).not.toBeInTheDocument());
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
   });
 
   it("supports press-and-hold voice recording", async () => {
@@ -850,6 +897,29 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
+  it("offers stop autocomplete once the user starts typing it", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/sto" } });
+
+    expect(screen.getByRole("option", { name: /\/stop/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("/stop");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("renders slash commands as direct actions with current status", () => {
     render(
       <ThreadComposer
@@ -863,6 +933,8 @@ describe("ThreadComposer", () => {
             description: "Show or switch the active model preset.",
             icon: "brain",
             argHint: "[preset]",
+            lifecycle: "side_channel",
+            acceptsArgs: true,
           },
           COMMANDS[1],
         ]}
@@ -886,7 +958,7 @@ describe("ThreadComposer", () => {
         onStop={onStop}
         isStreaming
         placeholder="Type your message..."
-        slashCommands={[COMMANDS[1]]}
+        slashCommands={COMMANDS}
       />,
     );
 
@@ -940,6 +1012,8 @@ describe("ThreadComposer", () => {
             title: `Command ${index}`,
             description: `Description ${index}`,
             icon: "activity",
+            lifecycle: "side_channel",
+            acceptsArgs: false,
           }))}
         />,
       );
@@ -1115,14 +1189,15 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("opens skills only from a $ reference anywhere", () => {
+  it("opens skills only from a $ reference and prioritizes the skill name", () => {
+    const skillName = "arxiv-intelligence-filter";
     render(
         <ThreadComposer
           onSend={vi.fn()}
           placeholder="Type your message..."
           skills={[{
-            name: "github",
-            description: "Work with pull requests and issues",
+            name: skillName,
+            description: "Fetch and summarize the latest AI research papers every day",
             source: "builtin",
             available: true,
           }]}
@@ -1134,15 +1209,18 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "/git", selectionStart: 4 } });
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
 
-    fireEvent.change(input, { target: { value: "please use $git", selectionStart: 15 } });
+    fireEvent.change(input, { target: { value: "please use $arxiv", selectionStart: 17 } });
 
     const palette = screen.getByRole("listbox", { name: "Slash commands" });
-    expect(within(palette).getByRole("option", { name: /github/i })).toHaveTextContent("$github");
+    const option = within(palette).getByRole("option", { name: new RegExp(skillName, "i") });
+    const name = within(option).getByText(skillName);
+    expect(name).not.toHaveClass("truncate");
+    expect(within(option).queryByText(`$${skillName}`)).not.toBeInTheDocument();
     expect(within(palette).queryByText("/model")).not.toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: "Tab" });
 
-    expect(input).toHaveValue("please use $github ");
+    expect(input).toHaveValue(`please use $${skillName} `);
   });
 
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {
@@ -1215,6 +1293,42 @@ describe("ThreadComposer", () => {
     expect(logo.className).toContain("top-1/2");
     expect(logo.className).toContain("left-1/2");
     expect(logo.className).not.toContain("-top-");
+  });
+
+  it("uses the shared accent when an installed CLI app has no brand metadata", () => {
+    const mention = "@obsidian-agent-cli";
+    const app: CliAppInfo = {
+      name: "obsidian-agent-cli",
+      display_name: "Obsidian CLI",
+      category: "productivity",
+      description: "Obsidian automation",
+      requires: "",
+      source: "local",
+      entry_point: "obsidian-agent",
+      install_supported: true,
+      installed: true,
+      available: true,
+      status: "installed",
+      logo_url: null,
+      brand_color: null,
+      skill_installed: true,
+    };
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        cliApps={[app]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: mention, selectionStart: mention.length },
+    });
+
+    const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
+    expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(token.getAttribute("style")).not.toContain("var(--primary)");
   });
 
   it("opens the slash command palette downward when there is more room below", async () => {
@@ -1312,6 +1426,175 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
   });
 
+  it("marks known slash commands as side-channel sends", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/history" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
+  });
+
+  it("does not infer side-channel behavior before command metadata loads", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/status", undefined, undefined);
+  });
+
+  it("marks new chat commands as side-channel sends that finalize the active turn", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/new",
+            title: "New chat",
+            description: "Reset this chat and start a fresh conversation.",
+            icon: "square-pen",
+            lifecycle: "finalize_active_turn",
+            acceptsArgs: false,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "/new",
+      undefined,
+      { sideChannel: true, finalizeActiveTurn: true },
+    );
+  });
+
+  it("does not classify exact-only slash commands with arguments", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/new",
+            title: "New chat",
+            description: "Reset this chat and start a fresh conversation.",
+            icon: "square-pen",
+            lifecycle: "finalize_active_turn",
+            acceptsArgs: false,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/new with a title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
+  });
+
+  it("routes a manually submitted stop command through the stop handler", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/stop" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps goal task commands on the normal agent turn path", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/goal",
+            title: "Start long-running goal",
+            description: "Tell the agent to treat the request as a long-running goal.",
+            icon: "activity",
+            argHint: "<goal>",
+            lifecycle: "agent_turn_with_args",
+            acceptsArgs: true,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/goal fix the release blocker" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "/goal fix the release blocker",
+      undefined,
+      undefined,
+    );
+  });
+
+  it("keeps goal usage commands on the side-channel path", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={[
+          {
+            command: "/goal",
+            title: "Start long-running goal",
+            description: "Tell the agent to treat the request as a long-running goal.",
+            icon: "activity",
+            argHint: "<goal>",
+            lifecycle: "agent_turn_with_args",
+            acceptsArgs: true,
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/goal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/goal", undefined, { sideChannel: true });
+  });
+
   it("shows a stop button while streaming", () => {
     const onStop = vi.fn();
     render(
@@ -1352,6 +1635,158 @@ describe("ThreadComposer", () => {
 
     expect(onSend).toHaveBeenCalledWith("keep the UI minimal");
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
+  });
+
+  it("guides queued guidance when Enter is pressed again", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "send this guidance now" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("");
+    expect(screen.getByText("send this guidance now")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("send this guidance now")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("send this guidance now");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("send this guidance now")).not.toBeInTheDocument();
+  });
+
+  it("disarms the second Enter shortcut when keyboard voice recording starts", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => "voice guidance");
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        onTranscribeAudio={onTranscribeAudio}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+
+    await waitForVoiceCapture();
+    fireEvent.keyUp(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalled());
+  });
+
+  it("disarms the second Enter shortcut after stopping the active response", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep this queued")).toBeInTheDocument();
+  });
+
+  it("disarms the second Enter shortcut when the composer loses focus", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "leave this queued" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText("leave this queued")).toBeInTheDocument();
+  });
+
+  it("guides the newly queued prompt when older guidance is still waiting", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "older guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "guide this one now" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("guide this one now");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("older guidance")).toBeInTheDocument();
+    expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
   });
 
   it("keeps queued guidance attached to the composer and sends it one item at a time", async () => {
@@ -1702,6 +2137,19 @@ describe("ThreadComposer", () => {
       expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
     });
 
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="chat-a"
+        placeholder="Type your message..."
+      />,
+    );
+    expect(await screen.findByText("remember this edited follow-up")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+
     unmount();
     const remount = render(
       <ThreadComposer
@@ -1714,6 +2162,8 @@ describe("ThreadComposer", () => {
     );
 
     expect(await screen.findByText("remember this edited follow-up")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
     expect(onSend).toHaveBeenCalledWith("remember this edited follow-up");
 

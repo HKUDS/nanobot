@@ -129,6 +129,7 @@ class ImageGenerationTool(Tool):
             "api_base": provider.api_base if provider else None,
             "extra_headers": provider.extra_headers if provider else None,
             "extra_body": provider.extra_body if provider else None,
+            "proxy": provider.proxy if provider else None,
         }
         return cls(**kwargs)
 

@@ -16,6 +16,11 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
 
 
+def test_agent_timezone_rejects_unknown_iana_name() -> None:
+    with pytest.raises(ValueError, match="unknown timezone"):
+        Config.model_validate({"agents": {"defaults": {"timezone": "Not/AZone"}}})
+
+
 def test_provider_api_type_accepts_exact_values_only() -> None:
     config = Config.model_validate({
         "providers": {
@@ -217,6 +222,23 @@ def test_model_presets_accepts_camel_case_root_key() -> None:
 
     assert config.model_presets["fast"].model == "openai/gpt-4.1"
     assert config.model_presets["fast"].provider == "openai"
+
+
+def test_model_presets_serializes_with_camel_case_root_key() -> None:
+    config = Config.model_validate({
+        "model_presets": {
+            "fast": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+            }
+        },
+    })
+
+    dumped = config.model_dump(mode="json", by_alias=True)
+
+    assert "modelPresets" in dumped
+    assert "model_presets" not in dumped
+    assert dumped["modelPresets"]["fast"]["model"] == "openai/gpt-4.1"
 
 
 def test_resolve_preset_can_target_named_preset_without_activating() -> None:

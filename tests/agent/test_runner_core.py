@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -17,7 +18,7 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 @pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     captured_second_call: list[dict] = []
@@ -41,8 +42,8 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "do task"},
@@ -74,7 +75,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
 
 @pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -85,8 +86,8 @@ async def test_runner_returns_max_iterations_fallback():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[],
         tools=tools,
         model="test-model",
@@ -108,7 +109,7 @@ async def test_runner_returns_max_iterations_fallback():
 
 @pytest.mark.asyncio
 async def test_runner_uses_no_tools_finalization_after_max_iterations():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
@@ -137,8 +138,8 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "inspect the repo"}],
         tools=tools,
         model="test-model",
@@ -160,7 +161,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
 
 @pytest.mark.asyncio
 async def test_runner_times_out_hung_llm_request():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -171,9 +172,9 @@ async def test_runner_times_out_hung_llm_request():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
+    runner = AgentRunner()
     started = time.monotonic()
-    result = await runner.run(AgentRunSpec(
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hello"}],
         tools=tools,
         model="test-model",
@@ -188,9 +189,9 @@ async def test_runner_times_out_hung_llm_request():
 
 
 @pytest.mark.asyncio
-async def test_runner_does_not_apply_outer_wall_timeout_to_streaming_requests():
+async def test_runner_applies_outer_wall_timeout_to_streaming_requests():
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     streamed: list[str] = []
@@ -214,10 +215,15 @@ async def test_runner_does_not_apply_outer_wall_timeout_to_streaming_requests():
         async def on_stream(self, context: AgentHookContext, delta: str) -> None:
             streamed.append(delta)
 
-    runner = AgentRunner(provider)
-    wait_for = AsyncMock(side_effect=AssertionError("streaming path must not use wait_for"))
-    with patch("nanobot.agent.runner.asyncio.wait_for", wait_for):
-        result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    wait_for_calls: list[float] = []
+
+    async def fake_wait_for(coro, *, timeout):
+        wait_for_calls.append(timeout)
+        return await coro
+
+    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
+        result = await runner.run(make_run_spec(provider,
             initial_messages=[{"role": "user", "content": "think for a while"}],
             tools=tools,
             model="test-model",
@@ -231,12 +237,111 @@ async def test_runner_does_not_apply_outer_wall_timeout_to_streaming_requests():
     assert result.final_content == "still alive"
     assert streamed == ["still ", "alive"]
     provider.chat_with_retry.assert_not_awaited()
-    wait_for.assert_not_awaited()
+    assert wait_for_calls == [300.0]
+
+
+@pytest.mark.asyncio
+async def test_runner_times_out_never_ending_streaming_request():
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await asyncio.sleep(3600)
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class StreamingHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+    async def fake_wait_for(coro, *, timeout):
+        coro.close()
+        raise asyncio.TimeoutError
+
+    runner = AgentRunner()
+    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
+        result = await runner.run(make_run_spec(provider,
+            initial_messages=[{"role": "user", "content": "think forever"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=StreamingHook(),
+            llm_timeout_s=200,
+        ))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == "Error calling LLM: timed out after 400s"
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_progress_reasoning_on_streaming_wall_timeout():
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.supports_progress_deltas = True
+    events: list[tuple[str, str | None]] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        try:
+            await on_content_delta("<think>working...</think>")
+            await asyncio.sleep(3600)
+        finally:
+            events.append(("provider_cancelled", None))
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class ProgressReasoningHook(AgentHook):
+        async def emit_reasoning(self, reasoning_content: str | None) -> None:
+            if reasoning_content:
+                events.append(("reasoning", reasoning_content))
+
+        async def emit_reasoning_end(self) -> None:
+            events.append(("reasoning_end", None))
+
+    real_wait_for = asyncio.wait_for
+
+    async def fake_wait_for(coro, *, timeout):
+        assert timeout == 300.0
+        return await real_wait_for(coro, timeout=0.01)
+
+    runner = AgentRunner()
+    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
+        result = await runner.run(make_run_spec(provider,
+            initial_messages=[{"role": "user", "content": "think forever"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=ProgressReasoningHook(),
+            progress_callback=AsyncMock(),
+            stream_progress_deltas=True,
+            llm_timeout_s=1,
+        ))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == "Error calling LLM: timed out after 300s"
+    assert events == [
+        ("reasoning", "working..."),
+        ("provider_cancelled", None),
+        ("reasoning_end", None),
+    ]
+    provider.chat_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_runner_replaces_empty_tool_result_with_marker():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     captured_second_call: list[dict] = []
@@ -258,8 +363,8 @@ async def test_runner_replaces_empty_tool_result_with_marker():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="")
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
@@ -275,7 +380,7 @@ async def test_runner_replaces_empty_tool_result_with_marker():
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
     """Empty responses get 2 silent retries before finalization kicks in."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
@@ -298,8 +403,8 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
@@ -320,7 +425,7 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
     """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     provider = MagicMock(spec=LLMProvider)
@@ -332,8 +437,8 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
@@ -352,7 +457,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
     Sequence: tool_call -> empty -> tool_call -> final text.
     The runner should recover via silent retry and complete normally.
     """
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     call_count = 0
@@ -390,8 +495,8 @@ async def test_runner_empty_response_does_not_break_tool_chain():
     tool_registry.get_definitions.return_value = [{"type": "function", "function": {"name": "read_file"}}]
     tool_registry.execute = AsyncMock(side_effect=fake_tool)
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "read both files"}],
         tools=tool_registry,
         model="test-model",
@@ -409,7 +514,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
 async def test_runner_accumulates_usage_and_preserves_cached_tokens():
     """Runner should accumulate prompt/completion tokens across iterations
     and preserve cached_tokens from provider responses."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     call_count = {"n": 0}
@@ -433,8 +538,8 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="file content")
 
-    runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
@@ -456,7 +561,7 @@ async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
     internal retry diagnostics like "Model request failed, retry in 1s"
     to leak to end-user channels as normal progress updates.
     """
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
@@ -472,8 +577,8 @@ async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
     progress_cb = AsyncMock()
     retry_wait_cb = AsyncMock()
 
-    runner = AgentRunner(provider)
-    await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    await runner.run(make_run_spec(provider,
         initial_messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "hi"},
@@ -498,7 +603,7 @@ async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
 @pytest.mark.asyncio
 async def test_runner_passes_temperature_to_provider():
     """temperature from AgentRunSpec should reach provider.chat_with_retry."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
@@ -511,8 +616,8 @@ async def test_runner_passes_temperature_to_provider():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hi"}],
         tools=tools,
         model="test-model",
@@ -527,7 +632,7 @@ async def test_runner_passes_temperature_to_provider():
 @pytest.mark.asyncio
 async def test_runner_passes_max_tokens_to_provider():
     """max_tokens from AgentRunSpec should reach provider.chat_with_retry."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
@@ -540,8 +645,8 @@ async def test_runner_passes_max_tokens_to_provider():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hi"}],
         tools=tools,
         model="test-model",
@@ -556,7 +661,7 @@ async def test_runner_passes_max_tokens_to_provider():
 @pytest.mark.asyncio
 async def test_runner_passes_reasoning_effort_to_provider():
     """reasoning_effort from AgentRunSpec should reach provider.chat_with_retry."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
@@ -569,8 +674,8 @@ async def test_runner_passes_reasoning_effort_to_provider():
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
-    runner = AgentRunner(provider)
-    await runner.run(AgentRunSpec(
+    runner = AgentRunner()
+    await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hi"}],
         tools=tools,
         model="test-model",

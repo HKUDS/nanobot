@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -44,6 +46,20 @@ class AgentRunHookContext:
     exception: BaseException | None = None
 
 
+@dataclass(slots=True)
+class AgentTurnHookContext:
+    """Turn-local inputs available when constructing per-turn hooks."""
+
+    on_progress: Callable[..., Awaitable[None]] | None = None
+    workspace: Path | None = None
+    channel: str = "cli"
+    chat_id: str = "direct"
+    message_id: str | None = None
+    session_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    ephemeral: bool = False
+
+
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
 
@@ -77,6 +93,35 @@ class AgentHook:
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         pass
 
+    async def before_execute_tool(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+    ) -> None:
+        pass
+
+    async def after_execute_tool(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+        result: Any,
+    ) -> None:
+        pass
+
+    async def on_execute_tool_error(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+        error: Any,
+    ) -> None:
+        pass
+
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         pass
 
@@ -93,6 +138,9 @@ class AgentHook:
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return content
+
+
+AgentTurnHookFactory = Callable[[AgentTurnHookContext], AgentHook | None]
 
 
 class CompositeHook(AgentHook):
@@ -146,6 +194,49 @@ class CompositeHook(AgentHook):
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_execute_tools", context)
+
+    async def before_execute_tool(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+    ) -> None:
+        await self._for_each_hook_safe("before_execute_tool", context, tool_call, tool, params)
+
+    async def after_execute_tool(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+        result: Any,
+    ) -> None:
+        await self._for_each_hook_safe(
+            "after_execute_tool",
+            context,
+            tool_call,
+            tool,
+            params,
+            result,
+        )
+
+    async def on_execute_tool_error(
+        self,
+        context: AgentHookContext,
+        tool_call: ToolCallRequest,
+        tool: Any,
+        params: Any,
+        error: Any,
+    ) -> None:
+        await self._for_each_hook_safe(
+            "on_execute_tool_error",
+            context,
+            tool_call,
+            tool,
+            params,
+            error,
+        )
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         await self._for_each_hook_safe("emit_reasoning", reasoning_content)

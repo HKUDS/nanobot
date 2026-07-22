@@ -10,6 +10,15 @@ from pathlib import Path
 
 from loguru import logger
 
+# Cap on the unified-diff block embedded in Dream commit messages. Memory files
+# are tiny in practice, but a pathological rewrite must not blow up the audit
+# record. The structured per-file summary is always emitted in full regardless.
+_WORKING_TREE_DIFF_MAX_CHARS = 6000
+
+
+class GitStoreError(RuntimeError):
+    """Raised when the memory Git repository cannot complete an operation."""
+
 
 @dataclass
 class CommitInfo:
@@ -17,9 +26,14 @@ class CommitInfo:
     message: str
     timestamp: str  # Formatted datetime
 
+    def subject(self) -> str:
+        """First line of the commit message, or a placeholder if empty."""
+        lines = self.message.splitlines()
+        return lines[0] if lines else "(no message)"
+
     def format(self, diff: str = "") -> str:
         """Format this commit for display, optionally with a diff."""
-        header = f"## {self.message.splitlines()[0]}\n`{self.sha}` — {self.timestamp}\n"
+        header = f"## {self.subject()}\n`{self.sha}` — {self.timestamp}\n"
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
@@ -103,7 +117,10 @@ class GitStore:
                     p.write_text("", encoding="utf-8")
 
             # Initial commit
-            porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
+            porcelain.add(
+                str(self._workspace),
+                paths=self._staging_paths(".gitignore", *self._tracked_files),
+            )
             porcelain.commit(
                 str(self._workspace),
                 message=b"init: nanobot memory store",
@@ -112,9 +129,8 @@ class GitStore:
             )
             logger.info("Git store initialized at {}", self._workspace)
             return True
-        except Exception:
-            logger.exception("Git store init failed for {}", self._workspace)
-            return False
+        except Exception as exc:
+            raise GitStoreError(f"Git store init failed for {self._workspace}") from exc
 
     # -- daily operations ------------------------------------------------------
 
@@ -136,7 +152,7 @@ class GitStore:
                 return None
 
             msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
+            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
             sha_bytes = porcelain.commit(
                 str(self._workspace),
                 message=msg_bytes,
@@ -148,11 +164,14 @@ class GitStore:
             sha = sha_bytes.hex()[:8]
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
-        except Exception:
-            logger.exception("Git auto-commit failed: {}", message)
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git auto-commit failed: {message}") from exc
 
     # -- internal helpers ------------------------------------------------------
+
+    def _staging_paths(self, *paths: str) -> list[str]:
+        """Return absolute paths without resolving tracked-file symlinks."""
+        return [str((self._workspace / path).absolute()) for path in paths]
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         """Resolve a short SHA prefix to the full SHA bytes."""
@@ -173,8 +192,8 @@ class GitStore:
                         break
                     sha = commit.parents[0] if commit.parents else None
             return None
-        except Exception:
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git SHA resolution failed: {short_sha}") from exc
 
     def _is_inside_git_repo(self) -> bool:
         """Check if self._workspace is already inside a git repository.
@@ -209,8 +228,16 @@ class GitStore:
 
     # -- query -----------------------------------------------------------------
 
-    def log(self, max_entries: int = 20) -> list[CommitInfo]:
-        """Return simplified commit log."""
+    def log(
+        self,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> list[CommitInfo]:
+        """Return simplified commit log, optionally filtered by message prefix.
+
+        When filtering, *max_entries* counts matching commits rather than every
+        commit traversed in the repository.
+        """
         if not self.is_initialized():
             return []
 
@@ -234,24 +261,24 @@ class GitStore:
                         time.localtime(commit.commit_time),
                     )
                     msg = commit.message.decode("utf-8", errors="replace").strip()
-                    entries.append(CommitInfo(
-                        sha=sha.hex()[:8],
-                        message=msg,
-                        timestamp=ts,
-                    ))
+                    if message_prefix is None or msg.startswith(message_prefix):
+                        entries.append(CommitInfo(
+                            sha=sha.hex()[:8],
+                            message=msg,
+                            timestamp=ts,
+                        ))
                     sha = commit.parents[0] if commit.parents else None
 
             return entries
-        except Exception:
-            logger.exception("Git log failed")
-            return []
+        except Exception as exc:
+            raise GitStoreError("Git log failed") from exc
 
     def line_ages(self, file_path: str) -> list[LineAge]:
         """Compute the age of each line in a tracked file via git blame.
 
         Returns one LineAge per line, in order.
-        Returns an empty list if the repo is not initialized, the file is
-        empty, or annotation fails.
+        Returns an empty list if the repo is not initialized or the file is
+        empty. Annotation failures raise :class:`GitStoreError`.
         """
 
         if not self.is_initialized():
@@ -265,9 +292,8 @@ class GitStore:
             from dulwich import porcelain
 
             annotated = porcelain.annotate(str(self._workspace), file_path)
-        except Exception:
-            logger.exception("Git line_ages annotate failed for {}", file_path)
-            return []
+        except Exception as exc:
+            raise GitStoreError(f"Git line annotation failed for {file_path}") from exc
 
         if not annotated:
             return []
@@ -295,9 +321,124 @@ class GitStore:
                 outstream=out,
             )
             return out.getvalue().decode("utf-8", errors="replace")
-        except Exception:
-            logger.exception("Git diff_commits failed")
+        except Exception as exc:
+            raise GitStoreError(f"Git diff failed for {sha1}..{sha2}") from exc
+
+    def summarize_working_tree(self, paths: list[str]) -> str:
+        """Structured summary of working-tree changes vs HEAD for *paths*.
+
+        Pure filesystem/git ground truth — never LLM narrative — suitable as a
+        truthful audit record. Returns "" when the repo is not initialized or
+        none of *paths* differ from HEAD.
+
+        Format::
+
+            SOUL.md: +3 -1
+            memory/MEMORY.md: +12 -8
+
+            2 files changed, 15 insertions(+), 9 deletions(-)
+
+            ```diff
+            --- SOUL.md
+            +++ SOUL.md
+            @@ ...
+            - old
+            + new
+            ```
+        """
+        if not self.is_initialized():
             return ""
+
+        try:
+            import difflib
+
+            from dulwich.repo import Repo
+        except ImportError as exc:
+            raise GitStoreError("Git working-tree summary dependencies are unavailable") from exc
+
+        summary_lines: list[str] = []
+        diff_lines: list[str] = []
+        total_added = 0
+        total_removed = 0
+        changed = 0
+
+        try:
+            with Repo(str(self._workspace)) as repo:
+                head_tree = self._head_tree(repo)
+                for path in paths:
+                    head_text = (
+                        self._read_blob_from_tree(repo, head_tree, path)
+                        if head_tree is not None
+                        else None
+                    )
+                    if head_text is None:
+                        head_text = ""
+                    wt_path = self._workspace / path
+                    try:
+                        wt_text = (
+                            wt_path.read_bytes().decode("utf-8")
+                            if wt_path.exists()
+                            else ""
+                        )
+                    except UnicodeDecodeError:
+                        # Non-UTF-8 (binary/corrupt) working-tree file: record
+                        # the change without a unified diff, which would
+                        # otherwise be polluted with replacement characters and
+                        # misrepresent the audit record.
+                        changed += 1
+                        summary_lines.append(f"{path}: binary or non-UTF-8 file changed")
+                        continue
+                    # Treat CRLF and LF as equivalent without hiding other
+                    # newline changes, such as a missing final newline.
+                    if head_text.replace("\r\n", "\n") == wt_text.replace("\r\n", "\n"):
+                        continue
+                    head_lines = head_text.splitlines()
+                    wt_lines = wt_text.splitlines()
+                    changed += 1
+                    hunks = list(difflib.unified_diff(
+                        head_lines,
+                        wt_lines,
+                        fromfile=path,
+                        tofile=path,
+                        lineterm="",
+                    ))
+                    added = sum(1 for line in hunks if line.startswith("+") and not line.startswith("+++"))
+                    removed = sum(1 for line in hunks if line.startswith("-") and not line.startswith("---"))
+                    total_added += added
+                    total_removed += removed
+                    summary_lines.append(f"{path}: +{added} -{removed}")
+                    diff_lines.extend(hunks)
+        except Exception as exc:
+            raise GitStoreError("Git working-tree summary failed") from exc
+
+        if changed == 0:
+            return ""
+
+        diff_text = "\n".join(diff_lines)
+        if len(diff_text) > _WORKING_TREE_DIFF_MAX_CHARS:
+            diff_text = diff_text[:_WORKING_TREE_DIFF_MAX_CHARS] + "\n...[diff truncated]"
+
+        body = "\n".join(summary_lines)
+        body += (
+            f"\n{changed} file{'s' if changed != 1 else ''} changed, "
+            f"{total_added} insertion{'s' if total_added != 1 else ''}(+), "
+            f"{total_removed} deletion{'s' if total_removed != 1 else ''}(-)"
+        )
+        if diff_lines:
+            body += f"\n\n```diff\n{diff_text}\n```"
+        return body
+
+    @staticmethod
+    def _head_tree(repo) -> object | None:
+        """Return the tree object at HEAD, or None if there are no commits."""
+        try:
+            head = repo.refs[b"HEAD"]
+        except KeyError:
+            return None
+        commit = repo[head]
+        if commit.type_name != b"commit":
+            return None
+        return repo[commit.tree]
 
     def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
         """Find a commit by short SHA prefix match."""
@@ -306,27 +447,43 @@ class GitStore:
                 return c
         return None
 
-    def show_commit_diff(self, short_sha: str, max_entries: int = 20) -> tuple[CommitInfo, str] | None:
-        """Find a commit and return it with its diff vs the parent."""
-        commits = self.log(max_entries=max_entries)
-        for i, c in enumerate(commits):
-            if c.sha.startswith(short_sha):
-                if i + 1 < len(commits):
-                    diff = self.diff_commits(commits[i + 1].sha, c.sha)
-                else:
-                    diff = ""
-                return c, diff
-        return None
+    def show_commit_diff(
+        self,
+        short_sha: str,
+        max_entries: int = 20,
+        message_prefix: str | None = None,
+    ) -> tuple[CommitInfo, str] | None:
+        """Find a commit and return it with its diff vs its actual parent."""
+        try:
+            from dulwich.repo import Repo
+
+            commits = self.log(max_entries=max_entries, message_prefix=message_prefix)
+            for c in commits:
+                if c.sha.startswith(short_sha):
+                    full_sha = self._resolve_sha(c.sha)
+                    if not full_sha:
+                        return None
+                    with Repo(str(self._workspace)) as repo:
+                        commit = repo[full_sha]
+                        parent = commit.parents[0] if commit.parents else None
+                    diff = self.diff_commits(parent.hex()[:8], c.sha) if parent else ""
+                    return c, diff
+            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git commit display failed for {short_sha}") from exc
 
     # -- restore ---------------------------------------------------------------
 
-    def revert(self, commit: str) -> str | None:
+    def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.
 
         Restores all tracked memory files to the state at the commit's parent,
-        then creates a new commit recording the revert.
+        then creates a new commit recording the revert. When *message_prefix*
+        is provided, commits outside that history are rejected before any files
+        are changed.
 
-        Returns the new commit SHA, or None on failure.
+        Returns the new commit SHA, or ``None`` when the commit cannot be reverted.
+        Repository and filesystem failures raise :class:`GitStoreError`.
         """
         if not self.is_initialized():
             return None
@@ -342,6 +499,15 @@ class GitStore:
             with Repo(str(self._workspace)) as repo:
                 commit_obj = repo[full_sha]
                 if commit_obj.type_name != b"commit":
+                    return None
+
+                commit_message = commit_obj.message.decode("utf-8", errors="replace").strip()
+                if message_prefix is not None and not commit_message.startswith(message_prefix):
+                    logger.warning(
+                        "Git revert: commit {} does not match message prefix {!r}",
+                        commit,
+                        message_prefix,
+                    )
                     return None
 
                 if not commit_obj.parents:
@@ -366,9 +532,8 @@ class GitStore:
             # Commit the restored state
             msg = f"revert: undo {commit}"
             return self.auto_commit(msg)
-        except Exception:
-            logger.exception("Git revert failed for {}", commit)
-            return None
+        except Exception as exc:
+            raise GitStoreError(f"Git revert failed for {commit}") from exc
 
     @staticmethod
     def _read_blob_from_tree(repo, tree, filepath: str) -> str | None:

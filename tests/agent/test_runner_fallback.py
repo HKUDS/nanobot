@@ -436,6 +436,53 @@ class TestFailoverOnTransientError:
         factory.assert_called_once_with(_fallback("fallback-a"))
 
 
+class TestFailoverOnArrearageError:
+    @pytest.mark.asyncio
+    async def test_non_retryable_quota_tries_configured_fallback(self) -> None:
+        arrearage = _make_response(
+            "insufficient quota",
+            finish_reason="error",
+            error_status_code=429,
+            error_type="insufficient_quota",
+            error_should_retry=False,
+        )
+        primary = _FakeProvider("primary", arrearage)
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fallback_preset = _fallback("fallback-a")
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[fallback_preset],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(fallback_preset)
+
+    @pytest.mark.asyncio
+    async def test_without_fallback_presets_returns_original_error(self) -> None:
+        arrearage = _make_response(
+            "payment required",
+            finish_reason="error",
+            error_status_code=402,
+            error_should_retry=False,
+        )
+        primary = _FakeProvider("primary", arrearage)
+        factory = MagicMock()
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result is arrearage
+        factory.assert_not_called()
+
+
 class TestNoFallbackOnNonRetryableError:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:

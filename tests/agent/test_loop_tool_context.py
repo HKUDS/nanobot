@@ -1,12 +1,20 @@
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import (
+    RequestContext,
+    bind_request_context,
+    current_request_context,
+    reset_request_context,
+)
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
-from nanobot.agent.tools.context import RequestContext
+from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
 
 class _ContextRecordingTool:
@@ -15,16 +23,18 @@ class _ContextRecordingTool:
 
     def __init__(self) -> None:
         self.contexts: list[dict] = []
+        self.runtimes: list[object] = []
 
-    def set_context(self, ctx: RequestContext) -> None:
+    async def execute(self, **_kwargs) -> str:
+        ctx = current_request_context()
+        assert ctx is not None
+        self.runtimes.append(ctx.runtime)
         self.contexts.append({
             "channel": ctx.channel,
             "chat_id": ctx.chat_id,
             "metadata": ctx.metadata,
             "session_key": ctx.session_key,
         })
-
-    async def execute(self, **_kwargs) -> str:
         return "created"
 
 
@@ -47,7 +57,7 @@ class _Tools:
 
 
 @pytest.mark.asyncio
-async def test_loop_hook_preserves_metadata_when_resetting_tool_context(tmp_path: Path) -> None:
+async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()
     calls = {"n": 0}
 
@@ -73,8 +83,10 @@ async def test_loop_hook_preserves_metadata_when_resetting_tool_context(tmp_path
     loop.tools = _Tools(cron)
 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
+    runtime = loop.llm_runtime()
     await loop._run_agent_loop(
         [],
+        runtime=runtime,
         channel="slack",
         chat_id="C123",
         metadata=metadata,
@@ -87,3 +99,144 @@ async def test_loop_hook_preserves_metadata_when_resetting_tool_context(tmp_path
         "metadata": metadata,
         "session_key": "slack:C123:111.222",
     }
+    assert cron.runtimes[-1] is runtime
+
+
+def test_request_context_nested_bind_restores_outer_context() -> None:
+    outer = RequestContext(channel="slack", chat_id="outer", session_key="slack:outer")
+    inner = RequestContext(channel="email", chat_id="inner", session_key="email:inner")
+
+    outer_token = bind_request_context(outer)
+    try:
+        assert current_request_context() is outer
+        inner_token = bind_request_context(inner)
+        try:
+            assert current_request_context() is inner
+        finally:
+            reset_request_context(inner_token)
+        assert current_request_context() is outer
+    finally:
+        reset_request_context(outer_token)
+
+    assert current_request_context() is None
+
+
+@pytest.mark.asyncio
+async def test_request_context_bindings_are_isolated_between_concurrent_tasks() -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def observe(ctx: RequestContext, *, wait_first: bool) -> RequestContext | None:
+        token = bind_request_context(ctx)
+        try:
+            if wait_first:
+                entered.set()
+                await release.wait()
+            else:
+                await entered.wait()
+                release.set()
+            await asyncio.sleep(0)
+            return current_request_context()
+        finally:
+            reset_request_context(token)
+
+    first = RequestContext(channel="feishu", chat_id="first", session_key="feishu:first")
+    second = RequestContext(channel="telegram", chat_id="second", session_key="telegram:second")
+
+    observed = await asyncio.gather(
+        observe(first, wait_first=True),
+        observe(second, wait_first=False),
+    )
+
+    assert observed == [first, second]
+    assert current_request_context() is None
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_restores_outer_request_context_after_runner_exception(
+    tmp_path: Path,
+) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    outer = RequestContext(channel="test", chat_id="outer", session_key="test:outer")
+    runtime = loop.llm_runtime()
+
+    async def fail_run(spec):
+        current = current_request_context()
+        assert current is not None
+        assert spec.runtime is runtime
+        assert current.runtime is runtime
+        assert current.channel == "slack"
+        assert current.chat_id == "C123"
+        assert current.session_key == "slack:C123:111.222"
+        assert current.original_user_text == "  unchanged user text  "
+        raise RuntimeError("runner failed")
+
+    loop.runner.run = AsyncMock(side_effect=fail_run)
+    outer_token = bind_request_context(outer)
+    try:
+        with pytest.raises(RuntimeError, match="runner failed"):
+            await loop._run_agent_loop(
+                [],
+                runtime=runtime,
+                channel="slack",
+                chat_id="C123",
+                session_key="slack:C123:111.222",
+                original_user_text="  unchanged user text  ",
+            )
+        assert current_request_context() is outer
+    finally:
+        reset_request_context(outer_token)
+
+    assert current_request_context() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({}, "  original user text  "),
+        ({INTERNAL_CONTINUATION_META: True}, None),
+    ],
+)
+async def test_process_message_captures_original_text_before_restore(
+    tmp_path: Path,
+    metadata: dict,
+    expected: str | None,
+) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    runtime = loop.llm_runtime()
+    seen: list[tuple[str | None, object]] = []
+
+    async def stop_after_capture(ctx) -> str:
+        seen.append((ctx.original_user_text, ctx.runtime))
+        raise RuntimeError("captured before restore")
+
+    loop._state_restore = stop_after_capture  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="captured before restore"):
+        await loop._process_message(
+            InboundMessage(
+                channel="slack",
+                sender_id="user",
+                chat_id="C123",
+                content="  original user text  ",
+                metadata=metadata,
+            ),
+            runtime=runtime,
+        )
+
+    assert seen == [(expected, runtime)]
