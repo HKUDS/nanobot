@@ -112,14 +112,64 @@ class TestEnforceRoleAlternation:
         assert result[1]["content"] is None
         assert result[2]["role"] == "tool"
 
-    def test_non_string_content_uses_latest(self):
+    def test_non_string_content_concatenates_blocks(self):
+        """Multimodal consecutive users keep all blocks (not keep-latest)."""
         msgs = [
             {"role": "user", "content": [{"type": "text", "text": "A"}]},
             {"role": "user", "content": "B"},
         ]
         result = LLMProvider._enforce_role_alternation(msgs)
         assert len(result) == 1
-        assert result[0]["content"] == "B"
+        content = result[0]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "A"}
+        assert content[1] == {"type": "text", "text": "B"}
+
+    def test_consecutive_multimodal_users_keep_all_image_url_blocks(self):
+        """Feishu album listen: N image-only user turns must not drop earlier images."""
+        msgs = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,aaa"}},
+                    {"type": "text", "text": ""},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,bbb"}},
+                    {"type": "text", "text": ""},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,ccc"}},
+                    {"type": "text", "text": "@bot what do you think?"},
+                ],
+            },
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert len(result) == 1
+        content = result[0]["content"]
+        assert isinstance(content, list)
+        image_urls = [
+            part["image_url"]["url"]
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "image_url"
+        ]
+        assert image_urls == [
+            "data:image/png;base64,aaa",
+            "data:image/png;base64,bbb",
+            "data:image/png;base64,ccc",
+        ]
+        assert any(
+            isinstance(part, dict)
+            and part.get("type") == "text"
+            and "@bot what do you think?" in str(part.get("text", ""))
+            for part in content
+        )
 
     def test_original_messages_not_mutated(self):
         msgs = [

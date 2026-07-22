@@ -5,13 +5,13 @@ from types import SimpleNamespace
 from nanobot.channels.feishu.runtime import FeishuChannel
 
 
-def _make_channel(bot_open_id: str | None = None) -> FeishuChannel:
+def _make_channel(bot_open_id: str | None = None, group_policy: str = "mention") -> FeishuChannel:
     config = SimpleNamespace(
         app_id="test_id",
         app_secret="test_secret",
         verification_token="",
         event_encrypt_key="",
-        group_policy="mention",
+        group_policy=group_policy,
     )
     ch = FeishuChannel.__new__(FeishuChannel)
     ch.config = config
@@ -58,3 +58,20 @@ class TestIsBotMentioned:
         ch = _make_channel(bot_open_id="ou_bot123")
         msg = _make_message(mentions=None)
         assert ch._is_bot_mentioned(msg) is False
+
+
+class TestGroupMessageForBot:
+    def test_mention_policy_requires_mention(self):
+        ch = _make_channel(bot_open_id="ou_bot123", group_policy="mention")
+        assert ch._is_group_message_for_bot(_make_message()) is False
+        assert ch._is_group_message_for_bot(
+            _make_message(mentions=[_make_mention("ou_bot123")])
+        ) is True
+
+    def test_open_policy_accepts_unmentioned(self):
+        ch = _make_channel(bot_open_id="ou_bot123", group_policy="open")
+        assert ch._is_group_message_for_bot(_make_message()) is True
+
+    def test_listen_policy_accepts_unmentioned(self):
+        ch = _make_channel(bot_open_id="ou_bot123", group_policy="listen")
+        assert ch._is_group_message_for_bot(_make_message()) is True

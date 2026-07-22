@@ -98,6 +98,9 @@ After approval, DM the bot again or mention it in a group chat:
 - Prefer pairing-only mode for first setup. Add `allowFrom` only when you want a
   static allowlist.
 - Keep `groupPolicy` as `"mention"` before inviting the bot into busy groups.
+  Use `"listen"` when you want the bot to silently follow group context and
+  only reply when @mentioned. Use `"open"` only when every group message
+  should trigger a reply.
 - Store app secrets through environment variables for deployed services.
 - Review file, shell, and web tool access before adding more users.
 

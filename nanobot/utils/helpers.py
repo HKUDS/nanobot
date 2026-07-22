@@ -2,6 +2,7 @@
 
 import base64
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -324,6 +325,104 @@ def build_image_content_blocks(
         },
         {"type": "text", "text": label},
     ]
+
+
+_IMAGE_BREADCRUMB_LINE_RE = re.compile(r"^\[image: ([^\]]+)\]\s*$")
+
+
+def strip_media_image_breadcrumbs(text: str, media_paths: list[str]) -> str:
+    """Remove ``[image: path]`` lines that only echo paths already in ``media``."""
+    paths = {p for p in media_paths if isinstance(p, str) and p}
+    if not paths or not text:
+        return text
+    lines = [
+        line
+        for line in text.splitlines()
+        if not (
+            (match := _IMAGE_BREADCRUMB_LINE_RE.match(line)) and match.group(1) in paths
+        )
+    ]
+    return "\n".join(lines).strip()
+
+
+def load_image_url_content_parts(
+    media: list[str] | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Load on-disk images into multimodal ``image_url`` parts.
+
+    Returns ``(image_parts, unresolved_paths)``. Unresolved paths are missing
+    files or non-image attachments that could not be encoded for vision.
+    """
+    if not media:
+        return [], []
+
+    images: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    for path in media:
+        if not isinstance(path, str) or not path:
+            continue
+        p = Path(path)
+        if not p.is_file():
+            unresolved.append(path)
+            continue
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            unresolved.append(path)
+            continue
+        mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+        if not mime or not mime.startswith("image/"):
+            unresolved.append(path)
+            continue
+        b64 = base64.b64encode(raw).decode()
+        images.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+                "_meta": {"path": str(p)},
+            }
+        )
+    return images, unresolved
+
+
+def build_user_content_with_media(
+    text: str, media: list[str] | None
+) -> str | list[dict[str, Any]]:
+    """Build current-turn user content with optional base64-encoded images."""
+    if not media:
+        return text
+    images, _unresolved = load_image_url_content_parts(media)
+    if not images:
+        return text
+    return images + [{"type": "text", "text": text}]
+
+
+def rehydrate_history_user_content(
+    text: str, media: list[str] | None
+) -> str | list[dict[str, Any]]:
+    """Rebuild history user content for LLM replay, restoring vision when possible.
+
+    Existing image files become ``image_url`` parts. Missing / non-image paths
+    stay as ``[image: path]`` breadcrumbs. Redundant Feishu-style breadcrumb
+    lines that only echo ``media`` paths are stripped so multimodal turns are
+    not flooded with placeholders.
+    """
+    if not media:
+        return text
+
+    media_paths = [p for p in media if isinstance(p, str) and p]
+    if not media_paths:
+        return text
+
+    images, unresolved = load_image_url_content_parts(media_paths)
+    cleaned = strip_media_image_breadcrumbs(text or "", media_paths)
+    if unresolved:
+        crumbs = "\n".join(image_placeholder_text(p) for p in unresolved)
+        cleaned = f"{cleaned}\n{crumbs}" if cleaned else crumbs
+
+    if not images:
+        return cleaned
+    return images + [{"type": "text", "text": cleaned or ""}]
 
 
 def ensure_dir(path: Path) -> Path:
@@ -715,12 +814,22 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         parts.append(content)
     elif isinstance(content, list):
         for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
+            if not isinstance(part, dict):
+                parts.append(json.dumps(part, ensure_ascii=False))
+                continue
+            if part.get("type") == "text":
                 text = part.get("text", "")
                 if text:
                     parts.append(text)
-            else:
-                parts.append(json.dumps(part, ensure_ascii=False))
+                continue
+            if part.get("type") == "image_url":
+                # Count like a path breadcrumb — not raw base64 — so history
+                # windowing stays comparable to pre-rehydration behavior.
+                meta = part.get("_meta") if isinstance(part.get("_meta"), dict) else {}
+                path = meta.get("path") if isinstance(meta, dict) else None
+                parts.append(image_placeholder_text(path if isinstance(path, str) else None))
+                continue
+            parts.append(json.dumps(part, ensure_ascii=False))
     elif content is not None:
         parts.append(json.dumps(content, ensure_ascii=False))
 

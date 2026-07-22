@@ -35,6 +35,7 @@
         "choices": {
           "mention": "僅提及時",
           "open": "所有訊息",
+          "listen": "旁聽（記錄上下文，僅@時回覆）",
           "allowlist": "允許清單"
         }
       },

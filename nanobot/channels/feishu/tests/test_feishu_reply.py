@@ -17,7 +17,7 @@ except ImportError:
 if not FEISHU_AVAILABLE:
     pytest.skip("Feishu dependencies not installed (lark-oapi)", allow_module_level=True)
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_HISTORY_ONLY, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig
@@ -26,20 +26,27 @@ from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
+_LISTEN_EMOJI_UNSET = object()
+
+
 def _make_feishu_channel(
     reply_to_message: bool = False,
     group_policy: str = "mention",
     topic_isolation: bool = True,
+    listen_emoji: str | object = _LISTEN_EMOJI_UNSET,
 ) -> FeishuChannel:
-    config = FeishuConfig(
-        enabled=True,
-        app_id="cli_test",
-        app_secret="secret",
-        allow_from=["*"],
-        reply_to_message=reply_to_message,
-        group_policy=group_policy,
-        topic_isolation=topic_isolation,
-    )
+    config_kwargs: dict = {
+        "enabled": True,
+        "app_id": "cli_test",
+        "app_secret": "secret",
+        "allow_from": ["*"],
+        "reply_to_message": reply_to_message,
+        "group_policy": group_policy,
+        "topic_isolation": topic_isolation,
+    }
+    if listen_emoji is not _LISTEN_EMOJI_UNSET:
+        config_kwargs["listen_emoji"] = listen_emoji
+    config = FeishuConfig(**config_kwargs)
     channel = FeishuChannel(config, MessageBus())
     channel._client = MagicMock()
     # _loop is only used by the WebSocket thread bridge; not needed for unit tests
@@ -1309,3 +1316,219 @@ async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> Non
     assert bus_spy[1].session_key_override == "feishu:oc_abc"
     # Private chat has no session key override
     assert bus_spy[2].session_key_override is None
+
+
+# ---------------------------------------------------------------------------
+# groupPolicy listen — history-only ingest
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_listen_unmentioned_group_message_sets_history_only_and_adds_default_pin() -> None:
+    channel = _make_feishu_channel(group_policy="listen")
+    channel._bot_open_id = "ou_bot123"
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content='{"text": "side chatter"}',
+            message_id="om_listen1",
+        )
+    )
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].metadata.get(INBOUND_META_HISTORY_ONLY) is True
+    assert bus_spy[0].content == "side chatter"
+    await asyncio.sleep(0)
+    channel._add_reaction.assert_awaited_once_with("om_listen1", "Pin")
+    assert "om_listen1" not in channel._reaction_ids
+
+
+@pytest.mark.asyncio
+async def test_listen_unmentioned_slash_new_skips_history_only_and_uses_react_emoji() -> None:
+    """Under listen, unmentioned /new is a normal command turn (no Pin / HISTORY_ONLY)."""
+    channel = _make_feishu_channel(group_policy="listen")
+    channel._bot_open_id = "ou_bot123"
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content='{"text": "/new"}',
+            message_id="om_listen_new",
+        )
+    )
+
+    assert len(bus_spy) == 1
+    assert INBOUND_META_HISTORY_ONLY not in bus_spy[0].metadata
+    assert bus_spy[0].content == "/new"
+    await asyncio.sleep(0)
+    channel._add_reaction.assert_awaited_once_with("om_listen_new", channel.config.react_emoji)
+
+
+@pytest.mark.asyncio
+async def test_listen_unmentioned_unknown_slash_stays_history_only() -> None:
+    channel = _make_feishu_channel(group_policy="listen")
+    channel._bot_open_id = "ou_bot123"
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content='{"text": "/not-a-real-command"}',
+            message_id="om_listen_unk",
+        )
+    )
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].metadata.get(INBOUND_META_HISTORY_ONLY) is True
+    await asyncio.sleep(0)
+    channel._add_reaction.assert_awaited_once_with("om_listen_unk", "Pin")
+
+
+@pytest.mark.asyncio
+async def test_listen_unmentioned_with_listen_emoji_adds_persistent_ack() -> None:
+    channel = _make_feishu_channel(group_policy="listen", listen_emoji="EYES")
+    channel._bot_open_id = "ou_bot123"
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content='{"text": "side chatter"}',
+            message_id="om_listen_pin",
+        )
+    )
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].metadata.get(INBOUND_META_HISTORY_ONLY) is True
+    await asyncio.sleep(0)
+    channel._add_reaction.assert_awaited_once_with("om_listen_pin", "EYES")
+    # Persistent ack: must not be registered for stream-end cleanup.
+    assert "om_listen_pin" not in channel._reaction_ids
+
+
+@pytest.mark.asyncio
+async def test_listen_unmentioned_empty_listen_emoji_skips_reaction() -> None:
+    channel = _make_feishu_channel(group_policy="listen", listen_emoji="")
+    channel._bot_open_id = "ou_bot123"
+    channel.bus.publish_inbound = AsyncMock()
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content='{"text": "side chatter"}',
+            message_id="om_listen_blank",
+        )
+    )
+
+    channel._add_reaction.assert_not_awaited()
+
+
+def test_feishu_config_listen_emoji_defaults_pin() -> None:
+    assert FeishuConfig().listen_emoji == "Pin"
+
+
+def test_feishu_config_listen_emoji_accepts_camel_case() -> None:
+    config = FeishuConfig.model_validate({"listenEmoji": "Pin"})
+    assert config.listen_emoji == "Pin"
+
+
+@pytest.mark.asyncio
+async def test_listen_mentioned_group_message_is_normal_turn() -> None:
+    channel = _make_feishu_channel(group_policy="listen")
+    channel._bot_open_id = "ou_bot123"
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    mention = SimpleNamespace(
+        key="@_user_1",
+        name="nanobot",
+        id=SimpleNamespace(open_id="ou_bot123", user_id=None),
+    )
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content=json.dumps({"text": "@_user_1 help"}),
+            message_id="om_listen2",
+            mentions=[mention],
+        )
+    )
+
+    assert len(bus_spy) == 1
+    assert INBOUND_META_HISTORY_ONLY not in bus_spy[0].metadata
+    # Reaction is scheduled as a background task — flush the event loop.
+    await asyncio.sleep(0)
+    channel._add_reaction.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mention_policy_still_drops_unmentioned_group_message() -> None:
+    channel = _make_feishu_channel(group_policy="mention")
+    channel._bot_open_id = "ou_bot123"
+    channel._handle_message = AsyncMock()
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    await channel._on_message(
+        _make_feishu_event(
+            chat_type="group",
+            content='{"text": "ignored"}',
+            message_id="om_drop1",
+        )
+    )
+
+    channel._handle_message.assert_not_awaited()
+    channel._add_reaction.assert_not_awaited()

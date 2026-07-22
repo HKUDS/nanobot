@@ -34,6 +34,7 @@
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
+          "listen": "Écoute (contexte seul, réponse sur mention)",
           "allowlist": "Liste d’autorisation"
         }
       },

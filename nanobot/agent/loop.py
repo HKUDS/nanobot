@@ -34,7 +34,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import INBOUND_META_HISTORY_ONLY, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import (
     RetryWaitEvent,
     StreamDeltaEvent,
@@ -1116,6 +1116,20 @@ class AgentLoop:
             # MCP stdio transports use AnyIO cancel scopes; close them from the task that opened them.
             await self.close_mcp()
 
+    def _ingest_history_only(self, msg: InboundMessage, session_key: str) -> None:
+        """Append an inbound message to session history without an agent turn.
+
+        Used by channel policies such as Feishu ``groupPolicy: listen`` so
+        unmentioned group traffic becomes context for a later @mention turn
+        without any LLM call or outbound reply.
+        """
+        session = self.sessions.get_or_create(session_key)
+        self._persist_user_message_early(msg, session)
+        # History-only ingest is not an agent turn — do not leave the
+        # pending-user-turn marker that early persist sets for real turns.
+        self._clear_pending_user_turn(session)
+        self.sessions.save(session)
+
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
         session_key = self._effective_session_key(msg)
@@ -1127,6 +1141,19 @@ class AgentLoop:
         pending: asyncio.Queue | None = None
         try:
             async with lock, gate:
+                if msg.metadata.get(INBOUND_META_HISTORY_ONLY):
+                    # Known slash commands (e.g. /new) must run immediately even
+                    # under listen/history-only policies — otherwise they are
+                    # persisted as plain user text and never execute.
+                    raw = msg.content.strip() if isinstance(msg.content, str) else ""
+                    if self.commands.is_known_command(raw):
+                        meta = dict(msg.metadata or {})
+                        meta.pop(INBOUND_META_HISTORY_ONLY, None)
+                        msg = dataclasses.replace(msg, metadata=meta)
+                    else:
+                        self._ingest_history_only(msg, session_key)
+                        return
+
                 # Only the task that owns the session lock may publish the
                 # active mid-turn injection queue for this session.
                 pending = asyncio.Queue(maxsize=20)

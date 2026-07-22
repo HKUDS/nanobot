@@ -92,6 +92,10 @@ class CommandRouter:
                 return True
         return False
 
+    def is_known_command(self, text: str) -> bool:
+        """True if *text* matches a priority or dispatchable slash command."""
+        return self.is_priority(text) or self.is_dispatchable_command(text)
+
     async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
         ctx.raw = normalize_command_text(ctx.raw)

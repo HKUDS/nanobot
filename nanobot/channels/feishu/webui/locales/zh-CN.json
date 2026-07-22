@@ -35,6 +35,7 @@
         "choices": {
           "mention": "仅提及时",
           "open": "所有消息",
+          "listen": "旁听（记录上下文，仅@时回复）",
           "allowlist": "白名单"
         }
       },

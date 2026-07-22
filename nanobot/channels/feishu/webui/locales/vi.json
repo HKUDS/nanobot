@@ -34,6 +34,7 @@
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
+          "listen": "Lắng nghe (chỉ ngữ cảnh, trả lời khi được nhắc)",
           "allowlist": "Danh sách cho phép"
         }
       },

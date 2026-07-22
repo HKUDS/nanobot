@@ -18,6 +18,10 @@ INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 RUNTIME_CONTROL_ACK = "_ack"
 RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
 
+# Persist the inbound message into session history without running the model
+# or publishing an outbound reply (e.g. Feishu groupPolicy ``listen``).
+INBOUND_META_HISTORY_ONLY = "_history_only"
+
 
 @dataclass
 class InboundMessage:

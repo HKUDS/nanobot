@@ -34,6 +34,7 @@
         "choices": {
           "mention": "멘션만",
           "open": "모든 메시지",
+          "listen": "듣기 (문맥만 저장, 멘션 시 응답)",
           "allowlist": "허용 목록"
         }
       },

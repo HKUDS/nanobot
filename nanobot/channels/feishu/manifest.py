@@ -1,10 +1,14 @@
 """Dependency-free Feishu/Lark management contract."""
 
-from nanobot.channels._manifest import DIRECT_GROUP_POLICIES, field, required_fields
+from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.feishu.instances import FEISHU_MANAGEMENT
 from nanobot.channels.feishu.validation import validate
 from nanobot.channels.plugin import ChannelPlugin
+
+# Feishu-local: includes ``listen`` (ingest all group msgs, reply only on @mention).
+# Keep this out of shared DIRECT_GROUP_POLICIES so other channels stay unchanged.
+FEISHU_GROUP_POLICIES = frozenset({"mention", "open", "listen"})
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
@@ -18,7 +22,7 @@ SETUP_SPEC = ChannelSetupSpec(
         ),
         "groupPolicy": field(
             "enum",
-            choices=DIRECT_GROUP_POLICIES,
+            choices=FEISHU_GROUP_POLICIES,
             default="mention",
             snapshot=False,
         ),

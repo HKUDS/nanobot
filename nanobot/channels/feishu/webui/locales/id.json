@@ -34,6 +34,7 @@
         "choices": {
           "mention": "Hanya sebutan",
           "open": "Semua pesan",
+          "listen": "Dengar (hanya konteks, balas saat disebut)",
           "allowlist": "Daftar izin"
         }
       },
