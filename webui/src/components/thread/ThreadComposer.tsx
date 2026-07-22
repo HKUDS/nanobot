@@ -843,7 +843,6 @@ export function ThreadComposer({
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
   const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceErrorRemoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const queuedPromptStorageKey = useMemo(
@@ -1294,9 +1293,7 @@ export function ThreadComposer({
 
   const clearVoiceErrorTimers = useCallback(() => {
     if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
-    if (voiceErrorRemoveTimerRef.current !== null) clearTimeout(voiceErrorRemoveTimerRef.current);
     voiceErrorFadeTimerRef.current = null;
-    voiceErrorRemoveTimerRef.current = null;
   }, []);
   const clearInlineError = useCallback(() => {
     clearVoiceErrorTimers();
@@ -1309,12 +1306,11 @@ export function ThreadComposer({
     setInlineError(t(`thread.composer.voiceErrors.${key}`));
     voiceErrorFadeTimerRef.current = setTimeout(() => {
       setVoiceErrorFading(true);
-      voiceErrorRemoveTimerRef.current = setTimeout(() => {
+      voiceErrorFadeTimerRef.current = setTimeout(() => {
         setInlineError(null);
         setVoiceErrorFading(false);
-        voiceErrorRemoveTimerRef.current = null;
+        voiceErrorFadeTimerRef.current = null;
       }, VOICE_ERROR_FADE_MS);
-      voiceErrorFadeTimerRef.current = null;
     }, VOICE_ERROR_VISIBLE_MS);
   }, [clearVoiceErrorTimers, t]);
   const voiceRecorder = useVoiceRecorder({
