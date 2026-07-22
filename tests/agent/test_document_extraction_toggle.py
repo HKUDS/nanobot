@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind, TurnRoute, TurnState
+from nanobot.agent.loop import AgentLoop, TurnContext, TurnKind, TurnState
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ChannelsConfig
@@ -42,20 +42,21 @@ async def test_state_restore_extracts_documents_by_default(
 
     monkeypatch.setattr("nanobot.agent.loop.extract_documents", fake_extract_documents)
 
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="u",
+        chat_id="c",
+        content="summarize",
+        media=[str(doc_path)],
+    )
     ctx = TurnContext(
-        msg=InboundMessage(
-            channel="cli",
-            sender_id="u",
-            chat_id="c",
-            content="summarize",
-            media=[str(doc_path)],
-        ),
+        msg=msg,
         session_key="cli:c",
         state=TurnState.RESTORE,
         turn_id="turn-1",
         runtime=loop.llm_runtime(),
         kind=TurnKind.USER,
-        route=TurnRoute(channel="cli", chat_id="c"),
+        delivery=loop.turn_delivery_factory.create(msg, "cli:c"),
     )
 
     assert await loop._state_restore(ctx) == "ok"
@@ -79,20 +80,21 @@ async def test_state_restore_references_documents_when_extraction_disabled(
 
     monkeypatch.setattr("nanobot.agent.loop.extract_documents", fail_extract_documents)
 
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="u",
+        chat_id="c",
+        content="summarize",
+        media=[str(doc_path)],
+    )
     ctx = TurnContext(
-        msg=InboundMessage(
-            channel="cli",
-            sender_id="u",
-            chat_id="c",
-            content="summarize",
-            media=[str(doc_path)],
-        ),
+        msg=msg,
         session_key="cli:c",
         state=TurnState.RESTORE,
         turn_id="turn-1",
         runtime=loop.llm_runtime(),
         kind=TurnKind.USER,
-        route=TurnRoute(channel="cli", chat_id="c"),
+        delivery=loop.turn_delivery_factory.create(msg, "cli:c"),
     )
 
     assert await loop._state_restore(ctx) == "ok"

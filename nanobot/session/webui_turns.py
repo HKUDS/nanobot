@@ -6,11 +6,12 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.agent.turn_delivery import TurnRoute
 from nanobot.bus import progress as bus_progress
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
@@ -39,9 +40,6 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
-
-if TYPE_CHECKING:
-    from nanobot.agent.loop import TurnRoute
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -240,16 +238,13 @@ async def publish_turn_run_status(
         ),
     )
 
-@dataclass
-class WebuiTurnCoordinator:
-    """Translate generic runtime events into WebUI/WebSocket wire messages."""
+@dataclass(frozen=True)
+class WebuiTurnRoutePolicy:
+    """Expose independently dispatched late subagent turns to WebUI sessions."""
 
-    bus: MessageBus
     sessions: SessionManager
-    schedule_background: Callable[[Awaitable[None]], None]
-    _title_contexts: dict[str, LLMRuntime] = field(default_factory=dict)
 
-    def prepare_turn_route(
+    def __call__(
         self,
         msg: InboundMessage,
         session_key: str,
@@ -275,6 +270,16 @@ class WebuiTurnCoordinator:
             WEBUI_TURN_METADATA_KEY: f"subagent:{uuid4().hex}",
         })
         return replace(route, metadata=metadata, publish_lifecycle=True)
+
+
+@dataclass
+class WebuiTurnCoordinator:
+    """Translate generic runtime events into WebUI/WebSocket wire messages."""
+
+    bus: MessageBus
+    sessions: SessionManager
+    schedule_background: Callable[[Awaitable[None]], None]
+    _title_contexts: dict[str, LLMRuntime] = field(default_factory=dict)
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""

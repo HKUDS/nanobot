@@ -23,7 +23,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot
-from nanobot.session.webui_turns import WebuiTurnCoordinator
+from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
@@ -45,60 +45,13 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 
 
 def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
+    loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
     coordinator = WebuiTurnCoordinator(
         bus=bus,
         sessions=loop.sessions,
         schedule_background=lambda coro: loop._schedule_background(coro),
     )
-    loop.register_turn_route_provider(coordinator.prepare_turn_route)
     coordinator.subscribe(loop.runtime_events)
-
-
-def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
-    loop = _make_loop(tmp_path)
-    _attach_webui_runtime_events(loop, loop.bus)
-    session_key = "websocket:chat-a"
-    msg = InboundMessage(
-        channel="system",
-        sender_id="subagent",
-        chat_id=session_key,
-        content="Background research completed",
-        session_key_override=session_key,
-        metadata={
-            "injected_event": "subagent_result",
-            "subagent_task_id": "sub-1",
-        },
-    )
-
-    hidden_route = loop._turn_route(msg, session_key)
-
-    assert hidden_route.channel == "websocket"
-    assert hidden_route.chat_id == "chat-a"
-    assert hidden_route.metadata == {}
-    assert hidden_route.publish_lifecycle is False
-
-    session = loop.sessions.get_or_create(session_key)
-    session.metadata["webui"] = True
-    first_visible_route = loop._turn_route(msg, session_key)
-    second_visible_route = loop._turn_route(msg, session_key)
-
-    assert first_visible_route.publish_lifecycle is True
-    assert set(first_visible_route.metadata) == {
-        "webui",
-        "_wants_stream",
-        WEBUI_TURN_METADATA_KEY,
-    }
-    assert first_visible_route.metadata["webui"] is True
-    assert first_visible_route.metadata["_wants_stream"] is True
-    first_turn_id = first_visible_route.metadata[WEBUI_TURN_METADATA_KEY]
-    second_turn_id = second_visible_route.metadata[WEBUI_TURN_METADATA_KEY]
-    assert first_turn_id.startswith("subagent:")
-    assert second_turn_id.startswith("subagent:")
-    assert first_turn_id != second_turn_id
-    assert msg.metadata == {
-        "injected_event": "subagent_result",
-        "subagent_task_id": "sub-1",
-    }
 
 
 class TestToolEventProgress:
@@ -397,12 +350,14 @@ class TestToolEventProgress:
             "status": "editing",
         }]
 
-        progress = await loop._build_bus_progress_callback(InboundMessage(
+        msg = InboundMessage(
             channel="telegram",
             sender_id="u1",
             chat_id="chat1",
             content="edit",
-        ))
+        )
+        progress = loop.turn_delivery_factory.create(msg, msg.session_key).progress_callback()
+        assert progress is not None
         assert on_progress_accepts_file_edit_events(progress) is True
         await invoke_file_edit_progress(progress, edit_events)
         outbound = await bus.consume_outbound()

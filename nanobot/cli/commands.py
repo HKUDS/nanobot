@@ -1606,6 +1606,7 @@ def _run_gateway(
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.tools.message import MessageTool
+    from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
@@ -1617,7 +1618,7 @@ def _run_gateway(
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
-    from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
@@ -1679,6 +1680,12 @@ def _run_gateway(
     cron = CronService(cron_store_path)
     trigger_store = LocalTriggerStore(config.workspace_path)
 
+    turn_delivery_factory = TurnDeliveryFactory(
+        bus,
+        runtime_events,
+        route_policy=WebuiTurnRoutePolicy(session_manager),
+    )
+
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
@@ -1690,6 +1697,7 @@ def _run_gateway(
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=load_provider_snapshot,
         runtime_events=runtime_events,
+        turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
@@ -1700,7 +1708,6 @@ def _run_gateway(
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
     )
-    agent.register_turn_route_provider(webui_turn_coordinator.prepare_turn_route)
     webui_turn_coordinator.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel

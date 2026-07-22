@@ -689,8 +689,8 @@ async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
     from nanobot.bus.events import InboundMessage
 
     loop = _make_loop(tmp_path)
-    route_provider = MagicMock(side_effect=lambda _msg, _key, route: route)
-    loop.register_turn_route_provider(route_provider)
+    route_policy = MagicMock(side_effect=lambda _msg, _key, route: route)
+    loop.turn_delivery_factory.route_policy = route_policy
     session_key = "cli:c"
     lock = loop._session_locks.setdefault(session_key, asyncio.Lock())
     await lock.acquire()
@@ -714,12 +714,12 @@ async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
         await asyncio.wait_for(waiting_at_lock.wait(), timeout=2.0)
 
     assert loop._pending_queues[session_key] is active_pending
-    route_provider.assert_not_called()
+    route_policy.assert_not_called()
 
     waiting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiting
-    route_provider.assert_not_called()
+    route_policy.assert_not_called()
     lock.release()
 
 
@@ -757,8 +757,8 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
 
     loop = _make_loop(tmp_path)
     loop._dispatch = AsyncMock()  # type: ignore[method-assign]
-    route_provider = MagicMock(side_effect=lambda _msg, _key, route: route)
-    loop.register_turn_route_provider(route_provider)
+    route_policy = MagicMock(side_effect=lambda _msg, _key, route: route)
+    loop.turn_delivery_factory.route_policy = route_policy
 
     session_key = "websocket:chat-1"
     pending = asyncio.Queue(maxsize=20)
@@ -785,7 +785,7 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
 
     assert queued_msg is msg
     assert loop._dispatch.await_count == 0
-    route_provider.assert_not_called()
+    route_policy.assert_not_called()
 
 
 @pytest.mark.asyncio
