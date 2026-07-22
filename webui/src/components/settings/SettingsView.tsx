@@ -223,10 +223,16 @@ type RestartAwarePayload = {
   runtime_capabilities?: SettingsPayload["runtime_capabilities"];
 };
 type ProviderApiType = "auto" | "chat_completions" | "responses";
-type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
+type ProviderForm = {
+  apiKey: string;
+  apiBase: string;
+  apiType: ProviderApiType;
+  proxy: string;
+};
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
+const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_oauth"]);
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -882,6 +888,7 @@ export function SettingsView({
           apiKey: next[provider.name]?.apiKey ?? "",
           apiBase: next[provider.name]?.apiBase ?? provider.api_base ?? provider.default_api_base ?? "",
           apiType: next[provider.name]?.apiType ?? provider.api_type ?? "auto",
+          proxy: next[provider.name]?.proxy ?? provider.proxy ?? "",
         };
       }
       return next;
@@ -1229,11 +1236,16 @@ export function SettingsView({
     if (providerSaving) return;
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
-    if (provider.auth_type === "oauth") return;
-    const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "", apiType: "auto" };
+    const isOauthProvider = provider.auth_type === "oauth";
+    const providerForm = providerForms[providerName] ?? {
+      apiKey: "",
+      apiBase: "",
+      apiType: "auto",
+      proxy: provider.proxy ?? "",
+    };
     const apiKey = providerForm.apiKey.trim();
     const apiKeyRequired = provider.api_key_required ?? true;
-    if (!provider.configured && apiKeyRequired && !apiKey) {
+    if (!isOauthProvider && !provider.configured && apiKeyRequired && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
@@ -1245,12 +1257,20 @@ export function SettingsView({
           ? "azure"
           : null;
       if (supportName && !(await installCapabilities([supportName]))) return;
-      const payload = await updateProviderSettings(token, {
-        provider: providerName,
-        apiKey: apiKey || undefined,
-        apiBase: providerForm.apiBase.trim(),
-        apiType: providerForm.apiType,
-      });
+      const payload = await updateProviderSettings(
+        token,
+        isOauthProvider
+          ? {
+              provider: providerName,
+              proxy: providerForm.proxy.trim(),
+            }
+          : {
+              provider: providerName,
+              apiKey: apiKey || undefined,
+              apiBase: providerForm.apiBase.trim(),
+              apiType: providerForm.apiType,
+            },
+      );
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
@@ -1262,6 +1282,7 @@ export function SettingsView({
           apiKey: "",
           apiBase: providerForm.apiBase.trim(),
           apiType: providerForm.apiType,
+          proxy: providerForm.proxy.trim(),
         },
       }));
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -1364,6 +1385,7 @@ export function SettingsView({
         apiKey: "",
         apiBase: provider.api_base ?? provider.default_api_base ?? "",
         apiType: provider.api_type ?? "auto",
+        proxy: provider.proxy ?? "",
       },
     }));
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -1418,6 +1440,7 @@ export function SettingsView({
             apiKey: "",
             apiBase: forms[providerName]?.apiBase ?? "",
             apiType: forms[providerName]?.apiType ?? "auto",
+            proxy: forms[providerName]?.proxy ?? "",
           },
         }));
         setVisibleProviderKeys((visible) => ({ ...visible, [providerName]: false }));
@@ -1682,6 +1705,7 @@ export function SettingsView({
                     apiKey: prev[provider]?.apiKey ?? "",
                     apiBase: prev[provider]?.apiBase ?? "",
                     apiType: prev[provider]?.apiType ?? "auto",
+                    proxy: prev[provider]?.proxy ?? "",
                     ...value,
                   },
                 }))
@@ -2925,15 +2949,21 @@ function ProvidersSettings({
       apiKey: "",
       apiBase: provider.api_base ?? provider.default_api_base ?? "",
       apiType: provider.api_type ?? "auto",
+      proxy: provider.proxy ?? "",
     };
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
     const isXaiOauthProvider = provider.name === "xai_oauth";
+    const supportsOauthProxy = isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
+    const proxy = form.proxy.trim();
+    const oauthProxyDirty = supportsOauthProxy && proxy !== (provider.proxy ?? "").trim();
+    const oauthProxySaving = saving && oauthProxyDirty;
+    const oauthActionBusy = saving && !oauthProxySaving;
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const missingOptionalCredential =
       !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
@@ -2995,64 +3025,143 @@ function ProvidersSettings({
               <p className="text-[12px] text-destructive">{capabilityError}</p>
             ) : null}
             {isOauthProvider ? (
-              <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-[13px] font-semibold text-foreground">
-                      {tx("settings.oauth.authentication", "OAuth authentication")}
+              <>
+                <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[13px] font-semibold text-foreground">
+                        {tx("settings.oauth.authentication", "OAuth authentication")}
+                      </p>
+                      {isXaiOauthProvider ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-foreground/75">
+                          <Search className="h-3 w-3" aria-hidden />
+                          {tx("settings.oauth.xaiBadge", "Live X Search")}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-[12px] text-muted-foreground">
+                      {provider.configured
+                        ? t("settings.oauth.signedInAs", {
+                            account: provider.oauth_account || provider.label,
+                            defaultValue: "Signed in as {{account}}",
+                          })
+                        : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
                     </p>
                     {isXaiOauthProvider ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-foreground/75">
-                        <Search className="h-3 w-3" aria-hidden />
-                        {tx("settings.oauth.xaiBadge", "Live X Search")}
-                      </span>
+                      <p className="mt-1.5 max-w-xl text-[12px] leading-5 text-muted-foreground">
+                        {tx(
+                          "settings.oauth.xaiHelp",
+                          "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
+                        )}
+                      </p>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-[12px] text-muted-foreground">
-                    {provider.configured
-                      ? t("settings.oauth.signedInAs", {
-                          account: provider.oauth_account || provider.label,
-                          defaultValue: "Signed in as {{account}}",
-                        })
-                      : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
-                  </p>
-                  {isXaiOauthProvider ? (
-                    <p className="mt-1.5 max-w-xl text-[12px] leading-5 text-muted-foreground">
-                      {tx(
-                        "settings.oauth.xaiHelp",
-                        "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
-                      )}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 justify-end gap-2">
-                  {provider.configured ? (
+                  <div className="flex shrink-0 justify-end gap-2">
+                    {provider.configured ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onProviderOAuthLogout(provider.name)}
+                        disabled={saving}
+                        className="rounded-full"
+                      >
+                        {tx("settings.oauth.signOut", "Sign out")}
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
-                      variant="ghost"
-                      onClick={() => onProviderOAuthLogout(provider.name)}
-                      disabled={saving}
+                      variant="outline"
+                      onClick={() => onProviderOAuthLogin(provider.name)}
+                      disabled={saving || oauthProxyDirty || !provider.oauth_login_supported}
+                      title={
+                        oauthProxyDirty
+                          ? tx(
+                              "settings.oauth.proxySaveBeforeSignIn",
+                              "Save proxy changes before signing in.",
+                            )
+                          : undefined
+                      }
                       className="rounded-full"
                     >
-                      {tx("settings.oauth.signOut", "Sign out")}
+                      {oauthActionBusy ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                      ) : null}
+                      {oauthActionBusy
+                        ? tx("settings.oauth.signingIn", "Signing in...")
+                        : provider.configured
+                          ? tx("settings.oauth.signInAgain", "Sign in again")
+                          : tx("settings.oauth.signIn", "Sign in")}
                     </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onProviderOAuthLogin(provider.name)}
-                    disabled={saving || !provider.oauth_login_supported}
-                    className="rounded-full"
-                  >
-                    {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                    {saving
-                      ? tx("settings.oauth.signingIn", "Signing in...")
-                      : provider.configured
-                        ? tx("settings.oauth.signInAgain", "Sign in again")
-                        : tx("settings.oauth.signIn", "Sign in")}
-                  </Button>
+                  </div>
                 </div>
-              </div>
+                {supportsOauthProxy ? (
+                  <div className="rounded-[18px] border border-border/45 bg-background/75 px-4 py-3.5">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <Globe2 className="h-4 w-4" aria-hidden />
+                      </span>
+                      <div className="min-w-0">
+                        <label
+                          htmlFor={`provider-${provider.name}-proxy`}
+                          className="text-[13px] font-semibold text-foreground"
+                        >
+                          {tx("settings.oauth.proxyLabel", "Network proxy")}
+                        </label>
+                        <p
+                          id={`provider-${provider.name}-proxy-help`}
+                          className="mt-0.5 max-w-2xl text-[12px] leading-5 text-muted-foreground"
+                        >
+                          {tx(
+                            "settings.oauth.proxyHelp",
+                            "Optional. Used for OAuth sign-in, token refresh, and model requests. Save changes before signing in; leave blank for a direct connection.",
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Input
+                        id={`provider-${provider.name}-proxy`}
+                        value={form.proxy}
+                        onChange={(event) =>
+                          onChangeProviderForm(provider.name, { proxy: event.target.value })
+                        }
+                        placeholder="http://127.0.0.1:7890"
+                        aria-describedby={`provider-${provider.name}-proxy-help`}
+                        autoCapitalize="none"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="h-9 min-w-0 flex-1 rounded-full font-mono text-[12px]"
+                      />
+                      <div className="flex shrink-0 justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onResetProviderDraft(provider.name)}
+                          disabled={saving || !oauthProxyDirty}
+                          className="rounded-full"
+                        >
+                          {t("settings.actions.cancel")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSaveProvider(provider.name)}
+                          disabled={saving || !oauthProxyDirty}
+                          className="rounded-full"
+                        >
+                          {oauthProxySaving ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                          ) : null}
+                          {oauthProxySaving
+                            ? t("settings.actions.saving")
+                            : tx("settings.oauth.saveProxy", "Save proxy")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <>
             <label className="block space-y-1.5">

@@ -809,6 +809,7 @@ export async function updateProviderSettings(
   if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
   if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
   if (update.apiType !== undefined) query.set("api_type", update.apiType);
+  if (update.proxy !== undefined) query.set("proxy", update.proxy);
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
     token,

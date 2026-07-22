@@ -711,7 +711,11 @@
       "notSignedIn": "未サインイン",
       "xaiSubtitle": "X Premium · リアルタイム X 検索",
       "xaiBadge": "リアルタイム X 検索",
-      "xaiHelp": "X Premium / Grok サブスクリプションを使用します。Grok 4.5 でリアルタイム X 検索を利用でき、OAuth 認証情報はこのデバイスにのみ保存されます。"
+      "xaiHelp": "X Premium / Grok サブスクリプションを使用します。Grok 4.5 でリアルタイム X 検索を利用でき、OAuth 認証情報はこのデバイスにのみ保存されます。",
+      "proxyLabel": "ネットワークプロキシ",
+      "proxyHelp": "任意。OAuth サインイン、トークン更新、モデルリクエストに使用します。サインイン前に変更を保存してください。空欄の場合は直接接続します。",
+      "proxySaveBeforeSignIn": "サインイン前にプロキシの変更を保存してください。",
+      "saveProxy": "プロキシを保存"
     },
     "skills": {
       "description": "このエージェントが会話中に読み込める指示スキルを確認します。",

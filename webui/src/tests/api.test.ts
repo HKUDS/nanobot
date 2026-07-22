@@ -431,6 +431,20 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("serializes OAuth provider proxy updates", async () => {
+    await updateProviderSettings("tok", {
+      provider: "xai_oauth",
+      proxy: "http://127.0.0.1:7890",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=xai_oauth&proxy=http%3A%2F%2F127.0.0.1%3A7890",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("fetches provider model lists", async () => {
     await fetchProviderModels("tok", "deepseek");
 

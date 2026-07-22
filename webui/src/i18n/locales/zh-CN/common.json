@@ -725,7 +725,11 @@
       "notSignedIn": "未登录",
       "xaiSubtitle": "X Premium · 实时 X 搜索",
       "xaiBadge": "实时 X 搜索",
-      "xaiHelp": "使用你的 X Premium / Grok 订阅。Grok 4.5 可直接进行实时 X 搜索；OAuth 凭据仅保存在这台设备上。"
+      "xaiHelp": "使用你的 X Premium / Grok 订阅。Grok 4.5 可直接进行实时 X 搜索；OAuth 凭据仅保存在这台设备上。",
+      "proxyLabel": "网络代理",
+      "proxyHelp": "可选。用于 OAuth 登录、令牌刷新和模型请求。请先保存代理再登录；留空则直接连接。",
+      "proxySaveBeforeSignIn": "请先保存代理更改再登录。",
+      "saveProxy": "保存代理"
     },
     "skills": {
       "description": "查看此 agent 在对话中可以加载的指令技能。",

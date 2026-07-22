@@ -122,6 +122,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "21:9",
 }
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
+_OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_oauth"}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -400,6 +401,8 @@ def _provider_settings_row(
         row["oauth_account"] = oauth_status["account"]
         row["oauth_expires_at"] = oauth_status["expires_at"]
         row["oauth_login_supported"] = oauth_status["login_supported"]
+    if spec.name in _OAUTH_PROXY_PROVIDERS:
+        row["proxy"] = provider_config.proxy
     if spec.name == "openai":
         row["api_type"] = provider_config.api_type
     return row
@@ -1197,7 +1200,23 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
     if spec.is_oauth:
-        raise WebUISettingsError("unknown provider")
+        if spec.name not in _OAUTH_PROXY_PROVIDERS:
+            raise WebUISettingsError("unknown provider")
+        if any(
+            key in query
+            for key in ("api_key", "apiKey", "api_base", "apiBase", "api_type")
+        ):
+            raise WebUISettingsError("OAuth provider only supports proxy settings")
+
+        changed = False
+        if "proxy" in query:
+            proxy = (_query_first(query, "proxy") or "").strip() or None
+            if provider_config.proxy != proxy:
+                provider_config.proxy = proxy
+                changed = True
+        if changed:
+            save_config(config)
+        return settings_payload()
 
     changed = False
     if "api_key" in query or "apiKey" in query:

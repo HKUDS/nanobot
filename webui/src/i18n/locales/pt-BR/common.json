@@ -725,7 +725,11 @@
       "notSignedIn": "Desconectado",
       "xaiSubtitle": "X Premium · Busca no X em tempo real",
       "xaiBadge": "Busca no X em tempo real",
-      "xaiHelp": "Use sua assinatura X Premium / Grok. O Grok 4.5 oferece busca no X em tempo real; as credenciais OAuth permanecem neste dispositivo."
+      "xaiHelp": "Use sua assinatura X Premium / Grok. O Grok 4.5 oferece busca no X em tempo real; as credenciais OAuth permanecem neste dispositivo.",
+      "proxyLabel": "Proxy de rede",
+      "proxyHelp": "Opcional. Usado no login OAuth, na renovação de tokens e nas solicitações ao modelo. Salve as alterações antes de entrar; deixe em branco para conexão direta.",
+      "proxySaveBeforeSignIn": "Salve as alterações do proxy antes de entrar.",
+      "saveProxy": "Salvar proxy"
     },
     "skills": {
       "description": "Revise as skills de instrução que este agente pode carregar durante uma conversa.",

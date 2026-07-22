@@ -2038,6 +2038,101 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("Signed in as user@example.com")).toBeInTheDocument();
   });
 
+  it("saves scoped proxies for xAI and OpenAI Codex OAuth providers", async () => {
+    const base = settingsPayload();
+    const providers: SettingsPayload["providers"] = [
+      {
+        name: "xai_oauth",
+        label: "xAI (X Premium)",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://cli-chat-proxy.grok.com/v1",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+        proxy: "http://127.0.0.1:7000",
+      },
+      {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://chatgpt.com/backend-api",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+        proxy: null,
+      },
+    ];
+    let payload: SettingsPayload = { ...base, providers };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url.startsWith("/api/settings/provider/update?")) {
+        const query = new URLSearchParams(url.split("?")[1]);
+        const providerName = query.get("provider");
+        const proxy = query.get("proxy");
+        payload = {
+          ...payload,
+          providers: payload.providers.map((provider) =>
+            provider.name === providerName ? { ...provider, proxy } : provider,
+          ),
+        };
+        return jsonResponse(payload);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click((await screen.findByText("xAI (X Premium)")).closest("button")!);
+    const xaiProxy = screen.getByLabelText("Network proxy");
+    expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
+    fireEvent.change(xaiProxy, { target: { value: "http://127.0.0.1:7890" } });
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sign in" })).toHaveAttribute(
+      "title",
+      "Save proxy changes before signing in.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save proxy" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/update?provider=xai_oauth&proxy=http%3A%2F%2F127.0.0.1%3A7890",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
+
+    fireEvent.click(screen.getByText("OpenAI Codex").closest("button")!);
+    const codexProxy = screen.getByLabelText("Network proxy");
+    expect(codexProxy).toHaveValue("");
+    fireEvent.change(codexProxy, { target: { value: "http://proxy.example:8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save proxy" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/update?provider=openai_codex&proxy=http%3A%2F%2Fproxy.example%3A8080",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+  });
+
   it("keeps the default model distinct from the active named configuration", async () => {
     const base = settingsPayload();
     const payload: SettingsPayload = {

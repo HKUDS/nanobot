@@ -711,7 +711,11 @@
       "notSignedIn": "Chưa đăng nhập",
       "xaiSubtitle": "X Premium · Tìm kiếm X trực tiếp",
       "xaiBadge": "Tìm kiếm X trực tiếp",
-      "xaiHelp": "Sử dụng gói đăng ký X Premium / Grok của bạn. Grok 4.5 hỗ trợ tìm kiếm X trực tiếp; thông tin xác thực OAuth chỉ được lưu trên thiết bị này."
+      "xaiHelp": "Sử dụng gói đăng ký X Premium / Grok của bạn. Grok 4.5 hỗ trợ tìm kiếm X trực tiếp; thông tin xác thực OAuth chỉ được lưu trên thiết bị này.",
+      "proxyLabel": "Proxy mạng",
+      "proxyHelp": "Không bắt buộc. Dùng cho đăng nhập OAuth, làm mới token và yêu cầu mô hình. Hãy lưu thay đổi trước khi đăng nhập; để trống để kết nối trực tiếp.",
+      "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
+      "saveProxy": "Lưu proxy"
     },
     "skills": {
       "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",

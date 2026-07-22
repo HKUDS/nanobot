@@ -725,7 +725,11 @@
       "notSignedIn": "Not signed in",
       "xaiSubtitle": "X Premium · Live X Search",
       "xaiBadge": "Live X Search",
-      "xaiHelp": "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device."
+      "xaiHelp": "Use your X Premium / Grok subscription. Grok 4.5 gets live X Search; OAuth credentials stay on this device.",
+      "proxyLabel": "Network proxy",
+      "proxyHelp": "Optional. Used for OAuth sign-in, token refresh, and model requests. Save changes before signing in; leave blank for a direct connection.",
+      "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
+      "saveProxy": "Save proxy"
     },
     "skills": {
       "description": "Review the instruction skills this agent can load during a conversation.",

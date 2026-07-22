@@ -711,7 +711,11 @@
       "notSignedIn": "Belum masuk",
       "xaiSubtitle": "X Premium · Pencarian X langsung",
       "xaiBadge": "Pencarian X langsung",
-      "xaiHelp": "Gunakan langganan X Premium / Grok Anda. Grok 4.5 menyediakan pencarian X langsung; kredensial OAuth hanya disimpan di perangkat ini."
+      "xaiHelp": "Gunakan langganan X Premium / Grok Anda. Grok 4.5 menyediakan pencarian X langsung; kredensial OAuth hanya disimpan di perangkat ini.",
+      "proxyLabel": "Proksi jaringan",
+      "proxyHelp": "Opsional. Digunakan untuk login OAuth, penyegaran token, dan permintaan model. Simpan perubahan sebelum login; kosongkan untuk koneksi langsung.",
+      "proxySaveBeforeSignIn": "Simpan perubahan proksi sebelum login.",
+      "saveProxy": "Simpan proksi"
     },
     "skills": {
       "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",

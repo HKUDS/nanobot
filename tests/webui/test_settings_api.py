@@ -345,6 +345,63 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     assert dynamic_provider.api_key == "sk-test"
 
 
+@pytest.mark.parametrize(
+    ("provider_name", "config_attr"),
+    [
+        ("openai_codex", "openai_codex"),
+        ("xai_oauth", "xai_oauth"),
+    ],
+)
+def test_update_provider_settings_updates_and_clears_oauth_proxy(
+    provider_name: str,
+    config_attr: str,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    getattr(config.providers, config_attr).proxy = "http://127.0.0.1:7000"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_api._oauth_provider_status",
+        lambda _spec: {
+            "configured": False,
+            "account": None,
+            "expires_at": None,
+            "login_supported": True,
+        },
+    )
+
+    payload = update_provider_settings(
+        {"provider": [provider_name], "proxy": [" http://127.0.0.1:7890 "]}
+    )
+
+    providers = {row["name"]: row for row in payload["providers"]}
+    assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
+    assert getattr(load_config(config_path).providers, config_attr).proxy == (
+        "http://127.0.0.1:7890"
+    )
+
+    cleared = update_provider_settings({"provider": [provider_name], "proxy": ["  "]})
+
+    providers = {row["name"]: row for row in cleared["providers"]}
+    assert providers[provider_name]["proxy"] is None
+    assert getattr(load_config(config_path).providers, config_attr).proxy is None
+
+
+def test_update_provider_settings_keeps_oauth_credentials_read_only(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="only supports proxy settings"):
+        update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
+
+
 def test_update_agent_settings_accepts_context_window_options(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
