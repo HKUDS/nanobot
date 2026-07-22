@@ -174,6 +174,29 @@ class TestExtractText:
         assert "This is paragraph one." in result
         assert "This is paragraph two." in result
 
+    def test_extract_text_docx_preserves_paragraph_and_table_order(self, tmp_path: Path):
+        """DOCX forms commonly keep nearly all meaningful content in tables."""
+        from docx import Document
+
+        docx_file = tmp_path / "form.docx"
+        doc = Document()
+        doc.add_paragraph("Applicant details")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Name"
+        table.cell(0, 1).text = "Ada Lovelace"
+        table.cell(1, 0).text = "Project"
+        table.cell(1, 1).text = "Analytical Engine"
+        doc.add_paragraph("End of form")
+        doc.save(docx_file)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert "Name\tAda Lovelace" in result
+        assert "Project\tAnalytical Engine" in result
+        assert result.index("Applicant details") < result.index("Name\tAda Lovelace")
+        assert result.index("Analytical Engine") < result.index("End of form")
+
     def test_extract_text_docx_empty(self, tmp_path: Path):
         """Test extracting text from an empty .docx file."""
         from docx import Document

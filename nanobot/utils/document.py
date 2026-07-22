@@ -210,6 +210,8 @@ def _extract_docx(path: Path) -> str:
     """Extract text from DOCX using python-docx."""
     try:
         from docx import Document as DocxDocument
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
     except ImportError:
         return "[error: python-docx not installed]"
     try:
@@ -217,10 +219,30 @@ def _extract_docx(path: Path) -> str:
             return error
         doc = DocxDocument(path)
         collector = _TextCollector(_MAX_TEXT_LENGTH)
-        for paragraph in doc.paragraphs:
-            text = paragraph.text.strip()
-            if text and not collector.add(text, separator="\n\n"):
-                break
+        for block in doc.iter_inner_content():
+            if isinstance(block, Paragraph):
+                text = block.text.strip()
+                if text and not collector.add(text, separator="\n\n"):
+                    break
+                continue
+            if not isinstance(block, Table):
+                continue
+            first_row = True
+            for row in block.rows:
+                cells: list[str] = []
+                seen_cells: set[int] = set()
+                for cell in row.cells:
+                    cell_id = id(cell._tc)
+                    if cell_id in seen_cells:
+                        continue
+                    seen_cells.add(cell_id)
+                    cells.append(" ".join(cell.text.split()))
+                if not any(cells):
+                    continue
+                separator = "\n\n" if first_row else "\n"
+                first_row = False
+                if not collector.add("\t".join(cells), separator=separator):
+                    return collector.render()
         return collector.render()
     except Exception as e:
         logger.exception("Failed to extract DOCX {}", path)

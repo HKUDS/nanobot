@@ -93,6 +93,26 @@ def test_drain_pending_path_preserves_document_text(tmp_path: Path) -> None:
     assert "summarize" in result
 
 
+def test_drain_pending_path_preserves_docx_table_text(tmp_path: Path) -> None:
+    """Uploaded Word forms must retain content stored in table cells."""
+    from docx import Document
+
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Applicant"
+    table.cell(0, 1).text = "Ada Lovelace"
+    table.cell(1, 0).text = "Research area"
+    table.cell(1, 1).text = "Analytical engines"
+    docx_path = tmp_path / "application.docx"
+    doc.save(docx_path)
+
+    content, image_only = extract_documents("summarize", [str(docx_path)])
+
+    assert image_only == []
+    assert "Applicant\tAda Lovelace" in content
+    assert "Research area\tAnalytical engines" in content
+
+
 def test_drain_pending_path_without_extract_loses_document(tmp_path: Path) -> None:
     """Demonstrates the BUG: if _drain_pending calls _build_user_content
     directly without extract_documents, document content is lost."""
