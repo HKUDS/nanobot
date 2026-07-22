@@ -1388,18 +1388,30 @@ class FeishuChannel(BaseChannel):
 
     def _build_card_elements(self, content: str) -> list[dict]:
         """Split content into div/markdown + table elements for Feishu card."""
+        protected = content
+        code_blocks: list[str] = []
+        for m in self._CODE_BLOCK_RE.finditer(content):
+            code_blocks.append(m.group(1))
+            protected = protected.replace(m.group(1), f"\x00CODE{len(code_blocks) - 1}\x00", 1)
+
         elements, last_end = [], 0
-        for m in self._TABLE_RE.finditer(content):
-            before = content[last_end : m.start()]
+        for m in self._TABLE_RE.finditer(protected):
+            before = protected[last_end : m.start()]
             if before.strip():
                 elements.extend(self._split_headings(before))
             elements.append(
                 self._parse_md_table(m.group(1)) or {"tag": "markdown", "content": m.group(1)}
             )
             last_end = m.end()
-        remaining = content[last_end:]
+        remaining = protected[last_end:]
         if remaining.strip():
             elements.extend(self._split_headings(remaining))
+
+        for i, cb in enumerate(code_blocks):
+            for el in elements:
+                if el.get("tag") == "markdown":
+                    el["content"] = el["content"].replace(f"\x00CODE{i}\x00", cb)
+
         return elements or [{"tag": "markdown", "content": content}]
 
     @staticmethod
