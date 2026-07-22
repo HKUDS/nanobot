@@ -28,21 +28,25 @@ Never share a bot token. Anyone who has it can control that Telegram bot.
 Repeat these steps if you want more than one bot. Each nanobot entry must use a
 different BotFather token.
 
-## 2. Install support and open Telegram settings
+## 2. Open Telegram settings in nanobot
 
-Install Telegram support in the same Python environment where nanobot runs:
-
-```bash
-nanobot plugins enable telegram
-```
-
-Then start the WebUI:
+Start the WebUI:
 
 ```bash
 nanobot webui
 ```
 
-Open **Settings → Channels → Telegram**.
+Open **Settings → Channels → Telegram**. If Telegram support is not installed,
+turn on the Telegram switch and confirm **Install and enable**. The same-machine
+WebUI installs the optional package in nanobot's Python environment; follow any
+restart prompt, then return to the Telegram card.
+
+If WebUI installation is unavailable, for example from a restricted remote
+browser, install it from the machine that runs nanobot:
+
+```bash
+nanobot plugins enable telegram
+```
 
 ## 3. Connect your first bot
 
@@ -135,8 +139,9 @@ full webhook example.
 
 ## Troubleshooting
 
-- **Telegram support is not installed:** run `nanobot plugins enable telegram`
-  in the Python environment that runs the gateway.
+- **Telegram support is not installed:** turn on its switch and confirm
+  **Install and enable**. If WebUI installation is unavailable, run
+  `nanobot plugins enable telegram` in the Python environment that runs the gateway.
 - **A token is rejected:** open BotFather, select the correct bot, and copy or
   regenerate its token. Do not reuse one token for two entries.
 - **The live check is temporarily unavailable:** confirm the machine can reach

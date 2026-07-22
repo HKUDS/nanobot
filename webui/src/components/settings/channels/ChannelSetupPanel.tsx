@@ -134,7 +134,10 @@ export function ChannelSetupPanel({
   const [connectRequestId, setConnectRequestId] = useState(0);
   const uiContribution = channelUiContribution(feature.name, feature.webui);
   const PluginPanel = uiContribution?.Panel;
-  if (PluginPanel) {
+  const showInstallGate = !feature.installed
+    && feature.install_supported
+    && (PluginPanel !== undefined || feature.instances !== undefined);
+  if (PluginPanel && !showInstallGate) {
     return (
       <PluginPanel
         token={token}
@@ -147,7 +150,7 @@ export function ChannelSetupPanel({
       />
     );
   }
-  if (feature.instances !== undefined) {
+  if (feature.instances !== undefined && !showInstallGate) {
     return (
       <ChannelInstancesPanel
         token={token}
@@ -166,7 +169,8 @@ export function ChannelSetupPanel({
   const channelBusy = enableBusy || disableBusy;
   const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
   const needsSetupBeforeEnable =
-    !channelChecked
+    !showInstallGate
+    && !channelChecked
     && feature.configured === false
     && !(uiContribution?.canConnectBeforeConfigured && setup.mode === "connect");
   const channelToggleDisabled =
@@ -241,15 +245,17 @@ export function ChannelSetupPanel({
 
       <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
 
-      <ChannelSetupSurface
-        token={token}
-        feature={feature}
-        setup={setup}
-        chatAppsDocsUrl={chatAppsDocsUrl}
-        connectRequestId={connectRequestId}
-        ConnectFlow={uiContribution?.ConnectFlow}
-        onFeaturesUpdate={onFeaturesUpdate}
-      />
+      {!showInstallGate ? (
+        <ChannelSetupSurface
+          token={token}
+          feature={feature}
+          setup={setup}
+          chatAppsDocsUrl={chatAppsDocsUrl}
+          connectRequestId={connectRequestId}
+          ConnectFlow={uiContribution?.ConnectFlow}
+          onFeaturesUpdate={onFeaturesUpdate}
+        />
+      ) : null}
     </aside>
   );
 }

@@ -659,6 +659,79 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Disabled channel 'matrix'")).not.toBeInTheDocument();
   });
 
+  it("installs Telegram support from the channel switch before showing bot setup", async () => {
+    const telegramInstance = {
+      id: "default",
+      name: "nanobot",
+      enabled: false,
+      configured: false,
+      config_values: {
+        "channels.telegram.name": "nanobot",
+        "channels.telegram.groupPolicy": "mention",
+      },
+      configured_fields: [
+        "channels.telegram.name",
+        "channels.telegram.groupPolicy",
+      ],
+    };
+    const telegramFeature = (installed: boolean) => ({
+      name: "telegram",
+      display_name: "Telegram",
+      webui: "webui/index.ts",
+      type: "channel",
+      enabled: installed,
+      configured: false,
+      installed,
+      ready: false,
+      status: installed ? "not_enabled" : "missing_dependency",
+      install_supported: true,
+      requires_restart: true,
+      setup: channelSetupContract("telegram"),
+      instances: [{ ...telegramInstance, enabled: installed }],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [telegramFeature(false)],
+          enabled_count: 0,
+        });
+      }
+      if (url === "/api/settings/nanobot-features/enable?name=telegram") {
+        return jsonResponse({
+          features: [telegramFeature(true)],
+          enabled_count: 1,
+          requires_restart: true,
+          last_action: { ok: true, message: "Enabled channel 'telegram'", enabled: true },
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "channels" });
+
+    const telegramSwitch = await screen.findByRole("switch", { name: "Telegram channel" });
+    expect(telegramSwitch).toBeEnabled();
+    expect(screen.queryByLabelText("Bot token", { selector: "input" })).not.toBeInTheDocument();
+
+    fireEvent.click(telegramSwitch);
+    expect(screen.getByRole("dialog", { name: "Install support for Telegram?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/nanobot-features/enable?name=telegram",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "nanobot" }));
+    expect(screen.getByLabelText("Bot token", { selector: "input" })).toBeVisible();
+  });
+
   it("shows an enabled channel with missing support as failed", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
