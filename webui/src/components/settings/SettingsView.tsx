@@ -1841,6 +1841,7 @@ export function SettingsView({
       case "image":
         return (
           <ImageGenerationSettings
+            token={token}
             settings={settings}
             form={imageGenerationForm}
             dirty={imageGenerationDirty}
@@ -3535,6 +3536,7 @@ function ProvidersSettings({
 }
 
 function ImageGenerationSettings({
+  token,
   settings,
   form,
   dirty,
@@ -3547,6 +3549,7 @@ function ImageGenerationSettings({
   isRestarting,
   requiresRestartPending,
 }: {
+  token: string;
   settings: SettingsPayload;
   form: ImageGenerationSettingsUpdate;
   dirty: boolean;
@@ -3574,11 +3577,6 @@ function ImageGenerationSettings({
     IMAGE_SIZE_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultImageSize,
   );
-  const modelOptions = (selectedProvider?.models ?? []).map((model) => ({
-    name: model,
-    label: model,
-  }));
-
   const selectProvider = (provider: string) => {
     const nextProvider = settings.image_generation.providers.find((row) => row.name === provider);
     onChangeForm((prev) => ({
@@ -3648,9 +3646,13 @@ function ImageGenerationSettings({
             title={tx("settings.rows.imageModel", "Image model")}
             description={tx("settings.help.imageModel", "Model name sent to the selected image provider.")}
           >
-            <EditableOptionPicker
-              options={modelOptions}
+            <ModelIdPicker
+              token={token}
+              settings={settings}
+              provider={form.provider}
+              models={selectedProvider?.models ?? []}
               value={form.model}
+              showProviderLogos={showBrandLogos}
               emptyLabel={tx("settings.image.selectModel", "Select image model")}
               searchPlaceholder={tx(
                 "settings.image.searchOrTypeModel",
@@ -3660,7 +3662,6 @@ function ImageGenerationSettings({
                 "settings.image.typeModelId",
                 "Type the model ID supported by this provider.",
               )}
-              useCustomLabel={tx("settings.models.useCustomModel", "Use")}
               onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
             />
           </SettingsRow>
@@ -7733,150 +7734,27 @@ function ProviderPicker({
   );
 }
 
-function EditableOptionPicker({
-  options,
-  value,
-  emptyLabel,
-  searchPlaceholder,
-  emptyMessage,
-  useCustomLabel,
-  onChange,
-}: {
-  options: Array<{ name: string; label: string }>;
-  value: string;
-  emptyLabel: string;
-  searchPlaceholder: string;
-  emptyMessage: string;
-  useCustomLabel: string;
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLowerCase();
-  const customCandidate = query.trim();
-  const exactMatch = options.some((option) => option.name === customCandidate);
-  const visibleOptions = options.filter((option) =>
-    [option.name, option.label].some((field) => field.toLowerCase().includes(normalizedQuery)),
-  );
-
-  const selectValue = (nextValue: string) => {
-    onChange(nextValue);
-    setQuery("");
-    setOpen(false);
-  };
-
-  return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (!nextOpen) setQuery("");
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className={cn(
-            "h-8 w-[min(300px,70vw)] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
-            "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
-          )}
-        >
-          <span className={cn("truncate", !value && "text-muted-foreground")}>
-            {value || emptyLabel}
-          </span>
-          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="w-[320px] max-w-[calc(100vw-2rem)] p-1.5"
-      >
-        <div className="p-1 pb-1.5">
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === "Enter" && customCandidate) {
-                  event.preventDefault();
-                  selectValue(customCandidate);
-                }
-              }}
-              placeholder={searchPlaceholder}
-              aria-label={searchPlaceholder}
-              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
-            />
-          </div>
-        </div>
-
-        {visibleOptions.length ? (
-          <div className="max-h-[14rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent">
-            {visibleOptions.map((option) => {
-              const selected = option.name === value;
-              return (
-                <DropdownMenuItem
-                  key={option.name}
-                  onSelect={() => selectValue(option.name)}
-                  className={cn(
-                    "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-2.5 py-2 text-[13px]",
-                    "focus:bg-muted/85 focus:text-foreground",
-                    selected && "bg-muted/80 text-foreground focus:bg-muted",
-                  )}
-                >
-                  <span className="min-w-0 truncate">{option.label}</span>
-                  {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
-                </DropdownMenuItem>
-              );
-            })}
-          </div>
-        ) : !customCandidate ? (
-          <div className="px-3 py-2 text-[11px] leading-4 text-muted-foreground">
-            {emptyMessage}
-          </div>
-        ) : null}
-
-        {customCandidate && !exactMatch ? (
-          <>
-            {visibleOptions.length ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuItem
-              onSelect={() => selectValue(customCandidate)}
-              className="flex cursor-default items-center gap-2 rounded-[12px] px-2 py-1.5 text-[12px] focus:bg-muted/85"
-            >
-              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted/80 text-muted-foreground">
-                <Pencil className="h-3 w-3" aria-hidden />
-              </span>
-              <span className="min-w-0 truncate">
-                {useCustomLabel}{" "}
-                <span className="font-medium text-foreground">“{customCandidate}”</span>
-              </span>
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function ModelIdPicker({
   token,
   settings,
   provider,
+  models,
   value,
   showProviderLogos,
+  emptyLabel,
+  searchPlaceholder,
+  emptyMessage,
   onChange,
 }: {
   token: string;
   settings: SettingsPayload;
   provider: string;
+  models?: string[];
   value: string;
   showProviderLogos: boolean;
+  emptyLabel?: string;
+  searchPlaceholder?: string;
+  emptyMessage?: string;
   onChange: (model: string) => void;
 }) {
   const { t } = useTranslation();
@@ -7889,19 +7767,25 @@ function ModelIdPicker({
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
+  const hasStaticModels = models !== undefined;
   const providerRow = settingsProviderRow(settings, effectiveProvider);
   const providerConfigured = settingsProviderConfigured(settings, effectiveProvider);
-  const providerRequiresConfiguration = hasConcreteProvider && !providerConfigured;
+  const providerRequiresConfiguration =
+    !hasStaticModels && hasConcreteProvider && !providerConfigured;
   const providerHasBuiltinModels = providerRow?.model_catalog === "builtin";
   const providerUsesManualModelIds =
+    !hasStaticModels &&
     hasConcreteProvider &&
     providerConfigured &&
     providerRow?.auth_type === "oauth" &&
     !providerHasBuiltinModels;
   const canFetchModels =
+    !hasStaticModels &&
     hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;
   const normalizedQuery = query.trim().toLowerCase();
-  const providerModels = payload?.models ?? [];
+  const providerModels: ProviderModelsPayload["models"] = hasStaticModels
+    ? (models?.map((id) => ({ id })) ?? [])
+    : (payload?.models ?? []);
   const visibleModels = providerModels
     .filter((model) => {
       if (!normalizedQuery) return true;
@@ -7917,8 +7801,10 @@ function ModelIdPicker({
     canFetchModels && (!defersModelList || hasDeferredSearchQuery);
   const waitingForModelSearch =
     open && canFetchModels && defersModelList && !hasDeferredSearchQuery;
-  const hasModelList = payload?.status === "available";
-  const showModels = Boolean(hasModelList && payload && (!isCatalog || normalizedQuery));
+  const hasModelList = hasStaticModels || payload?.status === "available";
+  const showModels = Boolean(
+    hasModelList && (hasStaticModels || (payload && (!isCatalog || normalizedQuery))),
+  );
   const customCandidate = query.trim();
   const allowCustomModel = !providerRequiresConfiguration;
   const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
@@ -8023,7 +7909,7 @@ function ModelIdPicker({
                 value ? "text-foreground" : "text-muted-foreground",
               )}
             >
-              {value || tx("settings.models.selectModel", "Select model")}
+              {value || emptyLabel || tx("settings.models.selectModel", "Select model")}
             </span>
           </span>
           <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -8042,8 +7928,19 @@ function ModelIdPicker({
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => event.stopPropagation()}
-              placeholder={tx("settings.models.searchModels", "Search or type model ID")}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter" && allowCustomModel && customCandidate) {
+                  event.preventDefault();
+                  selectModel(customCandidate);
+                }
+              }}
+              placeholder={
+                searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
+              }
+              aria-label={
+                searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
+              }
               className="h-8 rounded-full pl-8 pr-3 text-[12px]"
             />
           </div>
@@ -8052,6 +7949,10 @@ function ModelIdPicker({
         {providerRequiresConfiguration ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
+          </div>
+        ) : hasStaticModels && !providerModels.length ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {emptyMessage || tx("settings.models.unsupportedModelList", "Type a model ID manually.")}
           </div>
         ) : providerUsesManualModelIds ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">

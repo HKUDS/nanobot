@@ -101,6 +101,21 @@ def test_settings_payload_includes_relocated_capabilities(
     assert payload["observability"]["configured"] is True
 
 
+def test_settings_payload_exposes_modelscope_image_model(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    providers = {row["name"]: row for row in payload["image_generation"]["providers"]}
+
+    assert providers["modelscope"]["models"] == ["Qwen/Qwen-Image-2512"]
+    assert providers["modelscope"]["default_model"] == "Qwen/Qwen-Image-2512"
+
+
 def test_update_api_settings_requires_key_for_network_access(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1799,6 +1799,7 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
     """
 
     provider_name = "modelscope"
+    model_options = ("Qwen/Qwen-Image-2512",)
     missing_key_message = (
         "ModelScope API key is not configured. Set providers.modelscope.apiKey."
     )
