@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -213,11 +214,11 @@ class MyTool(Tool):
             if part.lower() in self._SENSITIVE_NAMES:
                 return None, f"'{part}' is not accessible"
             try:
-                if isinstance(obj, dict):
+                if isinstance(obj, Mapping):
                     if part in obj:
                         obj = obj[part]
                     else:
-                        return None, f"'{part}' not found in dict"
+                        return None, f"'{part}' not found in mapping"
                 else:
                     obj = getattr(obj, part)
             except (KeyError, AttributeError) as e:
@@ -260,7 +261,7 @@ class MyTool(Tool):
         # SubagentManager: delegate to its _task_statuses dict
         if hasattr(val, "_task_statuses") and isinstance(val._task_statuses, dict):
             return MyTool._format_value(val._task_statuses, key)
-        if isinstance(val, dict) and val and _is_subagent_status(next(iter(val.values()))):
+        if isinstance(val, Mapping) and val and _is_subagent_status(next(iter(val.values()))):
             prefix = f"{key}: " if key else ""
             lines = [f"{prefix}{len(val)} subagent(s):"]
             for tid, st in val.items():
@@ -273,8 +274,8 @@ class MyTool(Tool):
         if isinstance(val, (str, int, float, bool, type(None))):
             r = repr(val)
             return f"{key}: {r}" if key else r
-        # Dict — small: show content; large: show keys for dot-path navigation
-        if isinstance(val, dict):
+        # Mapping — small: show content; large: show keys for dot-path navigation
+        if isinstance(val, Mapping):
             ks = list(val.keys())
             if not ks:
                 return f"{key}: {{}}" if key else "{}"

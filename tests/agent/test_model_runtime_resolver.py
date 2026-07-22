@@ -177,12 +177,17 @@ def test_resolver_model_presets_are_read_only() -> None:
         model_presets={"fast": ModelPresetConfig(model="fast-model")},
     )
 
+    exposed = resolver.model_presets
     with pytest.raises(TypeError):
-        resolver.model_presets["other"] = ModelPresetConfig(  # type: ignore[index]
+        exposed["other"] = ModelPresetConfig(  # type: ignore[index]
             model="other-model"
         )
 
+    exposed["fast"].model = "mutated-model"
+
     assert set(resolver.model_presets) == {"fast"}
+    assert resolver.model_presets["fast"].model == "fast-model"
+    assert resolver.resolve_preset("fast").model == "fast-model"
 
 
 def test_resolver_model_override_is_derived_without_default_mutation() -> None:
