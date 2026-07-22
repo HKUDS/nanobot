@@ -118,6 +118,7 @@ class CronJobState:
                 if isinstance(record, CronRunRecord)
                 else CronRunRecord.from_store_dict(record)
                 for record in history
+                if isinstance(record, (dict, CronRunRecord))
             ],
         )
 

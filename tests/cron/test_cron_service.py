@@ -1086,3 +1086,42 @@ def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
     assert jobs[0].state.run_history[0].status == "ok"
     assert jobs[0].created_at_ms == 0
     assert jobs[0].updated_at_ms == 0
+
+
+def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
+    """Null runHistory elements must be skipped like LocalTrigger.from_dict."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                None,
+                                {"runAtMs": 1, "status": "ok", "durationMs": 2},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert len(jobs[0].state.run_history) == 1
+    assert jobs[0].state.run_history[0].run_at_ms == 1
+    assert jobs[0].state.run_history[0].status == "ok"
