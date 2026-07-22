@@ -725,7 +725,10 @@
       "notSignedIn": "未登录",
       "proxyLabel": "网络代理",
       "proxySaveBeforeSignIn": "请先保存代理更改再登录。",
-      "saveProxy": "保存代理"
+      "saveProxy": "保存代理",
+      "callbackHelp": "请在浏览器中完成登录。若未自动完成，请将最终网址粘贴到下方。",
+      "callbackPlaceholder": "最终网址或授权码",
+      "finishSignIn": "完成登录"
     },
     "skills": {
       "description": "查看此 agent 在对话中可以加载的指令技能。",

@@ -711,7 +711,10 @@
       "notSignedIn": "Belum masuk",
       "proxyLabel": "Proksi jaringan",
       "proxySaveBeforeSignIn": "Simpan perubahan proksi sebelum login.",
-      "saveProxy": "Simpan proksi"
+      "saveProxy": "Simpan proksi",
+      "callbackHelp": "Selesaikan proses masuk di browser. Jika tidak selesai otomatis, tempel URL terakhir di bawah.",
+      "callbackPlaceholder": "URL terakhir atau kode otorisasi",
+      "finishSignIn": "Selesaikan masuk"
     },
     "skills": {
       "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",

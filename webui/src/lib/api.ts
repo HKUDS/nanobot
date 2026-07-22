@@ -16,6 +16,8 @@ import type {
   NetworkSafetySettingsUpdate,
   PairingPayload,
   ProviderModelsPayload,
+  ProviderOAuthCompletionResult,
+  ProviderOAuthLoginResult,
   ProviderSettingsUpdate,
   SessionDeleteResult,
   SessionAutomationsPayload,
@@ -51,6 +53,7 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
 }
 const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
 const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
+const OAUTH_CALLBACK_HEADER = "X-Nanobot-OAuth-Callback";
 
 export class ApiError extends Error {
   status: number;
@@ -820,12 +823,31 @@ export async function loginProviderOAuth(
   token: string,
   provider: string,
   base: string = "",
-): Promise<SettingsPayload> {
+): Promise<ProviderOAuthLoginResult> {
   const query = new URLSearchParams();
   query.set("provider", provider);
-  return request<SettingsPayload>(
+  return request<ProviderOAuthLoginResult>(
     `${base}/api/settings/provider/oauth-login?${query}`,
     token,
+    { cache: "no-store" },
+  );
+}
+
+export async function completeProviderOAuth(
+  token: string,
+  provider: string,
+  flowId: string,
+  callbackValue?: string,
+  base: string = "",
+): Promise<ProviderOAuthCompletionResult> {
+  const query = new URLSearchParams();
+  query.set("provider", provider);
+  query.set("flow_id", flowId);
+  const headers = callbackValue ? { [OAUTH_CALLBACK_HEADER]: callbackValue } : undefined;
+  return request<ProviderOAuthCompletionResult>(
+    `${base}/api/settings/provider/oauth-login/complete?${query}`,
+    token,
+    { cache: "no-store", ...(headers ? { headers } : {}) },
   );
 }
 

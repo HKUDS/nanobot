@@ -21,11 +21,13 @@ from nanobot.providers.xai_oauth import (
     _generate_pkce,
     _make_callback_server,
     _validate_xai_endpoint,
+    complete_xai_oauth_login,
     get_xai_oauth_login_status,
     get_xai_oauth_storage_path,
     get_xai_oauth_token,
     login_xai_oauth,
     logout_xai_oauth,
+    start_xai_oauth_login,
 )
 
 
@@ -151,6 +153,42 @@ def test_login_uses_random_loopback_callback_and_saves_separate_credentials(
     saved = json.loads(get_xai_oauth_storage_path().read_text(encoding="utf-8"))
     assert saved["access"] == "access-secret"
     assert saved["refresh"] == "refresh-secret"
+    assert get_xai_oauth_login_status() == token
+
+
+def test_pending_login_accepts_callback_url_from_remote_browser(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _use_temp_credentials(monkeypatch, tmp_path)
+    discovery = _Discovery(
+        authorization_endpoint="https://auth.x.ai/oauth2/authorize",
+        token_endpoint="https://auth.x.ai/oauth2/token",
+        userinfo_endpoint=None,
+    )
+    monkeypatch.setattr(xai_oauth, "_discover", lambda _proxy: discovery)
+    exchanged: dict[str, str] = {}
+
+    def fake_exchange(endpoint: str, **kwargs):
+        exchanged.update(endpoint=endpoint, **kwargs)
+        return {"access_token": "remote-access", "expires_in": 3600}
+
+    monkeypatch.setattr(xai_oauth, "_exchange_code", fake_exchange)
+
+    flow = start_xai_oauth_login(timeout_s=5)
+    try:
+        params = parse_qs(urlsplit(flow.authorization_url).query)
+        callback_url = params["redirect_uri"][0]
+        callback_query = urlencode({"code": "remote-code", "state": params["state"][0]})
+
+        token = complete_xai_oauth_login(flow, f"{callback_url}?{callback_query}")
+    finally:
+        flow.cancel()
+
+    assert token is not None
+    assert token.access == "remote-access"
+    assert exchanged["code"] == "remote-code"
+    assert exchanged["redirect_uri"] == callback_url
     assert get_xai_oauth_login_status() == token
 
 

@@ -711,7 +711,10 @@
       "notSignedIn": "Chưa đăng nhập",
       "proxyLabel": "Proxy mạng",
       "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
-      "saveProxy": "Lưu proxy"
+      "saveProxy": "Lưu proxy",
+      "callbackHelp": "Hoàn tất đăng nhập trong trình duyệt. Nếu không tự động hoàn tất, hãy dán URL cuối cùng bên dưới.",
+      "callbackPlaceholder": "URL cuối cùng hoặc mã ủy quyền",
+      "finishSignIn": "Hoàn tất đăng nhập"
     },
     "skills": {
       "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",

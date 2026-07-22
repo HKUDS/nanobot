@@ -1998,10 +1998,27 @@ describe("SettingsView Apps catalog", () => {
       ...payload,
       providers: [{ ...xaiProvider, configured: true, oauth_account: "user@example.com" }],
     };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const authorization = {
+      status: "authorization_required",
+      provider: "xai_grok",
+      flow_id: "flow-123",
+      authorization_url: "https://auth.x.ai/oauth2/authorize?state=test",
+      expires_in: 600,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
       if (url === "/api/settings/provider/oauth-login?provider=xai_grok") {
+        return jsonResponse(authorization);
+      }
+      if (
+        url ===
+        "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123"
+      ) {
+        expect(init?.headers).toMatchObject({
+          "X-Nanobot-OAuth-Callback":
+            "http://127.0.0.1/callback?code=secret&state=test",
+        });
         return jsonResponse(signedIn);
       }
       if (url === "/api/settings/cli-apps") {
@@ -2013,6 +2030,12 @@ describe("SettingsView Apps catalog", () => {
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
+    const popup = {
+      opener: window,
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -2025,6 +2048,28 @@ describe("SettingsView Apps catalog", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/settings/provider/oauth-login?provider=xai_grok",
         expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    expect(popup.opener).toBeNull();
+    expect(popup.location.href).toBe(authorization.authorization_url);
+
+    const callbackInput = await screen.findByRole("textbox", {
+      name: "Final URL or authorization code",
+    });
+    fireEvent.change(callbackInput, {
+      target: { value: "http://127.0.0.1/callback?code=secret&state=test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "X-Nanobot-OAuth-Callback":
+              "http://127.0.0.1/callback?code=secret&state=test",
+          }),
+        }),
       ),
     );
     expect(await screen.findByText("Signed in as user@example.com")).toBeInTheDocument();

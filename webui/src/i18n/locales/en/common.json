@@ -725,7 +725,10 @@
       "notSignedIn": "Not signed in",
       "proxyLabel": "Network proxy",
       "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
-      "saveProxy": "Save proxy"
+      "saveProxy": "Save proxy",
+      "callbackHelp": "Complete sign-in in your browser. If it doesn't finish automatically, paste the final URL below.",
+      "callbackPlaceholder": "Final URL or authorization code",
+      "finishSignIn": "Finish sign-in"
     },
     "skills": {
       "description": "Review the instruction skills this agent can load during a conversation.",

@@ -711,7 +711,10 @@
       "notSignedIn": "Non connecté",
       "proxyLabel": "Proxy réseau",
       "proxySaveBeforeSignIn": "Enregistrez les modifications du proxy avant de vous connecter.",
-      "saveProxy": "Enregistrer le proxy"
+      "saveProxy": "Enregistrer le proxy",
+      "callbackHelp": "Terminez la connexion dans votre navigateur. Si elle ne se termine pas automatiquement, collez l’URL finale ci-dessous.",
+      "callbackPlaceholder": "URL finale ou code d’autorisation",
+      "finishSignIn": "Terminer la connexion"
     },
     "skills": {
       "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",

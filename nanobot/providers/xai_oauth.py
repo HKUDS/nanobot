@@ -103,6 +103,155 @@ class _CallbackResult:
     error: str | None = None
 
 
+class XAIOAuthLoginFlow:
+    """Pending xAI OAuth login that can finish through loopback or pasted callback."""
+
+    def __init__(
+        self,
+        *,
+        authorization_url: str,
+        redirect_uri: str,
+        verifier: str,
+        state: str,
+        discovery: _Discovery,
+        proxy: str | None,
+        result_queue: queue.Queue[_CallbackResult],
+        server: ThreadingHTTPServer,
+        timeout_s: float,
+    ) -> None:
+        self.authorization_url = authorization_url
+        self.redirect_uri = redirect_uri
+        self._verifier = verifier
+        self._state = state
+        self._discovery = discovery
+        self._proxy = proxy
+        self._result_queue = result_queue
+        self._server = server
+        self._expires_at = time.monotonic() + timeout_s
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._token: XAIToken | None = None
+        self._error: Exception | None = None
+        self._closed = False
+        self._server_thread = threading.Thread(
+            target=_serve_callback_server,
+            args=(server, self._stop_event),
+            name="nanobot-xai-grok-oauth-callback",
+            daemon=True,
+        )
+        self._server_thread.start()
+        self._timeout_timer = threading.Timer(timeout_s, self._expire)
+        self._timeout_timer.daemon = True
+        self._timeout_timer.start()
+
+    @property
+    def expired(self) -> bool:
+        return time.monotonic() >= self._expires_at
+
+    @property
+    def remaining_seconds(self) -> int:
+        return max(0, int(self._expires_at - time.monotonic()))
+
+    def complete(self, callback_value: str | None = None) -> XAIToken | None:
+        """Complete this flow, or return ``None`` while loopback is still pending."""
+        with self._lock:
+            if self._token is not None:
+                return self._token
+            self._raise_if_finished()
+
+        callback: _CallbackResult | None
+        if callback_value is not None:
+            callback = _parse_pasted_callback(callback_value)
+        else:
+            try:
+                callback = self._result_queue.get_nowait()
+            except queue.Empty:
+                callback = None
+        if callback is None:
+            with self._lock:
+                if self._token is not None:
+                    return self._token
+                self._raise_if_finished()
+                if self.expired:
+                    self._expire_locked()
+                    self._raise_if_finished()
+            return None
+        return self._finish(callback)
+
+    def wait(self, timeout_s: float) -> XAIToken:
+        """Wait for the loopback callback and complete this flow."""
+        with self._lock:
+            if self._token is not None:
+                return self._token
+            self._raise_if_finished()
+        try:
+            callback = self._result_queue.get(timeout=timeout_s)
+        except queue.Empty as exc:
+            with self._lock:
+                if self._error is not None:
+                    raise self._error
+            raise XAIOAuthError(
+                "Timed out waiting for xAI sign-in. Run "
+                "`nanobot provider login xai-grok` to try again."
+            ) from exc
+        return self._finish(callback)
+
+    def cancel(self) -> None:
+        """Stop the callback listener for an abandoned flow."""
+        with self._lock:
+            if self._token is None and self._error is None:
+                self._error = XAIOAuthError("xAI sign-in was cancelled.")
+            self._close_locked()
+
+    def _finish(self, callback: _CallbackResult) -> XAIToken:
+        with self._lock:
+            if self._token is not None:
+                return self._token
+            self._raise_if_finished()
+            self._close_locked()
+            try:
+                token = _exchange_callback(
+                    callback,
+                    expected_state=self._state,
+                    discovery=self._discovery,
+                    verifier=self._verifier,
+                    redirect_uri=self.redirect_uri,
+                    proxy=self._proxy,
+                )
+                with _token_lock():
+                    _write_token(token)
+            except Exception as exc:
+                self._error = exc
+                raise
+            self._token = token
+            return token
+
+    def _expire(self) -> None:
+        with self._lock:
+            if self._token is not None or self._error is not None:
+                return
+            self._expire_locked()
+
+    def _expire_locked(self) -> None:
+        self._error = XAIOAuthError("xAI sign-in expired. Start a new sign-in flow.")
+        self._close_locked()
+
+    def _raise_if_finished(self) -> None:
+        if self._token is not None:
+            return
+        if self._error is not None:
+            raise self._error
+
+    def _close_locked(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._timeout_timer.cancel()
+        self._stop_event.set()
+        if threading.current_thread() is not self._server_thread:
+            self._server_thread.join(timeout=2)
+
+
 def get_xai_oauth_storage_path() -> Path:
     """Return the instance-scoped xAI OAuth credential path."""
     return get_data_dir() / "auth" / "xai.json"
@@ -137,70 +286,65 @@ def login_xai_oauth(
     ``prompt_fn`` is used only when no local browser could be opened. It lets a
     headless user paste either the final callback URL or its authorization code.
     """
+    flow = start_xai_oauth_login(proxy=proxy, timeout_s=callback_timeout_s)
+
+    try:
+        print_fn("Opening xAI sign-in in your browser...")
+        print_fn(f"If it does not open automatically, visit:\n{flow.authorization_url}")
+        opened = False
+        with suppress(Exception):
+            opened = bool(browser_opener(flow.authorization_url))
+
+        if not opened and prompt_fn is not None:
+            pasted = prompt_fn("Paste the final callback URL (or authorization code)")
+            token = flow.complete(pasted)
+            if token is None:  # pragma: no cover - pasted input always resolves a callback
+                raise XAIOAuthError("xAI sign-in returned no authorization code.")
+            return token
+        return flow.wait(callback_timeout_s)
+    finally:
+        flow.cancel()
+
+
+def start_xai_oauth_login(
+    *,
+    proxy: str | None = None,
+    timeout_s: float = 600,
+) -> XAIOAuthLoginFlow:
+    """Create a non-blocking OAuth flow for browser or pasted-callback completion."""
     discovery = _discover(proxy)
     verifier, challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     result_queue: queue.Queue[_CallbackResult] = queue.Queue(maxsize=1)
     server = _make_callback_server(state, result_queue)
-    callback_thread = threading.Thread(
-        target=server.serve_forever,
-        name="nanobot-xai-grok-oauth-callback",
-        daemon=True,
-    )
-    callback_thread.start()
-
     redirect_uri = f"http://127.0.0.1:{server.server_port}/callback"
-    authorize_url = _build_authorize_url(
+    authorization_url = _build_authorize_url(
         discovery.authorization_endpoint,
         redirect_uri=redirect_uri,
         challenge=challenge,
         state=state,
         nonce=nonce,
     )
-
-    try:
-        print_fn("Opening xAI sign-in in your browser...")
-        print_fn(f"If it does not open automatically, visit:\n{authorize_url}")
-        opened = False
-        with suppress(Exception):
-            opened = bool(browser_opener(authorize_url))
-
-        if not opened and prompt_fn is not None:
-            pasted = prompt_fn("Paste the final callback URL (or authorization code)")
-            callback = _parse_pasted_callback(pasted)
-        else:
-            try:
-                callback = result_queue.get(timeout=callback_timeout_s)
-            except queue.Empty as exc:
-                raise XAIOAuthError(
-                    "Timed out waiting for xAI sign-in. Run "
-                    "`nanobot provider login xai-grok` to try again."
-                ) from exc
-    finally:
-        server.shutdown()
-        server.server_close()
-        callback_thread.join(timeout=2)
-
-    if callback.error:
-        raise XAIOAuthError(f"xAI sign-in was not completed: {callback.error}")
-    if not callback.code:
-        raise XAIOAuthError("xAI sign-in returned no authorization code.")
-    if callback.state and not hmac.compare_digest(callback.state, state):
-        raise XAIOAuthError("xAI sign-in failed because the OAuth state did not match.")
-
-    payload = _exchange_code(
-        discovery.token_endpoint,
-        code=callback.code,
-        verifier=verifier,
+    return XAIOAuthLoginFlow(
+        authorization_url=authorization_url,
         redirect_uri=redirect_uri,
+        verifier=verifier,
+        state=state,
+        discovery=discovery,
         proxy=proxy,
+        result_queue=result_queue,
+        server=server,
+        timeout_s=timeout_s,
     )
-    account_id = _fetch_account(discovery.userinfo_endpoint, payload["access_token"], proxy)
-    token = _token_from_response(payload, account_id=account_id)
-    with _token_lock():
-        _write_token(token)
-    return token
+
+
+def complete_xai_oauth_login(
+    flow: XAIOAuthLoginFlow,
+    callback_value: str | None = None,
+) -> XAIToken | None:
+    """Complete a pending login from loopback state or a pasted callback value."""
+    return flow.complete(callback_value)
 
 
 def get_xai_oauth_token(
@@ -384,6 +528,18 @@ def _make_callback_server(
     return ThreadingHTTPServer(("127.0.0.1", 0), CallbackHandler)
 
 
+def _serve_callback_server(
+    server: ThreadingHTTPServer,
+    stop_event: threading.Event,
+) -> None:
+    server.timeout = 0.2
+    try:
+        while not stop_event.is_set():
+            server.handle_request()
+    finally:
+        server.server_close()
+
+
 def _first(params: dict[str, list[str]], key: str) -> str | None:
     values = params.get(key)
     return values[0] if values else None
@@ -412,6 +568,33 @@ def _parse_pasted_callback(value: str) -> _CallbackResult:
         state=_first(params, "state"),
         error=_first(params, "error_description") or _first(params, "error"),
     )
+
+
+def _exchange_callback(
+    callback: _CallbackResult,
+    *,
+    expected_state: str,
+    discovery: _Discovery,
+    verifier: str,
+    redirect_uri: str,
+    proxy: str | None,
+) -> XAIToken:
+    if callback.error:
+        raise XAIOAuthError(f"xAI sign-in was not completed: {callback.error}")
+    if not callback.code:
+        raise XAIOAuthError("xAI sign-in returned no authorization code.")
+    if callback.state and not hmac.compare_digest(callback.state, expected_state):
+        raise XAIOAuthError("xAI sign-in failed because the OAuth state did not match.")
+
+    payload = _exchange_code(
+        discovery.token_endpoint,
+        code=callback.code,
+        verifier=verifier,
+        redirect_uri=redirect_uri,
+        proxy=proxy,
+    )
+    account_id = _fetch_account(discovery.userinfo_endpoint, payload["access_token"], proxy)
+    return _token_from_response(payload, account_id=account_id)
 
 
 def _exchange_code(

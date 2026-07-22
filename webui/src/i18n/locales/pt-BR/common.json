@@ -725,7 +725,10 @@
       "notSignedIn": "Desconectado",
       "proxyLabel": "Proxy de rede",
       "proxySaveBeforeSignIn": "Salve as alterações do proxy antes de entrar.",
-      "saveProxy": "Salvar proxy"
+      "saveProxy": "Salvar proxy",
+      "callbackHelp": "Conclua o login no navegador. Se ele não terminar automaticamente, cole a URL final abaixo.",
+      "callbackPlaceholder": "URL final ou código de autorização",
+      "finishSignIn": "Concluir login"
     },
     "skills": {
       "description": "Revise as skills de instrução que este agente pode carregar durante uma conversa.",

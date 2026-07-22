@@ -712,7 +712,10 @@
       "notSignedIn": "Sin sesión",
       "proxyLabel": "Proxy de red",
       "proxySaveBeforeSignIn": "Guarda los cambios del proxy antes de iniciar sesión.",
-      "saveProxy": "Guardar proxy"
+      "saveProxy": "Guardar proxy",
+      "callbackHelp": "Completa el inicio de sesión en el navegador. Si no finaliza automáticamente, pega abajo la URL final.",
+      "callbackPlaceholder": "URL final o código de autorización",
+      "finishSignIn": "Completar inicio de sesión"
     },
     "skills": {
       "description": "Revisa las habilidades de instrucciones que este agente puede cargar durante una conversación.",

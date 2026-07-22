@@ -711,7 +711,10 @@
       "notSignedIn": "未登入",
       "proxyLabel": "網路代理",
       "proxySaveBeforeSignIn": "請先儲存代理變更再登入。",
-      "saveProxy": "儲存代理"
+      "saveProxy": "儲存代理",
+      "callbackHelp": "請在瀏覽器中完成登入。若未自動完成，請將最終網址貼到下方。",
+      "callbackPlaceholder": "最終網址或授權碼",
+      "finishSignIn": "完成登入"
     },
     "skills": {
       "description": "檢閱此 Agent 可在對話期間載入的指令技能。",

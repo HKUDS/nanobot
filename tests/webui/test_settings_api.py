@@ -16,6 +16,7 @@ from nanobot.webui.settings_api import (
     _model_catalog_kind,
     _oauth_provider_status,
     _reasoning_effort_values_for,
+    complete_oauth_provider,
     create_model_configuration,
     login_oauth_provider,
     logout_oauth_provider,
@@ -1181,17 +1182,61 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     captured: dict[str, object] = {}
 
-    def fake_login(*, print_fn, prompt_fn, proxy=None):
-        captured.update(print_fn=print_fn, prompt_fn=prompt_fn, proxy=proxy)
-        return SimpleNamespace(access="access-token", account_id="user@example.com")
+    class FakeFlow:
+        authorization_url = "https://auth.x.ai/oauth2/authorize?state=test"
+        remaining_seconds = 600
+        expired = False
 
-    monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
+        def cancel(self) -> None:
+            captured["cancelled"] = True
 
-    login_oauth_provider({"provider": ["xai-grok"]})
+    def fake_start(*, proxy=None, timeout_s=None):
+        captured.update(proxy=proxy, timeout_s=timeout_s)
+        return FakeFlow()
+
+    monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
+
+    payload = login_oauth_provider({"provider": ["xai-grok"]})
 
     assert captured["proxy"] == proxy
-    assert captured["prompt_fn"] is None
-    assert callable(captured["print_fn"])
+    assert captured["timeout_s"] == 600
+    assert payload["status"] == "authorization_required"
+    assert payload["provider"] == "xai_grok"
+    assert payload["authorization_url"] == FakeFlow.authorization_url
+    assert payload["flow_id"]
+
+    callbacks: list[str | None] = []
+
+    def fake_complete(_flow, callback):
+        callbacks.append(callback)
+        if callback is None:
+            return None
+        return SimpleNamespace(access="access-token")
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.complete_xai_oauth_login",
+        fake_complete,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_api.settings_payload",
+        lambda: {"settings": "ready"},
+    )
+
+    pending = complete_oauth_provider(
+        {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
+    )
+    completed = complete_oauth_provider(
+        {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
+        "http://127.0.0.1/callback?code=secret&state=test",
+    )
+
+    assert pending == {
+        "status": "pending",
+        "provider": "xai_grok",
+        "flow_id": payload["flow_id"],
+    }
+    assert completed == {"settings": "ready"}
+    assert callbacks == [None, "http://127.0.0.1/callback?code=secret&state=test"]
 
 
 def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
@@ -1203,10 +1248,10 @@ def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     failure = RuntimeError("Could not reach xAI sign-in: ConnectError.")
 
-    def fake_login(**_kwargs):
+    def fake_start(**_kwargs):
         raise failure
 
-    monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
+    monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
 
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider({"provider": ["xai-grok"]})

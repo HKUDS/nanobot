@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
+import threading
 import time
 from contextlib import suppress
 from typing import Any, Literal
@@ -123,6 +125,10 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
 }
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
 _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
+_XAI_WEBUI_OAUTH_TIMEOUT_S = 600
+_XAI_WEBUI_OAUTH_MAX_FLOWS = 8
+_xai_webui_oauth_flows: dict[str, Any] = {}
+_xai_webui_oauth_flows_lock = threading.Lock()
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -1309,25 +1315,65 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
         return settings_payload()
 
     if spec.name == "xai_grok":
-        from nanobot.providers.xai_oauth import login_xai_oauth
+        from nanobot.providers.xai_oauth import start_xai_oauth_login
 
         try:
             proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
         except ValueError as e:
             raise WebUISettingsError(str(e), status=400) from e
         try:
-            token = login_xai_oauth(
-                print_fn=lambda _message: None,
-                prompt_fn=None,
+            flow = start_xai_oauth_login(
                 proxy=proxy,
+                timeout_s=_XAI_WEBUI_OAUTH_TIMEOUT_S,
             )
         except Exception as e:
             raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=502) from e
-        if not (token and token.access):
-            raise WebUISettingsError("OAuth login failed", status=401)
-        return settings_payload()
+        flow_id = secrets.token_urlsafe(24)
+        _register_xai_webui_oauth_flow(flow_id, flow)
+        return {
+            "status": "authorization_required",
+            "provider": spec.name,
+            "flow_id": flow_id,
+            "authorization_url": flow.authorization_url,
+            "expires_in": flow.remaining_seconds,
+        }
 
     raise WebUISettingsError("OAuth login is not supported for this provider")
+
+
+def complete_oauth_provider(
+    query: QueryParams,
+    callback_value: str | None = None,
+) -> dict[str, Any]:
+    provider_name = (_query_first(query, "provider") or "").strip()
+    flow_id = (_query_first(query, "flow_id") or "").strip()
+    spec = find_by_name(provider_name)
+    if spec is None or spec.name != "xai_grok":
+        raise WebUISettingsError("OAuth completion is not supported for this provider")
+    if not flow_id:
+        raise WebUISettingsError("flow_id is required")
+
+    flow = _get_xai_webui_oauth_flow(flow_id)
+    if flow is None:
+        raise WebUISettingsError("xAI sign-in expired. Start again.", status=410)
+
+    from nanobot.providers.xai_oauth import complete_xai_oauth_login
+
+    try:
+        token = complete_xai_oauth_login(flow, callback_value)
+    except Exception as e:
+        _remove_xai_webui_oauth_flow(flow_id, flow)
+        raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=502) from e
+    if token is None:
+        return {
+            "status": "pending",
+            "provider": spec.name,
+            "flow_id": flow_id,
+        }
+    _remove_xai_webui_oauth_flow(flow_id, flow, cancel=False)
+    if not token.access:
+        raise WebUISettingsError("OAuth login failed", status=401)
+    return settings_payload()
 
 
 def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
@@ -1358,6 +1404,7 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth
 
+        _clear_xai_webui_oauth_flows()
         logout_xai_oauth()
         return settings_payload()
     else:
@@ -1367,6 +1414,51 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
         with suppress(FileNotFoundError):
             path.unlink()
     return settings_payload()
+
+
+def _register_xai_webui_oauth_flow(flow_id: str, flow: Any) -> None:
+    discarded: list[Any] = []
+    with _xai_webui_oauth_flows_lock:
+        for existing_id, existing in list(_xai_webui_oauth_flows.items()):
+            if existing.expired:
+                discarded.append(_xai_webui_oauth_flows.pop(existing_id))
+        while len(_xai_webui_oauth_flows) >= _XAI_WEBUI_OAUTH_MAX_FLOWS:
+            oldest_id = next(iter(_xai_webui_oauth_flows))
+            discarded.append(_xai_webui_oauth_flows.pop(oldest_id))
+        _xai_webui_oauth_flows[flow_id] = flow
+    for existing in discarded:
+        existing.cancel()
+
+
+def _get_xai_webui_oauth_flow(flow_id: str) -> Any | None:
+    with _xai_webui_oauth_flows_lock:
+        flow = _xai_webui_oauth_flows.get(flow_id)
+        if flow is None or not flow.expired:
+            return flow
+        _xai_webui_oauth_flows.pop(flow_id, None)
+    flow.cancel()
+    return None
+
+
+def _remove_xai_webui_oauth_flow(
+    flow_id: str,
+    flow: Any,
+    *,
+    cancel: bool = True,
+) -> None:
+    with _xai_webui_oauth_flows_lock:
+        if _xai_webui_oauth_flows.get(flow_id) is flow:
+            _xai_webui_oauth_flows.pop(flow_id)
+    if cancel:
+        flow.cancel()
+
+
+def _clear_xai_webui_oauth_flows() -> None:
+    with _xai_webui_oauth_flows_lock:
+        flows = list(_xai_webui_oauth_flows.values())
+        _xai_webui_oauth_flows.clear()
+    for flow in flows:
+        flow.cancel()
 
 
 def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:

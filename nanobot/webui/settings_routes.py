@@ -37,6 +37,7 @@ from nanobot.optional_features import (
 )
 from nanobot.pairing import approve_code, deny_code, list_pending
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from nanobot.webui.http_utils import case_insensitive_header
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.http_utils import query_first as _query_first
 from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
@@ -47,6 +48,7 @@ from nanobot.webui.nanobot_features_api import (
 )
 from nanobot.webui.settings_api import (
     WebUISettingsError,
+    complete_oauth_provider,
     create_model_configuration,
     decorate_settings_payload,
     login_oauth_provider,
@@ -73,6 +75,8 @@ _CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values"
 _CHANNEL_VALUES_HEADER_MAX_BYTES = 64 * 1024
 _API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values"
 _API_SERVICE_VALUES_HEADER_MAX_BYTES = 8 * 1024
+_OAUTH_CALLBACK_HEADER = "X-Nanobot-OAuth-Callback"
+_OAUTH_CALLBACK_HEADER_MAX_BYTES = 8 * 1024
 
 _SKIP_FIELD = object()
 _CHANNEL_CONNECT_ACTIONS = frozenset({"start", "poll", "cancel"})
@@ -146,6 +150,8 @@ class WebUISettingsRouter:
             return await self._handle_settings_provider_models(request)
         if path == "/api/settings/provider/oauth-login":
             return await self._handle_settings_provider_oauth(request, "login")
+        if path == "/api/settings/provider/oauth-login/complete":
+            return await self._handle_settings_provider_oauth(request, "complete")
         if path == "/api/settings/provider/oauth-logout":
             return await self._handle_settings_provider_oauth(request, "logout")
         if path == "/api/settings/web-search/update":
@@ -378,10 +384,21 @@ class WebUISettingsRouter:
         try:
             if action == "login":
                 payload = await asyncio.to_thread(login_oauth_provider, query)
+            elif action == "complete":
+                callback_value = case_insensitive_header(request.headers, _OAUTH_CALLBACK_HEADER)
+                if len(callback_value.encode("utf-8")) > _OAUTH_CALLBACK_HEADER_MAX_BYTES:
+                    raise WebUISettingsError("OAuth callback is too large")
+                payload = await asyncio.to_thread(
+                    complete_oauth_provider,
+                    query,
+                    callback_value or None,
+                )
             else:
                 payload = await asyncio.to_thread(logout_oauth_provider, query)
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
+        if payload.get("status") in {"authorization_required", "pending"}:
+            return self._json_response(payload)
         return self._json_response(self._with_restart_state(payload))
 
     def _handle_settings_web_search_update(self, request: WsRequest) -> Response:

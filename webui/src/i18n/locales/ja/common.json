@@ -711,7 +711,10 @@
       "notSignedIn": "未サインイン",
       "proxyLabel": "ネットワークプロキシ",
       "proxySaveBeforeSignIn": "サインイン前にプロキシの変更を保存してください。",
-      "saveProxy": "プロキシを保存"
+      "saveProxy": "プロキシを保存",
+      "callbackHelp": "ブラウザーでサインインを完了してください。自動で完了しない場合は、最後のURLを下に貼り付けてください。",
+      "callbackPlaceholder": "最後のURLまたは認証コード",
+      "finishSignIn": "サインインを完了"
     },
     "skills": {
       "description": "このエージェントが会話中に読み込める指示スキルを確認します。",
