@@ -507,7 +507,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       <div
         ref={scrollRef}
         className={cn(
-          "thread-viewport-scrollbar absolute inset-0 overflow-y-auto scroll-auto scrollbar-thin",
+          "thread-viewport-scrollbar absolute inset-0 overflow-y-auto scroll-auto scrollbar-thin touch-pan-y",
           "[&::-webkit-scrollbar]:w-1.5",
           "[&::-webkit-scrollbar-thumb]:rounded-full",
           "[&::-webkit-scrollbar-thumb]:bg-muted-foreground/30",
