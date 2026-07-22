@@ -140,6 +140,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const [atBottom, setAtBottom] = useState(true);
   const [composerDockHeight, setComposerDockHeight] = useState(0);
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0);
+  const [hasVerticalOverflow, setHasVerticalOverflow] = useState(false);
   const [visibleMessageCount, setVisibleMessageCount] =
     useState(INITIAL_HISTORY_WINDOW);
   const hasMessages = messages.length > 0;
@@ -474,6 +475,29 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     return () => observer.disconnect();
   }, [hasMessages, measureComposerDock]);
 
+  const measureVerticalOverflow = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const next = el.scrollHeight > el.clientHeight + 1;
+    setHasVerticalOverflow((current) => (current === next ? current : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el) return;
+
+    measureVerticalOverflow();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureVerticalOverflow);
+    observer?.observe(el);
+    if (content) observer?.observe(content);
+    window.addEventListener("resize", measureVerticalOverflow);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureVerticalOverflow);
+    };
+  }, [composerDockHeight, hasMessages, measureVerticalOverflow, visibleMessages.length]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -508,7 +532,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         ref={scrollRef}
         className={cn(
           "thread-viewport-scrollbar absolute inset-0 scroll-auto scrollbar-thin",
-          hasMessages ? "overflow-y-auto" : "overflow-hidden",
+          hasMessages && hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
           "[&::-webkit-scrollbar]:w-1.5",
           "[&::-webkit-scrollbar-thumb]:rounded-full",
           "[&::-webkit-scrollbar-thumb]:bg-muted-foreground/30",
