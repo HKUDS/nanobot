@@ -40,7 +40,6 @@ export function TelegramBotsPanel({
     : [defaultTelegramInstance(feature)];
   const instances = allInstances.filter(isVisibleTelegramInstance);
   const configuredCount = instances.filter((instance) => instance.configured).length;
-  const panelFeature = useMemo(() => withoutGenericProxyField(feature), [feature]);
   const setup = useMemo(
     () => channelSetup(feature, i18n.resolvedLanguage ?? i18n.language),
     [feature.name, feature.setup, i18n.language, i18n.resolvedLanguage],
@@ -51,7 +50,7 @@ export function TelegramBotsPanel({
   return (
     <ChannelInstancesPanel
       token={token}
-      feature={panelFeature}
+      feature={feature}
       showBrandLogos={showBrandLogos}
       instances={instances}
       selectedInstanceId={selectedInstanceId}
@@ -836,17 +835,6 @@ export function isVisibleTelegramInstance(instance: NanobotChannelInstanceInfo):
     }
     return true;
   });
-}
-
-function withoutGenericProxyField(feature: NanobotFeatureInfo): NanobotFeatureInfo {
-  if (!feature.setup?.fields.some((field) => field.key === PROXY_KEY)) return feature;
-  return {
-    ...feature,
-    setup: {
-      ...feature.setup,
-      fields: feature.setup.fields.filter((field) => field.key !== PROXY_KEY),
-    },
-  };
 }
 
 function hasConfiguredProxy(instance: NanobotChannelInstanceInfo): boolean {

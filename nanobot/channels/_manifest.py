@@ -18,6 +18,7 @@ def field(
     default: Any = None,
     writable: bool = True,
     snapshot: bool = True,
+    generic_setup: bool = True,
 ) -> ChannelFieldSpec:
     return ChannelFieldSpec(
         kind=kind,
@@ -25,6 +26,7 @@ def field(
         default=default,
         writable=writable,
         snapshot=snapshot,
+        generic_setup=generic_setup,
     )
 
 

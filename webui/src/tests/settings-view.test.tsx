@@ -160,7 +160,6 @@ function channelSetupContract(
         fields: [
           field("name"),
           field("token", "secret", { required: true }),
-          field("proxy", "secret"),
           field("allowFrom", "list"),
           field("groupPolicy", "enum", {
             choices: ["mention", "open"],

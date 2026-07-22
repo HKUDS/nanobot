@@ -82,7 +82,6 @@ function telegramFeature(instance: NanobotChannelInstanceInfo): NanobotFeatureIn
       fields: [
         field("channels.telegram.name", "string"),
         field("channels.telegram.token", "secret", true),
-        field("channels.telegram.proxy", "secret"),
         field("channels.telegram.allowFrom", "list"),
         field("channels.telegram.groupPolicy", "enum"),
       ],
