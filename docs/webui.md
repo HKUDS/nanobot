@@ -187,6 +187,11 @@ extraction tools without requiring an API key. This does not replace nanobot's
 built-in web search provider; mention the Firecrawl MCP preset with `@` when a
 turn needs Firecrawl's richer web data tools.
 
+The Parallel Search preset connects to the free, anonymous Parallel Search MCP
+endpoint and exposes `web_search` and `web_fetch` without requiring an API key.
+It is an optional integration and does not replace nanobot's built-in web search
+provider; mention `@parallel-search` when a turn should use it.
+
 After an App or integration is available, mention it from the composer with
 `@` to attach that tool to the next message.
 

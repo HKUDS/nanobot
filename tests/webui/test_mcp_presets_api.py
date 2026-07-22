@@ -32,6 +32,7 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "figma",
         "context7",
         "firecrawl",
+        "parallel-search",
         "exa",
         "microsoft-learn",
         "aws-docs",
@@ -136,11 +137,13 @@ def test_enable_no_auth_remote_presets_write_url(tmp_path, monkeypatch: pytest.M
     mcp_presets_action("enable", {"name": ["microsoft-learn"]})
     mcp_presets_action("enable", {"name": ["exa"]})
     mcp_presets_action("enable", {"name": ["firecrawl"]})
+    mcp_presets_action("enable", {"name": ["parallel-search"]})
 
     config = load_config()
     assert config.tools.mcp_servers["microsoft-learn"].url == "https://learn.microsoft.com/api/mcp"
     assert config.tools.mcp_servers["exa"].url == "https://mcp.exa.ai/mcp"
     assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
+    assert config.tools.mcp_servers["parallel-search"].url == "https://search.parallel.ai/mcp"
 
 
 def test_firecrawl_preset_is_keyless(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,6 +161,28 @@ def test_firecrawl_preset_is_keyless(tmp_path, monkeypatch: pytest.MonkeyPatch) 
     assert config.tools.mcp_servers["firecrawl"].type == "streamableHttp"
     assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
     assert config.tools.mcp_servers["firecrawl"].env == {}
+
+
+def test_parallel_search_preset_is_keyless_and_tool_limited(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = mcp_presets_action("enable", {"name": ["parallel-search"]})
+
+    row = next(item for item in payload["presets"] if item["name"] == "parallel-search")
+    assert row["transport"] == "streamableHttp"
+    assert row["requires"] == "Network access"
+    assert row["required_fields"] == []
+    assert row["configured"] is True
+    assert "no API key" in row["note"]
+    config = load_config()
+    server = config.tools.mcp_servers["parallel-search"]
+    assert server.type == "streamableHttp"
+    assert server.url == "https://search.parallel.ai/mcp"
+    assert server.enabled_tools == ["web_search", "web_fetch"]
+    assert server.headers == {}
 
 
 def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
