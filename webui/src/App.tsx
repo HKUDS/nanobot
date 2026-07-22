@@ -1936,7 +1936,7 @@ function Shell({
                     "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
                     showHostChrome
                       ? "host-sidebar-glass"
-                      : "bg-sidebar shadow-inner-right",
+                      : "bg-sidebar",
                   )}
                 >
                   <Sidebar
@@ -2004,7 +2004,6 @@ function Shell({
         <main
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
-            showHostChrome && hostSidebarOpen && "border-l border-border/55",
           )}
         >
             <div

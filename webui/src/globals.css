@@ -22,16 +22,16 @@
     --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
+    --border: 40 8% 90.5%;
+    --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: 221 70% 50%;
     --radius: 0.4375rem;
-    --sidebar: 0 0% 98.5%;
+    --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
-    --sidebar-border: 0 0% 89.8%;
+    --sidebar-border: 40 8% 90.5%;
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
@@ -81,6 +81,7 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    overflow: hidden;
   }
 
   * {
@@ -159,10 +160,7 @@
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
     backdrop-filter: saturate(145%) blur(18px);
-    box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.32),
-      inset 1px 0 0 hsl(var(--background) / 0.52),
-      14px 0 32px -30px rgb(0 0 0 / 0.22);
+    box-shadow: 14px 0 32px -30px rgb(0 0 0 / 0.12);
   }
 
   .dark .host-window-shell,
@@ -174,10 +172,7 @@
 
   .dark .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.96);
-    box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.42),
-      inset 1px 0 0 hsl(var(--foreground) / 0.05),
-      14px 0 34px -30px rgb(0 0 0 / 0.62);
+    box-shadow: 14px 0 34px -30px rgb(0 0 0 / 0.34);
   }
 
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
