@@ -38,6 +38,23 @@ nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
 
 The config file controls what nanobot may use. The workspace is where nanobot keeps state for that instance.
 
+### Agent Workspace and Project Workspace
+
+The configured workspace is the **agent workspace**. A WebUI chat can also select
+a different **project workspace** for repository-specific work without moving the
+agent's identity or durable state.
+
+| Resource | Owner when a project is selected |
+|---|---|
+| Project instructions | `AGENTS.md` from the selected project; there is no fallback to the agent workspace's `AGENTS.md` |
+| Agent profile | `SOUL.md` and `USER.md` from the agent workspace; project-local files with those names are ignored |
+| Memory and custom skills | `memory/` and `skills/` from the agent workspace |
+| Relative file paths and shell working directory | The selected project workspace |
+
+When no separate project is selected, one directory normally serves both roles.
+Selecting a project changes the working context for that chat; it does not create
+a second agent or relocate the configured agent workspace.
+
 ## Config Format
 
 `config.json` accepts both camelCase and snake_case keys. The docs use camelCase because nanobot writes config back to disk with camelCase aliases, for example `apiKey`, `modelPresets`, `intervalS`, and `maxToolResultChars`.
@@ -49,7 +66,7 @@ Most examples are partial snippets. Merge them into the existing file created by
 A normal turn follows this flow:
 
 1. A channel receives a user message and publishes it to the message bus.
-2. The agent loop chooses a session key and builds context from the workspace, skills, memory, recent messages, channel metadata, and runtime settings.
+2. The agent loop chooses a session key and builds context from the effective project workspace, agent-owned profile/skills/memory, recent messages, channel metadata, and runtime settings.
 3. The provider receives the model request.
 4. If the model asks for tools, the runner executes them and feeds results back to the model.
 5. The final reply is saved to the session and sent back through the channel.

@@ -1919,6 +1919,16 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
+> [!NOTE]
+> When a restricted WebUI chat selects a project outside the configured agent
+> workspace, that project becomes the normal file and shell boundary. Nanobot
+> adds capability-specific, read-only access for built-in skills, the agent
+> workspace's `skills/` directory, and the exact agent
+> `memory/history.jsonl` file. Neighboring memory/profile files and all
+> cross-workspace writes remain denied. Agent-owned `SOUL.md` and `USER.md` are
+> assembled into model context directly; this does not grant file tools broader
+> access to the agent workspace.
+
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
 

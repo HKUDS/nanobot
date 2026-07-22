@@ -64,6 +64,11 @@ This is why nanobot's memory is not just archival. It is interpretive.
 
 ## The Files
 
+In this page, `workspace` means the configured **agent workspace** (the default
+is `~/.nanobot/workspace/`, or the path passed with `--workspace`). Selecting a
+different project in the WebUI changes that chat's project context and tool
+working directory; it does not relocate the files below.
+
 ```text
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
@@ -78,6 +83,11 @@ workspace/
     ├── .dream_cursor    # Dream consumption cursor
     └── .git/            # Version history for long-term memory files
 ```
+
+A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`,
+`USER.md`, and `memory/` do not replace the agent-owned files above. This keeps
+one agent's profile and memory continuous while it works across projects. Use a
+separate configured agent workspace when identity or memory must be isolated.
 
 These files play different roles:
 

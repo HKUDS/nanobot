@@ -106,10 +106,32 @@ Use the workspace picker before starting project-specific work. This gives the
 agent the right project context for file paths, shell commands, and session
 metadata.
 
+Selecting a project does not replace the configured agent workspace. The two
+paths have different responsibilities:
+
+| Selected project provides | Agent workspace continues to provide |
+|---|---|
+| Project `AGENTS.md` | `SOUL.md` and `USER.md` |
+| Relative file paths and shell working directory | Long-term memory and history |
+| The normal read/write boundary in Restricted mode | Custom skills and instance state |
+
+Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace's
+`AGENTS.md` is not inherited by a separately selected project. When the selected
+project is the configured agent workspace, both roles naturally use the same
+directory.
+
 The access control in the composer controls the local capability level for the
 chat. It does not bypass your gateway, provider, shell sandbox, or operating
 system configuration; it only selects among the capabilities that are already
 available to this WebUI session.
+
+In Restricted mode, ordinary file and shell work stays inside the selected
+project. To preserve agent continuity, filesystem/search tools receive narrow,
+read-only access to built-in skills, custom skills in the agent workspace, and
+the exact agent `memory/history.jsonl` file. This does not grant access to
+neighboring memory or profile files, and it does not allow writes outside the
+selected project. These tool exceptions do not broaden the browser's file
+preview boundary.
 
 Remote WebUI sessions may reduce access for the current workspace. Selecting a
 different workspace or enabling Full Access remains limited to local and native
