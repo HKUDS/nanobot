@@ -3,12 +3,7 @@ import {
   Suspense,
   lazy,
   memo,
-  startTransition,
-  useCallback,
   useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
   type ReactNode,
 } from "react";
 
@@ -28,17 +23,20 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   source,
   className,
   highlightCode,
+  streaming,
   onOpenFilePreview,
 }: {
   source: string;
   className?: string;
   highlightCode: boolean;
+  streaming: boolean;
   onOpenFilePreview?: (path: string) => void;
 }) {
   return (
     <LazyMarkdownRenderer
       className={className}
       highlightCode={highlightCode}
+      streaming={streaming}
       onOpenFilePreview={onOpenFilePreview}
     >
       {source}
@@ -46,13 +44,8 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   );
 });
 
-const SHORT_STREAM_COMMIT_MS = 80;
-const MEDIUM_STREAM_COMMIT_MS = 140;
-const LONG_STREAM_COMMIT_MS = 220;
-const STREAMING_HIGHLIGHT_CHAR_LIMIT = 16_000;
-
 class MarkdownRendererBoundary extends Component<
-  { children: ReactNode; fallback: ReactNode },
+  { children: ReactNode; fallback: ReactNode; resetKey: string },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -61,39 +54,41 @@ class MarkdownRendererBoundary extends Component<
     return { failed: true };
   }
 
+  componentDidUpdate(previous: Readonly<{ resetKey: string }>) {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false });
+    }
+  }
+
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
 }
 
-export function preloadMarkdownText(): void {
-  void loadMarkdownRenderer();
+export function preloadMarkdownText(): Promise<void> {
+  return loadMarkdownRenderer().then(() => undefined);
 }
 
-/**
- * Lightweight markdown renderer mirroring agent-chat-ui: GFM + math via
- * ``remark-math`` / ``rehype-katex``, and fenced code blocks delegated to
- * ``CodeBlock`` for copy-to-clipboard and syntax highlighting.
- */
+/** Lazy boundary for the heavier GFM, math, and code renderer. */
 export function MarkdownText({
   children,
   className,
   streaming = false,
   onOpenFilePreview,
 }: MarkdownTextProps) {
-  const renderedSource = useStreamingMarkdownSource(children, streaming);
-  const highlightCode = streaming
-    ? renderedSource.length <= STREAMING_HIGHLIGHT_CHAR_LIMIT
-    : renderedSource === children;
+  const renderedSource = children;
+  const renderPhase = streaming ? "streaming" : "complete";
+  const highlightCode = !streaming;
 
   useEffect(() => {
-    if (streaming) preloadMarkdownText();
+    if (streaming) void preloadMarkdownText();
   }, [streaming]);
 
   const plainFallback = (
     <div
       className={cn(
         "whitespace-pre-wrap break-words leading-relaxed text-foreground/92",
+        streaming && "streaming-text-fallback",
         className,
       )}
     >
@@ -102,73 +97,16 @@ export function MarkdownText({
   );
 
   return (
-    <MarkdownRendererBoundary fallback={plainFallback}>
+    <MarkdownRendererBoundary resetKey={renderPhase} fallback={plainFallback}>
       <Suspense fallback={plainFallback}>
         <MemoizedMarkdownRenderer
           source={renderedSource}
           className={className}
           highlightCode={highlightCode}
+          streaming={streaming}
           onOpenFilePreview={onOpenFilePreview}
         />
       </Suspense>
     </MarkdownRendererBoundary>
   );
-}
-
-function useStreamingMarkdownSource(source: string, streaming: boolean): string {
-  const [renderedSource, setRenderedSource] = useState(source);
-  const latestSourceRef = useRef(source);
-  const renderedSourceRef = useRef(source);
-  const timerRef = useRef<number | null>(null);
-
-  const clearPendingCommit = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-
-  const commitSource = useCallback((next: string, urgent: boolean) => {
-    if (renderedSourceRef.current === next) return;
-    renderedSourceRef.current = next;
-    if (urgent) {
-      setRenderedSource(next);
-      return;
-    }
-    startTransition(() => setRenderedSource(next));
-  }, []);
-
-  const scheduleCommit = useCallback(() => {
-    if (timerRef.current !== null) return;
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      commitSource(latestSourceRef.current, false);
-    }, streamingCommitDelay(latestSourceRef.current.length));
-  }, [commitSource]);
-
-  latestSourceRef.current = source;
-
-  useLayoutEffect(() => {
-    latestSourceRef.current = source;
-    if (!streaming) {
-      clearPendingCommit();
-      commitSource(source, true);
-    }
-  }, [clearPendingCommit, commitSource, source, streaming]);
-
-  useEffect(() => {
-    latestSourceRef.current = source;
-    if (!streaming) return;
-    scheduleCommit();
-  }, [scheduleCommit, source, streaming]);
-
-  useEffect(() => clearPendingCommit, [clearPendingCommit]);
-
-  return renderedSource;
-}
-
-function streamingCommitDelay(length: number): number {
-  if (length > 24_000) return LONG_STREAM_COMMIT_MS;
-  if (length > 8_000) return MEDIUM_STREAM_COMMIT_MS;
-  return SHORT_STREAM_COMMIT_MS;
 }

@@ -35,6 +35,7 @@ import {
   Loader2,
   Mic,
   Plus,
+  Quote,
   RotateCw,
   Shield,
   Sparkles,
@@ -71,6 +72,7 @@ import {
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
   CliAppInfo,
@@ -189,6 +191,9 @@ interface ThreadComposerProps {
   pendingQueueKey?: string | null;
   transcriptionProvider?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
+  quotedContext?: string | null;
+  focusRequest?: number;
+  onQuotedContextChange?: (text: string | null) => void;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -265,6 +270,7 @@ interface QueuedPrompt {
   id: string;
   text: string;
   images?: QueuedPromptImage[];
+  quotedContext?: string;
 }
 
 interface QueuedPromptImage {
@@ -355,11 +361,19 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
         }];
       }).slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
     : [];
+  const quotedContext = typeof record.quotedContext === "string"
+    ? record.quotedContext.trim().slice(0, QUEUED_PROMPT_MAX_CHARS)
+    : "";
   if (!text && images.length === 0) return null;
   const id = typeof record.id === "string" && record.id.trim()
     ? record.id
     : `queued-prompt-restored-${index}`;
-  return { id, text, ...(images.length > 0 ? { images } : {}) };
+  return {
+    id,
+    text,
+    ...(images.length > 0 ? { images } : {}),
+    ...(quotedContext ? { quotedContext } : {}),
+  };
 }
 
 function readQueuedPrompts(storageKey: string): QueuedPrompt[] {
@@ -391,6 +405,7 @@ function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
           id: prompt.id,
           text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
           ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
+          ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
         })),
       ),
     );
@@ -555,6 +570,7 @@ function RunElapsedStrip({
   goalState?: GoalStateWsPayload;
 }) {
   const { t } = useTranslation();
+  const pageVisible = usePageVisibility();
   const [goalPanelOpen, setGoalPanelOpen] = useState(false);
   const showTimer = startedAt != null;
   const stripLabel = goalStateStripPreview(goalState, t);
@@ -594,10 +610,11 @@ function RunElapsedStrip({
   }, [active, renderStrip]);
 
   useEffect(() => {
-    if (startedAt == null) return;
+    if (startedAt == null || !pageVisible) return;
+    setTick((n) => n + 1);
     const id = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
-  }, [startedAt]);
+  }, [pageVisible, startedAt]);
 
   const display = active
     ? { startedAt, goalState, stripLabel }
@@ -629,7 +646,7 @@ function RunElapsedStrip({
 
     relayout();
 
-    preloadMarkdownText();
+    void preloadMarkdownText();
     const ro =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => relayout())
@@ -817,6 +834,9 @@ export function ThreadComposer({
   pendingQueueKey = null,
   transcriptionProvider = null,
   ingressLimits = null,
+  quotedContext = null,
+  focusRequest = 0,
+  onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -937,6 +957,14 @@ export function ThreadComposer({
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
   }, [disabled]);
+
+  useEffect(() => {
+    if (!focusRequest || disabled) return;
+    const id = requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [disabled, focusRequest]);
+
+  const normalizedQuotedContext = quotedContext?.trim().slice(0, QUEUED_PROMPT_MAX_CHARS) || null;
 
   const readyImages = useMemo(
     () => images.filter((img): img is AttachedImage & { dataUrl: string } =>
@@ -1450,11 +1478,23 @@ export function ThreadComposer({
         id,
         text,
         ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
+        ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
       },
     ]);
     clear();
     clearComposerText();
-  }, [canQueueGuidance, clear, clearComposerText, maxTextBytes, readyImages, textTooLargeMessage, value]);
+    onQuotedContextChange?.(null);
+  }, [
+    canQueueGuidance,
+    clear,
+    clearComposerText,
+    maxTextBytes,
+    normalizedQuotedContext,
+    onQuotedContextChange,
+    readyImages,
+    textTooLargeMessage,
+    value,
+  ]);
 
   const removeQueuedPrompt = useCallback((id: string) => {
     secondEnterPromptIdRef.current = null;
@@ -1470,6 +1510,7 @@ export function ThreadComposer({
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(prompt.text.length);
+    onQuotedContextChange?.(prompt.quotedContext ?? null);
     if (prompt.images?.length) {
       restoreReadyImages(prompt.images as RestoredReadyImage[]);
     } else {
@@ -1482,7 +1523,7 @@ export function ThreadComposer({
       el.focus();
       el.setSelectionRange(prompt.text.length, prompt.text.length);
     });
-  }, [clear, resizeTextarea, restoreReadyImages]);
+  }, [clear, onQuotedContextChange, resizeTextarea, restoreReadyImages]);
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
@@ -1505,12 +1546,17 @@ export function ThreadComposer({
       const queuedImages = queuedImagesToSendImages(prompt.images);
       setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
       if (text || queuedImages?.length) {
-        if (queuedImages?.length) onSend(text, queuedImages);
-        else onSend(text);
+        const options: SendOptions | undefined = prompt.quotedContext || isStreaming
+          ? {
+              ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+              ...(isStreaming ? { continueActiveTurn: true } : {}),
+            }
+          : undefined;
+        onSend(text, queuedImages, options);
       }
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    [onSend],
+    [isStreaming, onSend],
   );
 
   const sendNextQueuedPrompt = useCallback(() => {
@@ -1522,7 +1568,12 @@ export function ThreadComposer({
     }
     setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id));
     const queuedImages = queuedImagesToSendImages(nextPrompt.images);
-    if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);
+    const options = nextPrompt.quotedContext
+      ? { quotedContext: nextPrompt.quotedContext }
+      : undefined;
+    if (queuedImages?.length && options) onSend(nextPrompt.text.trim(), queuedImages, options);
+    else if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);
+    else if (options) onSend(nextPrompt.text.trim(), undefined, options);
     else onSend(nextPrompt.text.trim());
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [onSend, queuedPrompts]);
@@ -1576,10 +1627,11 @@ export function ThreadComposer({
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
-      attachedCliApps.length > 0 || attachedMcpPresets.length > 0
+      attachedCliApps.length > 0 || attachedMcpPresets.length > 0 || normalizedQuotedContext
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
+            ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
           }
         : undefined;
     const hasPlainTextCommandPayload =
@@ -1598,6 +1650,7 @@ export function ThreadComposer({
       setQueuedPrompts([]);
       clear();
       clearComposerText();
+      onQuotedContextChange?.(null);
       return;
     }
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
@@ -1619,6 +1672,7 @@ export function ThreadComposer({
     // preview here without affecting the rendered message.
     clear();
     clearComposerText();
+    onQuotedContextChange?.(null);
   }, [
     activeCliMentionApps,
     activeMcpPresetMentions,
@@ -1632,6 +1686,8 @@ export function ThreadComposer({
     onModelBadgeClick,
     onSend,
     onStop,
+    onQuotedContextChange,
+    normalizedQuotedContext,
     readyImages,
     slashCommands,
     textTooLargeMessage,
@@ -1884,6 +1940,28 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
+        {normalizedQuotedContext ? (
+          <div
+            className="mx-3 mt-3 flex min-w-0 items-start gap-2 border-l-2 border-muted-foreground/25 pl-3 pr-1 text-muted-foreground"
+            aria-label={t("thread.composer.quotedContext")}
+          >
+            <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <p className="line-clamp-2 min-w-0 flex-1 text-[13px]/[1.45]">
+              {normalizedQuotedContext}
+            </p>
+            <button
+              type="button"
+              className="touch-target -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t("thread.composer.removeQuotedContext")}
+              onClick={() => {
+                onQuotedContextChange?.(null);
+                requestAnimationFrame(() => textareaRef.current?.focus());
+              }}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+        ) : null}
         <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         <div className="relative">
           {hasMentionDecorations ? (
@@ -1962,7 +2040,7 @@ export function ThreadComposer({
               aria-label={t("thread.composer.attachImage")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "rounded-full text-muted-foreground hover:text-foreground",
+                "touch-target rounded-full text-muted-foreground hover:text-foreground",
                 isHero
                   ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
                   : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
@@ -2016,7 +2094,7 @@ export function ThreadComposer({
                       onPointerCancel={voiceRecorder.endPress}
                       onClick={voiceRecorder.handleClick}
                       className={cn(
-                        "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                        "touch-target rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
                         isHero ? "h-8 w-8" : "h-9 w-9",
                         voiceRecorder.isRecording &&
                           "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
@@ -2059,7 +2137,7 @@ export function ThreadComposer({
               }
               onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
-                "rounded-full transition-transform",
+                "touch-target rounded-full transition-transform",
                 showStopButton
                   ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
                   : isHero

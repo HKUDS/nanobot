@@ -485,7 +485,10 @@ describe("SettingsView Apps catalog", () => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
       if (url === "/api/settings/cli-apps") {
-        return jsonResponse({ apps: [], installed_count: 0 });
+        return jsonResponse({
+          apps: [{ ...installedAnyGen, installed: false, status: "available" }],
+          installed_count: 0,
+        });
       }
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
@@ -514,11 +517,12 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "apps" });
 
     expect(await screen.findByText("Add tools to nanobot, then @ them in chat.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ready" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByText("Api")).not.toBeInTheDocument();
+    expect(screen.getByText("AnyGen")).toBeInTheDocument();
     expect(screen.getByText("0 ready")).toBeInTheDocument();
   });
 

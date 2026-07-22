@@ -528,6 +528,28 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("sends selected assistant text as separate quoted context", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage("chat-x", "What does this mean?", undefined, {
+      quotedContext: "  selected answer excerpt  ",
+    });
+
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "message",
+      chat_id: "chat-x",
+      content: "What does this mean?",
+      quoted_context: "selected answer excerpt",
+      webui: true,
+    });
+  });
+
   it("includes CLI app attachments in outbound messages", () => {
     const client = new NanobotClient({
       url: "ws://test",

@@ -48,6 +48,7 @@ interface ThreadViewportProps {
   onLoadOlder?: () => Promise<void> | void;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
+  onQuoteSelection?: (text: string) => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -120,6 +121,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   onLoadOlder,
   onOpenFilePreview,
   onForkFromMessage,
+  onQuoteSelection,
 }, ref) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -508,7 +510,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const programmaticPromptTop = programmaticPromptScrollTopRef.current;
       const programmatic =
         programmaticPromptTop !== null && Math.abs(el.scrollTop - programmaticPromptTop) < 2;
-      setAtBottom(near);
+      setAtBottom((current) => current === near ? current : near);
       if (programmatic) {
         programmaticPromptScrollTopRef.current = null;
         if (near) userReadingHistoryRef.current = false;
@@ -557,6 +559,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}
+                  onQuoteSelection={onQuoteSelection}
                 />
               </div>
             </div>

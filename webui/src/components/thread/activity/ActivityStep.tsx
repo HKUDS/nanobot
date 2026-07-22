@@ -7,51 +7,45 @@ import { cn } from "@/lib/utils";
 export type ActivityStepTone = "neutral" | "active" | "success" | "error";
 
 export interface ActivityStepProps {
-  as?: "div" | "li";
   icon?: LucideIcon;
   marker?: ReactNode;
   label: ReactNode;
-  detail?: ReactNode;
-  aside?: ReactNode;
-  children?: ReactNode;
+  ariaLabel?: string;
   active?: boolean;
   tone?: ActivityStepTone;
-  title?: string;
   className?: string;
   contentClassName?: string;
+  labelClassName?: string;
   markerClassName?: string;
   style?: CSSProperties;
 }
 
 export function ActivityStep({
-  as: Component = "div",
   icon: Icon,
   marker,
   label,
-  detail,
-  aside,
-  children,
+  ariaLabel,
   active = false,
   tone = active ? "active" : "neutral",
-  title,
   className,
   contentClassName,
+  labelClassName,
   markerClassName,
   style,
 }: ActivityStepProps) {
   return (
-    <Component
+    <div
+      data-testid="activity-step"
+      aria-label={ariaLabel}
       className={cn(
-        "group/activity-step relative grid min-w-0 grid-cols-[1.125rem_minmax(0,1fr)] gap-2 py-0.5 text-[13px] leading-5",
+        "relative grid min-w-0 grid-cols-[1.125rem_minmax(0,1fr)] gap-2 py-0.5 text-[13px] leading-5",
         className,
       )}
-      title={title}
       style={style}
     >
       <span
         className={cn(
-          "relative flex h-5 w-[1.125rem] shrink-0 items-start justify-center pt-[3px]",
-          "after:absolute after:left-1/2 after:top-[1.25rem] after:h-[calc(100%+0.375rem)] after:w-px after:-translate-x-1/2 after:bg-muted-foreground/14 group-last/activity-step:after:hidden",
+          "flex h-5 w-[1.125rem] shrink-0 items-start justify-center pt-[3px]",
         )}
         aria-hidden
       >
@@ -71,25 +65,23 @@ export function ActivityStep({
         )}
       </span>
       <div className={cn("min-w-0", contentClassName)}>
-        <div className="flex min-w-0 items-baseline gap-1.5">
+        <div
+          data-testid="activity-line"
+          title={typeof label === "string" ? label : undefined}
+          className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
+        >
           <StreamingLabelSheen
             active={active}
             className={cn(
-              "min-w-0 shrink-0 font-medium",
+              "min-w-0 flex-1 truncate font-medium",
               tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
+              labelClassName,
             )}
           >
             {label}
           </StreamingLabelSheen>
-          {detail ? (
-            <span className="min-w-0 break-words text-foreground/82">
-              {detail}
-            </span>
-          ) : null}
-          {aside ? <span className="ml-auto shrink-0">{aside}</span> : null}
         </div>
-        {children ? <div className="mt-1 min-w-0">{children}</div> : null}
       </div>
-    </Component>
+    </div>
   );
 }

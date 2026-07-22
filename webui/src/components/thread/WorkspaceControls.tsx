@@ -254,7 +254,7 @@ export function WorkspaceAccessMenu({
           variant="ghost"
           aria-label={t("thread.composer.workspace.accessAria")}
           className={cn(
-            "min-w-0 max-w-[min(7rem,30vw)] whitespace-nowrap rounded-[10px] border border-transparent font-semibold shadow-none sm:max-w-[min(12.5rem,42vw)]",
+            "touch-target min-w-0 max-w-[min(7rem,30vw)] whitespace-nowrap rounded-[10px] border border-transparent font-semibold shadow-none sm:max-w-[min(12.5rem,42vw)]",
             isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
             isFull
               ? "bg-transparent text-orange-600 hover:bg-orange-500/8 dark:text-orange-300 dark:hover:bg-orange-400/10"

@@ -11,7 +11,13 @@ from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_p
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.runtime_context import RuntimeContextBlock, public_history_message
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_INPUT_META,
+    WEBUI_QUOTE_METADATA,
+    RuntimeContextBlock,
+    public_history_message,
+    webui_quote_runtime_context,
+)
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -186,6 +192,39 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     persisted_first_user = session.messages[0]
     assert persisted_first_user["content"] == first_wire[1]["content"]
     assert public_history_message(persisted_first_user)["content"] == "first turn"
+
+
+@pytest.mark.asyncio
+async def test_webui_quote_reaches_model_without_leaking_into_public_history(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="answer", usage={}))
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)
+    session = loop.sessions.get_or_create("websocket:chat")
+    quote = webui_quote_runtime_context({
+        WEBUI_QUOTE_METADATA: "the selected answer excerpt",
+    })
+    assert quote is not None
+
+    await loop._process_message(InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat",
+        content="What does this mean?",
+        metadata={RUNTIME_CONTEXT_INPUT_META: [quote]},
+    ))
+
+    request = provider.chat_with_retry.await_args.kwargs["messages"]
+    assert "What does this mean?" in str(request)
+    assert "the selected answer excerpt" in str(request)
+    assert "the selected answer excerpt" in str(session.messages[0]["content"])
+    assert public_history_message(session.messages[0])["content"] == "What does this mean?"
 
 
 @pytest.mark.asyncio

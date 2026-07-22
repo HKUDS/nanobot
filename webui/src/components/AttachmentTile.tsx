@@ -61,7 +61,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         <video
           src={attachment.url}
           controls
-          preload="auto"
+          preload="metadata"
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",

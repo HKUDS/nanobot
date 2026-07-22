@@ -229,6 +229,7 @@ async def test_bootstrap_returns_token_for_localhost(
         assert resp.status_code == 200
         body = resp.json()
         assert body["token"].startswith("nbwt_")
+        assert channel.gateway.tokens.issued_token_audiences[body["token"]] == "webui"
         assert body["api_token"].startswith("nbwt_")
         assert body["api_token"] != body["token"]
         assert body["ws_path"] == "/"

@@ -4,6 +4,7 @@ import { Check, Loader2, Network, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import {
   cancelChannelConnect,
   pollChannelConnect,
@@ -52,6 +53,7 @@ export function ChannelQrConnectFlow({
   labels: ChannelQrConnectLabels;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
+  const pageVisible = usePageVisibility();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [connect, setConnect] = useState<ChannelConnectPayload | null>(null);
@@ -92,7 +94,7 @@ export function ChannelQrConnectFlow({
   }, [connect?.qr_url]);
 
   useEffect(() => {
-    if (!connect?.session_id || connect.status !== "pending") return;
+    if (!connect?.session_id || connect.status !== "pending" || !pageVisible) return;
     let cancelled = false;
     const poll = async () => {
       if (pollInFlight.current) return;
@@ -127,7 +129,7 @@ export function ChannelQrConnectFlow({
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, [channelName, connect?.interval_ms, connect?.session_id, connect?.status, onFeaturesUpdate, token]);
+  }, [channelName, connect?.interval_ms, connect?.session_id, connect?.status, onFeaturesUpdate, pageVisible, token]);
 
   const start = useCallback(async (force = false) => {
     setBusy(true);

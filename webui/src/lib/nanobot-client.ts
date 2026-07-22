@@ -386,6 +386,7 @@ export class NanobotClient {
     options?: {
       cliApps?: OutboundCliAppMention[];
       mcpPresets?: OutboundMcpPresetMention[];
+      quotedContext?: string;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
     },
@@ -398,6 +399,7 @@ export class NanobotClient {
       ...(media && media.length > 0 ? { media } : {}),
       ...(options?.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options?.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
+      ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,

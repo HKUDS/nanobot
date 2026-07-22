@@ -1,18 +1,29 @@
+import { useEffect } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MarkdownText } from "@/components/MarkdownText";
 
 const rendererSpy = vi.hoisted(() => vi.fn());
+const rendererMountSpy = vi.hoisted(() => vi.fn());
+const rendererControl = vi.hoisted(() => ({ failStreaming: false }));
 
 vi.mock("@/components/MarkdownTextRenderer", () => ({
-  default: ({
+  default: function MockMarkdownTextRenderer({
     children,
     highlightCode,
+    streaming,
   }: {
     children: string;
     highlightCode?: boolean;
-  }) => {
+    streaming?: boolean;
+  }) {
+    useEffect(() => {
+      rendererMountSpy();
+    }, []);
+    if (streaming && rendererControl.failStreaming) {
+      throw new Error("incomplete streaming markdown");
+    }
     rendererSpy({ children, highlightCode });
     return (
       <div
@@ -26,61 +37,76 @@ vi.mock("@/components/MarkdownTextRenderer", () => ({
 }));
 
 describe("MarkdownText", () => {
-  it("throttles streaming markdown commits and flushes before final highlighting", async () => {
-    rendererSpy.mockClear();
-    vi.useFakeTimers();
+  it("recovers markdown rendering when a failed streaming response completes", async () => {
+    rendererControl.failStreaming = true;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const source = "## Final answer\n\nThis is **important**.";
+
     try {
-      const { rerender } = render(
-        <MarkdownText streaming>hello</MarkdownText>,
+      const { container, rerender } = render(
+        <MarkdownText streaming>{source}</MarkdownText>,
       );
 
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
       });
+      expect(container.querySelector(".streaming-text-fallback")?.textContent).toBe(source);
 
-      expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello");
-      expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
-        "data-highlight-code",
-        "true",
-      );
-      expect(rendererSpy).toHaveBeenCalledTimes(1);
+      rendererControl.failStreaming = false;
+      rerender(<MarkdownText>{source}</MarkdownText>);
 
-      rerender(<MarkdownText streaming>hello world</MarkdownText>);
-      expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello");
-      expect(rendererSpy).toHaveBeenCalledTimes(1);
-
-      act(() => {
-        vi.advanceTimersByTime(79);
-      });
-      expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello");
-      expect(rendererSpy).toHaveBeenCalledTimes(1);
-
-      act(() => {
-        vi.advanceTimersByTime(1);
-      });
-      await act(async () => {
-        await Promise.resolve();
-      });
-
-      expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello world");
-      expect(rendererSpy).toHaveBeenCalledTimes(2);
-
-      rerender(<MarkdownText streaming>hello world!!!</MarkdownText>);
-      expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello world");
-
-      rerender(<MarkdownText>hello world!!!</MarkdownText>);
-      expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello world!!!");
-      expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
-        "data-highlight-code",
-        "true",
-      );
+      expect(screen.getByTestId("markdown-renderer").textContent).toBe(source);
     } finally {
-      vi.useRealTimers();
+      rendererControl.failStreaming = false;
+      consoleError.mockRestore();
     }
   });
 
-  it("keeps very large streaming snippets plain until the final render", async () => {
+  it("forwards every provider update without an extra UI timer", async () => {
+    rendererSpy.mockClear();
+    const { rerender } = render(
+      <MarkdownText streaming>hello</MarkdownText>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello");
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-highlight-code",
+      "false",
+    );
+
+    rerender(<MarkdownText streaming>hello world</MarkdownText>);
+    expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello world");
+
+    rerender(<MarkdownText>hello world!!!</MarkdownText>);
+    expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello world!!!");
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-highlight-code",
+      "true",
+    );
+  });
+
+  it("keeps a healthy renderer mounted when streaming completes", async () => {
+    rendererMountSpy.mockClear();
+    const { rerender } = render(
+      <MarkdownText streaming>hello</MarkdownText>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender(<MarkdownText>hello world</MarkdownText>);
+
+    expect(rendererMountSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers syntax highlighting until the final render", async () => {
     rendererSpy.mockClear();
     const largeCode = `\`\`\`ts\n${"const value = 1;\n".repeat(1_100)}\`\`\``;
 

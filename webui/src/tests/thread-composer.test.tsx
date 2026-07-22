@@ -292,6 +292,51 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
 }
 
 describe("ThreadComposer", () => {
+  it("focuses and sends a removable quoted answer excerpt", async () => {
+    const onSend = vi.fn();
+    const onQuotedContextChange = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        quotedContext="selected answer excerpt"
+        focusRequest={1}
+        onQuotedContextChange={onQuotedContextChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("selected answer excerpt");
+
+    fireEvent.change(input, { target: { value: "What does this mean?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("What does this mean?", undefined, {
+      quotedContext: "selected answer excerpt",
+    });
+    expect(onQuotedContextChange).toHaveBeenCalledWith(null);
+  });
+
+  it("removes quoted context without clearing the draft", () => {
+    const onQuotedContextChange = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        quotedContext="selected answer excerpt"
+        onQuotedContextChange={onQuotedContextChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+
+    expect(onQuotedContextChange).toHaveBeenCalledWith(null);
+    expect(input).toHaveValue("keep this draft");
+  });
+
   it("renders a readonly hero model composer when provided", () => {
     render(
       <ThreadComposer
@@ -1633,7 +1678,11 @@ describe("ThreadComposer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
 
-    expect(onSend).toHaveBeenCalledWith("keep the UI minimal");
+    expect(onSend).toHaveBeenCalledWith(
+      "keep the UI minimal",
+      undefined,
+      { continueActiveTurn: true },
+    );
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
   });
 
@@ -1663,7 +1712,11 @@ describe("ThreadComposer", () => {
 
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith("send this guidance now");
+    expect(onSend).toHaveBeenCalledWith(
+      "send this guidance now",
+      undefined,
+      { continueActiveTurn: true },
+    );
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("send this guidance now")).not.toBeInTheDocument();
   });
@@ -1783,7 +1836,11 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith("guide this one now");
+    expect(onSend).toHaveBeenCalledWith(
+      "guide this one now",
+      undefined,
+      { continueActiveTurn: true },
+    );
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.getByText("older guidance")).toBeInTheDocument();
     expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
@@ -2165,7 +2222,11 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Guide" }));
-    expect(onSend).toHaveBeenCalledWith("remember this edited follow-up");
+    expect(onSend).toHaveBeenCalledWith(
+      "remember this edited follow-up",
+      undefined,
+      { continueActiveTurn: true },
+    );
 
     remount.unmount();
     render(

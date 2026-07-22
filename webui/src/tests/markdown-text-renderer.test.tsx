@@ -13,6 +13,52 @@ describe("MarkdownTextRenderer", () => {
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
   });
 
+  it("does not render active URL protocols from untrusted markdown", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {[
+          "[JavaScript](javascript:alert(1))",
+          "[Data](data:text/html,<script>alert(1)</script>)",
+          "![Unsafe image](javascript:alert(2))",
+        ].join(" ")}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container).toHaveTextContent("JavaScript Data");
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("keeps safe external, mail, relative, and fragment links", () => {
+    render(
+      <MarkdownTextRenderer>
+        {[
+          "[HTTPS](https://example.com)",
+          "[Mail](mailto:hello@example.com)",
+          "[Relative](/docs/getting-started)",
+          "[Fragment](#install)",
+        ].join(" ")}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.getByRole("link", { name: "HTTPS" })).toHaveAttribute(
+      "href",
+      "https://example.com",
+    );
+    expect(screen.getByRole("link", { name: "Mail" })).toHaveAttribute(
+      "href",
+      "mailto:hello@example.com",
+    );
+    expect(screen.getByRole("link", { name: "Relative" })).toHaveAttribute(
+      "href",
+      "/docs/getting-started",
+    );
+    expect(screen.getByRole("link", { name: "Fragment" })).toHaveAttribute(
+      "href",
+      "#install",
+    );
+  });
+
   it("renders local file links as previewable file references", () => {
     const onOpenFilePreview = vi.fn();
     render(
@@ -264,7 +310,13 @@ describe("MarkdownTextRenderer", () => {
 
     expect(favicon()).toHaveAttribute(
       "src",
-      "https://www.savills.com.hk/favicon.ico",
+      "https://favicon.im/www.savills.com.hk?larger=true",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://www.google.com/s2/favicons?domain=www.savills.com.hk&sz=64",
     );
 
     fireEvent.error(favicon()!);
@@ -276,7 +328,7 @@ describe("MarkdownTextRenderer", () => {
     fireEvent.error(favicon()!);
     expect(favicon()).toHaveAttribute(
       "src",
-      "https://www.google.com/s2/favicons?domain=www.savills.com.hk&sz=64",
+      "https://www.savills.com.hk/favicon.ico",
     );
 
     fireEvent.error(favicon()!);
@@ -340,7 +392,7 @@ describe("MarkdownTextRenderer", () => {
     expect(container).not.toHaveTextContent("</details>");
   });
 
-  it("renders task list checkboxes as quiet status marks", () => {
+  it("renders task lists with compact static status markers", () => {
     const { container } = render(
       <MarkdownTextRenderer>
         {"- [x] 写 Markdown 示例\n- [x] 加点 emoji\n- [ ] 测试渲染效果"}
@@ -350,6 +402,120 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelectorAll("input[type='checkbox']")).toHaveLength(0);
     expect(screen.getAllByTestId("markdown-task-checkbox")).toHaveLength(3);
     expect(container.querySelectorAll(".task-list-item")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: /tasks/i })).not.toBeInTheDocument();
+  });
+
+  it("renders GFM tables in a responsive data surface", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "## Models\n\n| Model | Context | Price |\n| --- | ---: | ---: |\n| nanobot | 200k | $1 |\n\n## Notes"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    const surface = screen.getByTestId("markdown-data-table");
+    expect(surface).toHaveClass("overflow-x-auto", "rounded-lg", "mb-5");
+    expect(surface).toHaveAttribute("role", "region");
+    expect(surface).toHaveAttribute("tabindex", "0");
+    expect(surface).toHaveAccessibleName("Data table");
+    expect(screen.getByRole("table")).toHaveTextContent("nanobot");
+    expect(container.firstElementChild).toHaveClass("space-y-4");
+    expect(container.firstElementChild).not.toHaveClass("space-y-0");
+  });
+
+  it("uses Streamdown's incremental reveal while content is streaming", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>春天</MarkdownTextRenderer>,
+    );
+
+    expect(container.firstElementChild).toHaveClass(
+      "[&>*:last-child]:after:content-[var(--streamdown-caret)]",
+    );
+    const animatedUnits = container.querySelectorAll<HTMLElement>("[data-sd-animate]");
+    expect(animatedUnits).toHaveLength(1);
+    expect(animatedUnits[0]).toHaveTextContent("春天");
+    expect(animatedUnits[0].getAttribute("style")).toContain("--sd-duration: 180ms");
+  });
+
+  it("removes animation markup when a streamed response completes", async () => {
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming>春天</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector("[data-sd-animate]")).toBeInTheDocument();
+
+    rerender(<MarkdownTextRenderer>春天</MarkdownTextRenderer>);
+
+    await waitFor(() => {
+      expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not create one DOM node per CJK character for long responses", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>{"长".repeat(6_001)}</MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll("[data-sd-animate]")).toHaveLength(1);
+    expect(container.querySelector("[data-nanobot-stream-unit]")).not.toBeInTheDocument();
+  });
+
+  it("repairs incomplete streaming markdown without exposing syntax fragments", () => {
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming>{"**partial answer"}</MarkdownTextRenderer>,
+    );
+
+    expect(container).toHaveTextContent("partial answer");
+    expect(container).not.toHaveTextContent("**partial answer");
+
+    rerender(
+      <MarkdownTextRenderer streaming>
+        {"[OpenAI](https://openai.com"}
+      </MarkdownTextRenderer>,
+    );
+    expect(screen.queryByRole("link", { name: "OpenAI" })).not.toBeInTheDocument();
+    expect(container).toHaveTextContent("OpenAI");
+
+    rerender(
+      <MarkdownTextRenderer streaming>
+        {"[OpenAI](https://openai.com)"}
+      </MarkdownTextRenderer>,
+    );
+    expect(screen.getByRole("link", { name: "OpenAI" })).toHaveAttribute(
+      "href",
+      "https://openai.com",
+    );
+
+    rerender(
+      <MarkdownTextRenderer streaming highlightCode={false}>
+        {"```ts\nconst value = 1;"}
+      </MarkdownTextRenderer>,
+    );
+    expect(screen.getByText("const value = 1;")).toBeInTheDocument();
+  });
+
+  it("preserves semantic emphasis without leaking parser metadata into the DOM", () => {
+    render(
+      <MarkdownTextRenderer>
+        {"**Important** and *careful* with [links](https://example.com)."}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.getByText("Important").tagName).toBe("STRONG");
+    expect(screen.getByText("careful").tagName).toBe("EM");
+    expect(screen.getByRole("link", { name: "links" })).not.toHaveAttribute("node");
+  });
+
+  it("adds line numbers to multiline fenced code without changing inline code", () => {
+    render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {"```ts\nconst one = 1;\nconst two = 2;\n```\n\nUse `one` next."}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("one").tagName).toBe("CODE");
   });
 
   it("keeps dollar amounts from being parsed as inline math", () => {

@@ -335,7 +335,7 @@ class GatewayHTTPHandler:
                 status=429,
                 content_type="application/json; charset=utf-8",
             )
-        token = self.tokens.issue_token(self.config.token_ttl_s)
+        token = self.tokens.issue_token(self.config.token_ttl_s, audience="webui")
         api_token = (
             self.tokens.issue_api_token(self.config.token_ttl_s)
             if api_token_allowed

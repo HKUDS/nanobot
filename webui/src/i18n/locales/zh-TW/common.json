@@ -924,6 +924,8 @@
       "goalStateCloseAria": "關閉目標",
       "send": "送出訊息",
       "stop": "停止回覆",
+      "quotedContext": "引用內容",
+      "removeQuotedContext": "移除引用內容",
       "modelNotConfigured": "尚未設定模型",
       "configureModel": "設定模型",
       "queued": {
@@ -1136,7 +1138,8 @@
     "cliRunRan": "已使用",
     "cliRunFailed": "失敗",
     "automationSourceFallback": "自動化",
-    "automationTriggered": "已自動觸發"
+    "automationTriggered": "已自動觸發",
+    "askAboutSelection": "繼續提問"
   },
   "lightbox": {
     "title": "圖片預覽",

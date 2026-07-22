@@ -131,6 +131,55 @@ describe("useNanobotStream", () => {
     requestFrame.mockRestore();
   });
 
+  it("coalesces hidden-tab deltas without scheduling paint frames", () => {
+    vi.useFakeTimers();
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame");
+
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(
+        () => useNanobotStream("chat-background", EMPTY_MESSAGES),
+        { wrapper: wrap(fake.client) },
+      );
+
+      act(() => {
+        fake.emit("chat-background", {
+          event: "delta",
+          chat_id: "chat-background",
+          text: "Quiet",
+        });
+        fake.emit("chat-background", {
+          event: "delta",
+          chat_id: "chat-background",
+          text: " background",
+        });
+      });
+
+      expect(requestFrame).not.toHaveBeenCalled();
+      expect(result.current.messages).toHaveLength(0);
+
+      act(() => vi.advanceTimersByTime(1_000));
+
+      expect(result.current.messages[0]).toMatchObject({
+        content: "Quiet background",
+        isStreaming: true,
+      });
+    } finally {
+      requestFrame.mockRestore();
+      if (visibilityDescriptor) {
+        Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      } else {
+        delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
+      }
+      vi.useRealTimers();
+    }
+  });
+
   it("flushes pending delta text before turn_end finalizes the turn", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-flush", EMPTY_MESSAGES), {
@@ -1830,6 +1879,88 @@ describe("useNanobotStream", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps guided output in place while the active turn resumes", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-guide", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      result.current.send("research this");
+    });
+    const activeTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+
+    act(() => {
+      fake.emit("chat-guide", {
+        event: "delta",
+        chat_id: "chat-guide",
+        text: "Initial findings",
+        turn_id: activeTurnId,
+      });
+    });
+    await flushStreamFrame();
+
+    act(() => {
+      result.current.send("focus on primary sources", undefined, {
+        continueActiveTurn: true,
+      });
+    });
+
+    const guideCall = fake.client.sendMessage.mock.calls.at(-1)!;
+    expect(guideCall[3]).not.toHaveProperty("continueActiveTurn");
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "research this",
+      "Initial findings",
+      "focus on primary sources",
+    ]);
+
+    act(() => {
+      fake.emit("chat-guide", {
+        event: "stream_end",
+        chat_id: "chat-guide",
+        text: "Initial findings",
+        resuming: true,
+        turn_id: activeTurnId,
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages).toHaveLength(3);
+    expect(result.current.messages[1]).toMatchObject({
+      content: "Initial findings",
+      isStreaming: false,
+    });
+
+    act(() => {
+      fake.emit("chat-guide", {
+        event: "delta",
+        chat_id: "chat-guide",
+        text: "Updated with primary sources",
+        turn_id: activeTurnId,
+      });
+    });
+    await flushStreamFrame();
+
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "research this",
+      "Initial findings",
+      "focus on primary sources",
+      "Updated with primary sources",
+    ]);
+    expect(result.current.messages[3]).toMatchObject({ isStreaming: true });
+
+    act(() => {
+      fake.emit("chat-guide", {
+        event: "turn_end",
+        chat_id: "chat-guide",
+        turn_id: activeTurnId,
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
   });
 
   it("keeps streaming alive across stream_end when tool activity follows", async () => {

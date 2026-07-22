@@ -8,6 +8,7 @@ export default {
     "./index.html",
     "./src/**/*.{ts,tsx}",
     "../nanobot/channels/*/webui/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/*.js",
   ],
   theme: {
     container: {

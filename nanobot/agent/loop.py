@@ -60,6 +60,7 @@ from nanobot.runtime_context import (
     RuntimeContextProvider,
     append_runtime_context,
     resolve_runtime_context,
+    runtime_context_blocks_from_metadata,
 )
 from nanobot.security.workspace_access import (
     WorkspaceScopeResolver,
@@ -744,7 +745,9 @@ class AgentLoop:
             *self._runtime_context_providers,
         ]
         assert ctx.request_context is not None
-        return await resolve_runtime_context(providers, ctx.request_context)
+        blocks = runtime_context_blocks_from_metadata(ctx.request_context.metadata)
+        blocks.extend(await resolve_runtime_context(providers, ctx.request_context))
+        return blocks
 
     async def _dispatch_command_inline(
         self,

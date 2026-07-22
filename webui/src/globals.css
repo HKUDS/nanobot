@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+@supports (content-visibility: auto) {
+  .apps-catalog-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4.25rem;
+  }
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
@@ -196,7 +203,7 @@
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
 
-  /* Markdown body styles, ported from agent-chat-ui's markdown-styles.css. */
+  /* Keep the outer document rhythm clean at message boundaries. */
   .markdown-content > :first-child {
     @apply mt-0;
   }
@@ -211,6 +218,7 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
+    line-height: var(--cjk-line-height);
   }
 
   .markdown-content .contains-task-list {
@@ -219,6 +227,33 @@
 
   .markdown-content .task-list-item {
     @apply list-none pl-0;
+  }
+
+  /* Show a caret only while the full markdown renderer is still loading. */
+  @keyframes streaming-caret-blink {
+    0%, 45% { opacity: 1; }
+    55%, 100% { opacity: 0; }
+  }
+  .streaming-text-fallback::after {
+    content: "";
+    display: inline-block;
+    width: 1.5px;
+    height: 1em;
+    margin-left: 3px;
+    vertical-align: -0.12em;
+    border-radius: 1px;
+    background: hsl(var(--foreground) / 0.8);
+    animation: streaming-caret-blink 1s step-end infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-sd-animate] {
+      animation: none !important;
+    }
+
+    .streaming-text-fallback::after {
+      animation: none;
+    }
   }
 
   /* CJK-friendly line-height: prose paragraphs default to 1.625 which is
@@ -293,6 +328,10 @@
     .streaming-text-sheen::after {
       animation: none;
       content: "";
+    }
+    .markdown-content-streaming > :last-child::after,
+    .streaming-text-fallback::after {
+      animation: none;
     }
   }
 
@@ -571,6 +610,13 @@
     container-type: inline-size;
   }
 
+  @supports (content-visibility: auto) {
+    .thread-render-unit {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 12rem;
+    }
+  }
+
   .thread-prompt-rail {
     display: none;
     left: 1.75rem;
@@ -586,5 +632,12 @@
     .thread-prompt-rail {
       display: none;
     }
+  }
+}
+
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 }

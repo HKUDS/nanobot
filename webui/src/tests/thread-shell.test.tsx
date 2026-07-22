@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -232,6 +233,7 @@ describe("ThreadShell", () => {
   });
 
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
+    await preloadMarkdownText();
     const client = makeClient();
     let resolveProbe!: (value: Response) => void;
     const probe = new Promise<Response>((resolve) => {

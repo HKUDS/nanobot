@@ -1044,6 +1044,8 @@ export type InboundEvent =
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** This answer segment ended, but the active agent turn will continue. */
+      resuming?: boolean;
     } & InboundTurnMetadata)
   | ({
       event: "reasoning_delta";
@@ -1171,6 +1173,7 @@ export type Outbound =
       media?: OutboundMedia[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
+      quoted_context?: string;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

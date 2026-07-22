@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -9,11 +11,8 @@ import {
 import { Moon, PanelLeft, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
-import { DeleteConfirm } from "@/components/DeleteConfirm";
-import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { Sidebar } from "@/components/Sidebar";
-import { SessionSearchDialog } from "@/components/SessionSearchDialog";
-import { SettingsView, type SettingsSectionKey } from "@/components/settings/SettingsView";
+import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
@@ -22,6 +21,7 @@ import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -88,6 +88,7 @@ const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
+const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
 type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
 type ShellRoute = {
@@ -95,6 +96,39 @@ type ShellRoute = {
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
 };
+
+const loadSettingsView = () => import("@/components/settings/SettingsView");
+const SettingsView = lazy(async () => {
+  const module = await loadSettingsView();
+  return { default: module.SettingsView };
+});
+const SessionSearchDialog = lazy(async () => {
+  const module = await import("@/components/SessionSearchDialog");
+  return { default: module.SessionSearchDialog };
+});
+const DeleteConfirm = lazy(async () => {
+  const module = await import("@/components/DeleteConfirm");
+  return { default: module.DeleteConfirm };
+});
+const RenameChatDialog = lazy(async () => {
+  const module = await import("@/components/RenameChatDialog");
+  return { default: module.RenameChatDialog };
+});
+
+function SurfaceLoadingFallback() {
+  return (
+    <div
+      aria-busy="true"
+      className="flex h-full w-full flex-col gap-5 px-5 py-8 sm:px-8 lg:px-12"
+    >
+      <span className="sr-only">Loading</span>
+      <div className="h-4 w-20 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
+      <div className="h-9 w-48 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
+      <div className="mt-4 h-12 w-full max-w-3xl animate-pulse rounded-md bg-muted/55 motion-reduce:animate-none" />
+      <div className="h-28 w-full max-w-3xl animate-pulse rounded-md bg-muted/40 motion-reduce:animate-none" />
+    </div>
+  );
+}
 
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "overview",
@@ -952,6 +986,7 @@ function Shell({
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const skills = useSkills(token);
+  const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [draftWorkspaceScope, setDraftWorkspaceScope] =
@@ -1020,7 +1055,7 @@ function Shell({
     writeSessionUpdateChatIds(updatedChatIds);
   }, [updatedChatIds]);
 
-  const refreshPairingRequests = useCallback(async () => {
+  const refreshPairingRequests = useCallback(async (): Promise<number> => {
     try {
       const payload = await fetchPairingRequests(token);
       const requests = Array.isArray(payload.requests) ? payload.requests : [];
@@ -1036,19 +1071,33 @@ function Shell({
         );
         return next.size === current.size ? current : next;
       });
+      return requests.length;
     } catch {
       // Pairing is an opportunistic WebUI affordance. The slash command path
       // remains available if this polling request fails.
+      return 0;
     }
   }, [token]);
 
   useEffect(() => {
-    void refreshPairingRequests();
-    const timer = window.setInterval(() => {
-      void refreshPairingRequests();
-    }, PAIRING_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [refreshPairingRequests]);
+    if (!pageVisible) return undefined;
+
+    let disposed = false;
+    let timer: number | null = null;
+    const poll = async () => {
+      const requestCount = await refreshPairingRequests();
+      if (disposed) return;
+      timer = window.setTimeout(
+        () => void poll(),
+        requestCount > 0 ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
+      );
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [pageVisible, refreshPairingRequests]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
@@ -1578,6 +1627,10 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onSettingsIntent = useCallback(() => {
+    void loadSettingsView();
+  }, []);
+
   const onOpenModelSettings = useCallback(() => {
     onOpenSettings("models");
   }, [onOpenSettings]);
@@ -1849,6 +1902,7 @@ function Shell({
     onOpenApps,
     onOpenAutomations,
     onOpenSkills,
+    onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
     activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
     onToggleArchived,
@@ -1992,15 +2046,19 @@ function Shell({
             </Sheet>
           ) : null}
 
-          <SessionSearchDialog
-            open={sessionSearchOpen}
-            onOpenChange={setSessionSearchOpen}
-            sessions={sessions}
-            activeKey={activeKey}
-            loading={loading}
-            titleOverrides={sidebarState.title_overrides}
-            onSelect={onSelectSearchResult}
-          />
+          {sessionSearchOpen ? (
+            <Suspense fallback={null}>
+              <SessionSearchDialog
+                open
+                onOpenChange={setSessionSearchOpen}
+                sessions={sessions}
+                activeKey={activeKey}
+                loading={loading}
+                titleOverrides={sidebarState.title_overrides}
+                onSelect={onSelectSearchResult}
+              />
+            </Suspense>
+          ) : null}
         <main
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
@@ -2009,7 +2067,7 @@ function Shell({
             <div
               className={cn(
                 "absolute inset-0 flex flex-col",
-                view !== "chat" && "invisible pointer-events-none",
+                view !== "chat" && "hidden",
               )}
             >
               <ThreadShell
@@ -2038,51 +2096,65 @@ function Shell({
             </div>
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                <SettingsView
-                  theme={theme}
-                  initialSection={settingsInitialSection}
-                  initialSettings={settingsSnapshot}
-                  showSidebar={view === "settings"}
-                  onToggleTheme={toggle}
-                  onBackToChat={onBackToChat}
-                  onModelNameChange={onModelNameChange}
-                  onSettingsChange={setSettingsSnapshot}
-                  skills={skills}
-                  onWorkspaceSettingsChange={refreshWorkspaces}
-                  onSectionChange={onSettingsSectionChange}
-                  onLogout={onLogout}
-                  onRestart={onRestart}
-                  onNativeEngineRestart={onNativeEngineRestart}
-                  isRestarting={isRestarting}
-                  hostChromeInset={showHostChrome}
-                />
+                <Suspense fallback={<SurfaceLoadingFallback />}>
+                  <SettingsView
+                    theme={theme}
+                    initialSection={settingsInitialSection}
+                    initialSettings={settingsSnapshot}
+                    showSidebar={view === "settings"}
+                    onToggleTheme={toggle}
+                    onBackToChat={onBackToChat}
+                    onModelNameChange={onModelNameChange}
+                    onSettingsChange={setSettingsSnapshot}
+                    skills={skills}
+                    onWorkspaceSettingsChange={refreshWorkspaces}
+                    onSectionChange={onSettingsSectionChange}
+                    onLogout={onLogout}
+                    onRestart={onRestart}
+                    onNativeEngineRestart={onNativeEngineRestart}
+                    isRestarting={isRestarting}
+                    hostChromeInset={showHostChrome}
+                  />
+                </Suspense>
               </div>
             )}
           </main>
         </div>
 
-        <DeleteConfirm
-          open={!!pendingDelete}
-          title={pendingDelete?.label ?? ""}
-          automations={pendingDelete?.automations}
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={onConfirmDelete}
-        />
-        <RenameChatDialog
-          open={!!pendingRename}
-          title={pendingRename?.label ?? ""}
-          onCancel={() => setPendingRename(null)}
-          onConfirm={onConfirmRename}
-        />
-        <RenameChatDialog
-          open={!!pendingProjectRename}
-          title={pendingProjectRename?.label ?? ""}
-          dialogTitle={t("chat.renameProjectTitle")}
-          description={t("chat.renameProjectDescription")}
-          placeholder={t("chat.renameProjectPlaceholder")}
-          onCancel={() => setPendingProjectRename(null)}
-          onConfirm={onConfirmProjectRename}
-        />
+        {pendingDelete ? (
+          <Suspense fallback={null}>
+            <DeleteConfirm
+              open
+              title={pendingDelete.label}
+              automations={pendingDelete.automations}
+              onCancel={() => setPendingDelete(null)}
+              onConfirm={onConfirmDelete}
+            />
+          </Suspense>
+        ) : null}
+        {pendingRename ? (
+          <Suspense fallback={null}>
+            <RenameChatDialog
+              open
+              title={pendingRename.label}
+              onCancel={() => setPendingRename(null)}
+              onConfirm={onConfirmRename}
+            />
+          </Suspense>
+        ) : null}
+        {pendingProjectRename ? (
+          <Suspense fallback={null}>
+            <RenameChatDialog
+              open
+              title={pendingProjectRename.label}
+              dialogTitle={t("chat.renameProjectTitle")}
+              description={t("chat.renameProjectDescription")}
+              placeholder={t("chat.renameProjectPlaceholder")}
+              onCancel={() => setPendingProjectRename(null)}
+              onConfirm={onConfirmProjectRename}
+            />
+          </Suspense>
+        ) : null}
         {restartToast ? (
           <div
             role="status"

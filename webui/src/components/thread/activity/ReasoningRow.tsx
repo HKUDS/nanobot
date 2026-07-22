@@ -2,51 +2,35 @@ import { useEffect, useRef, useState } from "react";
 import { Check, CircleDashed } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
 
 import { ActivityStep } from "./ActivityStep";
+import { compactReasoningPreview } from "./reasoning-preview";
 
 export function ReasoningRow({
   text,
   streaming,
-  onOpenFilePreview,
+  className,
 }: {
   text: string;
   streaming: boolean;
-  onOpenFilePreview?: (path: string) => void;
+  className?: string;
 }) {
   const { t } = useTranslation();
-  useEffect(() => {
-    if (text.length > 0) preloadMarkdownText();
-  }, [text.length]);
+  const fallback = streaming
+    ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
+    : t("message.reasoning", { defaultValue: "Thinking" });
+  const preview = compactReasoningPreview(text) || fallback;
   return (
     <ActivityStep
       marker={<ReasoningMarker streaming={streaming} />}
       active={streaming}
       tone={streaming ? "active" : "success"}
-      label={streaming
-        ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
-        : t("message.reasoning", { defaultValue: "Thinking" })}
-    >
-      {text.trim() ? (
-        <MarkdownText
-          streaming={streaming}
-          onOpenFilePreview={onOpenFilePreview}
-          className={cn(
-            "min-w-0 text-[12.5px] italic text-muted-foreground/78",
-            "prose-p:my-1 prose-li:my-0.5",
-            "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
-            "prose-headings:text-muted-foreground/88 prose-strong:text-muted-foreground",
-            "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
-            "prose-a:text-blue-500 prose-a:underline hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
-            "prose-code:text-[0.92em]",
-          )}
-        >
-          {text}
-        </MarkdownText>
-      ) : null}
-    </ActivityStep>
+      label={preview}
+      labelClassName="italic text-muted-foreground/78"
+      contentClassName="overflow-hidden"
+      className={className}
+    />
   );
 }
 

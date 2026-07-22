@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { faviconUrls, logoFallbackUrls, providerBrand } from "@/lib/provider-brand";
+import {
+  browserSafeFaviconUrls,
+  faviconUrls,
+  isGenericRepositoryLogoUrl,
+  logoFallbackUrls,
+  providerBrand,
+} from "@/lib/provider-brand";
 
 describe("provider brand logos", () => {
   it("uses multiple favicon sources before falling back to initials", () => {
@@ -8,6 +14,15 @@ describe("provider brand logos", () => {
       "https://z.ai/favicon.ico",
       "https://icons.duckduckgo.com/ip3/z.ai.ico",
       "https://www.google.com/s2/favicons?domain=z.ai&sz=64",
+    ]);
+  });
+
+  it("uses cross-origin-safe favicon sources first for arbitrary web pages", () => {
+    expect(browserSafeFaviconUrls("openai.com")).toEqual([
+      "https://favicon.im/openai.com?larger=true",
+      "https://www.google.com/s2/favicons?domain=openai.com&sz=64",
+      "https://icons.duckduckgo.com/ip3/openai.com.ico",
+      "https://openai.com/favicon.ico",
     ]);
   });
 
@@ -26,6 +41,17 @@ describe("provider brand logos", () => {
       "https://icons.duckduckgo.com/ip3/github.com.ico",
       "https://www.google.com/s2/favicons?domain=github.com%2FHKUDS%2FCLI-Anything&sz=64",
     ]);
+  });
+
+  it("distinguishes repository host favicons from product identities", () => {
+    expect(
+      isGenericRepositoryLogoUrl(
+        "https://www.google.com/s2/favicons?domain=github.com/HKUDS/CLI-Anything&sz=64",
+      ),
+    ).toBe(true);
+    expect(isGenericRepositoryLogoUrl("https://github.com/favicon.ico")).toBe(true);
+    expect(isGenericRepositoryLogoUrl("https://raw.githubusercontent.com/org/repo/logo.svg")).toBe(false);
+    expect(isGenericRepositoryLogoUrl("https://blender.org/favicon.ico")).toBe(false);
   });
 
   it("keeps Zhipu on the current Z.ai brand domain", () => {

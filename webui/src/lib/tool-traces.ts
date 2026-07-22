@@ -20,6 +20,19 @@ export function formatToolCallTrace(call: unknown): string | null {
   return `${name}()`;
 }
 
+export function canonicalToolTrace(line: string): string {
+  const trimmed = line.trim();
+  const match = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
+  if (!match) return trimmed;
+  const args = match[2].trim();
+  if (!args) return `${match[1]}()`;
+  try {
+    return `${match[1]}(${JSON.stringify(JSON.parse(args))})`;
+  } catch {
+    return trimmed;
+  }
+}
+
 const VALID_PHASES = new Set(["start", "end", "error"]);
 const PHASE_RANK: Record<string, number> = { start: 1, end: 2, error: 3 };
 
@@ -91,12 +104,13 @@ export function mergeUniqueToolTraceLines(
   previousTraces: string[],
   lines: string[],
 ): { traces: string[]; added: boolean } {
-  const seen = new Set(previousTraces);
+  const seen = new Set(previousTraces.map(canonicalToolTrace));
   const traces = [...previousTraces];
   let added = false;
   for (const line of lines) {
-    if (seen.has(line)) continue;
-    seen.add(line);
+    const key = canonicalToolTrace(line);
+    if (seen.has(key)) continue;
+    seen.add(key);
     traces.push(line);
     added = true;
   }

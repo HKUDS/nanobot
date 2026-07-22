@@ -143,7 +143,9 @@ import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import {
+  isGenericRepositoryLogoUrl,
   logoFallbackUrls,
   providerBrand,
   providerDisplayLabel,
@@ -538,6 +540,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const { t } = useTranslation();
   const { token } = useClient();
+  const pageVisible = usePageVisibility();
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
@@ -584,7 +587,7 @@ export function SettingsView({
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("ready");
+  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("cli");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
@@ -685,7 +688,7 @@ export function SettingsView({
 
   const hasSettings = settings !== null;
   useEffect(() => {
-    if (activeSection !== "overview" || !hasSettings) return;
+    if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
     let cancelled = false;
     const refresh = () => {
       fetchSettingsUsage(token)
@@ -698,18 +701,13 @@ export function SettingsView({
     void refresh();
     const interval = window.setInterval(refresh, 5000);
     const onFocus = () => refresh();
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
     window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [activeSection, hasSettings, token]);
+  }, [activeSection, hasSettings, pageVisible, token]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -844,7 +842,7 @@ export function SettingsView({
   );
 
   useEffect(() => {
-    if (activeSection !== "automations") return;
+    if (activeSection !== "automations" || !pageVisible) return;
     let cancelled = false;
     const refresh = async (showLoading = false) => {
       if (cancelled) return;
@@ -862,18 +860,14 @@ export function SettingsView({
     };
     void refresh(true);
     const interval = window.setInterval(() => void refresh(false), 5000);
-    const refreshOnFocus = () => {
-      if (document.visibilityState !== "hidden") void refresh(false);
-    };
+    const refreshOnFocus = () => void refresh(false);
     window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
     };
-  }, [activeSection, token]);
+  }, [activeSection, pageVisible, token]);
 
   useEffect(() => {
     writeLocalPreferences(localPrefs);
@@ -1969,7 +1963,7 @@ export function SettingsView({
               <button
                 type="button"
                 onClick={onBackToChat}
-                className="mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
+                className="touch-target mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
               >
                 <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
                 {t("settings.backToChat")}
@@ -2052,6 +2046,24 @@ function SettingsSidebar({
   hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
+  const navRef = useRef<HTMLElement>(null);
+  const activeItemRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    const activeItem = activeItemRef.current;
+    if (!nav || !activeItem || nav.scrollWidth <= nav.clientWidth) return;
+    const navRect = nav.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    const itemCenter = itemRect.left - navRect.left + nav.scrollLeft + itemRect.width / 2;
+    const targetLeft = Math.max(
+      0,
+      Math.min(nav.scrollWidth - nav.clientWidth, itemCenter - nav.clientWidth / 2),
+    );
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    nav.scrollTo({ left: targetLeft, behavior: reducedMotion ? "auto" : "smooth" });
+  }, [activeSection]);
+
   return (
     <aside
       className={cn(
@@ -2062,7 +2074,7 @@ function SettingsSidebar({
       <button
         type="button"
         onClick={onBackToChat}
-        className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3"
+        className="touch-target mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3"
       >
         <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
         {t("settings.backToChat")}
@@ -2074,19 +2086,21 @@ function SettingsSidebar({
       </div>
 
       <nav
+        ref={navRef}
         aria-label={t("settings.sidebar.ariaLabel")}
-        className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:block lg:space-y-1 lg:overflow-visible lg:px-0 lg:pb-0"
+        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:block lg:space-y-1 lg:overflow-visible lg:px-0 lg:pb-0"
       >
         {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
           const active = key === activeSection;
           return (
             <button
+              ref={active ? activeItemRef : undefined}
               key={key}
               type="button"
               aria-current={active ? "page" : undefined}
               onClick={() => onSelectSection(key)}
               className={cn(
-                "flex h-9 w-auto shrink-0 snap-start items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors lg:w-full lg:rounded-[10px] lg:px-2.5",
+                "touch-target flex h-9 w-auto shrink-0 items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors lg:w-full lg:rounded-[10px] lg:px-2.5",
                 active
                   ? "bg-sidebar-accent text-foreground"
                   : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
@@ -5833,7 +5847,7 @@ function CliAppsCatalogRow({
   const description = app.description || app.requires || app.entry_point || app.name;
 
   return (
-    <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
+    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
       <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -6624,9 +6638,11 @@ function CliAppReadyPanel({
 }
 
 function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: boolean }) {
-  const bg = app.brand_color || "hsl(var(--muted))";
-  const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const logoUrls = useMemo(
+    () => (isGenericRepositoryLogoUrl(app.logo_url) ? [] : logoFallbackUrls(app.logo_url)),
+    [app.logo_url],
+  );
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const initials = app.display_name
     .split(/\s+/)
     .filter(Boolean)
@@ -6634,30 +6650,41 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
     .map((part) => part[0]?.toUpperCase())
     .join("") || app.name.slice(0, 2).toUpperCase();
 
-  if (showBrandLogos && logoUrl) {
-    return (
+  const showRemoteLogo = showBrandLogos && Boolean(logoUrl);
+
+  return (
+    <span
+      className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[8px] border border-border/45 bg-muted text-[13px] font-semibold"
+      style={{
+        color: app.brand_color || "hsl(var(--muted-foreground))",
+        boxShadow: `inset 0 0 0 1px ${app.brand_color ?? "transparent"}18`,
+      }}
+    >
       <span
-        className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-border/45 bg-background"
-        style={{ boxShadow: `inset 0 0 0 1px ${app.brand_color ?? "transparent"}22` }}
+        aria-hidden
+        className={cn(
+          "transition-opacity duration-150 motion-reduce:transition-none",
+          showRemoteLogo && logoLoaded ? "opacity-0" : "opacity-100",
+        )}
       >
+        {initials}
+      </span>
+      {showRemoteLogo ? (
         <img
           src={logoUrl}
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-6 w-6 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "absolute h-6 w-6 object-contain transition-opacity duration-150 motion-reduce:transition-none",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />
-      </span>
-    );
-  }
-  return (
-    <span
-      className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] text-[13px] font-semibold text-white"
-      style={{ backgroundColor: bg }}
-    >
-      {initials}
+      ) : null}
     </span>
   );
 }
@@ -8494,6 +8521,7 @@ function SegmentedControl({
         <button
           key={option.value}
           type="button"
+          aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
             "rounded-full px-3 py-1 transition-colors",

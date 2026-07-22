@@ -1,7 +1,8 @@
-import { Fragment, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
@@ -16,6 +17,7 @@ interface ThreadMessagesProps {
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
+  onQuoteSelection?: (text: string) => void;
 }
 
 export type DisplayUnit = TurnUnit;
@@ -56,8 +58,10 @@ export function ThreadMessages({
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
+  onQuoteSelection,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
+  const messageListRef = useRef<HTMLDivElement>(null);
   const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
@@ -72,7 +76,11 @@ export function ThreadMessages({
   let nextUserIndex = hiddenUserMessageCount;
 
   return (
-    <div className="flex w-full flex-col">
+    <div ref={messageListRef} className="flex w-full flex-col">
+      <AssistantSelectionAction
+        containerRef={messageListRef}
+        onQuoteSelection={onQuoteSelection}
+      />
       {units.map((unit, index) => {
         const prev = units[index - 1];
         const marginTop =
@@ -96,42 +104,141 @@ export function ThreadMessages({
         if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
 
         return (
-          <Fragment key={unitKeys[index]}>
-            <div className={marginTop} data-user-prompt-id={userPromptId}>
-              {unit.type === "activity" ? (
-                <AgentActivityCluster
-                  messages={unit.messages}
-                  isTurnStreaming={liveActivityClusterIndices.has(index)}
-                  hasBodyBelow={hasBodyBelow}
-                  turnLatencyMs={unit.turnLatencyMs}
-                  startedAtMs={unit.startedAtMs}
-                  cliApps={cliApps}
-                  mcpPresets={mcpPresets}
-                  onOpenFilePreview={onOpenFilePreview}
-                />
-              ) : (
-                <MessageBubble
-                  message={unit.message}
-                  cliApps={cliApps}
-                  mcpPresets={mcpPresets}
-                  slashCommands={slashCommands}
-                  onOpenFilePreview={onOpenFilePreview}
-                  onForkFromHere={
-                    onForkFromMessage && forkIndex !== undefined
-                      ? () => onForkFromMessage(forkIndex)
-                      : undefined
-                  }
-                />
-              )}
-            </div>
-            {index === forkBoundaryAfterUnitIndex ? (
-              <ForkBoundaryDivider label={t("thread.forkedFromHistory")} />
-            ) : null}
-          </Fragment>
+          <ThreadDisplayUnit
+            key={unitKeys[index]}
+            unit={unit}
+            marginTop={marginTop}
+            userPromptId={userPromptId}
+            hasBodyBelow={hasBodyBelow}
+            isTurnStreaming={liveActivityClusterIndices.has(index)}
+            forkIndex={forkIndex}
+            showForkBoundary={index === forkBoundaryAfterUnitIndex}
+            forkBoundaryLabel={t("thread.forkedFromHistory")}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            slashCommands={slashCommands}
+            onOpenFilePreview={onOpenFilePreview}
+            onForkFromMessage={onForkFromMessage}
+          />
         );
       })}
     </div>
   );
+}
+
+interface ThreadDisplayUnitProps {
+  unit: DisplayUnit;
+  marginTop: string;
+  userPromptId?: string;
+  hasBodyBelow: boolean;
+  isTurnStreaming: boolean;
+  forkIndex?: number;
+  showForkBoundary: boolean;
+  forkBoundaryLabel: string;
+  cliApps: CliAppInfo[];
+  mcpPresets: McpPresetInfo[];
+  slashCommands: SlashCommand[];
+  onOpenFilePreview?: (path: string) => void;
+  onForkFromMessage?: (beforeUserIndex: number) => void;
+}
+
+const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
+  unit,
+  marginTop,
+  userPromptId,
+  hasBodyBelow,
+  isTurnStreaming,
+  forkIndex,
+  showForkBoundary,
+  forkBoundaryLabel,
+  cliApps,
+  mcpPresets,
+  slashCommands,
+  onOpenFilePreview,
+  onForkFromMessage,
+}: ThreadDisplayUnitProps) {
+  const onForkFromHere = useCallback(() => {
+    if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
+  }, [forkIndex, onForkFromMessage]);
+  const deferOffscreenRender = unit.type === "activity"
+    ? !isTurnStreaming
+    : unit.message.role === "assistant" && !unit.message.isStreaming;
+
+  return (
+    <>
+      <div
+        className={`${marginTop}${deferOffscreenRender ? " thread-render-unit" : ""}`}
+        data-user-prompt-id={userPromptId}
+      >
+        {unit.type === "activity" ? (
+          <AgentActivityCluster
+            messages={unit.messages}
+            isTurnStreaming={isTurnStreaming}
+            hasBodyBelow={hasBodyBelow}
+            turnLatencyMs={unit.turnLatencyMs}
+            startedAtMs={unit.startedAtMs}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        ) : (
+          <MessageBubble
+            message={unit.message}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            slashCommands={slashCommands}
+            onOpenFilePreview={onOpenFilePreview}
+            onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+          />
+        )}
+      </div>
+      {showForkBoundary ? <ForkBoundaryDivider label={forkBoundaryLabel} /> : null}
+    </>
+  );
+}, threadDisplayUnitPropsEqual);
+
+function threadDisplayUnitPropsEqual(
+  previous: ThreadDisplayUnitProps,
+  next: ThreadDisplayUnitProps,
+): boolean {
+  return (
+    displayUnitsEqual(previous.unit, next.unit)
+    && previous.marginTop === next.marginTop
+    && previous.userPromptId === next.userPromptId
+    && previous.hasBodyBelow === next.hasBodyBelow
+    && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.forkIndex === next.forkIndex
+    && previous.showForkBoundary === next.showForkBoundary
+    && previous.forkBoundaryLabel === next.forkBoundaryLabel
+    && previous.cliApps === next.cliApps
+    && previous.mcpPresets === next.mcpPresets
+    && previous.slashCommands === next.slashCommands
+    && previous.onOpenFilePreview === next.onOpenFilePreview
+    && previous.onForkFromMessage === next.onForkFromMessage
+  );
+}
+
+function displayUnitsEqual(previous: DisplayUnit, next: DisplayUnit): boolean {
+  if (previous.type !== next.type) return false;
+  if (previous.type === "message" && next.type === "message") {
+    return shallowMessageEqual(previous.message, next.message);
+  }
+  if (previous.type !== "activity" || next.type !== "activity") return false;
+  return (
+    previous.turnLatencyMs === next.turnLatencyMs
+    && previous.startedAtMs === next.startedAtMs
+    && previous.messages.length === next.messages.length
+    && previous.messages.every((message, index) =>
+      shallowMessageEqual(message, next.messages[index]))
+  );
+}
+
+function shallowMessageEqual(previous: UIMessage, next: UIMessage): boolean {
+  if (previous === next) return true;
+  const previousKeys = Object.keys(previous) as Array<keyof UIMessage>;
+  const nextKeys = Object.keys(next) as Array<keyof UIMessage>;
+  return previousKeys.length === nextKeys.length
+    && previousKeys.every((key) => previous[key] === next[key]);
 }
 
 function unitIndexAfterMessageCount(

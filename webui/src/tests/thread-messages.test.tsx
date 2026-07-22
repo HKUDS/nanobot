@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,10 +10,58 @@ import {
 import type { UIMessage } from "@/lib/types";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
 describe("ThreadMessages", () => {
+  it("offers a follow-up action for text selected within one completed answer", async () => {
+    const onQuoteSelection = vi.fn();
+    render(
+      <ThreadMessages
+        messages={[{
+          id: "a1",
+          role: "assistant",
+          content: "The selected answer excerpt",
+          createdAt: 1,
+        }]}
+        isStreaming={false}
+        onQuoteSelection={onQuoteSelection}
+      />,
+    );
+
+    const textNode = screen.getByText("The selected answer excerpt").firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 4);
+    range.setEnd(textNode, 19);
+    vi.spyOn(range, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      right: 240,
+      top: 100,
+      bottom: 120,
+      width: 140,
+      height: 20,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    const removeAllRanges = vi.fn();
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => "selected answer",
+      removeAllRanges,
+    } as unknown as Selection);
+
+    document.dispatchEvent(new Event("selectionchange"));
+    const action = await screen.findByRole("button", { name: "Ask about this" });
+    fireEvent.click(action);
+
+    await waitFor(() => expect(onQuoteSelection).toHaveBeenCalledWith("selected answer"));
+    expect(removeAllRanges).toHaveBeenCalled();
+  });
+
   it("groups consecutive reasoning and tool rows into one timeline before the answer", () => {
     const messages: UIMessage[] = [
       {

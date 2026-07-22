@@ -344,6 +344,8 @@ export function ThreadShell({
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [quotedContext, setQuotedContext] = useState<string | null>(null);
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
@@ -395,7 +397,13 @@ export function ThreadShell({
     }
     setFilePreviewClosing(false);
     setFilePreviewPath(null);
+    setQuotedContext(null);
   }, [historyKey]);
+
+  const handleQuoteSelection = useCallback((text: string) => {
+    setQuotedContext(text);
+    setComposerFocusSignal((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -806,6 +814,9 @@ export function ThreadShell({
           pendingQueueKey={chatId}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
+          quotedContext={quotedContext}
+          focusRequest={composerFocusSignal}
+          onQuotedContextChange={setQuotedContext}
         />
       ) : (
         <ThreadComposer
@@ -904,6 +915,7 @@ export function ThreadShell({
             onLoadOlder={loadOlder}
             onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+            onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
         </FilePreviewAvailabilityProvider>
       </div>
