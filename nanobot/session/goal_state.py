@@ -92,9 +92,6 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     hint = str(goal.get("ui_summary") or "").strip()
     if hint:
         out.append(f"Summary: {hint}")
-    out.append(
-        "Please continue working, unless the user explicitly asks you to cancel or stop."
-    )
     return out
 
 
