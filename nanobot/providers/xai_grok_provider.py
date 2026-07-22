@@ -32,9 +32,9 @@ from nanobot.providers.xai_oauth import (
     get_xai_oauth_token,
 )
 
-DEFAULT_XAI_OAUTH_URL = "https://cli-chat-proxy.grok.com/v1/responses"
-DEFAULT_XAI_OAUTH_MODELS_URL = "https://cli-chat-proxy.grok.com/v1/models"
-DEFAULT_XAI_OAUTH_MODEL = "xai-oauth/grok-4.5"
+DEFAULT_XAI_GROK_URL = "https://cli-chat-proxy.grok.com/v1/responses"
+DEFAULT_XAI_GROK_MODELS_URL = "https://cli-chat-proxy.grok.com/v1/models"
+DEFAULT_XAI_GROK_MODEL = "xai-grok/grok-4.5"
 _MODEL_CAPABILITIES_TTL_S = 5 * 60
 _MAX_ERROR_BODY_CHARS = 1000
 _SENSITIVE_ERROR_KEYS = {
@@ -46,14 +46,14 @@ _SENSITIVE_ERROR_KEYS = {
 }
 
 
-class XAIOAuthProvider(LLMProvider):
+class XAIGrokProvider(LLMProvider):
     """Call xAI's subscription proxy and expose supported hosted tools."""
 
     supports_progress_deltas = True
 
     def __init__(
         self,
-        default_model: str = DEFAULT_XAI_OAUTH_MODEL,
+        default_model: str = DEFAULT_XAI_GROK_MODEL,
         proxy: str | None = None,
         extra_body: dict[str, Any] | None = None,
     ):
@@ -73,7 +73,7 @@ class XAIOAuthProvider(LLMProvider):
         ):
             try:
                 capabilities = await _fetch_xai_model_capabilities(
-                    DEFAULT_XAI_OAUTH_MODELS_URL,
+                    DEFAULT_XAI_GROK_MODELS_URL,
                     _build_model_headers(token),
                     proxy=self.proxy,
                 )
@@ -143,7 +143,7 @@ class XAIOAuthProvider(LLMProvider):
             stage = "xai_request"
             try:
                 result = await _request_xai(
-                    DEFAULT_XAI_OAUTH_URL,
+                    DEFAULT_XAI_GROK_URL,
                     headers,
                     body,
                     proxy=self.proxy,
@@ -165,7 +165,7 @@ class XAIOAuthProvider(LLMProvider):
                 headers = _build_headers(token.access, wire_model)
                 stage = "xai_request_retry"
                 result = await _request_xai(
-                    DEFAULT_XAI_OAUTH_URL,
+                    DEFAULT_XAI_GROK_URL,
                     headers,
                     body,
                     proxy=self.proxy,
@@ -242,7 +242,7 @@ class XAIOAuthProvider(LLMProvider):
 
 
 def _strip_model_prefix(model: str) -> str:
-    if model.startswith("xai-oauth/") or model.startswith("xai_oauth/"):
+    if model.startswith("xai-grok/") or model.startswith("xai_grok/"):
         return model.split("/", 1)[1]
     return model
 
@@ -478,7 +478,7 @@ def _is_sensitive_error_key(key: str) -> bool:
 
 def _friendly_error(status_code: int, response_body: str | None = None) -> str:
     if status_code == 401:
-        message = "xAI rejected the login. Sign in again with `nanobot provider login xai-oauth`."
+        message = "xAI rejected the login. Sign in again with `nanobot provider login xai-grok`."
     elif status_code == 403:
         message = "This xAI account or subscription cannot access the Grok subscription endpoint."
     elif status_code == 429:

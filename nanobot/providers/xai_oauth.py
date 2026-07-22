@@ -145,7 +145,7 @@ def login_xai_oauth(
     server = _make_callback_server(state, result_queue)
     callback_thread = threading.Thread(
         target=server.serve_forever,
-        name="nanobot-xai-oauth-callback",
+        name="nanobot-xai-grok-oauth-callback",
         daemon=True,
     )
     callback_thread.start()
@@ -175,7 +175,7 @@ def login_xai_oauth(
             except queue.Empty as exc:
                 raise XAIOAuthError(
                     "Timed out waiting for xAI sign-in. Run "
-                    "`nanobot provider login xai-oauth` to try again."
+                    "`nanobot provider login xai-grok` to try again."
                 ) from exc
     finally:
         server.shutdown()
@@ -213,7 +213,7 @@ def get_xai_oauth_token(
     token = _load_token()
     if token is None:
         raise XAIOAuthError(
-            "xAI is not signed in. Run `nanobot provider login xai-oauth` first."
+            "xAI is not signed in. Run `nanobot provider login xai-grok` first."
         )
     if not force_refresh and _token_is_fresh(token, min_ttl_ms):
         return token
@@ -222,21 +222,21 @@ def get_xai_oauth_token(
             return token
         raise XAIOAuthError(
             "The xAI login has expired and cannot be refreshed. "
-            "Run `nanobot provider login xai-oauth` again."
+            "Run `nanobot provider login xai-grok` again."
         )
 
     with _token_lock():
         latest = _load_token()
         if latest is None:
             raise XAIOAuthError(
-                "xAI is not signed in. Run `nanobot provider login xai-oauth` first."
+                "xAI is not signed in. Run `nanobot provider login xai-grok` first."
             )
         if not force_refresh and _token_is_fresh(latest, min_ttl_ms):
             return latest
         if not latest.refresh:
             raise XAIOAuthError(
                 "The xAI login has expired and cannot be refreshed. "
-                "Run `nanobot provider login xai-oauth` again."
+                "Run `nanobot provider login xai-grok` again."
             )
         refreshed = _refresh_token(latest, proxy)
         _write_token(refreshed)

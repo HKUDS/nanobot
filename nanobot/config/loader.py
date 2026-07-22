@@ -85,7 +85,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     # non-credential request settings consumed by these provider backends.
     for alias, provider in (
         ("openaiCodex", config.providers.openai_codex),
-        ("xaiOauth", config.providers.xai_oauth),
+        ("xaiGrok", config.providers.xai_grok),
     ):
         settings = provider.model_dump(
             mode="json",

@@ -349,7 +349,7 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     ("provider_name", "config_attr"),
     [
         ("openai_codex", "openai_codex"),
-        ("xai_oauth", "xai_oauth"),
+        ("xai_grok", "xai_grok"),
     ],
 )
 def test_update_provider_settings_updates_and_clears_oauth_proxy(
@@ -1078,7 +1078,7 @@ def test_openai_codex_oauth_status_rejects_unavailable_token(
     assert status["account"] is None
 
 
-def test_xai_oauth_status_accepts_refreshable_login(
+def test_xai_grok_status_accepts_refreshable_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     token = SimpleNamespace(
@@ -1092,7 +1092,7 @@ def test_xai_oauth_status_accepts_refreshable_login(
         lambda: token,
     )
 
-    status = _oauth_provider_status(find_by_name("xai_oauth"))
+    status = _oauth_provider_status(find_by_name("xai_grok"))
 
     assert status == {
         "configured": True,
@@ -1171,13 +1171,13 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
 
 
-def test_xai_oauth_login_starts_fresh_browser_flow_with_proxy(
+def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
-    save_config(Config.model_validate({"providers": {"xaiOauth": {"proxy": proxy}}}), config_path)
+    save_config(Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     captured: dict[str, object] = {}
 
@@ -1187,14 +1187,14 @@ def test_xai_oauth_login_starts_fresh_browser_flow_with_proxy(
 
     monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
 
-    login_oauth_provider({"provider": ["xai-oauth"]})
+    login_oauth_provider({"provider": ["xai-grok"]})
 
     assert captured["proxy"] == proxy
     assert captured["prompt_fn"] is None
     assert callable(captured["print_fn"])
 
 
-def test_xai_oauth_login_reports_upstream_failure_as_bad_gateway(
+def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1209,7 +1209,7 @@ def test_xai_oauth_login_reports_upstream_failure_as_bad_gateway(
     monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
 
     with pytest.raises(WebUISettingsError) as exc:
-        login_oauth_provider({"provider": ["xai-oauth"]})
+        login_oauth_provider({"provider": ["xai-grok"]})
 
     assert exc.value.status == 502
     assert str(exc.value) == (
@@ -1218,7 +1218,7 @@ def test_xai_oauth_login_reports_upstream_failure_as_bad_gateway(
     assert exc.value.__cause__ is failure
 
 
-def test_xai_oauth_logout_removes_token_through_shared_lock(
+def test_xai_grok_logout_removes_token_through_shared_lock(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1234,7 +1234,7 @@ def test_xai_oauth_logout_removes_token_through_shared_lock(
         lambda: token_path,
     )
 
-    logout_oauth_provider({"provider": ["xai-oauth"]})
+    logout_oauth_provider({"provider": ["xai-grok"]})
 
     assert not token_path.exists()
 
@@ -1294,17 +1294,17 @@ def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
     ]
 
 
-def test_provider_models_payload_returns_xai_oauth_model() -> None:
-    payload = provider_models_payload({"provider": ["xai_oauth"]})
+def test_provider_models_payload_returns_xai_grok_model() -> None:
+    payload = provider_models_payload({"provider": ["xai_grok"]})
 
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "builtin"
     assert payload["models"] == [
         {
-            "id": "xai-oauth/grok-4.5",
+            "id": "xai-grok/grok-4.5",
             "label": "Grok 4.5",
             "description": "Grok via xAI subscription; X Search is enabled when supported.",
-            "owned_by": "xAI (X Premium)",
+            "owned_by": "xAI Grok",
             "context_window": 500000,
         }
     ]

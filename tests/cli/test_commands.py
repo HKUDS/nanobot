@@ -478,7 +478,7 @@ def test_config_dump_excludes_oauth_provider_blocks():
     providers = config.model_dump(by_alias=True)["providers"]
 
     assert "openaiCodex" not in providers
-    assert "xaiOauth" not in providers
+    assert "xaiGrok" not in providers
     assert "githubCopilot" not in providers
 
 
@@ -542,7 +542,7 @@ def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypa
     assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
 
 
-def test_provider_logout_xai_oauth_removes_instance_credentials(tmp_path, monkeypatch):
+def test_provider_logout_xai_grok_removes_instance_credentials(tmp_path, monkeypatch):
     token_path = tmp_path / "auth" / "xai.json"
     lock_path = token_path.with_suffix(".lock")
     token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -553,14 +553,14 @@ def test_provider_logout_xai_oauth_removes_instance_credentials(tmp_path, monkey
         lambda: token_path,
     )
 
-    result = runner.invoke(app, ["provider", "logout", "xai-oauth"])
+    result = runner.invoke(app, ["provider", "logout", "xai-grok"])
 
     assert result.exit_code == 0
     assert not token_path.exists()
-    assert "Logged out from xAI (X Premium)" in result.stdout
+    assert "Logged out from xAI Grok" in result.stdout
 
 
-def test_provider_logout_xai_oauth_uses_explicit_config_path(tmp_path, monkeypatch):
+def test_provider_logout_xai_grok_uses_explicit_config_path(tmp_path, monkeypatch):
     from nanobot.config import loader
 
     default_config = tmp_path / "default" / "config.json"
@@ -574,7 +574,7 @@ def test_provider_logout_xai_oauth_uses_explicit_config_path(tmp_path, monkeypat
 
     result = runner.invoke(
         app,
-        ["provider", "logout", "xai-oauth", "--config", str(selected_config)],
+        ["provider", "logout", "xai-grok", "--config", str(selected_config)],
     )
 
     assert result.exit_code == 0
@@ -710,34 +710,34 @@ def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
     assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
 
 
-def test_provider_login_can_set_xai_oauth_as_main_provider(tmp_path):
+def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
     config_path = tmp_path / "config.json"
-    original = cli_commands._LOGIN_HANDLERS["xai_oauth"]
-    cli_commands._LOGIN_HANDLERS["xai_oauth"] = lambda: None
+    original = cli_commands._LOGIN_HANDLERS["xai_grok"]
+    cli_commands._LOGIN_HANDLERS["xai_grok"] = lambda: None
     try:
         result = runner.invoke(
             app,
             [
                 "provider",
                 "login",
-                "xai-oauth",
+                "xai-grok",
                 "--set-main",
                 "--config",
                 str(config_path),
             ],
         )
     finally:
-        cli_commands._LOGIN_HANDLERS["xai_oauth"] = original
+        cli_commands._LOGIN_HANDLERS["xai_grok"] = original
 
     assert result.exit_code == 0
-    assert "Set xai-oauth as the main provider" in result.stdout
+    assert "Set xai-grok as the main provider" in result.stdout
 
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
-    assert saved.agents.defaults.provider == "xai_oauth"
-    assert saved.agents.defaults.model == "xai-oauth/grok-4.5"
+    assert saved.agents.defaults.provider == "xai_grok"
+    assert saved.agents.defaults.model == "xai-grok/grok-4.5"
     assert saved.agents.defaults.context_window_tokens == 500_000
     assert saved.agents.defaults.model_preset is None
-    assert make_provider(saved).__class__.__name__ == "XAIOAuthProvider"
+    assert make_provider(saved).__class__.__name__ == "XAIGrokProvider"
 
 
 def test_provider_login_model_implies_set_main_provider(tmp_path):
@@ -869,11 +869,11 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
     assert captured["proxy"] == proxy
 
 
-def test_provider_login_xai_oauth_runs_browser_flow_with_configured_proxy(monkeypatch):
+def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda: Config.model_validate({"providers": {"xaiOauth": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}),
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_token",
@@ -887,7 +887,7 @@ def test_provider_login_xai_oauth_runs_browser_flow_with_configured_proxy(monkey
 
     monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
 
-    result = runner.invoke(app, ["provider", "login", "xai-oauth"])
+    result = runner.invoke(app, ["provider", "login", "xai-grok"])
 
     assert result.exit_code == 0
     assert captured["proxy"] == proxy

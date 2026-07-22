@@ -67,7 +67,7 @@ These fields answer different questions:
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
-Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_oauth`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. This is supported for providers that use nanobot's OpenAI-compatible client, including `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, and similar registry entries. It is also supported for `openai_codex` and `xai_grok`, including OAuth token exchange/refresh and model requests. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
 
 ## Common Provider Patterns
 
@@ -436,10 +436,10 @@ nanobot provider login openai-codex --set-main
 For an eligible X Premium / Grok subscription:
 
 ```bash
-nanobot provider login xai-oauth --set-main
+nanobot provider login xai-grok --set-main
 ```
 
-This selects `xai-oauth/grok-4.5`. The provider reads xAI's model catalog and
+This selects `xai-grok/grok-4.5`. The provider reads xAI's model catalog and
 exposes the hosted `x_search` tool only when the selected model advertises
 `supportsBackendSearch`; otherwise the model runs without hosted X Search.
 When enabled, Grok can search current X posts and return inline source links

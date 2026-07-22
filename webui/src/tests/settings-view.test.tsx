@@ -1977,11 +1977,11 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
   });
 
-  it("signs in to the xAI OAuth provider", async () => {
+  it("signs in to the xAI Grok provider", async () => {
     const base = settingsPayload();
     const xaiProvider = {
-      name: "xai_oauth",
-      label: "xAI (X Premium)",
+      name: "xai_grok",
+      label: "xAI Grok",
       configured: false,
       auth_type: "oauth" as const,
       api_key_required: false,
@@ -2001,7 +2001,7 @@ describe("SettingsView Apps catalog", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
-      if (url === "/api/settings/provider/oauth-login?provider=xai_oauth") {
+      if (url === "/api/settings/provider/oauth-login?provider=xai_grok") {
         return jsonResponse(signedIn);
       }
       if (url === "/api/settings/cli-apps") {
@@ -2016,14 +2016,14 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    const providerLabel = await screen.findByText("xAI (X Premium)");
+    const providerLabel = await screen.findByText("xAI Grok");
     fireEvent.click(providerLabel.closest("button")!);
 
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/oauth-login?provider=xai_oauth",
+        "/api/settings/provider/oauth-login?provider=xai_grok",
         expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
       ),
     );
@@ -2034,8 +2034,8 @@ describe("SettingsView Apps catalog", () => {
     const base = settingsPayload();
     const providers: SettingsPayload["providers"] = [
       {
-        name: "xai_oauth",
-        label: "xAI (X Premium)",
+        name: "xai_grok",
+        label: "xAI Grok",
         configured: false,
         auth_type: "oauth",
         api_key_required: false,
@@ -2092,7 +2092,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click((await screen.findByText("xAI (X Premium)")).closest("button")!);
+    fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
     const xaiProxy = screen.getByLabelText("Network proxy");
     expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
     fireEvent.change(xaiProxy, { target: { value: "http://127.0.0.1:7890" } });
@@ -2105,7 +2105,7 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/update?provider=xai_oauth&proxy=http%3A%2F%2F127.0.0.1%3A7890",
+        "/api/settings/provider/update?provider=xai_grok&proxy=http%3A%2F%2F127.0.0.1%3A7890",
         expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
       ),
     );

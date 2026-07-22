@@ -131,8 +131,8 @@ export const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   minimaxAnthropic: "minimax",
   minimax_anthropic: "minimax",
   openai_codex: "openai",
-  "xai-oauth": "xai",
-  xai_oauth: "xai",
+  "xai-grok": "xai",
+  xai_grok: "xai",
   xiaomi: "xiaomi_mimo",
   volcengine_coding_plan: "volcengine",
 };
@@ -143,8 +143,8 @@ export const PROVIDER_LABEL_ALIASES: Record<string, string> = {
   minimaxAnthropic: "MiniMax",
   minimax_anthropic: "MiniMax",
   openai_codex: "OpenAI",
-  "xai-oauth": "xAI",
-  xai_oauth: "xAI",
+  "xai-grok": "xAI",
+  xai_grok: "xAI",
   volcengine_coding_plan: "Volcengine",
 };
 

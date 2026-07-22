@@ -232,7 +232,7 @@ type ProviderForm = {
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
-const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_oauth"]);
+const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",

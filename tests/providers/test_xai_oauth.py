@@ -193,7 +193,7 @@ def test_missing_credentials_returns_actionable_login_command(
 ) -> None:
     _use_temp_credentials(monkeypatch, tmp_path)
 
-    with pytest.raises(XAIOAuthError, match="nanobot provider login xai-oauth"):
+    with pytest.raises(XAIOAuthError, match="nanobot provider login xai-grok"):
         get_xai_oauth_token()
 
 

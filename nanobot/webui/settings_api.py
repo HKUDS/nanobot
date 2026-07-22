@@ -122,7 +122,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "21:9",
 }
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
-_OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_oauth"}
+_OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -305,7 +305,7 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
             "login_supported": True,
         }
 
-    if spec.name == "xai_oauth":
+    if spec.name == "xai_grok":
         try:
             from nanobot.providers.xai_oauth import get_xai_oauth_login_status
         except Exception:
@@ -1308,11 +1308,11 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("OAuth login failed", status=401)
         return settings_payload()
 
-    if spec.name == "xai_oauth":
+    if spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import login_xai_oauth
 
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.xai_oauth.proxy or None
+            proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
         except ValueError as e:
             raise WebUISettingsError(str(e), status=400) from e
         try:
@@ -1355,7 +1355,7 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
                 "oauth_cli_kit not installed. Run: pip install oauth-cli-kit", status=500
             ) from None
         token_path = get_storage().get_token_path()
-    elif spec.name == "xai_oauth":
+    elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth
 
         logout_xai_oauth()
