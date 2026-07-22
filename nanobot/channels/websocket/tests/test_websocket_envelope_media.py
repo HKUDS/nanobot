@@ -38,7 +38,7 @@ def _data_url(mime: str, payload: bytes) -> str:
     return f"data:{mime};base64,{base64.b64encode(payload).decode()}"
 
 
-def _make_channel() -> WebSocketChannel:
+def _make_channel(*, runtime_warning=None) -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
@@ -51,6 +51,7 @@ def _make_channel() -> WebSocketChannel:
         workspace_path=Path.cwd(),
         default_restrict_to_workspace=False,
         runtime_model_name=None,
+        runtime_warning=runtime_warning,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
     )
@@ -113,6 +114,41 @@ async def test_message_text_policy_is_independent_from_transport_limit() -> None
         "chat_id": "abc123",
         "detail": "message_rejected",
         "reason": "text_too_large",
+    }
+
+
+@pytest.mark.asyncio
+async def test_webui_message_sends_runtime_warning_before_agent_turn() -> None:
+    events: list[str] = []
+
+    def runtime_warning() -> str:
+        events.append("warning")
+        return "OpenAI Codex OAuth token expires in 1 hour."
+
+    channel = _make_channel(runtime_warning=runtime_warning)
+    mock_conn = AsyncMock()
+    mock_conn.send.side_effect = lambda _payload: events.append("send")
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "hello",
+        "webui": True,
+        "turn_id": "turn-1",
+    }
+
+    async def capture_handle(**_kwargs):
+        events.append("handle")
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    assert events == ["warning", "send", "handle"]
+    payload = json.loads(mock_conn.send.await_args.args[0])
+    assert payload == {
+        "event": "runtime_warning",
+        "chat_id": "abc123",
+        "message": "OpenAI Codex OAuth token expires in 1 hour.",
     }
 
 

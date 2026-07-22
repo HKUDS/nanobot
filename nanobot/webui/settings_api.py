@@ -28,6 +28,13 @@ from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
 )
+from nanobot.providers.oauth_status import (
+    CLI_EXPIRY_WARNING_DAYS,
+    OAuthProviderStatus,
+    get_oauth_provider_status,
+    oauth_expires_soon,
+    oauth_expiry_warning,
+)
 from nanobot.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from nanobot.security.network import is_loopback_host
 from nanobot.security.workspace_access import workspace_sandbox_status
@@ -252,59 +259,7 @@ def _provider_requires_api_base(spec: Any) -> bool:
 
 
 def _oauth_provider_status(spec: Any) -> dict[str, Any]:
-    if not getattr(spec, "is_oauth", False):
-        return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
-
-    if spec.name == "openai_codex":
-        try:
-            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
-            from oauth_cli_kit.storage import FileTokenStorage
-        except Exception:
-            return {
-                "configured": False,
-                "account": None,
-                "expires_at": None,
-                "login_supported": False,
-            }
-        token = None
-        with suppress(Exception):
-            token = FileTokenStorage(
-                token_filename=OPENAI_CODEX_PROVIDER.token_filename,
-            ).load()
-        expires_at = getattr(token, "expires", None) if token else None
-        now_ms = int(time.time() * 1000)
-        return {
-            "configured": bool(
-                token
-                and token.access
-                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
-            ),
-            "account": getattr(token, "account_id", None) if token else None,
-            "expires_at": expires_at,
-            "login_supported": True,
-        }
-
-    if spec.name == "github_copilot":
-        try:
-            from nanobot.providers.github_copilot_provider import get_github_copilot_login_status
-        except Exception:
-            return {
-                "configured": False,
-                "account": None,
-                "expires_at": None,
-                "login_supported": False,
-            }
-        token = None
-        with suppress(Exception):
-            token = get_github_copilot_login_status()
-        return {
-            "configured": bool(token and token.access and token.expires > int(time.time() * 1000)),
-            "account": getattr(token, "account_id", None) if token else None,
-            "expires_at": getattr(token, "expires", None) if token else None,
-            "login_supported": True,
-        }
-
-    return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+    return get_oauth_provider_status(spec).as_dict()
 
 
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
@@ -354,6 +309,16 @@ def _provider_settings_row(
     provider_config: ProviderConfig,
 ) -> dict[str, Any]:
     oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
+    oauth_status_obj = (
+        OAuthProviderStatus(
+            configured=bool(oauth_status.get("configured")),
+            account=oauth_status.get("account"),
+            expires_at=oauth_status.get("expires_at"),
+            login_supported=bool(oauth_status.get("login_supported")),
+        )
+        if oauth_status is not None
+        else None
+    )
     row = {
         "name": name,
         "label": spec.label,
@@ -374,6 +339,15 @@ def _provider_settings_row(
         row["oauth_account"] = oauth_status["account"]
         row["oauth_expires_at"] = oauth_status["expires_at"]
         row["oauth_login_supported"] = oauth_status["login_supported"]
+        row["oauth_expires_soon"] = oauth_expires_soon(
+            oauth_status_obj,
+            threshold_days=CLI_EXPIRY_WARNING_DAYS,
+        )
+        row["oauth_expiry_warning"] = oauth_expiry_warning(
+            spec,
+            oauth_status_obj,
+            threshold_days=CLI_EXPIRY_WARNING_DAYS,
+        )
     if spec.name == "openai":
         row["api_type"] = provider_config.api_type
     return row

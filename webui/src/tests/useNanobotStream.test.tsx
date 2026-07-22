@@ -97,6 +97,29 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("surfaces and dismisses runtime warnings without adding transcript messages", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-warning", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-warning", {
+        event: "runtime_warning",
+        chat_id: "chat-warning",
+        message: "OpenAI Codex OAuth token expires in 1 hour.",
+      });
+    });
+
+    expect(result.current.runtimeWarning).toBe(
+      "OpenAI Codex OAuth token expires in 1 hour.",
+    );
+    expect(result.current.messages).toHaveLength(0);
+
+    act(() => result.current.dismissRuntimeWarning());
+    expect(result.current.runtimeWarning).toBeNull();
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");
