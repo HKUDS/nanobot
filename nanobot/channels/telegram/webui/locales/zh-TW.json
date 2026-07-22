@@ -42,7 +42,7 @@
       }
     }
   },
-  "custom": {
+  "panel": {
     "toggleBot": "{{name}} 機器人",
     "running": "執行中",
     "needsToken": "需要權杖",

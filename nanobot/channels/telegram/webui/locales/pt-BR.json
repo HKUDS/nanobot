@@ -42,7 +42,7 @@
       }
     }
   },
-  "custom": {
+  "panel": {
     "toggleBot": "Bot {{name}}",
     "running": "Em execução",
     "needsToken": "Precisa de token",

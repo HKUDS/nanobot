@@ -61,15 +61,15 @@ export function TelegramBotsPanel({
           runningCount,
           tx,
         ),
-        toggleAriaLabel: (instance) => tx("custom.toggleBot", "{{name}} bot", {
+        toggleAriaLabel: (instance) => tx("panel.toggleBot", "{{name}} bot", {
           name: instanceDisplayName(instance),
         }),
-        configuredLabel: tx("custom.running", "Running"),
-        needsSetupLabel: tx("custom.needsToken", "Needs token"),
+        configuredLabel: tx("panel.running", "Running"),
+        needsSetupLabel: tx("panel.needsToken", "Needs token"),
         renderInstanceSummary: (instance) => (
           instance.id === "default"
-            ? tx("custom.defaultInstance", "Default bot")
-            : tx("custom.instanceId", "Instance {{id}}", { id: instance.id })
+            ? tx("panel.defaultInstance", "Default bot")
+            : tx("panel.instanceId", "Instance {{id}}", { id: instance.id })
         ),
         renderInstanceAction: (instance) => instance.configured ? (
           <TelegramConnectionCheck key={instance.id} token={token} instance={instance} />
@@ -81,7 +81,7 @@ export function TelegramBotsPanel({
             initialName={instance.config_values?.[NAME_KEY] ?? instanceDisplayName(instance)}
             proxyConfigured={hasConfiguredProxy(instance)}
             instanceEnabled={instance.enabled}
-            submitLabel={tx("custom.finishSetup", "Check and finish setup")}
+            submitLabel={tx("panel.finishSetup", "Check and finish setup")}
             tx={tx}
             onFeaturesUpdate={onFeaturesUpdate}
           />
@@ -145,13 +145,13 @@ function TelegramBotCreator({
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-semibold text-foreground">
             {firstBot
-              ? tx("custom.connectFirst", "Connect your first bot")
-              : tx("custom.addAnother", "Add another bot")}
+              ? tx("panel.connectFirst", "Connect your first bot")
+              : tx("panel.addAnother", "Add another bot")}
           </div>
           {firstBot ? (
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
               {tx(
-                "custom.connectFirstHint",
+                "panel.connectFirstHint",
                 "Paste a BotFather token. nanobot will verify it before saving anything.",
               )}
             </p>
@@ -173,7 +173,7 @@ function TelegramBotCreator({
             onClick={() => setOpen(true)}
           >
             <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            {tx("custom.addBot", "Add bot")}
+            {tx("panel.addBot", "Add bot")}
           </Button>
         ) : null}
       </div>
@@ -184,8 +184,8 @@ function TelegramBotCreator({
             token={token}
             instanceId={instanceId}
             submitLabel={firstBot
-              ? tx("custom.connectBot", "Check and connect")
-              : tx("custom.addBot", "Add bot")}
+              ? tx("panel.connectBot", "Check and connect")
+              : tx("panel.addBot", "Add bot")}
             tx={tx}
             onFeaturesUpdate={onFeaturesUpdate}
             onComplete={() => {
@@ -245,7 +245,7 @@ export function TelegramCredentialsForm({
     const nextToken = botToken.trim();
     const nextProxy = proxy.trim();
     if (!nextToken) {
-      setError(tx("custom.tokenRequired", "Enter the BotFather token first."));
+      setError(tx("panel.tokenRequired", "Enter the BotFather token first."));
       return;
     }
 
@@ -267,11 +267,11 @@ export function TelegramCredentialsForm({
         setError(validation.status === "configured"
           ? proxyConnectionFailed(validation)
             ? tx(
-              "custom.proxyUnavailable",
+              "panel.proxyUnavailable",
               "Telegram could not be reached through this proxy. Check the address and credentials.",
             )
             : tx(
-              "custom.verificationUnavailable",
+              "panel.verificationUnavailable",
               "Telegram could not verify this token right now. Try again before connecting.",
             )
           : validationMessage(validation, tx));
@@ -319,7 +319,7 @@ export function TelegramCredentialsForm({
       }
       setProxy("");
       setShowProxy(false);
-      setMessage(tx("custom.proxyRemoved", "Saved proxy removed."));
+      setMessage(tx("panel.proxyRemoved", "Saved proxy removed."));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -337,12 +337,12 @@ export function TelegramCredentialsForm({
     >
       <label className="block">
         <span className="text-[11px] font-medium text-foreground/85">
-          {tx("custom.botToken", "Bot token")}
+          {tx("panel.botToken", "Bot token")}
           <span className="ml-0.5 text-destructive" aria-hidden>*</span>
         </span>
         <span className="relative mt-1 block">
           <Input
-            aria-label={tx("custom.botToken", "Bot token")}
+            aria-label={tx("panel.botToken", "Bot token")}
             type={showToken ? "text" : "password"}
             autoComplete="off"
             required
@@ -354,8 +354,8 @@ export function TelegramCredentialsForm({
           <button
             type="button"
             aria-label={showToken
-              ? tx("custom.hideToken", "Hide token")
-              : tx("custom.showToken", "Show token")}
+              ? tx("panel.hideToken", "Hide token")
+              : tx("panel.showToken", "Show token")}
             onClick={() => setShowToken((current) => !current)}
             className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
           >
@@ -371,7 +371,7 @@ export function TelegramCredentialsForm({
       <details className="group rounded-[12px] border border-border/60 bg-muted/20 px-3 py-2.5">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium text-foreground [&::-webkit-details-marker]:hidden">
           <span className="inline-flex items-center gap-1.5">
-            {tx("custom.advancedOptions", "Advanced options")}
+            {tx("panel.advancedOptions", "Advanced options")}
             <ChevronDown
               className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180"
               aria-hidden
@@ -384,45 +384,45 @@ export function TelegramCredentialsForm({
               : "bg-muted text-muted-foreground",
           )}>
             {proxyConfigured
-              ? tx("custom.proxyConfigured", "Configured")
-              : tx("custom.proxyOptional", "Optional")}
+              ? tx("panel.proxyConfigured", "Configured")
+              : tx("panel.proxyOptional", "Optional")}
           </span>
         </summary>
         <div className="mt-3 space-y-3 border-t border-border/50 pt-3">
           <label className="block">
             <span className="text-[11px] font-medium text-foreground/85">
-              {tx("custom.botName", "Bot name")}
+              {tx("panel.botName", "Bot name")}
             </span>
             <Input
-              aria-label={tx("custom.botName", "Bot name")}
+              aria-label={tx("panel.botName", "Bot name")}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder={tx("custom.botNamePlaceholder", "Support bot")}
+              placeholder={tx("panel.botNamePlaceholder", "Support bot")}
               className="mt-1 h-9 rounded-[10px] border-border/60 bg-background text-[13px]"
             />
           </label>
 
           <div className="block">
             <span className="text-[11px] font-medium text-foreground/85">
-              {tx("custom.networkProxy", "Network proxy (optional)")}
+              {tx("panel.networkProxy", "Network proxy (optional)")}
             </span>
             <span className="relative mt-1 block">
               <Input
-                aria-label={tx("custom.networkProxy", "Network proxy (optional)")}
+                aria-label={tx("panel.networkProxy", "Network proxy (optional)")}
                 type={showProxy ? "text" : "password"}
                 autoComplete="off"
                 value={proxy}
                 onChange={(event) => setProxy(event.target.value)}
                 placeholder={proxyConfigured
-                  ? tx("custom.savedProxyPlaceholder", "A proxy is already saved")
+                  ? tx("panel.savedProxyPlaceholder", "A proxy is already saved")
                   : "http://127.0.0.1:7890"}
                 className="h-9 rounded-[10px] border-border/60 bg-background pr-9 font-mono text-[12px]"
               />
               <button
                 type="button"
                 aria-label={showProxy
-                  ? tx("custom.hideProxy", "Hide proxy")
-                  : tx("custom.showProxy", "Show proxy")}
+                  ? tx("panel.hideProxy", "Hide proxy")
+                  : tx("panel.showProxy", "Show proxy")}
                 onClick={() => setShowProxy((current) => !current)}
                 className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
               >
@@ -436,11 +436,11 @@ export function TelegramCredentialsForm({
             <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
               {proxyConfigured && !proxy
                 ? tx(
-                  "custom.savedProxyHint",
+                  "panel.savedProxyHint",
                   "Leave this blank to keep the saved proxy. Enter a new URL to replace it.",
                 )
                 : tx(
-                  "custom.proxyHint",
+                  "panel.proxyHint",
                   "Used for both connection checks and bot traffic. HTTP and SOCKS URLs are supported.",
                 )}
             </span>
@@ -451,7 +451,7 @@ export function TelegramCredentialsForm({
                 onClick={() => void removeProxy()}
                 disabled={busy}
               >
-                {tx("custom.removeProxy", "Remove saved proxy")}
+                {tx("panel.removeProxy", "Remove saved proxy")}
               </button>
             ) : null}
             {message ? (
@@ -468,7 +468,7 @@ export function TelegramCredentialsForm({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[11.5px] leading-5 text-muted-foreground">
-          {tx("custom.secretHint", "The token stays masked after it is saved.")}
+          {tx("panel.secretHint", "The token stays masked after it is saved.")}
         </p>
         <div className="flex items-center gap-2">
           {onCancel ? (
@@ -480,7 +480,7 @@ export function TelegramCredentialsForm({
               onClick={onCancel}
               disabled={busy}
             >
-              {tx("custom.cancel", "Cancel")}
+              {tx("panel.cancel", "Cancel")}
             </Button>
           ) : null}
           <Button
@@ -542,7 +542,7 @@ export function TelegramProxySettings({
   const applyProxy = async () => {
     const nextProxy = proxy.trim();
     if (!nextProxy) {
-      setError(tx("custom.proxyRequired", "Enter a proxy URL first."));
+      setError(tx("panel.proxyRequired", "Enter a proxy URL first."));
       return;
     }
 
@@ -559,7 +559,7 @@ export function TelegramProxySettings({
       if (!validation.can_enable || validation.status !== "connected") {
         setError(validation.status === "configured" && proxyConnectionFailed(validation)
           ? tx(
-            "custom.proxyUnavailable",
+            "panel.proxyUnavailable",
             "Telegram could not be reached through this proxy. Check the address and credentials.",
           )
           : validationMessage(validation, tx));
@@ -577,7 +577,7 @@ export function TelegramProxySettings({
       }
       setProxy("");
       setShowProxy(false);
-      setMessage(tx("custom.proxySaved", "Proxy saved and connection verified."));
+      setMessage(tx("panel.proxySaved", "Proxy saved and connection verified."));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -601,7 +601,7 @@ export function TelegramProxySettings({
       }
       setProxy("");
       setShowProxy(false);
-      setMessage(tx("custom.proxyRemoved", "Saved proxy removed."));
+      setMessage(tx("panel.proxyRemoved", "Saved proxy removed."));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -610,9 +610,9 @@ export function TelegramProxySettings({
   };
 
   return (
-    <section aria-label={tx("custom.networkProxy", "Network proxy (optional)")}>
+    <section aria-label={tx("panel.networkProxy", "Network proxy (optional)")}>
       <div className="flex items-center justify-between gap-3 text-[12px] font-medium text-foreground">
-        <span>{tx("custom.networkProxy", "Network proxy (optional)")}</span>
+        <span>{tx("panel.networkProxy", "Network proxy (optional)")}</span>
         <span className={cn(
           "rounded-full px-2 py-0.5 text-[10px] font-semibold",
           configured
@@ -620,35 +620,35 @@ export function TelegramProxySettings({
             : "bg-muted text-muted-foreground",
         )}>
           {configured
-            ? tx("custom.proxyConfigured", "Configured")
-            : tx("custom.proxyOptional", "Optional")}
+            ? tx("panel.proxyConfigured", "Configured")
+            : tx("panel.proxyOptional", "Optional")}
         </span>
       </div>
       <div className="mt-2">
         <p className="text-[11px] leading-4 text-muted-foreground">
           {tx(
-            "custom.proxyHint",
+            "panel.proxyHint",
             "Used for both connection checks and bot traffic. HTTP and SOCKS URLs are supported.",
           )}
         </p>
         <div className="mt-2 flex flex-col gap-2 sm:flex-row">
           <span className="relative block min-w-0 flex-1">
             <Input
-              aria-label={tx("custom.networkProxy", "Network proxy (optional)")}
+              aria-label={tx("panel.networkProxy", "Network proxy (optional)")}
               type={showProxy ? "text" : "password"}
               autoComplete="off"
               value={proxy}
               onChange={(event) => setProxy(event.target.value)}
               placeholder={configured
-                ? tx("custom.savedProxyPlaceholder", "A proxy is already saved")
+                ? tx("panel.savedProxyPlaceholder", "A proxy is already saved")
                 : "http://127.0.0.1:7890"}
               className="h-9 rounded-[10px] border-border/60 bg-background pr-9 font-mono text-[12px]"
             />
             <button
               type="button"
               aria-label={showProxy
-                ? tx("custom.hideProxy", "Hide proxy")
-                : tx("custom.showProxy", "Show proxy")}
+                ? tx("panel.hideProxy", "Hide proxy")
+                : tx("panel.showProxy", "Show proxy")}
               onClick={() => setShowProxy((current) => !current)}
               className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
             >
@@ -668,7 +668,7 @@ export function TelegramProxySettings({
             disabled={busy || !proxy.trim()}
           >
             {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            {tx("custom.saveProxy", "Check and save")}
+            {tx("panel.saveProxy", "Check and save")}
           </Button>
         </div>
         {configured ? (
@@ -678,7 +678,7 @@ export function TelegramProxySettings({
             onClick={() => void removeProxy()}
             disabled={busy}
           >
-            {tx("custom.removeProxy", "Remove saved proxy")}
+            {tx("panel.removeProxy", "Remove saved proxy")}
           </button>
         ) : null}
         {error ? (
@@ -739,7 +739,7 @@ export function TelegramConnectionCheck({
   const status = validation
     ? proxyConnectionFailed(validation)
       ? tx(
-        "custom.proxyUnavailable",
+        "panel.proxyUnavailable",
         "Telegram could not be reached through this proxy. Check the address and credentials.",
       )
       : validationMessage(validation, tx)
@@ -778,7 +778,7 @@ export function TelegramConnectionCheck({
         ) : (
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
         )}
-        {tx("custom.checkConnection", "Check connection")}
+        {tx("panel.checkConnection", "Check connection")}
       </Button>
     </div>
   );
@@ -790,41 +790,41 @@ function validationMessage(
 ): string {
   if (validation.checks.some((check) => check.id === "proxy_env" && check.status === "fail")) {
     return tx(
-      "custom.proxyEnvMissing",
+      "panel.proxyEnvMissing",
       "The saved proxy uses an environment variable that is not set.",
     );
   }
   if (validation.checks.some((check) => check.id === "token_env" && check.status === "fail")) {
     return tx(
-      "custom.tokenEnvMissing",
+      "panel.tokenEnvMissing",
       "The saved bot token uses an environment variable that is not set.",
     );
   }
   if (validation.checks.some((check) => check.id === "proxy_format" && check.status === "fail")) {
     return tx(
-      "custom.invalidProxy",
+      "panel.invalidProxy",
       "Enter a full proxy URL, such as http://127.0.0.1:7890.",
     );
   }
   if (validation.status === "connected") {
     const identity = normalizedBotHandle(validation.identity?.name);
     return identity
-      ? tx("custom.connectedAs", "Connected as {{name}}.", { name: identity })
-      : tx("custom.connected", "Telegram accepted the saved token.");
+      ? tx("panel.connectedAs", "Connected as {{name}}.", { name: identity })
+      : tx("panel.connected", "Telegram accepted the saved token.");
   }
   if (validation.status === "configured") {
     return tx(
-      "custom.configuredUnverified",
+      "panel.configuredUnverified",
       "A saved token was found, but Telegram could not verify it right now.",
     );
   }
   if (validation.status === "needs_setup") {
-    return tx("custom.tokenRequired", "Enter the BotFather token first.");
+    return tx("panel.tokenRequired", "Enter the BotFather token first.");
   }
   if (validation.status === "invalid") {
-    return tx("custom.invalidToken", "Telegram rejected this bot token.");
+    return tx("panel.invalidToken", "Telegram rejected this bot token.");
   }
-  return tx("custom.checkFailed", "The connection could not be checked.");
+  return tx("panel.checkFailed", "The connection could not be checked.");
 }
 
 function proxyConnectionFailed(validation: ChannelValidationPayload): boolean {
@@ -895,9 +895,9 @@ export function nextTelegramInstanceId(instances: NanobotChannelInstanceInfo[]):
 }
 
 function defaultBotName(instanceId: string, tx: ChannelTranslator): string {
-  if (instanceId === "default") return tx("custom.defaultBotName", "Telegram bot");
+  if (instanceId === "default") return tx("panel.defaultBotName", "Telegram bot");
   const number = instanceId.replace(/^bot-/, "");
-  return tx("custom.numberedBotName", "Telegram bot {{number}}", { number });
+  return tx("panel.numberedBotName", "Telegram bot {{number}}", { number });
 }
 
 function instanceDisplayName(instance: NanobotChannelInstanceInfo): string {
@@ -909,14 +909,14 @@ function telegramBotCountLabel(
   runningCount: number,
   tx: ChannelTranslator,
 ): string {
-  if (configuredCount === 0) return tx("custom.countNone", "No bots configured");
+  if (configuredCount === 0) return tx("panel.countNone", "No bots configured");
   if (configuredCount === 1) {
-    return tx("custom.countOne", "1 bot configured · {{running}} running", {
+    return tx("panel.countOne", "1 bot configured · {{running}} running", {
       running: runningCount,
     });
   }
   return tx(
-    "custom.countMany",
+    "panel.countMany",
     "{{count}} bots configured · {{running}} running",
     { count: configuredCount, running: runningCount },
   );

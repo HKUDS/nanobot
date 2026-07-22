@@ -42,7 +42,7 @@
       }
     }
   },
-  "custom": {
+  "panel": {
     "toggleBot": "{{name}} ボット",
     "running": "実行中",
     "needsToken": "トークンが必要",

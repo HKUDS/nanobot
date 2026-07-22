@@ -42,7 +42,7 @@
       }
     }
   },
-  "custom": {
+  "panel": {
     "toggleBot": "Bot {{name}}",
     "running": "Berjalan",
     "needsToken": "Perlu token",
