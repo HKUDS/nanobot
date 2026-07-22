@@ -57,9 +57,15 @@ class ModelRuntimeResolver:
     def current(self, *, refresh: bool = False) -> LLMRuntime:
         """Return the selected runtime, optionally refreshing the default source."""
         if refresh:
-            if self._refresh_required:
-                self.refresh()
+            self.refresh()
             self._refresh_provider_generation()
+        return self._runtime
+
+    def admit(self) -> LLMRuntime:
+        """Resolve the immutable runtime for the next turn admission."""
+        if self._refresh_required:
+            self.refresh()
+        self._refresh_provider_generation()
         return self._runtime
 
     def invalidate(self) -> None:

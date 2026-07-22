@@ -2071,6 +2071,8 @@ def _run_gateway(
         )
         try:
             await cron.start()
+            # Re-read once on first admission to close the watcher subscription window.
+            agent.runtime_resolver.invalidate()
             tasks = [
                 asyncio.create_task(
                     watch_config_file(

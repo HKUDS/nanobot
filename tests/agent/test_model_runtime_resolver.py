@@ -177,13 +177,13 @@ def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:
     admitted = resolver.current()
 
     provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
-    refreshed = resolver.current(refresh=True)
+    refreshed = resolver.admit()
 
     assert admitted.generation == GenerationSettings(0.2, 2048, None)
     assert refreshed.generation == GenerationSettings(0.8, 512, None)
 
 
-def test_resolver_reloads_config_only_after_invalidation() -> None:
+def test_resolver_admission_reloads_config_only_after_invalidation() -> None:
     initial = _runtime()
     refreshed_provider = _provider()
     load_count = 0
@@ -200,16 +200,34 @@ def test_resolver_reloads_config_only_after_invalidation() -> None:
 
     resolver = ModelRuntimeResolver(initial, provider_snapshot_loader=load_snapshot)
 
-    assert resolver.current(refresh=True) is initial
+    assert resolver.admit() is initial
     assert load_count == 0
 
     resolver.invalidate()
-    refreshed = resolver.current(refresh=True)
+    refreshed = resolver.admit()
 
     assert refreshed.provider is refreshed_provider
     assert refreshed.model == "refreshed-model"
-    assert resolver.current(refresh=True) is refreshed
+    assert resolver.admit() is refreshed
     assert load_count == 1
+
+
+def test_current_refresh_forces_config_reload() -> None:
+    initial = _runtime()
+    load_snapshot = MagicMock(
+        return_value=ProviderSnapshot(
+            provider=_provider(),
+            model="refreshed-model",
+            context_window_tokens=20_000,
+            signature=("refreshed-model", "auto"),
+        )
+    )
+    resolver = ModelRuntimeResolver(initial, provider_snapshot_loader=load_snapshot)
+
+    refreshed = resolver.current(refresh=True)
+
+    assert refreshed.model == "refreshed-model"
+    load_snapshot.assert_called_once_with()
 
 
 def test_selected_preset_generation_does_not_fall_back_to_provider_defaults() -> None:
@@ -227,7 +245,7 @@ def test_selected_preset_generation_does_not_fall_back_to_provider_defaults() ->
     selected = resolver.select_preset("creative")
 
     provider.generation = GenerationSettings(temperature=0.9, max_tokens=64)
-    refreshed = resolver.current(refresh=True)
+    refreshed = resolver.admit()
 
     assert refreshed is selected
     assert refreshed.generation == GenerationSettings(0.7, 4096, None)

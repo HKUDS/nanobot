@@ -235,7 +235,7 @@ class AgentLoop:
     def llm_runtime(self) -> LLMRuntime:
         """Resolve the immutable default used to admit the next turn."""
         previous = self.runtime_resolver.runtime
-        runtime = self.runtime_resolver.current(refresh=True)
+        runtime = self.runtime_resolver.admit()
         if (
             runtime.model != previous.model
             or runtime.model_preset != previous.model_preset
