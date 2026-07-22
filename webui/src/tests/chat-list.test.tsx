@@ -76,9 +76,9 @@ describe("ChatList", () => {
     );
 
     const pinnedSection = screen.getByRole("region", { name: "Pinned" });
-    expect(within(pinnedSection).getByRole("img", { name: "Pinned" })).toBeInTheDocument();
+    expect(within(pinnedSection).getByTitle("Pinned")).toBeInTheDocument();
     expect(
-      within(screen.getByRole("region", { name: "Earlier" })).queryByRole("img", { name: "Pinned" }),
+      within(screen.getByRole("region", { name: "Earlier" })).queryByTitle("Pinned"),
     ).not.toBeInTheDocument();
   });
 

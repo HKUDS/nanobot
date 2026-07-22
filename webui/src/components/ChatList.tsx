@@ -495,8 +495,7 @@ function ChatsGroupHeader({ label }: { label: string }) {
 function PinnedChatIndicator({ label }: { label: string }) {
   return (
     <span
-      role="img"
-      aria-label={label}
+      aria-hidden="true"
       title={label}
       className="inline-flex shrink-0 items-center text-muted-foreground/65"
     >
