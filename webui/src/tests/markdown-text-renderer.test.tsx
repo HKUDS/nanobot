@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
 describe("MarkdownTextRenderer", () => {
@@ -32,6 +33,75 @@ describe("MarkdownTextRenderer", () => {
     expect(onOpenFilePreview).toHaveBeenCalledWith(
       "/Users/test/project/nanobot/agent/hook.py",
     );
+  });
+
+  it("keeps unavailable inferred inline file paths non-interactive", async () => {
+    const onOpenFilePreview = vi.fn();
+    const resolve = vi.fn().mockResolvedValue(false);
+    render(
+      <FilePreviewAvailabilityProvider resolve={resolve}>
+        <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+          {"Future file: `notes/missing.md`"}
+        </MarkdownTextRenderer>
+      </FilePreviewAvailabilityProvider>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    expect(reference).toHaveTextContent("missing.md");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/missing.md"));
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).not.toHaveAttribute("tabindex");
+
+    fireEvent.click(reference);
+
+    expect(onOpenFilePreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps inferred inline file paths non-interactive when availability lookup fails", async () => {
+    const onOpenFilePreview = vi.fn();
+    let rejectAvailability!: (reason?: unknown) => void;
+    const resolve = vi.fn(() => new Promise<boolean>((_resolve, reject) => {
+      rejectAvailability = reject;
+    }));
+    render(
+      <FilePreviewAvailabilityProvider resolve={resolve}>
+        <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+          {"Unreadable file: `notes/locked.md`"}
+        </MarkdownTextRenderer>
+      </FilePreviewAvailabilityProvider>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/locked.md"));
+    await act(async () => {
+      rejectAvailability(new Error("probe failed"));
+      await Promise.resolve();
+    });
+
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).not.toHaveAttribute("tabindex");
+    fireEvent.click(reference);
+    expect(onOpenFilePreview).not.toHaveBeenCalled();
+  });
+
+  it("makes available inferred inline file paths previewable", async () => {
+    const onOpenFilePreview = vi.fn();
+    const resolve = vi.fn().mockResolvedValue(true);
+    render(
+      <FilePreviewAvailabilityProvider resolve={resolve}>
+        <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+          {"Existing file: `notes/ready.md`"}
+        </MarkdownTextRenderer>
+      </FilePreviewAvailabilityProvider>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    await waitFor(() => expect(reference).toHaveAttribute("role", "button"));
+    expect(reference).toHaveAttribute("tabindex", "0");
+
+    fireEvent.click(reference);
+
+    expect(onOpenFilePreview).toHaveBeenCalledWith("notes/ready.md");
   });
 
   it("does not treat non-file hrefs as previews just because the label looks like a file", () => {
@@ -93,7 +163,8 @@ describe("MarkdownTextRenderer", () => {
     );
 
     expect(screen.getByText("code without language")).toBeInTheDocument();
-    expect(screen.getByText("text")).toBeInTheDocument();
+    expect(screen.queryByText("text")).not.toBeInTheDocument();
+    expect(container.querySelector(".not-prose")).toHaveAttribute("data-language", "text");
     expect(container.querySelectorAll("pre")).toHaveLength(1);
   });
 

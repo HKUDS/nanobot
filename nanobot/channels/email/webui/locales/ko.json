@@ -1,0 +1,92 @@
+{
+  "description": "nanobot이 이메일을 받고 답장하도록 합니다.",
+  "requirements": "IMAP 받은편지함, SMTP 발신, 앱 비밀번호 및 명시적 동의",
+  "setup": {
+    "docsLabel": "이메일 설정 가이드 열기",
+    "officialLabel": "앱 비밀번호 가이드 열기",
+    "tryIt": "연결된 사서함으로 테스트 이메일을 보내세요.",
+    "summary": "이메일은 IMAP으로 읽고 SMTP로 답장합니다. 전용 사서함을 사용하고 활성화 전에 동의하세요.",
+    "steps": [
+      "전용 사서함을 만들고 필요하면 앱 비밀번호를 생성하세요.",
+      "제공자 프리셋을 선택하거나 IMAP 및 SMTP 설정을 직접 입력하세요.",
+      "동의하고 저장한 뒤 이메일을 활성화하고 테스트 메시지를 보내세요."
+    ],
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud",
+      "custom": "사용자 지정"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "동의함",
+        "help": "필수 안전 스위치입니다. 이 봇 사서함을 연결하기로 결정하기 전에는 끄세요.",
+        "choices": {
+          "true": "동의함",
+          "false": "동의하지 않음"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP 호스트",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP 사용자 이름",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP 비밀번호",
+        "placeholder": "앱 비밀번호",
+        "help": "메일 제공자가 요구하면 앱 비밀번호를 사용하세요."
+      },
+      "smtpHost": {
+        "label": "SMTP 호스트",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP 사용자 이름",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP 비밀번호",
+        "placeholder": "앱 비밀번호",
+        "help": "보통 IMAP과 같은 앱 비밀번호를 사용합니다."
+      },
+      "imapPort": {
+        "label": "IMAP 포트",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP 포트",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "보내는 주소",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "확인 간격",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "허용된 발신자",
+        "placeholder": "이메일 주소, 쉼표로 구분",
+        "help": "비워 두면 발신자가 먼저 페어링해야 합니다."
+      },
+      "verifyDkim": {
+        "label": "DKIM 확인",
+        "choices": {
+          "true": "켜짐",
+          "false": "꺼짐"
+        }
+      },
+      "verifySpf": {
+        "label": "SPF 확인",
+        "choices": {
+          "true": "켜짐",
+          "false": "꺼짐"
+        }
+      }
+    }
+  }
+}

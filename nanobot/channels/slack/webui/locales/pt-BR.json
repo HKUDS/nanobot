@@ -1,0 +1,38 @@
+{
+  "description": "Use o nanobot em workspaces do Slack.",
+  "requirements": "Token do app Slack, token do bot e instalação no workspace",
+  "setup": {
+    "docsLabel": "Abrir guia do Slack",
+    "officialLabel": "Abrir aplicativos do Slack",
+    "tryIt": "Mencione o app Slack ou envie uma mensagem direta.",
+    "summary": "O Slack usa Socket Mode por padrão e precisa dos tokens do app e do bot.",
+    "steps": [
+      "Crie um app Slack com o manifesto fornecido e ative o Socket Mode.",
+      "Instale o app no workspace e copie os tokens do app e do bot.",
+      "Salve e ative o Slack; depois, mencione o app ou envie uma DM."
+    ],
+    "actions": {
+      "slack-manifest": "Copiar manifesto"
+    },
+    "fields": {
+      "appToken": {
+        "label": "Token do app",
+        "placeholder": "xapp-...",
+        "help": "Crie-o no Socket Mode do Slack."
+      },
+      "botToken": {
+        "label": "Token do bot",
+        "placeholder": "xoxb-...",
+        "help": "Use o token do bot após instalar o app Slack."
+      },
+      "groupPolicy": {
+        "label": "Comportamento em grupos",
+        "choices": {
+          "mention": "Somente menções",
+          "open": "Todas as mensagens",
+          "allowlist": "Lista de permissão"
+        }
+      }
+    }
+  }
+}

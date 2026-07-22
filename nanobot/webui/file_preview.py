@@ -28,30 +28,9 @@ def file_preview_payload(
     scope: WorkspaceScope,
     max_bytes: int = MAX_FILE_PREVIEW_BYTES,
 ) -> dict[str, Any]:
-    """Return a text preview for a file inside the session workspace."""
+    """Return a text preview for a file allowed by the session workspace scope."""
 
-    path = _clean_preview_path(raw_path)
-    if not path:
-        raise WebUIFilePreviewError(400, "missing path")
-    if len(path) > 4096:
-        raise WebUIFilePreviewError(400, "path is too long")
-
-    try:
-        resolved = resolve_allowed_path(
-            path,
-            workspace=scope.project_path,
-            allowed_root=scope.project_path,
-            strict=True,
-        )
-    except FileNotFoundError as e:
-        raise WebUIFilePreviewError(404, "file not found") from e
-    except WorkspaceBoundaryError as e:
-        raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
-    except OSError as e:
-        raise WebUIFilePreviewError(400, "invalid path") from e
-
-    if not resolved.is_file():
-        raise WebUIFilePreviewError(404, "file not found")
+    resolved = _resolve_preview_path(raw_path, scope=scope)
 
     try:
         with open(resolved, "rb") as f:
@@ -79,6 +58,50 @@ def file_preview_payload(
         "size": resolved.stat().st_size,
         "truncated": truncated,
     }
+
+
+def file_preview_availability_payload(
+    raw_path: str | None,
+    *,
+    scope: WorkspaceScope,
+) -> dict[str, bool]:
+    """Confirm that a path is a readable text preview candidate without loading it fully."""
+
+    resolved = _resolve_preview_path(raw_path, scope=scope)
+    try:
+        with open(resolved, "rb") as f:
+            prefix = f.read(4096)
+    except OSError as e:
+        raise WebUIFilePreviewError(500, "failed to read file") from e
+    if b"\0" in prefix:
+        raise WebUIFilePreviewError(415, "binary files cannot be previewed")
+    return {"available": True}
+
+
+def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Path:
+    path = _clean_preview_path(raw_path)
+    if not path:
+        raise WebUIFilePreviewError(400, "missing path")
+    if len(path) > 4096:
+        raise WebUIFilePreviewError(400, "path is too long")
+
+    try:
+        resolved = resolve_allowed_path(
+            path,
+            workspace=scope.project_path,
+            allowed_root=scope.project_path if scope.restrict_to_workspace else None,
+            strict=True,
+        )
+    except FileNotFoundError as e:
+        raise WebUIFilePreviewError(404, "file not found") from e
+    except WorkspaceBoundaryError as e:
+        raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
+    except OSError as e:
+        raise WebUIFilePreviewError(400, "invalid path") from e
+
+    if not resolved.is_file():
+        raise WebUIFilePreviewError(404, "file not found")
+    return resolved
 
 
 def _clean_preview_path(raw_path: str | None) -> str:

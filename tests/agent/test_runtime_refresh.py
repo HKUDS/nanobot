@@ -2,10 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import save_config
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.base import GenerationSettings
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
 from nanobot.webui.settings_api import update_agent_settings
 
@@ -17,7 +20,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     return provider
 
 
-def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
+def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
     loop = AgentLoop(
@@ -33,20 +36,45 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
             signature=("new-model",),
         ),
     )
+    loop.runtime_resolver.invalidate()
 
-    loop._refresh_provider_snapshot()
+    runtime = loop.llm_runtime()
 
+    assert runtime is loop.runtime_resolver.runtime
     assert loop.provider is new_provider
     assert loop.model == "new-model"
     assert loop.context_window_tokens == 2000
-    assert loop.runner.provider is new_provider
-    assert loop.subagents.provider is new_provider
-    assert loop.subagents.model == "new-model"
-    assert loop.subagents.runner.provider is new_provider
-    assert loop.consolidator.provider is new_provider
-    assert loop.consolidator.model == "new-model"
-    assert loop.consolidator.context_window_tokens == 2000
-    assert loop.consolidator.max_completion_tokens == 456
+    assert not hasattr(loop.runner, "provider")
+    assert not hasattr(loop.subagents, "provider")
+    assert not hasattr(loop.subagents, "model")
+    assert not hasattr(loop.subagents.runner, "provider")
+    assert not hasattr(loop.consolidator, "provider")
+    assert not hasattr(loop.consolidator, "model")
+    assert not hasattr(loop.consolidator, "context_window_tokens")
+    assert not hasattr(loop.consolidator, "max_completion_tokens")
+
+
+def test_loop_has_no_mutable_runtime_mirrors_or_legacy_snapshot_api(tmp_path: Path) -> None:
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider("test-model"),
+        workspace=tmp_path,
+        model="test-model",
+        context_window_tokens=1000,
+    )
+
+    assert {
+        "provider",
+        "model",
+        "context_window_tokens",
+        "model_presets",
+        "_active_preset",
+        "_provider_signature",
+        "_max_messages",
+    }.isdisjoint(loop.__dict__)
+    assert not hasattr(loop, "_apply_provider_snapshot")
+    assert not hasattr(loop, "_build_model_preset_snapshot")
+    assert not hasattr(loop, "_sync_replay_max_messages")
 
 
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
@@ -65,13 +93,87 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
             signature=("new-model",),
         ),
     )
+    loop.runtime_resolver.invalidate()
 
     runtime = loop.llm_runtime()
 
     assert runtime.provider is new_provider
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
-    assert loop.runner.provider is new_provider
+    assert not hasattr(loop.runner, "provider")
+
+
+def test_llm_runtime_surfaces_invalidated_config_errors(tmp_path: Path) -> None:
+    def fail_refresh() -> ProviderSnapshot:
+        raise ValueError("invalid config")
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider("old-model"),
+        workspace=tmp_path,
+        model="old-model",
+        context_window_tokens=1000,
+        provider_snapshot_loader=fail_refresh,
+    )
+    loop.runtime_resolver.invalidate()
+
+    with pytest.raises(ValueError, match="invalid config"):
+        loop.llm_runtime()
+
+
+def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path) -> None:
+    base_provider = _provider("base-model")
+    fast_provider = _provider("fast-model")
+    fast_snapshot = ProviderSnapshot(
+        provider=fast_provider,
+        model="fast-model",
+        context_window_tokens=2000,
+        signature=("fast-model", "auto", "same-runtime"),
+    )
+    published: list[tuple[str, str | None]] = []
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=base_provider,
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        provider_signature=("base-model", "auto", "initial"),
+        provider_snapshot_loader=lambda: fast_snapshot,
+        model_presets={"fast": ModelPresetConfig(model="fast-model")},
+        model_preset="fast",
+        preset_snapshot_loader=lambda _name: fast_snapshot,
+        runtime_model_publisher=lambda model, preset: published.append((model, preset)),
+    )
+    loop.runtime_resolver.invalidate()
+
+    runtime = loop.llm_runtime()
+
+    assert runtime.model_preset is None
+    assert loop.model_preset is None
+    assert published == [("fast-model", None)]
+
+
+def test_next_turn_captures_generation_changed_after_previous_admission(
+    tmp_path: Path,
+) -> None:
+    provider = _provider("test-model")
+    provider.generation = GenerationSettings(temperature=0.2, max_tokens=1024)
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        context_window_tokens=16_384,
+    )
+
+    first = loop.llm_runtime()
+    provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
+    second = loop.llm_runtime()
+
+    assert first.generation.temperature == 0.2
+    assert first.generation.max_tokens == 1024
+    assert second.generation.temperature == 0.8
+    assert second.generation.max_tokens == 512
 
 
 def test_settings_context_window_refreshes_runtime_state(
@@ -94,8 +196,9 @@ def test_settings_context_window_refreshes_runtime_state(
     loop = AgentLoop.from_config(config, provider_snapshot_loader=loader)
 
     payload = update_agent_settings({"context_window_tokens": ["262144"]})
-    loop._refresh_provider_snapshot()
+    loop.runtime_resolver.invalidate()
+    loop.llm_runtime()
 
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
-    assert loop.consolidator.context_window_tokens == 262_144
+    assert loop.llm_runtime().context_window_tokens == 262_144

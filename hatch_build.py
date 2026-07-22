@@ -4,7 +4,7 @@ Triggered automatically by `python -m build` (and any other hatch-driven build)
 so published wheels and sdists ship a fresh webui without requiring developers
 to remember `cd webui && bun run build` beforehand.
 
-Behaviour:
+Behavior:
 
 - Skips for editable installs (`pip install -e .`). Editable mode is for Python
   development; webui contributors use `cd webui && bun run dev` (Vite HMR) and
@@ -12,7 +12,7 @@ Behaviour:
 - No-op when `webui/package.json` is absent (e.g. installing from an sdist that
   already contains a prebuilt `nanobot/web/dist/`).
 - Skips when `NANOBOT_SKIP_WEBUI_BUILD=1` is set.
-- Skips when `nanobot/web/dist/index.html` already exists, unless
+- Reuses `nanobot/web/dist/` only when it is already fresh, unless
   `NANOBOT_FORCE_WEBUI_BUILD=1` is set.
 - Uses `bun` when available, otherwise falls back to `npm`. The chosen tool
   performs `install` followed by `run build`.
@@ -21,11 +21,21 @@ Behaviour:
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+
+_PROJECT_ROOT = Path(__file__).resolve().parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+
+def _load_webui_build_module() -> ModuleType:
+    from nanobot.webui import build as webui_build
+
+    return webui_build
 
 
 class WebUIBuildHook(BuildHookInterface):
@@ -58,24 +68,32 @@ class WebUIBuildHook(BuildHookInterface):
             )
             return
 
+        webui_build = _load_webui_build_module()
+        status = webui_build.inspect_webui_bundle(source_dir=webui_dir, dist_dir=dist_dir)
         force = os.environ.get("NANOBOT_FORCE_WEBUI_BUILD") == "1"
-        if index_html.is_file() and not force:
+        if not status.needs_build and not force:
             self.app.display_info(
                 f"[webui-build] reusing existing build at {dist_dir} "
-                "(set NANOBOT_FORCE_WEBUI_BUILD=1 to rebuild)"
+                "(already fresh; set NANOBOT_FORCE_WEBUI_BUILD=1 to rebuild)"
             )
             return
 
-        runner = self._pick_runner()
-        if runner is None:
-            raise RuntimeError(
-                "[webui-build] neither `bun` nor `npm` is available on PATH; "
-                "install one or set NANOBOT_SKIP_WEBUI_BUILD=1 to bypass."
+        if status.needs_build and not force:
+            self.app.display_info(
+                f"[webui-build] {webui_build.describe_webui_bundle_status(status)}"
             )
 
-        self.app.display_info(f"[webui-build] using {runner} to build webui")
-        self._run([runner, "install"], cwd=webui_dir)
-        self._run([runner, "run", "build"], cwd=webui_dir)
+        try:
+            webui_build.build_webui_bundle(
+                source_dir=webui_dir,
+                dist_dir=dist_dir,
+                output=self.app.display_info,
+            )
+        except webui_build.WebUIBuildError as exc:
+            raise RuntimeError(
+                "[webui-build] "
+                f"{exc}. Install `bun` or `npm`, or set NANOBOT_SKIP_WEBUI_BUILD=1 to bypass."
+            ) from exc
 
         if not index_html.is_file():
             raise RuntimeError(
@@ -83,19 +101,3 @@ class WebUIBuildHook(BuildHookInterface):
                 "check webui/vite.config.ts outDir."
             )
         self.app.display_info(f"[webui-build] webui ready at {dist_dir}")
-
-    @staticmethod
-    def _pick_runner() -> str | None:
-        for candidate in ("bun", "npm"):
-            if shutil.which(candidate):
-                return candidate
-        return None
-
-    def _run(self, cmd: list[str], *, cwd: Path) -> None:
-        self.app.display_info(f"[webui-build] $ {' '.join(cmd)} (cwd={cwd})")
-        try:
-            subprocess.run(cmd, cwd=cwd, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(
-                f"[webui-build] command failed ({exc.returncode}): {' '.join(cmd)}"
-            ) from exc

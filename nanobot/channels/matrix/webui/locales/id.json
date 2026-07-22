@@ -1,0 +1,48 @@
+{
+  "description": "Gunakan nanobot dari ruang Matrix.",
+  "requirements": "Homeserver, token akun, dan akses ruang",
+  "setup": {
+    "docsLabel": "Buka panduan Matrix",
+    "officialLabel": "Buka daftar klien Matrix",
+    "tryIt": "Undang akun Matrix ke ruang dan kirim pesan uji.",
+    "summary": "Matrix memerlukan akun homeserver dan login dengan kata sandi atau token akses.",
+    "steps": [
+      "Buat atau pilih akun Matrix untuk nanobot.",
+      "Masukkan homeserver, ID pengguna, dan kata sandi atau token akses.",
+      "Simpan dan aktifkan Matrix, undang akun ke ruang, lalu kirim pesan uji."
+    ],
+    "fields": {
+      "homeserver": {
+        "label": "Homeserver",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ID pengguna",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Kata sandi",
+        "placeholder": "••••••",
+        "help": "Gunakan kata sandi atau token akses."
+      },
+      "accessToken": {
+        "label": "Token akses",
+        "placeholder": "Login token opsional",
+        "help": "Disarankan jika klien Matrix menyediakan token akses."
+      },
+      "deviceId": {
+        "label": "ID perangkat",
+        "placeholder": "Wajib dengan token akses",
+        "help": "Salin ID perangkat yang terkait token. Login kata sandi tidak memerlukannya."
+      },
+      "groupPolicy": {
+        "label": "Perilaku grup",
+        "choices": {
+          "mention": "Hanya sebutan",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      }
+    }
+  }
+}

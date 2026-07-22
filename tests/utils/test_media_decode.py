@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 import pytest
 
@@ -50,14 +51,38 @@ def test_saves_common_audio_with_api_friendly_extension(
     assert result.endswith(suffix)
 
 
+def test_saves_document_with_safe_original_name(tmp_path) -> None:
+    result = save_base64_data_url(
+        _data_url(b"%PDF-1.4", mime="application/pdf"),
+        tmp_path,
+        filename="quarterly report.pdf",
+    )
+    assert result is not None
+    assert result.endswith("_quarterly report.pdf")
+    assert Path(result).read_bytes() == b"%PDF-1.4"
+
+
+def test_document_filename_cannot_escape_media_dir(tmp_path) -> None:
+    result = save_base64_data_url(
+        _data_url(b"%PDF-1.4", mime="application/pdf"),
+        tmp_path,
+        filename="../../escape.pdf",
+    )
+    assert result is not None
+    saved = Path(result)
+    assert saved.parent == tmp_path
+    assert saved.suffix == ".pdf"
+    assert saved.read_bytes() == b"%PDF-1.4"
+
+
 def test_returns_none_for_malformed_data_url(tmp_path) -> None:
     assert save_base64_data_url("not-a-data-url", tmp_path) is None
 
 
-def test_returns_none_for_broken_base64(tmp_path) -> None:
-    # Python's b64decode strips non-alphabet chars by default, so we need a
-    # payload whose alphabet-filtered length breaks padding.
-    assert save_base64_data_url("data:image/png;base64,not-valid-base64!!!", tmp_path) is None
+@pytest.mark.parametrize("payload", ["not-valid-base64!!!", "@@@@"])
+def test_returns_none_for_broken_base64(tmp_path, payload: str) -> None:
+    assert save_base64_data_url(f"data:image/png;base64,{payload}", tmp_path) is None
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_unknown_mime_falls_back_to_bin(tmp_path) -> None:

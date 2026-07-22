@@ -101,20 +101,33 @@ class BaseChannel(ABC):
         """
         pass
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+        stream_end: bool = False,
+        resuming: bool = False,
+    ) -> None:
         """Deliver a streaming text chunk.
 
         Override in subclasses to enable streaming. Implementations should
         raise on delivery failure so the channel manager can retry.
 
-        Streaming contract: ``_stream_delta`` is a chunk, ``_stream_end`` ends
-        the current segment, and stateful implementations must key buffers by
-        ``_stream_id`` rather than only by ``chat_id``.
+        Stateful implementations should key buffers by ``stream_id`` rather
+        than only by ``chat_id`` when it is provided.
         """
         pass
 
     async def send_reasoning_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Stream a chunk of model reasoning/thinking content.
 
@@ -123,15 +136,17 @@ class BaseChannel(ABC):
         subtext, WebUI italic bubble, ...) override to render reasoning
         as a subordinate trace that updates in place as the model thinks.
 
-        Streaming contract mirrors :meth:`send_delta`: ``_reasoning_delta``
-        is a chunk, ``_reasoning_end`` ends the current reasoning segment,
-        and stateful implementations should key buffers by ``_stream_id``
-        rather than only by ``chat_id``.
+        Streaming contract mirrors :meth:`send_delta`: stateful implementations
+        should key buffers by ``stream_id`` rather than only by ``chat_id``.
         """
         return
 
     async def send_reasoning_end(
-        self, chat_id: str, metadata: dict[str, Any] | None = None
+        self,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
     ) -> None:
         """Mark the end of a reasoning stream segment.
 
@@ -165,13 +180,18 @@ class BaseChannel(ABC):
         """
         if not msg.content:
             return
-        meta = dict(msg.metadata or {})
-        meta.setdefault("_reasoning_delta", True)
-        await self.send_reasoning_delta(msg.chat_id, msg.content, meta)
-        end_meta = dict(meta)
-        end_meta.pop("_reasoning_delta", None)
-        end_meta["_reasoning_end"] = True
-        await self.send_reasoning_end(msg.chat_id, end_meta)
+        stream_id = getattr(msg.event, "stream_id", None)
+        await self.send_reasoning_delta(
+            msg.chat_id,
+            msg.content,
+            msg.metadata,
+            stream_id=stream_id,
+        )
+        await self.send_reasoning_end(
+            msg.chat_id,
+            msg.metadata,
+            stream_id=stream_id,
+        )
 
     @property
     def supports_streaming(self) -> bool:
@@ -204,9 +224,17 @@ class BaseChannel(ABC):
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         is_dm: bool = False,
+        authorization_id: str | None = None,
     ) -> None:
-        """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
-        if not self.is_allowed(sender_id):
+        """Handle a message after checking its authorization subject.
+
+        ``sender_id`` is the identity recorded on the inbound message.  Channels
+        where access is scoped to another entity (for example, a group or room)
+        can pass that entity as ``authorization_id`` without changing the
+        sender's identity.  When omitted, authorization remains sender-based.
+        """
+        permission_id = authorization_id if authorization_id is not None else sender_id
+        if not self.is_allowed(permission_id):
             if is_dm:
                 code = generate_code(self.name, str(sender_id))
                 await self.send(
@@ -249,6 +277,16 @@ class BaseChannel(ABC):
     def default_config(cls) -> dict[str, Any]:
         """Return default config for onboard. Override in plugins to auto-populate config.json."""
         return {"enabled": False}
+
+    @classmethod
+    def refresh_feature_metadata(
+        cls,
+        config_path: Path,
+        *,
+        instance_id: str = "default",
+    ) -> bool:
+        """Refresh persisted display metadata after an explicit settings action."""
+        return False
 
     @property
     def is_running(self) -> bool:

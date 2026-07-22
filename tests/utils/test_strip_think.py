@@ -1,4 +1,9 @@
-from nanobot.utils.helpers import extract_reasoning, extract_think, strip_think
+from nanobot.utils.helpers import (
+    extract_reasoning,
+    extract_think,
+    strip_reasoning_tags,
+    strip_think,
+)
 
 
 class TestStripThinkTag:
@@ -26,6 +31,15 @@ class TestStripThinkTag:
 
     def test_self_closing_tag_not_matched(self):
         assert strip_think("<thought/>some text") == "<thought/>some text"
+
+    def test_thinking_alias_closed_tag(self):
+        assert strip_think("Hello <thinking>reasoning</thinking> World") == "Hello  World"
+
+    def test_thinking_alias_unclosed_trailing_tag(self):
+        assert strip_think("<thinking>ongoing...") == ""
+
+    def test_self_closing_thinking_marker_at_start_stripped(self):
+        assert strip_think("<thinking/>some text") == "some text"
 
     def test_normal_text_unchanged(self):
         assert strip_think("Just normal text") == "Just normal text"
@@ -165,6 +179,12 @@ class TestExtractThink:
         assert thinking == "reasoning content"
         assert clean == "Hello  World"
 
+    def test_single_thinking_block(self):
+        text = "Hello <thinking>reasoning content</thinking> World"
+        thinking, clean = extract_think(text)
+        assert thinking == "reasoning content"
+        assert clean == "Hello  World"
+
     def test_multiple_think_blocks(self):
         text = "A<think>first</think>B<thought>second</thought>C"
         thinking, clean = extract_think(text)
@@ -230,6 +250,24 @@ squares = [x**2 for x in range(10)]
 class TestExtractReasoning:
     """Single source of truth for reasoning extraction across all providers."""
 
+    def test_strips_tags_from_dedicated_reasoning_content(self):
+        reasoning, content = extract_reasoning(
+            "<thinking>Preparing final response",
+            None,
+            "visible answer",
+        )
+        assert reasoning == "Preparing final response"
+        assert content == "visible answer"
+
+    def test_self_closing_thinking_marker_in_reasoning_content(self):
+        reasoning, content = extract_reasoning(
+            "<thinking/>Preparing final response",
+            None,
+            "visible answer",
+        )
+        assert reasoning == "Preparing final response"
+        assert content == "visible answer"
+
     def test_prefers_reasoning_content_and_strips_inline_think(self):
         # Dedicated field wins; inline tags are still scrubbed from content.
         reasoning, content = extract_reasoning(
@@ -271,3 +309,24 @@ class TestExtractReasoning:
         )
         assert reasoning == "plan"
         assert content == "answer"
+
+
+class TestStripReasoningTags:
+
+    def test_unclosed_thinking_wrapper_keeps_reasoning_body(self):
+        assert strip_reasoning_tags("<thinking>Preparing final response") == (
+            "Preparing final response"
+        )
+
+    def test_self_closing_thinking_marker_keeps_reasoning_body(self):
+        assert strip_reasoning_tags("<thinking/>Preparing final response") == (
+            "Preparing final response"
+        )
+
+    def test_closing_thinking_wrapper_removed(self):
+        assert strip_reasoning_tags("Preparing final response</thinking>") == (
+            "Preparing final response"
+        )
+
+    def test_non_string_reasoning_ignored(self):
+        assert strip_reasoning_tags(object()) == ""

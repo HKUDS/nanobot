@@ -8,6 +8,7 @@ export const supportedLocales = [
   { code: "ja", label: "Japanese", nativeLabel: "日本語" },
   { code: "ko", label: "Korean", nativeLabel: "한국어" },
   { code: "es", label: "Spanish", nativeLabel: "Español" },
+  { code: "pt-BR", label: "Portuguese (Brazil)", nativeLabel: "Português (Brasil)" },
   { code: "vi", label: "Vietnamese", nativeLabel: "Tiếng Việt" },
   { code: "id", label: "Indonesian", nativeLabel: "Bahasa Indonesia" },
 ] as const;
@@ -39,6 +40,9 @@ export function normalizeLocale(
   ) {
     return "zh-TW";
   }
+  if (lower === "pt" || lower.startsWith("pt-")) {
+    return "pt-BR";
+  }
 
   const base = lower.split("-")[0];
   const baseMatch = supportedLocales.find(
@@ -55,19 +59,6 @@ export function readStoredLocale(): SupportedLocale | null {
   } catch {
     return null;
   }
-}
-
-export function detectNavigatorLocale(): SupportedLocale {
-  if (typeof navigator === "undefined") return defaultLocale;
-  const candidates = [
-    ...(navigator.languages ?? []),
-    navigator.language,
-  ].filter(Boolean);
-  for (const locale of candidates) {
-    const normalized = normalizeLocale(locale);
-    if (normalized) return normalized;
-  }
-  return defaultLocale;
 }
 
 export function resolveInitialLocale(): SupportedLocale {

@@ -197,6 +197,63 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
 
 
+def test_payload_resolves_obsidian_agent_cli_brand(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-07-14"},
+            "clis": [
+                {
+                    "name": "obsidian-agent-cli",
+                    "display_name": "Obsidian CLI",
+                    "description": "Obsidian automation",
+                    "category": "productivity",
+                    "entry_point": "obsidian-agent",
+                }
+            ],
+        },
+    )
+    _write_cache(manager._cache_path("public"), {"meta": {}, "clis": []})
+    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
+
+    app = manager.payload()["apps"][0]
+
+    assert app["brand_color"] == "#7C3AED"
+    assert app["logo_url"] == "https://cdn.simpleicons.org/obsidian/7C3AED"
+
+
+def test_installed_payload_enriches_apps_from_cached_catalog(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({
+        "gimp": {
+            "entry_point": "installed-gimp",
+            "source": "harness",
+            "strategy": "pip",
+        }
+    })
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda entry_point: "/bin/installed-gimp" if entry_point == "installed-gimp" else None,
+    )
+
+    app = manager.installed_payload()["apps"][0]
+
+    assert app["name"] == "gimp"
+    assert app["entry_point"] == "installed-gimp"
+    assert app["source"] == "harness"
+    assert app["status"] == "installed"
+    assert app["display_name"] == "GIMP"
+    assert app["category"] == "image"
+    assert app["description"] == "Public duplicate entry"
+    assert app["brand_color"] == "#5C5543"
+    assert app["logo_url"] == "https://cdn.simpleicons.org/gimp/5C5543"
+
+
 def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
@@ -270,6 +327,51 @@ def test_optional_extension_registry_failure_does_not_break_payload(
     assert [app["name"] for app in payload["apps"]] == ["gimp"]
 
 
+def test_payload_cache_only_does_not_fetch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("network should not be used")
+
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+
+    payload = manager.payload(cache_only=True)
+
+    assert payload["catalog_updated_at"] == "2026-04-18"
+    assert {app["name"] for app in payload["apps"]} >= {"gimp", "feishu"}
+    assert manager.catalog_cache_fresh() is True
+
+
+def test_catalog_cache_fresh_can_include_optional_sources(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {"meta": {"updated": "2026-04-16"}, "clis": []},
+    )
+    _write_cache(
+        manager._cache_path("public"),
+        {"meta": {"updated": "2026-04-18"}, "clis": []},
+    )
+
+    assert manager.catalog_cache_fresh() is True
+    assert manager.catalog_cache_fresh(include_optional=True) is False
+
+
+def test_payload_cache_only_without_cache_returns_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = _manager(tmp_path)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("network should not be used")
+
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+
+    payload = manager.payload(cache_only=True)
+
+    assert payload == {"apps": [], "installed_count": 0, "catalog_updated_at": None}
+    assert manager.catalog_cache_fresh() is False
+
+
 def test_install_dispatches_safe_pip_and_installs_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -301,6 +403,62 @@ def test_install_dispatches_safe_pip_and_installs_skill(
     skill = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
     assert skill.is_file()
     assert 'run_cli_app` tool with `name="gimp"' in skill.read_text(encoding="utf-8")
+
+
+def test_run_argv_logs_command_exit_and_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.apps.cli import service as cli_service
+
+    manager = _manager(tmp_path)
+    records: list[str] = []
+
+    class _Logger:
+        def info(self, message: str, *args: object) -> None:
+            records.append(message.format(*args))
+
+    def fake_run(
+        argv: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        encoding: str,
+        errors: str,
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        assert encoding == "utf-8"
+        assert errors == "replace"
+        assert timeout == 5
+        return subprocess.CompletedProcess(argv, 0, stdout="installed ok", stderr="")
+
+    monkeypatch.setattr(cli_service, "logger", _Logger())
+    monkeypatch.setattr(cli_service.subprocess, "run", fake_run)
+
+    result = manager._run_argv(["python", "-m", "pip", "install", "sample"], timeout=5)
+
+    assert result.returncode == 0
+    assert any(record.startswith("CLI Apps: running ") for record in records)
+    assert any("command exited with code 0" in record for record in records)
+    assert any("installed ok" in record for record in records)
+
+
+def test_run_argv_decodes_utf8_output(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+
+    result = manager._run_argv(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(chr(0x2713).encode('utf-8'))",
+        ],
+        timeout=5,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "\u2713"
 
 
 def test_install_records_available_cli_without_reinstalling(
@@ -439,6 +597,9 @@ def test_install_records_entry_point_path_and_pip_distribution(
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["gimp"]["entry_point_path"] == str(resolved)
     assert installed["gimp"]["pip_distribution"] == "cli-anything-gimp"
+    assert installed["gimp"]["display_name"] == "GIMP"
+    assert installed["gimp"]["category"] == "image"
+    assert installed["gimp"]["description"] == "Public duplicate entry"
 
 
 def test_installed_state_writes_atomically_without_temp_leftovers(tmp_path: Path) -> None:
@@ -722,6 +883,9 @@ def test_run_installed_cli_uses_argv_without_shell(
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert "shell" not in kwargs or kwargs["shell"] is False
+        assert kwargs["text"] is True
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         return subprocess.CompletedProcess(
             argv,
             0,

@@ -76,6 +76,7 @@
       "image": "画像",
       "voice": "音声",
       "browser": "ウェブ",
+      "channels": "チャンネル",
       "runtime": "システム",
       "advanced": "セキュリティ",
       "cliApps": "CLI アプリ",
@@ -121,6 +122,7 @@
       "presetModel": "プリセットモデル",
       "density": "表示密度",
       "activityMode": "アクティビティ詳細",
+      "fileEditDisplay": "ファイル編集表示",
       "codeWrap": "コードの折り返し",
       "maxResults": "最大結果数",
       "timeout": "タイムアウト",
@@ -165,6 +167,7 @@
       "presetModel": "Default に切り替えると、WebUI からモデルとプロバイダーを編集できます。",
       "density": "このブラウザーにのみ保存されます。",
       "activityMode": "既定で表示する agent アクティビティの詳細量を選択します。",
+      "fileEditDisplay": "ファイル編集アクティビティを行数または差分で表示します。",
       "codeWrap": "小さな画面でも長いコード行を読みやすくします。",
       "maxResults": "各 web_search 呼び出しで返す結果数です。",
       "timeout": "検索プロバイダーのリクエストがタイムアウトするまでの秒数です。",
@@ -214,6 +217,9 @@
       "compact": "コンパクト",
       "auto": "自動",
       "expanded": "展開",
+      "summary": "概要",
+      "diff": "差分",
+      "collapsedDiff": "折りたたみ差分",
       "on": "オン",
       "off": "オフ",
       "defaultPermission": "既定の権限",
@@ -454,22 +460,118 @@
       "noTools": "なし",
       "testForTools": "テストを実行して個別のツールを確認・選択します。"
     },
+    "api": {
+      "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "ローカルの /v1 エンドポイントから SDK やエージェントを接続します。",
+      "start": "API サーバーを起動", "starting": "起動中...", "stop": "停止", "stopping": "停止中...",
+      "access": "アクセス", "thisDevice": "このデバイス", "localNetwork": "ローカルネットワーク",
+      "localHelp": "このデバイスだけが接続できます。", "networkHelp": "他のデバイスも接続できるため API キーが必要です。",
+      "port": "ポート", "portHelp": "API が使用するローカルポートです。", "apiKey": "API キー", "apiKeyHelp": "クライアントは Bearer トークンとして送信します。",
+      "apiKeyRequired": "ネットワークに公開する前に必要です。", "apiKeyPlaceholder": "API キーを入力",
+      "autoInstall": "起動時に API サポートを自動インストールします。"
+    },
+    "observability": {
+      "title": "可観測性", "configured": "nanobot がトレース認証情報を利用できます。",
+      "environment": "LANGFUSE_SECRET_KEY と LANGFUSE_PUBLIC_KEY を設定して nanobot を再起動してください。", "enable": "トレースサポートを有効化"
+    },
     "legal": {
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
     },
     "apps": {
-      "description": "nanobot がチャットで使用できる App CLI と MCP サービスを追加します。",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "すべて",
-      "filterCli": "CLI アプリ",
-      "filterMcp": "MCP サービス",
-      "enabledSummary": "{{count}} 件有効",
-      "caption": "CLI {{cli}} 件 · MCP {{mcp}} 件",
+      "description": "nanobot にツールを追加し、チャットで @ を付けて使用できます。",
+      "cliLabel": "アプリ",
+      "mcpLabel": "連携",
+      "channelLabel": "チャンネル",
+      "featureLabel": "機能",
+      "filterAll": "使用可能",
+      "filterPlugins": "プラグイン",
+      "filterCli": "アプリ",
+      "filterMcp": "連携",
+      "enabledSummary": "{{count}} 件使用可能",
+      "caption": "アプリ {{cli}} 件 · 連携 {{mcp}} 件",
       "searchPlaceholder": "アプリを検索",
-      "featured": "注目",
+      "featured": "ツール",
       "loading": "アプリを読み込み中...",
-      "empty": "一致するアプリはありません。"
+      "empty": "この表示に一致するツールはありません。",
+      "restartRequired": "更新したアプリと機能を反映するには nanobot を再起動してください。"
+    },
+    "channels": {
+      "description": "nanobot をチャットアプリに接続します。サポートのインストールは統合パッケージを追加するだけで、多くのチャンネルでは引き続きトークンやワークスペース設定が必要です。",
+      "caption": "{{enabled}} 件有効 · 全 {{total}} チャンネル",
+      "searchPlaceholder": "チャンネルを検索",
+      "backToChannels": "すべてのチャンネル",
+      "catalog": "チャンネル",
+      "loading": "チャンネルを読み込み中...",
+      "empty": "一致するチャンネルはありません。",
+      "restartRequired": "更新したチャンネルサポートを反映するには nanobot を再起動してください。",
+      "requires": "必要: {{requirements}}",
+      "setUp": "設定",
+      "setupGuide": "設定ガイド",
+      "setupSummary": "有効化は nanobot 側のサポートをオンにするだけです。プラットフォームの認証情報を追加してから nanobot を再起動してください。",
+      "configKeys": "設定キー",
+      "enable": "チャンネルを有効化",
+      "disable": "チャンネルを無効化",
+      "needsConfig": "設定が必要",
+      "connect": "接続",
+      "reconnect": "再接続",
+      "advanced": "詳細設定",
+      "checkAndEnable": "確認して有効化",
+      "checkConnection": "接続を確認",
+      "checkedAndEnabled": "確認して有効化しました。",
+      "checking": "確認中...",
+      "checkOnly": "確認のみ",
+      "commandCopied": "コマンドをコピーしました。",
+      "commandCopyFailed": "コマンドをコピーできませんでした。",
+      "configuredInstances": "{{count}} 個のインスタンスを設定済み",
+      "connectPreview": "次の手順でブラウザー内接続を行います。今は下のコマンドを実行してください。",
+      "copyCommand": "コマンドをコピー",
+      "filterAll": "すべて",
+      "filterOff": "オフ",
+      "filterOn": "オン",
+      "helperCopied": "{{name}} をコピーしました。",
+      "helperCopyFailed": "{{name}} をコピーできませんでした。",
+      "hideSecret": "シークレットを隠す",
+      "instanceConfigured": "設定済み",
+      "instanceNeedsSetup": "設定が必要",
+      "runtimeFailed": "起動失敗",
+      "runtimeStarting": "起動中",
+      "runtimeStopped": "未実行",
+      "managedByWebui": "WebUI で管理",
+      "officialGuide": "公式ガイド",
+      "optional": "任意",
+      "providerPreset": "プロバイダー",
+      "requiredSetup": "必要な設定",
+      "savedSecret": "保存済み",
+      "savedSecretPlaceholder": "保存済みのシークレット",
+      "savedSettings": "設定を保存しました。",
+      "saveSettings": "設定を保存",
+      "selectChannel": "{{name}} の設定を表示",
+      "setupSteps": "次の手順",
+      "showSecret": "シークレットを表示",
+      "toggleChannel": "{{name}} チャンネル",
+      "toggleInstance": "{{name}} インスタンス",
+      "tryIt": "試してみる",
+      "validationFailed": "有効化する前に必要な設定を確認してください。",
+      "validation": {
+        "connected": "接続済み",
+        "configured": "手動設定済み",
+        "needs_setup": "設定が必要",
+        "invalid": "無効",
+        "unsupported": "手動設定"
+      }
+    },
+    "nanobotFeatures": {
+      "enabled": "有効",
+      "enable": "有効化",
+      "disable": "無効化",
+      "ready": "準備完了",
+      "missingDependency": "サポート不足",
+      "installSupport": "サポートをインストール",
+      "installConfirmTitle": "{{name}} のサポートをインストールしますか？",
+      "installConfirmDescription": "nanobot が {{name}} に必要なものを追加し、その後有効化します。続けますか？",
+      "installConfirmAction": "インストールして有効化",
+      "websocketRequired": "WebUI に必須",
+      "channelDisabled": "チャンネルは無効",
+      "notEnabled": "未有効"
     },
     "automations": {
       "filters": {
@@ -493,6 +595,7 @@
       "emptyHint": "実行元から作成すると、nanobot が正しいコンテキストを保持できます。",
       "oneShot": "一回限り",
       "systemTask": "システム管理の自動タスク",
+      "localTrigger": "ローカルトリガー",
       "labels": {
         "schedule": "スケジュール",
         "next": "次回",
@@ -551,11 +654,13 @@
         "weekdaysAt": "平日 {{time}}",
         "hourlyAt": "毎時 :{{minute}}",
         "hourlyWindow": "{{start}}-{{end}} の毎時 :{{minute}}",
+        "local": "ローカルトリガー",
         "custom": "カスタムスケジュール"
       },
       "next": {
         "paused": "一時停止",
         "pending": "実行中",
+        "local": "トリガー待ち",
         "none": "次回実行なし"
       },
       "message": {
@@ -692,11 +797,13 @@
       "every": "{{duration}} ごと",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "ローカルトリガー",
       "unknown": "カスタムスケジュール"
     },
     "next": {
       "label": "次回: {{time}}",
       "disabled": "一時停止中",
+      "local": "トリガー待ち",
       "none": "次回実行なし"
     }
   },
@@ -791,12 +898,14 @@
         "every": "{{duration}}ごと",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "ローカルトリガー",
         "unknown": "カスタムスケジュール"
       },
       "next": {
         "label": "次回 {{time}}",
         "pending": "まもなく実行",
         "disabled": "一時停止",
+        "local": "トリガー待ち",
         "none": "次回実行なし"
       }
     },
@@ -824,7 +933,7 @@
         "edit": "ガイドを編集",
         "drag": "ドラッグして並べ替え"
       },
-      "attachImage": "画像を添付",
+      "attachImage": "ファイルを添付",
       "imageMode": {
         "label": "画像生成",
         "toggle": "画像生成モードを切り替え",
@@ -854,11 +963,12 @@
       },
       "voiceErrors": {
         "unsupported": "このブラウザーは音声入力に対応していません。",
-        "permission": "マイクの許可が必要です。",
+        "permission": "アドレスバーでマイクを許可してから再試行してください。",
         "notConfigured": "先に文字起こしプロバイダーを設定してください。",
         "tooLong": "録音が長すぎます。",
         "tooShort": "もう少し長く録音してください。",
         "noInput": "マイク入力が検出されませんでした。",
+        "noDevice": "マイクが見つかりません。接続して再試行してください。",
         "failed": "音声を文字起こしできませんでした。"
       },
       "slash": {
@@ -870,7 +980,7 @@
         "commands": {
           "new": {
             "title": "新しいチャット",
-            "description": "現在のタスクを停止して、新しい会話を開始します。"
+            "description": "このチャットをリセットして、新しい会話を開始します。"
           },
           "stop": {
             "title": "現在のタスクを停止",
@@ -904,9 +1014,17 @@
             "title": "メモリを復元",
             "description": "以前の Dream スナップショットへメモリを戻します。"
           },
+          "dream_prompt": {
+            "title": "Dream の記憶",
+            "description": "このワークスペースの記憶を Dream がどう整理するかを設定します。"
+          },
           "goal": {
             "title": "長期目標",
             "description": "持続的な複数ステップの目標として扱うようエージェントに伝えます。"
+          },
+          "trigger": {
+            "title": "ローカルトリガーを作成",
+            "description": "このチャットセッションに紐づく CLI トリガーを作成します。"
           },
           "help": {
             "title": "ヘルプを表示",
@@ -931,12 +1049,17 @@
       "encoding": "処理中…",
       "remove": "添付を削除",
       "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
+      "textTooLarge": "メッセージ本文が大きすぎます（最大 {{max}}）",
       "imageRejected": {
         "unsupported_type": "対応していないファイル形式です",
+        "empty_file": "空のファイルは添付できません",
+        "too_many_attachments": "1 メッセージにつき最大 {{max}} 件までです",
         "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
         "magic_mismatch": "画像ファイルではないようです",
         "decode_failed": "この画像をデコードできません",
-        "too_large": "画像が大きすぎます。小さいものを選んでください",
+        "too_large": "ファイルが大きすぎます。小さいものを選んでください",
+        "total_too_large": "添付ファイルの合計サイズが大きすぎます。いくつか削除するか、より小さいファイルを使用してください",
+        "transport_too_large": "この添付ファイルはゲートウェイの転送上限を超えます",
         "io": "このファイルを読み込めません"
       },
       "mentions": {
@@ -950,11 +1073,11 @@
         "mcpDescription": "@{{name}} を MCP サーバーとして使用"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "ワークスペースのアクセスモード",
         "projectAria": "プロジェクトを選択",
         "projectPlaceholder": "プロジェクトを選択",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "既定の権限",
+        "full": "フルアクセス"
       }
     },
     "scrollToBottom": "一番下へスクロール",
@@ -989,6 +1112,14 @@
     "copyReply": "コピー",
     "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",
+    "fileEditViewDiff": "差分を表示",
+    "fileEditViewLargeDiff": "大きな差分を表示",
+    "fileEditDiffLineCount": "{{count}} 行",
+    "fileEditUnchangedLinesHidden": "未変更の {{count}} 行を非表示",
+    "fileEditShowMoreLines": "さらに {{count}} 行を表示",
+    "fileEditShowFewerLines": "表示行数を減らす",
+    "fileEditOpenFile": "ファイルを開く",
+    "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",
     "activityThoughtFor": "{{duration}}考えました",
@@ -1038,17 +1169,17 @@
       "body": "サイズ上限を超えたため、直前のメッセージはサーバーに拒否されました。画像を減らすか、より小さいファイルに差し替えて再送してください。"
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "ワークスペースは変更されませんでした",
+      "body": "要求されたプロジェクトまたはアクセスモードがゲートウェイで拒否されたため、Nanobot は以前のワークスペースをそのまま使用しています。"
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "既定のワークスペース",
       "manual": "パスを貼り付け",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "パスを使用",
+      "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
     }
   }
 }

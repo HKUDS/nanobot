@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_fork_marker,
@@ -22,6 +23,17 @@ def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
     lines = read_transcript_lines(key)
     assert len(lines) == 1
     assert lines[0]["text"] == "hello"
+
+
+def test_append_stamps_created_at_ms(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript.time.time", lambda: 1_700_000_000.0)
+    key = "websocket:t-created-at"
+
+    append_transcript_object(key, {"event": "user", "chat_id": "t-created-at", "text": "hello"})
+
+    lines = read_transcript_lines(key)
+    assert lines[0]["created_at_ms"] == 1_700_000_000_000
 
 
 def _force_small_transcript_budget(monkeypatch, *, limit: int = 520, target: int = 260) -> None:
@@ -290,6 +302,31 @@ def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
     assert msgs[1]["latencyMs"] == 42
 
 
+def test_replay_uses_persisted_created_at_ms() -> None:
+    msgs = replay_transcript_to_ui_messages(
+        [
+            {
+                "event": "user",
+                "chat_id": "t-created-at",
+                "text": "q",
+                "created_at_ms": 1_700_000_000_000,
+            },
+            {
+                "event": "message",
+                "chat_id": "t-created-at",
+                "kind": "tool_hint",
+                "text": "exec()",
+                "created_at_ms": 1_700_000_230_000,
+            },
+        ],
+    )
+
+    assert [message["createdAt"] for message in msgs] == [
+        1_700_000_000_000,
+        1_700_000_230_000,
+    ]
+
+
 def test_thread_response_does_not_mark_completed_message_tool_tail_pending(
     tmp_path,
     monkeypatch,
@@ -471,6 +508,42 @@ def test_replay_reused_turn_id_after_turn_end_starts_new_turn(tmp_path, monkeypa
     assert msgs[2]["turnId"].startswith("turn-1:replay:")
     assert msgs[2]["turnId"] != msgs[1]["turnId"]
     assert msgs[2]["source"] == {"kind": "cron", "label": "drink water"}
+
+
+def test_replay_preserves_local_trigger_source_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-local-trigger-source"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "t-local-trigger-source",
+            "text": "PR #4502 review started.",
+            "source": {"kind": "local_trigger", "label": "PR review"},
+        },
+    )
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert msgs[0]["source"] == {"kind": "local_trigger", "label": "PR review"}
+
+
+def test_replay_preserves_legacy_trigger_source_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-trigger-source"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "t-trigger-source",
+            "text": "PR #4502 review started.",
+            "source": {"kind": "trigger", "label": "PR review"},
+        },
+    )
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert msgs[0]["source"] == {"kind": "trigger", "label": "PR review"}
 
 
 def test_build_response_restores_session_users_for_legacy_transcript(
@@ -659,6 +732,47 @@ def test_backfill_does_not_misalign_when_session_only_has_transcript_tail(
         "old answer",
         "tail question",
         "tail answer",
+    ]
+
+
+def test_backfill_skips_internal_subagent_results(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-subagent"
+    for ev in (
+        {"event": "message", "chat_id": "t-subagent", "text": "summary one"},
+        {"event": "turn_end", "chat_id": "t-subagent"},
+        {"event": "message", "chat_id": "t-subagent", "text": "summary two"},
+        {"event": "turn_end", "chat_id": "t-subagent"},
+    ):
+        append_transcript_object(key, ev)
+
+    legacy_raw = (
+        "[Subagent 'legacy' completed successfully]\n\n"
+        "Task: t\n\n"
+        "Result:\nr\n\n"
+        "Summarize this naturally for the user."
+    )
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": legacy_raw},
+            {"role": "assistant", "content": "summary one"},
+            {
+                "role": "user",
+                "content": "marked result",
+                HIDDEN_HISTORY_META: {
+                    "kind": "subagent_result",
+                    "subagent_task_id": "sub-1",
+                },
+            },
+            {"role": "assistant", "content": "summary two"},
+        ],
+    )
+
+    assert out is not None
+    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+        ("assistant", "summary one"),
+        ("assistant", "summary two"),
     ]
 
 
@@ -861,6 +975,122 @@ def test_replay_file_edit_absorbs_matching_write_tool_event() -> None:
             "status": "editing",
         },
     ]
+
+
+def test_replay_file_edit_stays_separate_from_mixed_tool_trace() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-file",
+            "text": "",
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-read",
+                    "name": "read_file",
+                    "arguments": {"path": "quicksort.py"},
+                },
+                {
+                    "phase": "start",
+                    "call_id": "call-write",
+                    "name": "write_file",
+                    "arguments": {"path": "sorting/quicksort.py", "content": "def quicksort():\n"},
+                },
+            ],
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "sorting/quicksort.py",
+                    "phase": "end",
+                    "added": 3,
+                    "deleted": 0,
+                    "approximate": False,
+                    "status": "done",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 2
+    assert msgs[0]["kind"] == "trace"
+    assert msgs[0]["traces"] == ['read_file({"path": "quicksort.py"})']
+    assert [event["name"] for event in msgs[0]["toolEvents"]] == ["read_file"]
+    assert "fileEdits" not in msgs[0]
+    assert msgs[1]["kind"] == "trace"
+    assert msgs[1]["traces"] == []
+    assert "toolEvents" not in msgs[1]
+    assert msgs[1]["fileEdits"] == [
+        {
+            "version": 1,
+            "call_id": "call-write",
+            "tool": "write_file",
+            "path": "sorting/quicksort.py",
+            "phase": "end",
+            "added": 3,
+            "deleted": 0,
+            "approximate": False,
+            "status": "done",
+        },
+    ]
+
+
+def test_replay_keeps_every_file_from_one_apply_patch_call() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-file",
+            "text": "apply_patch()",
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-patch",
+                    "name": "apply_patch",
+                    "arguments": {"edits": []},
+                },
+            ],
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-patch",
+                    "tool": "apply_patch",
+                    "path": "USER.md",
+                    "phase": "end",
+                    "added": 0,
+                    "deleted": 3,
+                    "approximate": False,
+                    "status": "done",
+                },
+                {
+                    "version": 1,
+                    "call_id": "call-patch",
+                    "tool": "apply_patch",
+                    "path": "MEMORY.md",
+                    "phase": "end",
+                    "added": 0,
+                    "deleted": 4,
+                    "approximate": False,
+                    "status": "done",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 1
+    assert msgs[0]["traces"] == []
+    assert "toolEvents" not in msgs[0]
+    assert [edit["path"] for edit in msgs[0]["fileEdits"]] == ["USER.md", "MEMORY.md"]
 
 
 def test_replay_keeps_interrupted_pre_tool_text_in_activity() -> None:

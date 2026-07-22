@@ -16,17 +16,18 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 
 ### 1. Configure
 
-Add to `config.json` under `channels.websocket`:
+The WebSocket channel is enabled by default. Add only the fields you want to
+override under `channels.websocket`:
 
 ```json
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "127.0.0.1",
       "port": 8765,
       "path": "/",
-      "websocketRequiresToken": false,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true,
       "allowFrom": ["*"],
       "streaming": true
     }
@@ -207,7 +208,7 @@ All fields go under `channels.websocket` in `config.json`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable the WebSocket server. |
+| `enabled` | bool | `true` | Enable the WebSocket server. Set to `false` only when you intentionally do not want the bundled WebUI/WebSocket surface. |
 | `host` | string | `"127.0.0.1"` | Bind address. Use `"0.0.0.0"` to accept external connections. |
 | `port` | int | `8765` | Listen port. |
 | `path` | string | `"/"` | WebSocket upgrade path. Trailing slashes are normalized (root `/` is preserved). |
@@ -220,7 +221,7 @@ All fields go under `channels.websocket` in `config.json`.
 | `token` | string | `""` | Static shared secret. When set, clients must provide `?token=<value>` matching this secret (timing-safe comparison). Issued tokens are also accepted as a fallback. |
 | `websocketRequiresToken` | bool | `true` | When `true` and no static `token` is configured, clients must still present a valid issued token. Set to `false` to allow unauthenticated connections (only safe for local/trusted networks). |
 | `tokenIssuePath` | string | `""` | HTTP path for issuing short-lived tokens. Must differ from `path`. See [Token Issuance](#token-issuance). |
-| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain tokens (logged as a warning). |
+| `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain WebSocket connection tokens from `tokenIssuePath` (logged as a warning). `/webui/bootstrap` still issues WebUI REST API tokens for same-machine localhost browser requests; remote or forwarded bootstrap requires `tokenIssueSecret` or `token`. |
 | `tokenTtlS` | int | `300` | Time-to-live for issued tokens in seconds (30 – 86,400). |
 
 ### Access Control
@@ -265,13 +266,17 @@ For production deployments where `websocketRequiresToken: true`, use short-lived
 3. Client opens WebSocket with `?token=nbwt_aBcDeFg...&client_id=...`.
 4. The token is consumed (single use) and cannot be reused.
 
+The embedded WebUI's `/webui/bootstrap` route also returns a WebSocket token.
+It returns a separate `api_token` for REST routes to same-machine localhost
+browser requests, or after the request proves knowledge of `tokenIssueSecret`
+or the static `token`.
+
 ### Example setup
 
 ```json
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "port": 8765,
       "path": "/ws",
       "tokenIssuePath": "/auth/token",
@@ -366,7 +371,6 @@ Outbound `message` events may include a `media` field containing local filesyste
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
       "websocketRequiresToken": false,
@@ -383,7 +387,6 @@ Outbound `message` events may include a `media` field containing local filesyste
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "token": "my-shared-secret",
       "allowFrom": ["alice", "bob"]
     }
@@ -399,7 +402,6 @@ Clients connect with `?token=my-shared-secret&client_id=alice`.
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
       "path": "/ws",
@@ -420,7 +422,6 @@ Clients connect with `?token=my-shared-secret&client_id=alice`.
 {
   "channels": {
     "websocket": {
-      "enabled": true,
       "path": "/chat/ws",
       "allowFrom": ["*"]
     }

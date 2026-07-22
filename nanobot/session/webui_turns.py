@@ -11,7 +11,15 @@ from typing import Any
 from loguru import logger
 
 from nanobot.bus import progress as bus_progress
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import (
+    GoalStateSyncEvent,
+    GoalStatusEvent,
+    RuntimeModelUpdatedEvent,
+    SessionUpdatedEvent,
+    TurnEndEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
     GoalStateChanged,
@@ -22,9 +30,10 @@ from nanobot.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
-from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.providers.base import LLMProvider
+from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
+from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -69,8 +78,9 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     for message in session.messages:
         if message.get("_command") is True:
             continue
-        if message.get(CRON_HISTORY_META) is True:
+        if is_hidden_history_message(message):
             continue
+        message = public_history_message(message)
         role = message.get("role")
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
@@ -206,26 +216,22 @@ async def publish_turn_run_status(
     if msg.channel != "websocket":
         return
     cid = str(msg.chat_id)
-    meta: dict[str, Any] = {
-        **dict(msg.metadata or {}),
-        "_goal_status": True,
-        "goal_status": status,
-    }
+    started_at_event: float | None = None
     if status == "running":
         if isinstance(started_at, int | float) and started_at > 0:
             t0 = float(started_at)
         else:
             t0 = time.time()
-        meta["started_at"] = t0
+        started_at_event = t0
         _WEBSOCKET_TURN_WALL_STARTED_AT[cid] = t0
     else:
         _WEBSOCKET_TURN_WALL_STARTED_AT.pop(cid, None)
     await bus.publish_outbound(
-        OutboundMessage(
+        outbound_message_for_event(
             channel=msg.channel,
             chat_id=cid,
-            content="",
-            metadata=meta,
+            event=GoalStatusEvent(status=status, started_at=started_at_event),
+            metadata=msg.metadata,
         ),
     )
 
@@ -318,28 +324,25 @@ class WebuiTurnCoordinator:
         if not cid:
             return
         await self.bus.publish_outbound(
-            OutboundMessage(
+            outbound_message_for_event(
                 channel=event.context.channel,
                 chat_id=cid,
-                content="",
-                metadata={
-                    "_goal_state_sync": True,
-                    "goal_state": goal_state_ws_blob(event.session_metadata),
-                },
+                event=GoalStateSyncEvent(
+                    goal_state=goal_state_ws_blob(event.session_metadata),
+                ),
+                metadata=event.context.metadata,
             ),
         )
 
     async def _handle_runtime_model_changed(self, event: RuntimeModelChanged) -> None:
         await self.bus.publish_outbound(
-            OutboundMessage(
+            outbound_message_for_event(
                 channel="websocket",
                 chat_id="*",
-                content="",
-                metadata={
-                    "_runtime_model_updated": True,
-                    "model": event.model,
-                    "model_preset": event.model_preset,
-                },
+                event=RuntimeModelUpdatedEvent(
+                    model=event.model,
+                    model_preset=event.model_preset,
+                ),
             )
         )
 
@@ -374,17 +377,18 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        turn_metadata: dict[str, Any] = {**msg.metadata, "_turn_end": True}
-        if latency_ms is not None:
-            turn_metadata["latency_ms"] = int(latency_ms)
         session = self.sessions.get_or_create(session_key)
-        turn_metadata["goal_state"] = goal_state_ws_blob(session.metadata)
-        await self.bus.publish_outbound(OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="",
-            metadata=turn_metadata,
-        ))
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                event=TurnEndEvent(
+                    latency_ms=latency_ms,
+                    goal_state=goal_state_ws_blob(session.metadata),
+                ),
+                metadata=msg.metadata,
+            )
+        )
         self._schedule_title_update(msg, session_key=session_key)
 
     def _schedule_title_update(self, msg: InboundMessage, *, session_key: str) -> None:
@@ -404,16 +408,11 @@ class WebuiTurnCoordinator:
                 model=title_llm.model,
             )
             if generated:
-                await self.bus.publish_outbound(OutboundMessage(
+                await self._publish_session_metadata_updated(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content="",
-                    metadata={
-                        **msg.metadata,
-                        "_session_updated": True,
-                        "_session_update_scope": "metadata",
-                    },
-                ))
+                    metadata=msg.metadata,
+                )
 
         self.schedule_background(_generate_title_and_notify())
 
@@ -438,15 +437,26 @@ class WebuiTurnCoordinator:
                 model=title_llm.model,
             )
             if generated:
-                await self.bus.publish_outbound(OutboundMessage(
+                await self._publish_session_metadata_updated(
                     channel=event.context.channel,
                     chat_id=event.context.chat_id,
-                    content="",
-                    metadata={
-                        **event.context.metadata,
-                        "_session_updated": True,
-                        "_session_update_scope": "metadata",
-                    },
-                ))
+                    metadata=event.context.metadata,
+                )
 
         self.schedule_background(_generate_title_and_notify())
+
+    async def _publish_session_metadata_updated(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel=channel,
+                chat_id=chat_id,
+                event=SessionUpdatedEvent(scope="metadata"),
+                metadata=metadata,
+            )
+        )

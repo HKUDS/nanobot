@@ -81,11 +81,11 @@ Main files:
 | Area | Files |
 |---|---|
 | Base channel contract | `nanobot/channels/base.py` |
-| Built-in channels | `nanobot/channels/*.py` |
+| Channel packages | `nanobot/channels/<channel>/` |
 | Discovery and lifecycle | `nanobot/channels/manager.py` |
-| WebSocket/WebUI channel | `nanobot/channels/websocket.py` |
+| WebSocket/WebUI channel | `nanobot/channels/websocket/` |
 
-Channels are discovered through built-in module scanning and plugin entry points. A custom channel should follow [`channel-plugin-guide.md`](./channel-plugin-guide.md).
+Channels are discovered by scanning self-contained packages under `nanobot/channels/`. Add a channel by contributing one package that follows [`channel-package-guide.md`](./channel-package-guide.md).
 
 ## WebUI and Gateway
 
@@ -181,7 +181,7 @@ When changing tools, channels, file access, WebUI workspace behavior, or network
 | Extension | How |
 |---|---|
 | Provider | Add `ProviderSpec` in `providers/registry.py`, add schema field in `config/schema.py`, implement provider only if the generic backend is not enough |
-| Channel | Implement `BaseChannel`, expose an entry point, follow [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
+| Channel | Export a `ChannelPlugin` descriptor, keep its runtime and optional setup surfaces in one package, and follow [`channel-package-guide.md`](./channel-package-guide.md) |
 | Tool | Implement a tool under `agent/tools/` or expose a plugin entry point |
 | MCP | Add `tools.mcpServers` config |
 | Skill | Add workspace skill files under `<workspace>/skills/` or built-in skills under `nanobot/skills/` |

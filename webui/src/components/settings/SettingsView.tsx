@@ -3,6 +3,7 @@ import {
   useEffect,
   forwardRef,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -21,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Cloud,
+  Clipboard,
   Cpu,
   Database,
   Eye,
@@ -35,6 +37,7 @@ import {
   Layers,
   Loader2,
   LogOut,
+  MessageCircle,
   Mic,
   Moon,
   PauseCircle,
@@ -58,9 +61,22 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { channelUiPresentation } from "@/channel-plugins/registry";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
+import { ToggleButton } from "@/components/settings/ToggleButton";
+import {
+  channelIsRunning,
+  channelMatchesFilter,
+  channelSearchText,
+  localizedChannelDisplayName,
+  type ChannelFilter,
+} from "@/components/settings/channels/ChannelIdentity";
+import {
+  ChannelCatalogRow,
+  ChannelSetupPanel,
+} from "@/components/settings/channels/ChannelSetupPanel";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -79,14 +95,19 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { isLoopbackHost } from "@/lib/network";
 import {
   checkVersion,
   createModelConfiguration,
+  disableNanobotFeature,
+  enableNanobotFeature,
+  fetchApiService,
   fetchAutomations,
   fetchSettings,
   fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
+  fetchNanobotFeatures,
   fetchProviderModels,
   importMcpConfig,
   loginProviderOAuth,
@@ -95,6 +116,8 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  startApiService,
+  stopApiService,
   updateAutomation,
   updateImageGenerationSettings,
   updateMcpServerTools,
@@ -106,9 +129,20 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
-import { getHostApi } from "@/lib/runtime";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import {
+  readLocalPreferences,
+  writeLocalPreferences,
+  type FileEditDisplayMode,
+  type LocalActivityMode,
+  type LocalDensity,
+  type LocalPreferences,
+} from "@/lib/local-preferences";
+import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import { fmtDateTime, relativeTime } from "@/lib/format";
+import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   logoFallbackUrls,
   providerBrand,
@@ -118,6 +152,7 @@ import { cn } from "@/lib/utils";
 import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 import type {
+  ApiServicePayload,
   AutomationsPayload,
   AutomationUpdatePayload,
   CliAppInfo,
@@ -125,6 +160,8 @@ import type {
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
   McpPresetsPayload,
+  NanobotFeatureInfo,
+  NanobotFeaturesPayload,
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   SessionAutomationJob,
@@ -142,28 +179,20 @@ export type SettingsSectionKey =
   | "image"
   | "voice"
   | "browser"
+  | "channels"
   | "apps"
   | "automations"
   | "skills"
   | "runtime"
   | "advanced";
 
-type LocalDensity = "comfortable" | "compact";
-type LocalActivityMode = "auto" | "expanded";
-type AppsKindFilter = "all" | "cli" | "mcp";
+type AppsKindFilter = "ready" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
 type AutomationSort = "next" | "last" | "updated" | "name";
 type AutomationAction = "enable" | "disable" | "delete" | "run";
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
-
-interface LocalPreferences {
-  density: LocalDensity;
-  activityMode: LocalActivityMode;
-  codeWrap: boolean;
-  brandLogos: boolean;
-}
 
 interface AgentSettingsDraft {
   model: string;
@@ -195,7 +224,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 1_048_576] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -203,6 +232,7 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "byteplus_coding_plan",
   "huggingface",
   "lm_studio",
+  "modelscope",
   "novita",
   "ollama",
   "openrouter",
@@ -213,6 +243,8 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "volcengine_coding_plan",
 ]);
 const DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH = 2;
+const CLI_APPS_REFRESH_RETRY_MS = 2_000;
+const CLI_APPS_REFRESH_MAX_RETRIES = 30;
 
 const FALLBACK_TIMEZONES = [
   "UTC",
@@ -249,14 +281,6 @@ interface CustomMcpForm {
   toolTimeout: string;
 }
 
-const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
-
-const DEFAULT_LOCAL_PREFS: LocalPreferences = {
-  density: "comfortable",
-  activityMode: "auto",
-  codeWrap: true,
-  brandLogos: true,
-};
 const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
   { value: "auto", label: "Auto" },
   { value: "chat_completions", label: "Chat Completions" },
@@ -308,22 +332,6 @@ interface SettingsViewProps {
   hostChromeInset?: boolean;
 }
 
-function readLocalPreferences(): LocalPreferences {
-  try {
-    const raw = window.localStorage.getItem(LOCAL_PREFS_STORAGE_KEY);
-    if (!raw) return DEFAULT_LOCAL_PREFS;
-    const parsed = JSON.parse(raw) as Partial<LocalPreferences>;
-    return {
-      density: parsed.density === "compact" ? "compact" : "comfortable",
-      activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
-      codeWrap: parsed.codeWrap !== false,
-      brandLogos: parsed.brandLogos !== false,
-    };
-  } catch {
-    return DEFAULT_LOCAL_PREFS;
-  }
-}
-
 function modelPresetValue(payload: SettingsPayload): string {
   return payload.agent.model_preset || "default";
 }
@@ -333,7 +341,7 @@ function defaultPreset(payload: SettingsPayload): SettingsPayload["model_presets
 }
 
 function normalizeContextWindowTokens(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 65_536;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 200_000;
 }
 
 function editableDefaultProvider(payload: SettingsPayload): string {
@@ -370,7 +378,7 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   provider: "",
   modelPreset: "default",
   presetLabel: "Default",
-  contextWindowTokens: 65_536,
+  contextWindowTokens: 200_000,
   timezone: "UTC",
   botName: "nanobot",
   botIcon: "",
@@ -532,10 +540,13 @@ export function SettingsView({
   const { token } = useClient();
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
+  const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
+  const featureCatalog = nanobotFeatures?.features ?? [];
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [loading, setLoading] = useState(() => initialSettings === null);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
+  const [nanobotFeaturesLoading, setNanobotFeaturesLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
   const [automationsLoading, setAutomationsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -547,25 +558,33 @@ export function SettingsView({
     model: "",
   });
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
+  const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
+  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
   const [networkSafetySaving, setNetworkSafetySaving] = useState(false);
+  const [apiService, setApiService] = useState<ApiServicePayload | null>(null);
+  const [apiServiceLoading, setApiServiceLoading] = useState(false);
+  const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
+  const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [hostEngineApplying, setHostEngineApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
   const [appsQuery, setAppsQuery] = useState("");
+  const [channelsQuery, setChannelsQuery] = useState("");
   const [automationsQuery, setAutomationsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
   const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
+  const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
+  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("ready");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
@@ -695,19 +714,91 @@ export function SettingsView({
   useEffect(() => {
     if (activeSection !== "apps") return;
     let cancelled = false;
-    setCliAppsLoading(true);
-    fetchCliApps(token)
-      .then((payload) => {
-        if (!cancelled) {
+    let retry: number | null = null;
+    let retryCount = 0;
+    const loadCliApps = (showLoading: boolean) => {
+      if (showLoading) setCliAppsLoading(true);
+      fetchCliApps(token)
+        .then((payload) => {
+          if (cancelled) return;
+          if (payload.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
+            retryCount += 1;
+            retry = window.setTimeout(() => {
+              retry = null;
+              loadCliApps(false);
+            }, CLI_APPS_REFRESH_RETRY_MS);
+          }
           setCliApps(payload);
           setCliAppsError(null);
+          setCliAppsLoading(false);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setCliAppsError((err as Error).message);
+            setCliAppsLoading(false);
+          }
+        });
+    };
+    loadCliApps(true);
+    return () => {
+      cancelled = true;
+      if (retry !== null) window.clearTimeout(retry);
+    };
+  }, [activeSection, token]);
+
+  useEffect(() => {
+    if (!["channels", "models", "browser", "runtime"].includes(activeSection)) return;
+    let cancelled = false;
+    const refresh = async (showLoading = false) => {
+      if (showLoading) setNanobotFeaturesLoading(true);
+      try {
+        const payload = await fetchNanobotFeatures(token);
+        if (!cancelled) {
+          setNanobotFeatures(payload);
+          setNanobotFeaturesError(null);
+        }
+      } catch (err) {
+        const message = (err as Error).message;
+        if (!cancelled && message !== "HTTP 404") setNanobotFeaturesError(message);
+      } finally {
+        if (!cancelled && showLoading) setNanobotFeaturesLoading(false);
+      }
+    };
+    void refresh(true);
+    const interval = activeSection === "channels"
+      ? window.setInterval(() => void refresh(false), 5000)
+      : null;
+    const refreshOnFocus = () => {
+      if (activeSection === "channels" && document.visibilityState !== "hidden") {
+        void refresh(false);
+      }
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      cancelled = true;
+      if (interval !== null) window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [activeSection, token]);
+
+  useEffect(() => {
+    if (activeSection !== "runtime") return;
+    let cancelled = false;
+    setApiServiceLoading(true);
+    fetchApiService(token)
+      .then((payload) => {
+        if (!cancelled) {
+          setApiService(payload);
+          setApiServiceError(null);
         }
       })
       .catch((err) => {
-        if (!cancelled) setCliAppsError((err as Error).message);
+        if (!cancelled) setApiServiceError((err as Error).message);
       })
       .finally(() => {
-        if (!cancelled) setCliAppsLoading(false);
+        if (!cancelled) setApiServiceLoading(false);
       });
     return () => {
       cancelled = true;
@@ -785,11 +876,7 @@ export function SettingsView({
   }, [activeSection, token]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(localPrefs));
-    } catch {
-      // Browser-only preferences should never block settings.
-    }
+    writeLocalPreferences(localPrefs);
   }, [localPrefs]);
 
   useEffect(() => {
@@ -1096,6 +1183,54 @@ export function SettingsView({
     }
   };
 
+  const installCapabilities = async (names: string[]): Promise<boolean> => {
+    const missing = names.filter(
+      (name) => !featureCatalog.find((feature) => feature.name === name)?.installed,
+    );
+    if (!missing.length) return true;
+    setNanobotFeatureAction(`enable:${names.join("+")}`);
+    setNanobotFeaturesError(null);
+    try {
+      let latest = nanobotFeatures;
+      for (const name of missing) {
+        latest = await enableNanobotFeature(token, name);
+        if (latest.requires_restart) {
+          setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+        }
+      }
+      if (latest) setNanobotFeatures(latest);
+      return true;
+    } catch (err) {
+      setNanobotFeaturesError((err as Error).message);
+      return false;
+    } finally {
+      setNanobotFeatureAction(null);
+    }
+  };
+
+  const handleApiServiceAction = async (
+    action: "start" | "stop",
+    values?: { host: string; port: number; timeout: number; apiKey?: string },
+  ) => {
+    if (apiServiceAction) return;
+    setApiServiceAction(action);
+    setApiServiceError(null);
+    try {
+      const payload = action === "start"
+        ? await startApiService(token, values!)
+        : await stopApiService(token);
+      setApiService(payload);
+      const refreshed = await fetchNanobotFeatures(token);
+      setNanobotFeatures(refreshed);
+      const nextSettings = await fetchSettings(token);
+      applyPayload(nextSettings);
+    } catch (err) {
+      setApiServiceError((err as Error).message);
+    } finally {
+      setApiServiceAction(null);
+    }
+  };
+
   const saveProvider = async (providerName: string) => {
     if (providerSaving) return;
     const provider = settings?.providers.find((item) => item.name === providerName);
@@ -1110,6 +1245,12 @@ export function SettingsView({
     }
     setProviderSaving(providerName);
     try {
+      const supportName = providerName === "bedrock"
+        ? "bedrock"
+        : providerName === "azure_openai"
+          ? "azure"
+          : null;
+      if (supportName && !(await installCapabilities([supportName]))) return;
       const payload = await updateProviderSettings(token, {
         provider: providerName,
         apiKey: apiKey || undefined,
@@ -1179,6 +1320,7 @@ export function SettingsView({
 
     setWebSearchSaving(true);
     try {
+      if (provider.name === "olostep" && !(await installCapabilities(["olostep"]))) return;
       const webFetchRestartRequired =
         (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
         settings.web.fetch.use_jina_reader;
@@ -1310,6 +1452,36 @@ export function SettingsView({
       setCliAppsError((err as Error).message);
     } finally {
       setCliAppsAction(null);
+    }
+  };
+
+  const handleNanobotFeatureAction = async (
+    action: "enable" | "disable",
+    name: string,
+    confirmed = false,
+  ) => {
+    const feature = featureCatalog.find((item) => item.name === name);
+    if (action === "enable" && !confirmed && feature && !feature.installed && feature.install_supported) {
+      setNanobotFeaturesError(null);
+      setNanobotFeatureConfirm(feature);
+      return;
+    }
+    const key = `${action}:${name}`;
+    setNanobotFeatureAction(key);
+    setNanobotFeatureConfirm(null);
+    setNanobotFeaturesError(null);
+    try {
+      const payload = action === "enable"
+        ? await enableNanobotFeature(token, name)
+        : await disableNanobotFeature(token, name);
+      setNanobotFeatures(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+    } catch (err) {
+      setNanobotFeaturesError((err as Error).message);
+    } finally {
+      setNanobotFeatureAction(null);
     }
   };
 
@@ -1495,6 +1667,9 @@ export function SettingsView({
             />
             <ProvidersSettings
               settings={settings}
+              nanobotFeatures={nanobotFeatures}
+              featureAction={nanobotFeatureAction}
+              capabilityError={nanobotFeaturesError}
               expandedProvider={expandedProvider}
               providerForms={providerForms}
               visibleProviderKeys={visibleProviderKeys}
@@ -1521,7 +1696,7 @@ export function SettingsView({
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
               onResetProviderDraft={resetProviderDraft}
-              imageProviderRestartPending={pendingRestartSections.image}
+              imageProviderRestartPending={pendingRestartSections.image || pendingRestartSections.runtime}
               onRestart={restartViaSettingsSurface}
               isRestarting={isRestarting || hostEngineApplying}
             />
@@ -1581,6 +1756,31 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.browser}
+            olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
+            olostepInstalling={nanobotFeatureAction === "enable:olostep"}
+            capabilityError={nanobotFeaturesError}
+          />
+        );
+      case "channels":
+        return (
+          <ChannelsSettings
+            token={token}
+            nanobotFeatures={nanobotFeatures}
+            loading={nanobotFeaturesLoading}
+            query={channelsQuery}
+            actionKey={nanobotFeatureAction}
+            chatAppsDocsUrl={settings.docs?.chat_apps_url}
+            showBrandLogos={localPrefs.brandLogos}
+            error={nanobotFeaturesError}
+            requiresRestartPending={pendingRestartSections.runtime}
+            onQueryChange={setChannelsQuery}
+            onAction={handleNanobotFeatureAction}
+            onFeaturesUpdate={setNanobotFeatures}
+            onDismissStatus={() => {
+              setNanobotFeaturesError(null);
+            }}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
           />
         );
       case "apps":
@@ -1665,6 +1865,16 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.runtime}
+            apiService={apiService}
+            apiServiceLoading={apiServiceLoading}
+            apiServiceAction={apiServiceAction}
+            apiServiceError={apiServiceError}
+            langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
+            capabilitiesLoading={nanobotFeaturesLoading}
+            capabilityAction={nanobotFeatureAction}
+            capabilityError={nanobotFeaturesError}
+            onApiServiceAction={handleApiServiceAction}
+            onInstallCapability={(name) => void installCapabilities([name])}
           />
         );
       case "advanced":
@@ -1689,10 +1899,7 @@ export function SettingsView({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row",
-        showSidebar
-          ? "bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)]"
-          : "bg-background",
+        "flex min-h-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row",
       )}
     >
       {showSidebar ? (
@@ -1716,6 +1923,15 @@ export function SettingsView({
         onSave={handleCreateModelConfiguration}
       />
 
+      <NanobotFeatureInstallDialog
+        feature={nanobotFeatureConfirm}
+        installing={nanobotFeatureAction === `enable:${nanobotFeatureConfirm?.name ?? ""}`}
+        onOpenChange={(open) => {
+          if (!open) setNanobotFeatureConfirm(null);
+        }}
+        onConfirm={(feature) => handleNanobotFeatureAction("enable", feature.name, true)}
+      />
+
       <AutomationDeleteDialog
         job={automationPendingDelete}
         deleting={automationAction === `delete:${automationPendingDelete?.id ?? ""}`}
@@ -1734,10 +1950,17 @@ export function SettingsView({
         onSave={handleAutomationEdit}
       />
 
-      <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <main
+        className={cn(
+          "min-w-0 flex-1 [scrollbar-gutter:stable]",
+          activeSection === "channels" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
+        )}
+      >
         <div
           className={cn(
-            "mx-auto w-full max-w-[920px] px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            activeSection === "channels" ? "max-w-[1240px] xl:px-10" : "max-w-[920px]",
+            activeSection === "channels" && "flex min-h-full flex-col xl:h-full xl:min-h-0",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -1774,7 +1997,13 @@ export function SettingsView({
               </SettingsRow>
             </SettingsGroup>
           ) : settings ? (
-            <div className="space-y-5">
+            <div
+              className={cn(
+                "space-y-5",
+                activeSection === "channels" &&
+                  "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
+              )}
+            >
               {error ? (
                 <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
@@ -1796,6 +2025,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "voice", icon: Mic, fallback: "Voice" },
   { key: "browser", icon: Globe2, fallback: "Web" },
+  { key: "channels", icon: MessageCircle, fallback: "Channels" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Security" },
 ];
@@ -1825,19 +2055,19 @@ function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-3 pb-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
-        hostChromeInset ? "pt-[4.25rem] md:pt-[4.25rem]" : "pt-4 md:pt-4",
+        "flex w-full shrink-0 flex-col bg-sidebar px-3 pb-2 lg:w-[17rem] lg:px-3 lg:pb-4",
+        hostChromeInset ? "pt-[4.25rem] lg:pt-[4.25rem]" : "pt-4 lg:pt-4",
       )}
     >
       <button
         type="button"
         onClick={onBackToChat}
-        className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground md:mb-3"
+        className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3"
       >
         <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
         {t("settings.backToChat")}
       </button>
-      <div className="mb-3 px-1 md:mb-4 md:px-2">
+      <div className="mb-3 px-1 lg:mb-4 lg:px-2">
         <h2 className="text-[18px] font-normal tracking-normal text-foreground">
           {t("settings.sidebar.title")}
         </h2>
@@ -1845,7 +2075,7 @@ function SettingsSidebar({
 
       <nav
         aria-label={t("settings.sidebar.ariaLabel")}
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0"
+        className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:block lg:space-y-1 lg:overflow-visible lg:px-0 lg:pb-0"
       >
         {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
           const active = key === activeSection;
@@ -1856,9 +2086,9 @@ function SettingsSidebar({
               aria-current={active ? "page" : undefined}
               onClick={() => onSelectSection(key)}
               className={cn(
-                "flex h-9 w-auto shrink-0 items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors md:w-full md:rounded-[10px] md:px-2.5",
+                "flex h-9 w-auto shrink-0 snap-start items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors lg:w-full lg:rounded-[10px] lg:px-2.5",
                 active
-                  ? "bg-muted/90 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]"
+                  ? "bg-sidebar-accent text-foreground"
                   : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
               )}
             >
@@ -1869,7 +2099,7 @@ function SettingsSidebar({
         })}
       </nav>
 
-      <div className="hidden md:mt-auto md:block md:pt-4">
+      <div className="hidden lg:mt-auto lg:block lg:pt-4">
         {onLogout && !hostChromeInset ? (
           <Button
             type="button"
@@ -2233,6 +2463,25 @@ function AppearanceSettings({
             />
           </SettingsRow>
           <SettingsRow
+            title={tx("settings.rows.fileEditDisplay", "File edit display")}
+            description={tx("settings.help.fileEditDisplay", "Choose whether file edit activity opens as line counts or a diff.")}
+          >
+            <SegmentedControl
+              value={localPrefs.fileEditDisplayMode}
+              options={[
+                { value: "summary", label: tx("settings.values.summary", "Summary") },
+                { value: "diff", label: tx("settings.values.diff", "Diff") },
+                { value: "collapsed_diff", label: tx("settings.values.collapsedDiff", "Collapsed diff") },
+              ]}
+              onChange={(fileEditDisplayMode) =>
+                onChangeLocalPrefs((prev) => ({
+                  ...prev,
+                  fileEditDisplayMode: fileEditDisplayMode as FileEditDisplayMode,
+                }))
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
             title={tx("settings.rows.codeWrap", "Code wrapping")}
             description={tx("settings.help.codeWrap", "Keep long code lines readable on smaller screens.")}
           >
@@ -2373,6 +2622,30 @@ function NewModelConfigurationDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function CapabilityInstallNotice({
+  title,
+  description,
+  installing = false,
+}: {
+  title: string;
+  description: string;
+  installing?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-[14px] border border-border/55 bg-muted/22 px-3.5 py-3">
+      {installing ? (
+        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+      ) : (
+        <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      )}
+      <div className="min-w-0">
+        <p className="text-[12.5px] font-medium text-foreground">{title}</p>
+        <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{description}</p>
+      </div>
+    </div>
   );
 }
 
@@ -2537,7 +2810,14 @@ function ModelsSettings({
               value={String(form.contextWindowTokens)}
               options={CONTEXT_WINDOW_TOKEN_OPTIONS.map((tokens) => ({
                 value: String(tokens),
-                label: tokens === 262_144 ? "256K" : "64K",
+                label:
+                  tokens === 1_048_576
+                    ? "1M"
+                    : tokens === 262_144
+                      ? "256K"
+                      : tokens === 200_000
+                        ? "200K"
+                        : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({
@@ -2567,6 +2847,9 @@ function ModelsSettings({
 
 function ProvidersSettings({
   settings,
+  nanobotFeatures,
+  featureAction,
+  capabilityError,
   expandedProvider,
   providerForms,
   visibleProviderKeys,
@@ -2588,6 +2871,9 @@ function ProvidersSettings({
   isRestarting,
 }: {
   settings: SettingsPayload;
+  nanobotFeatures: NanobotFeaturesPayload | null;
+  featureAction: string | null;
+  capabilityError: string | null;
   expandedProvider: string | null;
   providerForms: Record<string, ProviderForm>;
   visibleProviderKeys: Record<string, boolean>;
@@ -2634,6 +2920,14 @@ function ProvidersSettings({
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const missingOptionalCredential =
       !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
+    const supportName = provider.name === "bedrock"
+      ? "bedrock"
+      : provider.name === "azure_openai"
+        ? "azure"
+        : null;
+    const supportFeature = supportName
+      ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
+      : null;
     return (
       <div key={provider.name} className="divide-y divide-border/45">
         <button
@@ -2668,6 +2962,19 @@ function ProvidersSettings({
 
         {expanded ? (
           <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+            {supportFeature && !supportFeature.installed ? (
+              <CapabilityInstallNotice
+                title={tx("settings.capabilities.providerSupport", "Provider support")}
+                description={tx(
+                  "settings.capabilities.providerInstallOnSave",
+                  "Required support will be installed automatically when you save this provider.",
+                )}
+                installing={featureAction === `enable:${supportName}`}
+              />
+            ) : null}
+            {supportName && capabilityError ? (
+              <p className="text-[12px] text-destructive">{capabilityError}</p>
+            ) : null}
             {isOauthProvider ? (
               <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
@@ -2850,7 +3157,7 @@ function ProvidersSettings({
       {imageProviderRestartPending && onRestart ? (
         <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
           <p className="text-[13px] leading-5 text-muted-foreground">
-            {tx("settings.status.imageProviderRestart", "Image provider changes saved. Restart when ready.")}
+            {tx("settings.status.imageProviderRestart", "Provider support changed. Restart when ready.")}
           </p>
           <div className="shrink-0">
             <Button
@@ -3214,6 +3521,9 @@ function WebSettings({
   onRestart,
   isRestarting,
   requiresRestartPending,
+  olostepFeature,
+  olostepInstalling,
+  capabilityError,
 }: {
   settings: SettingsPayload;
   form: WebSearchSettingsUpdate;
@@ -3230,6 +3540,9 @@ function WebSettings({
   onRestart?: () => void;
   isRestarting?: boolean;
   requiresRestartPending: boolean;
+  olostepFeature?: NanobotFeatureInfo;
+  olostepInstalling: boolean;
+  capabilityError: string | null;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -3263,6 +3576,21 @@ function WebSettings({
     <div className="space-y-7">
       <section>
         <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle>
+        {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
+          <div className="mb-3">
+            <CapabilityInstallNotice
+              title={tx("settings.capabilities.searchSupport", "Search provider support")}
+              description={tx(
+                "settings.capabilities.searchInstallOnSave",
+                "Olostep support will be installed automatically when you save.",
+              )}
+              installing={olostepInstalling}
+            />
+          </div>
+        ) : null}
+        {capabilityError ? (
+          <p className="mb-3 text-[12px] text-destructive">{capabilityError}</p>
+        ) : null}
         <SettingsGroup>
           <SettingsRow
             title={t("settings.byok.webSearch.provider")}
@@ -3655,6 +3983,7 @@ function AutomationListItem({
   const status = automationStatus(job, tx);
   const origin = automationOriginLabel(job, tx);
   const nextRun = formatAutomationNext(job, tx);
+  const summary = automationSummary(job, tx);
 
   return (
     <div role="listitem">
@@ -3680,7 +4009,7 @@ function AutomationListItem({
             </span>
           </span>
           <span className="mt-1.5 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
-            {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
+            {summary}
           </span>
           <span className="mt-2.5 flex min-w-0 items-center gap-2 text-[11.5px] leading-none text-muted-foreground">
             <span className="truncate" title={formatAutomationNextTitle(job, locale, tx)}>
@@ -3737,13 +4066,20 @@ function AutomationDetailPanel({
     : null;
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
-  const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+  const localTrigger = isLocalTriggerAutomation(job);
+  const triggerCommand = automationTriggerCommand(job);
+  const message = automationDetailText(job, tx);
+  const messageLabel = localTrigger
+    ? tx("settings.automations.fields.command", "Command")
+    : tx("settings.automations.fields.message", "Message");
   const schedule = formatAutomationSchedule(job, locale, tx);
   const [messageExpanded, setMessageExpanded] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
   const messageNeedsExpansion = automationMessageNeedsExpansion(message);
 
   useEffect(() => {
     setMessageExpanded(false);
+    setCommandCopied(false);
   }, [job.id]);
 
   return (
@@ -3777,12 +4113,37 @@ function AutomationDetailPanel({
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <section className="rounded-[20px] border border-border/35 bg-background/62 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/10 dark:bg-background/24">
-            <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
-              {tx("settings.automations.fields.message", "Message")}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
+                {messageLabel}
+              </div>
+              {localTrigger && triggerCommand ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 rounded-full px-2 text-[11.5px]"
+                  onClick={() => {
+                    void copyTextToClipboard(triggerCommand).then((ok) => {
+                      if (ok) setCommandCopied(true);
+                    });
+                  }}
+                >
+                  {commandCopied ? (
+                    <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {commandCopied
+                    ? tx("settings.automations.commandCopied", "Copied")
+                    : tx("settings.automations.copyCommand", "Copy")}
+                </Button>
+              ) : null}
             </div>
             <div
               className={cn(
                 "mt-3 whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85",
+                localTrigger && "font-mono text-[12.5px]",
                 !messageExpanded && messageNeedsExpansion && "line-clamp-6",
               )}
             >
@@ -3889,7 +4250,8 @@ function AutomationActionGroup({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const canManage = !job.protected;
   const hasLinkedChat = Boolean(job.origin);
-  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending;
+  const localTrigger = isLocalTriggerAutomation(job);
+  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending && !localTrigger;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
   const canToggle = canManage && (job.enabled || hasLinkedChat);
   const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
@@ -3911,14 +4273,16 @@ function AutomationActionGroup({
       >
         <Pencil className="h-4 w-4" aria-hidden />
       </AppsActionButton>
-      <AppsActionButton
-        ariaLabel={tx("settings.automations.runNow", "Run now")}
-        busy={actionKey === `run:${job.id}`}
-        disabled={!canRun}
-        onClick={() => void onAction("run", job)}
-      >
-        <PlayCircle className="h-4 w-4" aria-hidden />
-      </AppsActionButton>
+      {!localTrigger ? (
+        <AppsActionButton
+          ariaLabel={tx("settings.automations.runNow", "Run now")}
+          busy={actionKey === `run:${job.id}`}
+          disabled={!canRun}
+          onClick={() => void onAction("run", job)}
+        >
+          <PlayCircle className="h-4 w-4" aria-hidden />
+        </AppsActionButton>
+      ) : null}
       <AppsActionButton
         ariaLabel={
           job.enabled
@@ -4041,6 +4405,7 @@ function AutomationEditDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [draft, setDraft] = useState<AutomationEditDraft>(() => automationDraftFromJob(null));
+  const localTrigger = isLocalTriggerAutomation(job);
 
   useEffect(() => {
     setDraft(automationDraftFromJob(job));
@@ -4090,34 +4455,38 @@ function AutomationEditDialog({
                 />
               </label>
 
-              <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.automations.fields.message", "Message")}
-                </span>
-                <Textarea
-                  value={draft.message}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
-                  className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
-                />
-              </label>
+              {!localTrigger ? (
+                <label className="block space-y-1.5">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.message", "Message")}
+                  </span>
+                  <Textarea
+                    value={draft.message}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
+                    className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
+                  />
+                </label>
+              ) : null}
 
-              <div className="space-y-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.automations.fields.scheduleType", "Schedule type")}
-                </span>
-                <SegmentedControl
-                  value={draft.scheduleKind}
-                  options={scheduleOptions}
-                  onChange={(value) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      scheduleKind: value as AutomationEditDraft["scheduleKind"],
-                    }))
-                  }
-                />
-              </div>
+              {!localTrigger ? (
+                <div className="space-y-2">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.scheduleType", "Schedule type")}
+                  </span>
+                  <SegmentedControl
+                    value={draft.scheduleKind}
+                    options={scheduleOptions}
+                    onChange={(value) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        scheduleKind: value as AutomationEditDraft["scheduleKind"],
+                      }))
+                    }
+                  />
+                </div>
+              ) : null}
 
-              {draft.scheduleKind === "every" ? (
+              {!localTrigger && draft.scheduleKind === "every" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4158,7 +4527,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {draft.scheduleKind === "cron" ? (
+              {!localTrigger && draft.scheduleKind === "cron" ? (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
                   <label className="block space-y-1.5">
                     <span className="text-[12px] font-medium text-muted-foreground">
@@ -4185,7 +4554,7 @@ function AutomationEditDialog({
                 </div>
               ) : null}
 
-              {draft.scheduleKind === "at" ? (
+              {!localTrigger && draft.scheduleKind === "at" ? (
                 <label className="block space-y-1.5">
                   <span className="text-[12px] font-medium text-muted-foreground">
                     {tx("settings.automations.fields.runAt", "Run at")}
@@ -4250,7 +4619,7 @@ function AutomationDeleteDialog({
           <DialogDescription>
             {tx(
               "settings.automations.deleteDescription",
-              "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+              "This removes {{name}} from automations. Past chat messages stay in the session.",
               { name: job?.name || job?.id || "" },
             )}
           </DialogDescription>
@@ -4281,6 +4650,92 @@ function AutomationDeleteDialog({
   );
 }
 
+function NanobotFeatureInstallDialog({
+  feature,
+  installing,
+  onOpenChange,
+  onConfirm,
+}: {
+  feature: NanobotFeatureInfo | null;
+  installing: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (feature: NanobotFeatureInfo) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const name = feature?.display_name || feature?.name || "";
+  return (
+    <Dialog open={Boolean(feature)} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="w-[min(calc(100vw-2rem),24rem)] gap-0 rounded-[28px] border border-white/70 bg-card/95 p-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.20)] backdrop-blur-xl sm:rounded-[28px]"
+      >
+        <DialogHeader className="items-center space-y-0 text-center">
+          <DialogTitle className="text-center text-[20px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
+            {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
+          </DialogTitle>
+          <DialogDescription className="mt-3 max-w-[20rem] text-center text-[14px] leading-6 text-muted-foreground">
+            {tx(
+              "settings.nanobotFeatures.installConfirmDescription",
+              "nanobot will add what {{name}} needs, then turn it on. Continue?",
+              { name },
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-7 !grid grid-cols-1 gap-3 space-x-0 sm:grid-cols-2 sm:space-x-0">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={installing}
+            className="h-11 w-full min-w-0 rounded-full bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+          >
+            {tx("settings.automations.cancel", "Cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => feature && void onConfirm(feature)}
+            disabled={!feature || installing}
+            className="h-11 w-full min-w-0 !whitespace-normal rounded-full px-5 text-center text-[15px] font-semibold"
+          >
+            {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+            {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function isLocalTriggerAutomation(job: SessionAutomationJob | null): boolean {
+  if (!job) return false;
+  return job.kind === "local_trigger"
+    || job.payload.kind === "local_trigger"
+    || job.schedule.kind === "local";
+}
+
+function automationTriggerCommand(job: SessionAutomationJob): string {
+  return job.trigger?.command || job.payload.command || job.payload.message || "";
+}
+
+function automationSummary(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (isLocalTriggerAutomation(job)) {
+    return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
+  }
+  return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+}
+
+function automationDetailText(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  return automationSummary(job, tx);
+}
+
 function automationNeedsAttention(job: SessionAutomationJob): boolean {
   return job.state.last_status === "error";
 }
@@ -4292,6 +4747,7 @@ function automationStatusKey(
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
   if (job.state.last_status === "error") return "failed";
+  if (isLocalTriggerAutomation(job)) return "active";
   if (job.delete_after_run && !job.state.next_run_at_ms && job.state.last_status === "ok") {
     return "completed";
   }
@@ -4355,6 +4811,7 @@ function automationEditDraftError(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
   if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
+  if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
     return tx("settings.automations.validation.messageRequired", "Message is required.");
   }
@@ -4384,6 +4841,10 @@ function automationUpdatePayloadFromDraft(
   job: SessionAutomationJob | null,
 ): AutomationUpdatePayload | string {
   const name = draft.name.trim();
+  if (isLocalTriggerAutomation(job)) {
+    if (!name) return "invalid";
+    return { name };
+  }
   const message = draft.message.trim();
   if (!name || !message) return "invalid";
   const payload: AutomationUpdatePayload = { name, message };
@@ -4443,22 +4904,9 @@ const AUTOMATION_SEARCH_FIELDS = new Set<AutomationSearchField>([
   "status",
 ]);
 
-const AUTOMATION_CHANNEL_LABELS: Record<string, string> = {
+const HOST_AUTOMATION_CHANNEL_LABELS: Record<string, string> = {
   api: "API",
   cli: "CLI",
-  dingtalk: "DingTalk",
-  discord: "Discord",
-  email: "Email",
-  feishu: "Feishu",
-  matrix: "Matrix",
-  msteams: "Microsoft Teams",
-  qq: "QQ",
-  slack: "Slack",
-  telegram: "Telegram",
-  wechat: "WeChat",
-  wecom: "WeCom",
-  weixin: "WeChat",
-  whatsapp: "WhatsApp",
 };
 
 function parseAutomationSearchQuery(query: string): AutomationSearchToken[] {
@@ -4501,7 +4949,7 @@ function automationSearchParts(
   const scheduleParts = automationScheduleSearchParts(job);
   if (field === "id") return [job.id];
   if (field === "name") return [job.name, job.id];
-  if (field === "message") return [job.payload.message];
+  if (field === "message") return [job.payload.message, job.payload.command, job.trigger?.command];
   if (field === "chat") return originParts;
   if (field === "cron" || field === "schedule") return scheduleParts;
   if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
@@ -4509,6 +4957,9 @@ function automationSearchParts(
     job.id,
     job.name,
     job.payload.message,
+    job.payload.command,
+    job.trigger?.command,
+    isLocalTriggerAutomation(job) ? "trigger local" : null,
     ...scheduleParts,
     automationStatusKey(job),
     ...originParts,
@@ -4524,7 +4975,7 @@ function automationOriginSearchParts(job: SessionAutomationJob): Array<string | 
     origin.title,
     origin.preview,
     origin.channel,
-    AUTOMATION_CHANNEL_LABELS[channel],
+    automationChannelDisplayName(channel),
   ];
 }
 
@@ -4661,9 +5112,15 @@ function automationChannelLabel(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
   const key = channel.trim().toLowerCase();
-  return AUTOMATION_CHANNEL_LABELS[key]
-    ? tx(`settings.automations.channels.${key}`, AUTOMATION_CHANNEL_LABELS[key])
+  const displayName = automationChannelDisplayName(key);
+  return displayName
+    ? tx(`settings.automations.channels.${key}`, displayName)
     : channel;
+}
+
+function automationChannelDisplayName(channel: string): string | undefined {
+  const key = channel.trim().toLowerCase();
+  return channelUiPresentation(key)?.displayName ?? HOST_AUTOMATION_CHANNEL_LABELS[key];
 }
 
 function formatAutomationSchedule(
@@ -4697,6 +5154,9 @@ function formatAutomationSchedule(
           tz: job.schedule.tz,
         })
       : tx("settings.automations.schedule.cron", "Cron {{expr}}", { expr: job.schedule.expr });
+  }
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.schedule.local", "Local trigger");
   }
   return tx("settings.automations.schedule.custom", "Custom schedule");
 }
@@ -4752,6 +5212,9 @@ function formatAutomationNext(
 ): string {
   if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
   if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
+  if (isLocalTriggerAutomation(job)) {
+    return tx("settings.automations.next.local", "Waiting for trigger");
+  }
   if (!job.state.next_run_at_ms) return tx("settings.automations.next.none", "No next run");
   return relativeTime(job.state.next_run_at_ms);
 }
@@ -4800,6 +5263,333 @@ function formatAutomationInterval(ms: number, locale: string): string {
   const fallbackUnit = ms < 60_000 ? "second" : "minute";
   const fallbackSize = fallbackUnit === "second" ? 1000 : 60_000;
   return formatAutomationUnit(ms / fallbackSize, fallbackUnit, locale, 1);
+}
+
+function DismissibleStatusMessage({
+  message,
+  isError,
+  onDismiss,
+}: {
+  message: string;
+  isError: boolean;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
+        isError
+          ? "border-destructive/20 bg-destructive/5 text-destructive"
+          : "border-border/55 bg-muted/35 text-muted-foreground",
+      )}
+    >
+      <span className="min-w-0">{message}</span>
+      <button
+        type="button"
+        aria-label={tx("settings.actions.dismiss", "Dismiss")}
+        title={tx("settings.actions.dismiss", "Dismiss")}
+        onClick={onDismiss}
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+          isError
+            ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+            : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
+        )}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function RestartRequiredNotice({
+  message,
+  onRestart,
+  isRestarting,
+}: {
+  message: string;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+      <span>{message}</span>
+      {onRestart ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onRestart}
+          disabled={isRestarting}
+          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
+        >
+          {isRestarting ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function ChannelsSettings({
+  token,
+  nanobotFeatures,
+  loading,
+  query,
+  actionKey,
+  chatAppsDocsUrl,
+  showBrandLogos,
+  error,
+  requiresRestartPending,
+  onQueryChange,
+  onAction,
+  onFeaturesUpdate,
+  onDismissStatus,
+  onRestart,
+  isRestarting,
+}: {
+  token: string;
+  nanobotFeatures: NanobotFeaturesPayload | null;
+  loading: boolean;
+  query: string;
+  actionKey: string | null;
+  chatAppsDocsUrl?: string;
+  showBrandLogos: boolean;
+  error: string | null;
+  requiresRestartPending: boolean;
+  onQueryChange: (value: string) => void;
+  onAction: (action: "enable" | "disable", name: string) => void;
+  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onDismissStatus: () => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const normalizedQuery = query.trim().toLowerCase();
+  const [filter, setFilter] = useState<ChannelFilter>("all");
+  const splitLayout = useMediaQuery("(min-width: 1280px)");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const compactDetailTopRef = useRef<HTMLButtonElement>(null);
+  const [compactDetailOpen, setCompactDetailOpen] = useState(false);
+  const allChannels = (nanobotFeatures?.features ?? [])
+    .filter((feature) => feature.type === "channel")
+    .filter((feature) => feature.settings_visible !== false)
+    .filter((feature) => !normalizedQuery || channelSearchText(feature, t).includes(normalizedQuery))
+    .sort((left, right) => {
+      const rank = Number(!left.ready) - Number(!right.ready);
+      return rank || localizedChannelDisplayName(left, t).localeCompare(
+        localizedChannelDisplayName(right, t),
+      );
+    });
+  const channels = allChannels.filter((feature) => channelMatchesFilter(feature, filter));
+  const [selectedChannelName, setSelectedChannelName] = useState<string | null>(null);
+  const selectedChannel =
+    channels.find((feature) => feature.name === selectedChannelName) ?? channels[0] ?? null;
+  const enabledCount = allChannels.filter(channelIsRunning).length;
+  const offCount = Math.max(0, allChannels.length - enabledCount);
+  const filterOptions: Array<{ value: ChannelFilter; label: string; count: number }> = [
+    { value: "all", label: tx("settings.channels.filterAll", "All"), count: allChannels.length },
+    { value: "on", label: tx("settings.channels.filterOn", "On"), count: enabledCount },
+    { value: "off", label: tx("settings.channels.filterOff", "Off"), count: offCount },
+  ];
+  const statusMessage = error;
+  const statusIsError = true;
+
+  useEffect(() => {
+    if (!channels.length) {
+      if (selectedChannelName !== null) setSelectedChannelName(null);
+      setCompactDetailOpen(false);
+      return;
+    }
+    if (!selectedChannelName || !channels.some((feature) => feature.name === selectedChannelName)) {
+      setSelectedChannelName(channels[0].name);
+      setCompactDetailOpen(false);
+    }
+  }, [channels, selectedChannelName]);
+
+  useEffect(() => {
+    if (splitLayout) return;
+    const resetScroll = () => {
+      let node = containerRef.current?.parentElement ?? null;
+      while (node) {
+        node.scrollTop = 0;
+        node = node.parentElement;
+      }
+      if (compactDetailOpen) {
+        compactDetailTopRef.current?.scrollIntoView?.({ block: "start" });
+      }
+    };
+    resetScroll();
+    const frame = window.requestAnimationFrame(resetScroll);
+    return () => window.cancelAnimationFrame(frame);
+  }, [compactDetailOpen, selectedChannelName, splitLayout]);
+
+  const openChannel = (name: string) => {
+    setSelectedChannelName(name);
+    if (!splitLayout) setCompactDetailOpen(true);
+  };
+
+  const setupPanel = selectedChannel ? (
+    <ChannelSetupPanel
+      token={token}
+      feature={selectedChannel}
+      actionKey={actionKey}
+      chatAppsDocsUrl={chatAppsDocsUrl}
+      showBrandLogos={showBrandLogos}
+      onAction={onAction}
+      onFeaturesUpdate={onFeaturesUpdate}
+    />
+  ) : null;
+  const showingCompactDetail = !splitLayout && compactDetailOpen && selectedChannel !== null;
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex min-h-full flex-1 flex-col xl:min-h-0 xl:overflow-hidden"
+    >
+      {!showingCompactDetail ? (
+        <section className="shrink-0 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
+              {tx(
+                "settings.channels.description",
+                "Connect chat apps, email, and WebUI to nanobot.",
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2 text-[12px] font-medium text-muted-foreground">
+              <span className="rounded-full bg-muted/70 px-2.5 py-1">
+                {t("settings.channels.caption", {
+                  enabled: enabledCount,
+                  total: allChannels.length,
+                  defaultValue: "{{enabled}} enabled · {{total}} channels",
+                })}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                placeholder={tx("settings.channels.searchPlaceholder", "Search channels")}
+                className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
+              />
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-1.5 rounded-[14px] bg-muted/55 p-1">
+              {filterOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setFilter(option.value)}
+                  className={cn(
+                    "rounded-[11px] px-3 py-1.5 text-[12px] font-medium transition-colors",
+                    filter === option.value
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {option.label}
+                  <span className="ml-1 text-[11px] text-muted-foreground">{option.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {statusMessage ? (
+        <div className="mt-3 shrink-0">
+          <DismissibleStatusMessage
+            message={statusMessage}
+            isError={statusIsError}
+            onDismiss={onDismissStatus}
+          />
+        </div>
+      ) : null}
+
+      {requiresRestartPending ? (
+        <div className="mt-3 shrink-0">
+          <RestartRequiredNotice
+            message={tx("settings.channels.restartRequired", "Restart nanobot to apply updated channel support.")}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
+        </div>
+      ) : null}
+
+      <section
+        className={cn(
+          "flex flex-1 flex-col",
+          showingCompactDetail ? "mt-1" : "mt-5",
+          splitLayout && "min-h-0 overflow-hidden",
+        )}
+      >
+        {loading && !nanobotFeatures ? (
+          <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            {tx("settings.channels.loading", "Loading Channels...")}
+          </div>
+        ) : channels.length ? splitLayout ? (
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(400px,460px)] gap-6 overflow-hidden">
+            <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
+              {channels.map((feature) => (
+                <ChannelCatalogRow
+                  key={feature.name}
+                  feature={feature}
+                  selected={selectedChannel?.name === feature.name}
+                  showBrandLogos={showBrandLogos}
+                  onSelect={() => openChannel(feature.name)}
+                />
+              ))}
+            </div>
+            <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">{setupPanel}</div>
+          </div>
+        ) : showingCompactDetail ? (
+          <div className="pb-6">
+            <button
+              ref={compactDetailTopRef}
+              type="button"
+              onClick={() => setCompactDetailOpen(false)}
+              className="mb-4 inline-flex h-9 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+              {tx("settings.channels.backToChannels", "All channels")}
+            </button>
+            {setupPanel}
+          </div>
+        ) : (
+          <div className="space-y-1 pb-6">
+            {channels.map((feature) => (
+              <ChannelCatalogRow
+                key={feature.name}
+                feature={feature}
+                selected={false}
+                showBrandLogos={showBrandLogos}
+                onSelect={() => openChannel(feature.name)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 px-3 py-12 text-center text-sm text-muted-foreground">
+            {tx("settings.channels.empty", "No channels match this filter.")}
+          </div>
+        )}
+      </section>
+
+      <div className={cn("shrink-0 pt-2", showingCompactDetail && "hidden")}>
+        <ThirdPartyBrandNotice />
+      </div>
+    </div>
+  );
 }
 
 function AppsCatalogSettings({
@@ -4872,9 +5662,9 @@ function AppsCatalogSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
-    { value: "all", label: tx("settings.apps.filterAll", "All") },
-    { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
-    { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
+    { value: "ready", label: tx("settings.apps.filterAll", "Ready") },
+    { value: "cli", label: tx("settings.apps.filterCli", "Apps") },
+    { value: "mcp", label: tx("settings.apps.filterMcp", "Integrations") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
   const items: AppsCatalogItem[] = [
@@ -4885,8 +5675,10 @@ function AppsCatalogSettings({
       preset,
     })),
   ]
-    .filter((item) => filter === "all" || item.kind === filter)
-    .filter((item) => !normalizedQuery || appsSearchText(item).includes(normalizedQuery))
+    .filter((item) => {
+      if (normalizedQuery) return appsSearchText(item).includes(normalizedQuery);
+      return filter === "ready" ? appsReady(item) : item.kind === filter;
+    })
     .sort((left, right) => {
       const rank = Number(!appsReady(left)) - Number(!appsReady(right));
       return rank || appsTitle(left).localeCompare(appsTitle(right));
@@ -4894,13 +5686,19 @@ function AppsCatalogSettings({
   const focusedApp = cliFocusName
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
-  const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
-  const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
+  const loading =
+    (cliAppsLoading || mcpPresetsLoading) &&
+    !cliApps &&
+    !mcpPresets;
+  const statusMessage =
+    cliError ||
+    mcpError ||
+    (!focusedApp ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
-  const caption = t("settings.apps.caption", {
-    cli: cliApps?.installed_count ?? 0,
-    mcp: mcpPresets?.installed_count ?? 0,
-    defaultValue: "{{cli}} CLI · {{mcp}} MCP",
+  const readyCount = (cliApps?.installed_count ?? 0) + (mcpPresets?.installed_count ?? 0);
+  const caption = t("settings.apps.enabledSummary", {
+    count: readyCount,
+    defaultValue: "{{count}} ready",
   });
 
   return (
@@ -4910,7 +5708,7 @@ function AppsCatalogSettings({
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
               "settings.apps.description",
-              "Add local app adapters and connected tool servers that nanobot can use from chat.",
+              "Add tools to nanobot, then @ them in chat.",
             )}
           </p>
           <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
@@ -4934,30 +5732,11 @@ function AppsCatalogSettings({
       </section>
 
       {statusMessage ? (
-        <div
-          className={cn(
-            "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
-            statusIsError
-              ? "border-destructive/20 bg-destructive/5 text-destructive"
-              : "border-border/55 bg-muted/35 text-muted-foreground",
-          )}
-        >
-          <span className="min-w-0">{statusMessage}</span>
-          <button
-            type="button"
-            aria-label={tx("settings.actions.dismiss", "Dismiss")}
-            title={tx("settings.actions.dismiss", "Dismiss")}
-            onClick={onDismissStatus}
-            className={cn(
-              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
-              statusIsError
-                ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-                : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
-            )}
-          >
-            <X className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        </div>
+        <DismissibleStatusMessage
+          message={statusMessage}
+          isError={statusIsError}
+          onDismiss={onDismissStatus}
+        />
       ) : null}
 
       {focusedApp ? (
@@ -4965,31 +5744,16 @@ function AppsCatalogSettings({
       ) : null}
 
       {requiresRestartPending ? (
-        <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-          <span>{tx("settings.mcp.restartRequired", "Restart nanobot to connect updated MCP tools.")}</span>
-          {onRestart ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onRestart}
-              disabled={isRestarting}
-              className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
-            >
-              {isRestarting ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              )}
-              {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-            </Button>
-          ) : null}
-        </div>
+        <RestartRequiredNotice
+          message={tx("settings.apps.restartRequired", "Restart nanobot to apply updated apps and features.")}
+          onRestart={onRestart}
+          isRestarting={isRestarting}
+        />
       ) : null}
 
       <section>
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>{tx("settings.apps.featured", "Featured")}</SettingsSectionTitle>
+          <SettingsSectionTitle>{tx("settings.apps.featured", "Tools")}</SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
             {items.length}
           </span>
@@ -5026,12 +5790,12 @@ function AppsCatalogSettings({
           </div>
         ) : (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-            {tx("settings.apps.empty", "No apps match this filter.")}
+            {tx("settings.apps.empty", "No tools match this view.")}
           </div>
         )}
       </section>
 
-      {filter !== "cli" ? (
+      {filter === "mcp" ? (
         <McpCustomServerPanel
           form={customMcpForm}
           configImport={mcpConfigImport}
@@ -5074,7 +5838,7 @@ function CliAppsCatalogRow({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{app.display_name}</h3>
-          <AppsTypeBadge>{tx("settings.apps.cliLabel", "CLI")}</AppsTypeBadge>
+          <AppsTypeBadge>{tx("settings.apps.cliLabel", "App")}</AppsTypeBadge>
         </div>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
       </div>
@@ -5206,7 +5970,7 @@ function McpAppsCatalogRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
-            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "MCP")}</AppsTypeBadge>
+            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "Integration")}</AppsTypeBadge>
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
@@ -5407,7 +6171,7 @@ function McpAppsCatalogRow({
 
 function AppsTypeBadge({ children }: { children: ReactNode }) {
   return (
-    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-[0.06em] text-muted-foreground">
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
       {children}
     </span>
   );
@@ -5485,7 +6249,7 @@ function appsSearchText(item: AppsCatalogItem): string {
     preset.source ?? "",
   ]
     .join(" ")
-    .toLowerCase();
+      .toLowerCase();
 }
 
 function McpCustomServerPanel({
@@ -5531,10 +6295,13 @@ function McpCustomServerPanel({
           </span>
           <div className="min-w-0">
             <h3 className="text-[13px] font-semibold leading-5 text-foreground">
-              {tx("settings.mcp.moreOptions", "More MCP options")}
+              {tx("settings.mcp.moreOptions", "Add integration")}
             </h3>
             <p className="truncate text-[12px] text-muted-foreground">
-              {tx("settings.mcp.moreOptionsSubtitle", "Add a custom server or import mcp.json.")}
+              {tx(
+                "settings.mcp.moreOptionsSubtitle",
+                "Connect a custom tool server or import an existing configuration.",
+              )}
             </p>
           </div>
         </div>
@@ -5740,18 +6507,15 @@ function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string
 }
 
 function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; showBrandLogos: boolean }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const bg = preset.brand_color || "hsl(var(--muted))";
   const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const initials = preset.display_name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || preset.name.slice(0, 2).toUpperCase();
-
-  useEffect(() => setLogoIndex(0), [preset.logo_url]);
 
   if (showBrandLogos && logoUrl) {
     return (
@@ -5762,8 +6526,11 @@ function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; show
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-6 w-6 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -5857,18 +6624,15 @@ function CliAppReadyPanel({
 }
 
 function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: boolean }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const bg = app.brand_color || "hsl(var(--muted))";
   const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
-  const logoUrl = logoUrls[logoIndex];
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const initials = app.display_name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || app.name.slice(0, 2).toUpperCase();
-
-  useEffect(() => setLogoIndex(0), [app.logo_url]);
 
   if (showBrandLogos && logoUrl) {
     return (
@@ -5879,8 +6643,11 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-6 w-6 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -5905,6 +6672,16 @@ function RuntimeSettings({
   onRestart,
   isRestarting,
   requiresRestartPending,
+  apiService,
+  apiServiceLoading,
+  apiServiceAction,
+  apiServiceError,
+  langfuseFeature,
+  capabilitiesLoading,
+  capabilityAction,
+  capabilityError,
+  onApiServiceAction,
+  onInstallCapability,
 }: {
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
@@ -5915,10 +6692,27 @@ function RuntimeSettings({
   onRestart?: () => void;
   isRestarting?: boolean;
   requiresRestartPending: boolean;
+  apiService: ApiServicePayload | null;
+  apiServiceLoading: boolean;
+  apiServiceAction: "start" | "stop" | null;
+  apiServiceError: string | null;
+  langfuseFeature?: NanobotFeatureInfo;
+  capabilitiesLoading: boolean;
+  capabilityAction: string | null;
+  capabilityError: string | null;
+  onApiServiceAction: (
+    action: "start" | "stop",
+    values?: { host: string; port: number; timeout: number; apiKey?: string },
+  ) => void;
+  onInstallCapability: (name: string) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const isNativeHost = getHostApi() !== null || (settings.surface ?? settings.runtime_surface) === "native";
+  const runtimeSurface = settings.surface ?? settings.runtime_surface;
+  const runtimeHost = getRuntimeHost(runtimeSurface, settings.runtime_capabilities);
+  const openLogs = runtimeHost.openLogs;
+  const exportDiagnostics = runtimeHost.exportDiagnostics;
+  const isNativeHost = isNativeRuntime(runtimeSurface);
   const restartActionLabel = isNativeHost
     ? tx("app.system.restartEngine", "Restart engine")
     : t("app.system.restart");
@@ -5932,7 +6726,30 @@ function RuntimeSettings({
   } | null>(null);
   const [hostActionBusy, setHostActionBusy] =
     useState<"logs" | "diagnostics" | null>(null);
-  const hostApi = getHostApi();
+  const apiDefaults = apiService ?? {
+    installed: false,
+    running: false,
+    managed: false,
+    host: settings.api?.host ?? "127.0.0.1",
+    port: settings.api?.port ?? 8900,
+    timeout: settings.api?.timeout ?? 120,
+    api_key_hint: settings.api?.api_key_hint,
+    endpoint: `http://127.0.0.1:${settings.api?.port ?? 8900}/v1`,
+    command: "nanobot serve",
+  };
+  const [apiHost, setApiHost] = useState(apiDefaults.host);
+  const [apiPort, setApiPort] = useState(apiDefaults.port);
+  const [apiKey, setApiKey] = useState("");
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  useEffect(() => {
+    if (!apiService) return;
+    setApiHost(apiService.host);
+    setApiPort(apiService.port);
+    setApiKey("");
+    setApiKeyVisible(false);
+  }, [apiService]);
+  const apiNetworkAccess = !isLoopbackHost(apiHost);
+  const apiMissingNetworkKey = apiNetworkAccess && !apiKey.trim() && !apiDefaults.api_key_hint;
   const engineState = isRestarting
     ? tx("settings.values.restartingEngine", "Restarting")
     : settings.apply_state?.status === "pending"
@@ -5940,11 +6757,11 @@ function RuntimeSettings({
       : tx("settings.values.ready", "Ready");
   const runHostAction = async (
     target: "logs" | "diagnostics",
-    action: () => Promise<string | void>,
+    action: (() => Promise<string | void>) | undefined,
     successMessage: (result: string | void) => string,
     failureMessage: string,
   ) => {
-    if (!hostApi) {
+    if (!action) {
       setHostActionMessage({
         target,
         message: tx(
@@ -6031,7 +6848,7 @@ function RuntimeSettings({
                   onClick={() =>
                     void runHostAction(
                       "logs",
-                      () => hostApi!.openLogs(),
+                      openLogs,
                       () => tx("settings.status.logsOpened", "Opened logs folder."),
                       tx("settings.status.logsOpenFailed", "Could not open logs folder."),
                     )
@@ -6062,11 +6879,11 @@ function RuntimeSettings({
                   onClick={() =>
                     void runHostAction(
                       "diagnostics",
-                      async () => {
-                        const path = await hostApi!.exportDiagnostics();
+                      exportDiagnostics ? async () => {
+                        const path = await exportDiagnostics();
                         setDiagnosticsPath(path);
                         return path;
-                      },
+                      } : undefined,
                       (path) =>
                         t("settings.status.diagnosticsExported", {
                           path: String(path ?? ""),
@@ -6087,6 +6904,171 @@ function RuntimeSettings({
           </SettingsGroup>
         </section>
       ) : null}
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.api.title", "API server")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.api.openaiCompatible", "OpenAI-compatible API")}
+            description={
+              apiServiceError
+                ? apiServiceError
+                : apiDefaults.running
+                  ? apiDefaults.endpoint
+                  : tx("settings.api.description", "Connect SDKs and agents through a local /v1 endpoint.")
+            }
+          >
+            <div className="flex items-center justify-end gap-2">
+              <StatusPill tone={apiDefaults.running ? "success" : "neutral"}>
+                {apiServiceLoading
+                  ? tx("settings.values.checking", "Checking")
+                  : apiDefaults.running
+                    ? tx("settings.values.running", "Running")
+                    : tx("settings.values.off", "Off")}
+              </StatusPill>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={apiServiceLoading || apiServiceAction !== null || apiMissingNetworkKey}
+                onClick={() =>
+                  onApiServiceAction(
+                    apiDefaults.running ? "stop" : "start",
+                    apiDefaults.running
+                      ? undefined
+                      : {
+                          host: apiHost,
+                          port: apiPort,
+                          timeout: apiDefaults.timeout,
+                          apiKey: apiKey.trim() || undefined,
+                        },
+                  )
+                }
+                className="rounded-full"
+              >
+                {apiServiceAction ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : apiDefaults.running ? (
+                  <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                ) : (
+                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                )}
+                {apiServiceAction === "start"
+                  ? tx("settings.api.starting", "Starting...")
+                  : apiServiceAction === "stop"
+                    ? tx("settings.api.stopping", "Stopping...")
+                    : apiDefaults.running
+                      ? tx("settings.api.stop", "Stop")
+                      : tx("settings.api.start", "Start API server")}
+              </Button>
+            </div>
+          </SettingsRow>
+          {!apiDefaults.running ? (
+            <>
+              <SettingsRow
+                title={tx("settings.api.access", "Access")}
+                description={
+                  apiNetworkAccess
+                    ? tx("settings.api.networkHelp", "Other devices can connect; an API key is required.")
+                    : tx("settings.api.localHelp", "Only this device can connect.")
+                }
+              >
+                <SegmentedControl
+                  value={apiNetworkAccess ? "network" : "local"}
+                  options={[
+                    { value: "local", label: tx("settings.api.thisDevice", "This device") },
+                    { value: "network", label: tx("settings.api.localNetwork", "Local network") },
+                  ]}
+                  onChange={(value) => setApiHost(value === "network" ? "0.0.0.0" : "127.0.0.1")}
+                />
+              </SettingsRow>
+              <SettingsRow
+                title={tx("settings.api.port", "Port")}
+                description={tx("settings.api.portHelp", "The API uses this local port.")}
+              >
+                <NumberInput value={apiPort} min={1} max={65535} onChange={setApiPort} />
+              </SettingsRow>
+              {apiNetworkAccess ? (
+                <SettingsRow
+                  title={tx("settings.api.apiKey", "API key")}
+                  description={
+                    apiMissingNetworkKey
+                      ? tx("settings.api.apiKeyRequired", "Required before exposing the API to your network.")
+                      : tx("settings.api.apiKeyHelp", "Clients send this as a Bearer token.")
+                  }
+                >
+                  <div className="relative w-[280px] max-w-full">
+                    <Input
+                      type={apiKeyVisible ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      placeholder={apiDefaults.api_key_hint ?? tx("settings.api.apiKeyPlaceholder", "Enter an API key")}
+                      className="h-9 rounded-full pr-10 text-[13px]"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setApiKeyVisible((visible) => !visible)}
+                      aria-label={apiKeyVisible ? tx("settings.byok.hideApiKey", "Hide API key") : tx("settings.byok.showApiKey", "Show API key")}
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full"
+                    >
+                      {apiKeyVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </SettingsRow>
+              ) : null}
+            </>
+          ) : null}
+        </SettingsGroup>
+        {!apiDefaults.installed && !apiDefaults.running ? (
+          <p className="mt-2 text-[11.5px] text-muted-foreground">
+            {tx("settings.api.autoInstall", "API support will be installed automatically when you start it.")}
+          </p>
+        ) : null}
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.observability.title", "Observability")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title="Langfuse"
+            description={
+              settings.observability?.configured
+                ? tx("settings.observability.configured", "Tracing credentials are available to nanobot.")
+                : tx(
+                    "settings.observability.environment",
+                    "Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY, then restart nanobot.",
+                  )
+            }
+          >
+            {capabilitiesLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+            ) : langfuseFeature?.installed ? (
+              <StatusPill tone={settings.observability?.configured ? "success" : "neutral"}>
+                {settings.observability?.configured
+                  ? tx("settings.values.ready", "Ready")
+                  : tx("settings.values.needsSetup", "Needs setup")}
+              </StatusPill>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={capabilityAction === "enable:langfuse"}
+                onClick={() => onInstallCapability("langfuse")}
+                className="rounded-full"
+              >
+                {capabilityAction === "enable:langfuse" ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : null}
+                {capabilityAction === "enable:langfuse"
+                  ? tx("settings.capabilities.installing", "Installing support...")
+                  : tx("settings.observability.enable", "Enable tracing support")}
+              </Button>
+            )}
+          </SettingsRow>
+        </SettingsGroup>
+        {capabilityError ? <p className="mt-2 text-[12px] text-destructive">{capabilityError}</p> : null}
+      </section>
 
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
@@ -6406,8 +7388,12 @@ function ModelIdPicker({
   const providerRow = settingsProviderRow(settings, effectiveProvider);
   const providerConfigured = settingsProviderConfigured(settings, effectiveProvider);
   const providerRequiresConfiguration = hasConcreteProvider && !providerConfigured;
+  const providerHasBuiltinModels = providerRow?.model_catalog === "builtin";
   const providerUsesManualModelIds =
-    hasConcreteProvider && providerConfigured && providerRow?.auth_type === "oauth";
+    hasConcreteProvider &&
+    providerConfigured &&
+    providerRow?.auth_type === "oauth" &&
+    !providerHasBuiltinModels;
   const canFetchModels =
     hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;
   const normalizedQuery = query.trim().toLowerCase();
@@ -6415,7 +7401,7 @@ function ModelIdPicker({
   const visibleModels = providerModels
     .filter((model) => {
       if (!normalizedQuery) return true;
-      return [model.id, model.label ?? "", model.owned_by ?? ""]
+      return [model.id, model.label ?? "", model.description ?? "", model.owned_by ?? ""]
         .some((field) => field.toLowerCase().includes(normalizedQuery));
     })
     .slice(0, 80);
@@ -6490,8 +7476,17 @@ function ModelIdPicker({
           showBrandLogos={showProviderLogos}
           unconfigured={!providerConfigured}
         />
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {model.label ?? model.id}
+        <span className="min-w-0">
+          <span className="block truncate font-medium text-foreground">
+            {model.label ?? model.id}
+          </span>
+          {model.description || (model.label && model.label !== model.id) ? (
+            <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">
+              {[model.label && model.label !== model.id ? model.id : null, model.description]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ) : null}
         </span>
       </span>
       <span className="ml-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
@@ -6645,12 +7640,9 @@ function ProviderPickerIcon({
   showBrandLogos: boolean;
   unconfigured?: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const logoUrl = brand?.logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [provider]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
 
   if (unconfigured) {
     return (
@@ -6669,14 +7661,17 @@ function ProviderPickerIcon({
       <span
         data-testid={`provider-picker-logo-${provider}`}
         className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${brand.color}22` }}
+        style={{ boxShadow: `inset 0 0 0 1px ${(brand?.color ?? "#6B7280")}22` }}
         aria-hidden
       >
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-3.5 w-3.5 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -6892,6 +7887,7 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   deepseek: Waves,
   zhipu: Grid3X3,
   dashscope: Cloud,
+  modelscope: Layers,
   moonshot: Moon,
   minimax: Zap,
   minimax_anthropic: Brain,
@@ -6932,25 +7928,25 @@ function ProviderIcon({
   provider: string;
   showBrandLogos: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const logoUrl = brand?.logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [provider]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
 
   if (showBrandLogos && logoUrl) {
     return (
       <span
         data-testid={`provider-logo-${provider}`}
         className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${brand.color}22` }}
+        style={{ boxShadow: `inset 0 0 0 1px ${(brand?.color ?? "#6B7280")}22` }}
       >
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-6 w-6 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -6993,11 +7989,8 @@ function OverviewValueLogo({
   provider: string | null | undefined;
   showBrandLogos: boolean;
 }) {
-  const [logoIndex, setLogoIndex] = useState(0);
   const brand = provider ? providerBrand(provider) : null;
-  const logoUrl = brand?.logoUrls[logoIndex];
-
-  useEffect(() => setLogoIndex(0), [provider]);
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
 
   if (!provider || !showBrandLogos || !brand) return null;
 
@@ -7012,8 +8005,11 @@ function OverviewValueLogo({
         <img
           src={logoUrl}
           alt=""
+          decoding="async"
+          loading="lazy"
           className="h-3.5 w-3.5 object-contain"
-          onError={() => setLogoIndex((index) => index + 1)}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
         />
       </span>
     );
@@ -7175,6 +8171,7 @@ function ModelPresetPicker({
               settings={settings}
               draftModel={draftModel}
               draftProvider={draftProvider}
+              useDraft={selectedPreset.is_default}
               forceUnconfigured={selectedPreset?.is_default ? !providerConfigured : undefined}
               showProviderLogos={showProviderLogos}
               compact
@@ -7208,6 +8205,7 @@ function ModelPresetPicker({
                 settings={settings}
                 draftModel={draftModel}
                 draftProvider={draftProvider}
+                useDraft={selected && preset.is_default}
                 showProviderLogos={showProviderLogos}
               />
               {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
@@ -7240,6 +8238,7 @@ function ModelPresetOptionContent({
   settings,
   draftModel,
   draftProvider,
+  useDraft = false,
   forceUnconfigured,
   showProviderLogos,
   compact = false,
@@ -7248,6 +8247,7 @@ function ModelPresetOptionContent({
   settings: SettingsPayload;
   draftModel: string;
   draftProvider: string;
+  useDraft?: boolean;
   forceUnconfigured?: boolean;
   showProviderLogos: boolean;
   compact?: boolean;
@@ -7255,9 +8255,9 @@ function ModelPresetOptionContent({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const provider = modelPresetProviderKey(preset, settings, {
-    draftProvider: preset.is_default ? draftProvider : undefined,
+    draftProvider: preset.is_default && useDraft ? draftProvider : undefined,
   });
-  const model = preset.is_default ? draftModel : preset.model;
+  const model = preset.is_default && useDraft ? draftModel : preset.model;
   const providerName = providerDisplayLabel(settings.providers, provider);
   const providerConfigured =
     forceUnconfigured === undefined
@@ -7325,7 +8325,7 @@ function RestartSettingsFooter({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const isNativeHost = getHostApi() !== null;
+  const isNativeHost = isNativeRuntime();
   const restartLabel = isNativeHost
     ? tx("app.system.restartEngine", "Restart engine")
     : t("app.system.restart");
@@ -7504,45 +8504,6 @@ function SegmentedControl({
         </button>
       ))}
     </div>
-  );
-}
-
-function ToggleButton({
-  checked,
-  onChange,
-  ariaLabel,
-  label,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  ariaLabel?: string;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel ?? label}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full p-[2px]",
-        "transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        checked
-          ? "bg-[#2997FF] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.035)]"
-          : "bg-muted shadow-[inset_0_0_0_1px_rgba(0,0,0,0.035)] hover:bg-muted/80",
-      )}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "h-[18px] w-[18px] rounded-full bg-background shadow-[0_1px_2px_rgba(0,0,0,0.18),0_2px_7px_rgba(0,0,0,0.11)]",
-          "transition-transform duration-200 ease-out",
-          checked ? "translate-x-[16px]" : "translate-x-0",
-        )}
-      />
-      <span className="sr-only">{label}</span>
-    </button>
   );
 }
 

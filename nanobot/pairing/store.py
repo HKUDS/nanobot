@@ -44,9 +44,9 @@ def _load() -> dict[str, Any]:
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
 
-    # Convert approved lists to sets for O(1) lookup
+    # Convert approved lists to str sets for O(1) lookup.
     for channel, users in data.get("approved", {}).items():
-        data["approved"][channel] = set(users)
+        data["approved"][channel] = {str(u) for u in users}
     return data
 
 
@@ -87,7 +87,7 @@ def generate_code(
 
         data.setdefault("pending", {})[code] = {
             "channel": channel,
-            "sender_id": sender_id,
+            "sender_id": str(sender_id),
             "created_at": time.time(),
             "expires_at": time.time() + ttl,
         }
@@ -110,7 +110,7 @@ def approve_code(code: str) -> tuple[str, str] | None:
         if info is None:
             return None
         channel = info["channel"]
-        sender_id = info["sender_id"]
+        sender_id = str(info["sender_id"])
         data.setdefault("approved", {}).setdefault(channel, set()).add(sender_id)
         _save(data)
         logger.info("Approved pairing code {} for {}@{}", code, sender_id, channel)
@@ -162,14 +162,60 @@ def revoke(channel: str, sender_id: str) -> bool:
         data = _load()
         approved: dict[str, set[str]] = data.get("approved", {})
         users = approved.get(channel, set())
-        if sender_id in users:
-            users.discard(sender_id)
+        sid = str(sender_id)
+        if sid in users:
+            users.discard(sid)
             if not users:
                 del approved[channel]
             _save(data)
-            logger.info("Revoked {} from {}", sender_id, channel)
+            logger.info("Revoked {} from {}", sid, channel)
             return True
-        return False
+    return False
+
+
+def revoke_channel(channel: str) -> int:
+    """Remove all approved sender IDs for *channel*.
+
+    Returns the number of approved senders that were removed.
+    """
+    with _LOCK:
+        data = _load()
+        approved: dict[str, set[str]] = data.get("approved", {})
+        users = approved.pop(channel, set())
+        if not users:
+            return 0
+        _save(data)
+        logger.info("Revoked {} approved sender(s) from {}", len(users), channel)
+        return len(users)
+
+
+def clear_channel(channel: str) -> dict[str, int]:
+    """Remove approved senders and pending requests for *channel*."""
+    with _LOCK:
+        data = _load()
+        approved: dict[str, set[str]] = data.get("approved", {})
+        approved_users = approved.pop(channel, set())
+
+        pending: dict[str, Any] = data.get("pending", {})
+        pending_codes = [
+            code
+            for code, info in pending.items()
+            if str(info.get("channel", "")) == channel
+        ]
+        for code in pending_codes:
+            del pending[code]
+
+        if not approved_users and not pending_codes:
+            return {"approved": 0, "pending": 0}
+
+        _save(data)
+        logger.info(
+            "Cleared {} approved sender(s) and {} pending request(s) from {}",
+            len(approved_users),
+            len(pending_codes),
+            channel,
+        )
+        return {"approved": len(approved_users), "pending": len(pending_codes)}
 
 
 def get_approved(channel: str) -> list[str]:
@@ -184,8 +230,8 @@ def format_pairing_reply(code: str) -> str:
     return (
         "Hi there! This assistant only responds to approved users.\n\n"
         f"Your pairing code is: `{code}`\n\n"
-        "To get access, ask the owner to approve this code:\n"
-        f"- In this chat: send `/pairing approve {code}`"
+        "To get access, ask the owner to approve this request in the nanobot WebUI.\n"
+        f"If the WebUI is not available, the owner can also send `/pairing approve {code}`."
     )
 
 

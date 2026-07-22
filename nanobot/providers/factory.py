@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
+from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import create_dynamic_spec, find_by_name
+from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class ProviderSnapshot:
     model: str
     context_window_tokens: int
     signature: tuple[object, ...]
+    generation: GenerationSettings | None = None
 
 
 def _resolve_model_preset(
@@ -26,6 +27,16 @@ def _resolve_model_preset(
     preset: ModelPresetConfig | None = None,
 ) -> ModelPresetConfig:
     return preset if preset is not None else config.resolve_preset(preset_name)
+
+
+def _provider_extra_headers(
+    spec: ProviderSpec | None,
+    provider_config: ProviderConfig | None,
+) -> dict[str, str] | None:
+    headers = dict(spec.default_extra_headers) if spec else {}
+    if provider_config and provider_config.extra_headers:
+        headers.update(provider_config.extra_headers)
+    return headers or None
 
 
 def _make_provider_core(
@@ -44,10 +55,15 @@ def _make_provider_core(
     if provider_name and not spec and p:
         if not p.api_base:
             raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
-        spec = create_dynamic_spec(provider_name)
+        spec = create_dynamic_spec(provider_name, thinking_style=(p.thinking_style or "") if p else "")
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
+    if p and p.proxy and backend not in {"openai_compat", "openai_codex"}:
+        raise ValueError(
+            f"providers.{provider_name}.proxy is only supported for "
+            "OpenAI-compatible providers and OpenAI Codex."
+        )
 
     if backend == "azure_openai":
         if not p or not p.api_base:
@@ -69,7 +85,11 @@ def _make_provider_core(
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
-        provider = OpenAICodexProvider(default_model=model)
+        provider = OpenAICodexProvider(
+            default_model=model,
+            proxy=getattr(p, "proxy", None) if p else None,
+            extra_body=p.extra_body if p else None,
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
@@ -89,7 +109,7 @@ def _make_provider_core(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=_provider_extra_headers(spec, p),
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider
@@ -109,11 +129,12 @@ def _make_provider_core(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p and provider_name == "openai" else "auto",
             extra_query=p.extra_query if p else None,
+            proxy=p.proxy if p else None,
         )
 
     provider.generation = resolved.to_generation_settings()
@@ -191,13 +212,14 @@ def provider_signature(
 
     def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
         fp = config.get_provider(fallback.model, preset=fallback)
+        provider_name = config.get_provider_name(fallback.model, preset=fallback)
         return (
             fallback.model,
             fallback.provider,
-            config.get_provider_name(fallback.model, preset=fallback),
+            provider_name,
             config.get_api_key(fallback.model, preset=fallback),
             config.get_api_base(fallback.model, preset=fallback),
-            fp.extra_headers if fp else None,
+            _provider_extra_headers(find_by_name(provider_name) if provider_name else None, fp),
             fp.extra_body if fp else None,
             fp.api_type if fp else "auto",
             fp.extra_query if fp else None,
@@ -207,15 +229,17 @@ def provider_signature(
             fallback.temperature,
             fallback.reasoning_effort,
             fallback.context_window_tokens,
+            getattr(fp, "proxy", None) if fp else None,
         )
 
+    provider_name = config.get_provider_name(resolved.model, preset=resolved)
     return (
         resolved.model,
         resolved.provider,
-        config.get_provider_name(resolved.model, preset=resolved),
+        provider_name,
         config.get_api_key(resolved.model, preset=resolved),
         config.get_api_base(resolved.model, preset=resolved),
-        p.extra_headers if p else None,
+        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, p),
         p.extra_body if p else None,
         p.api_type if p else "auto",
         p.extra_query if p else None,
@@ -225,6 +249,7 @@ def provider_signature(
         resolved.temperature,
         resolved.reasoning_effort,
         resolved.context_window_tokens,
+        getattr(p, "proxy", None) if p else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 
@@ -245,6 +270,7 @@ def build_provider_snapshot(
         model=resolved.model,
         context_window_tokens=min([resolved.context_window_tokens, *fallback_windows]),
         signature=provider_signature(config, preset=resolved),
+        generation=resolved.to_generation_settings(),
     )
 
 

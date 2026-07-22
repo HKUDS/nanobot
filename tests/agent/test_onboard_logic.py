@@ -8,11 +8,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
-from nanobot.cli.commands import _merge_missing_defaults
 from nanobot.cli.onboard import (
     _BACK_PRESSED,
     _configure_pydantic_model,
@@ -23,18 +21,19 @@ from nanobot.cli.onboard import (
     _input_text,
     run_onboard,
 )
-from nanobot.config.schema import Config
+from nanobot.config.loader import merge_missing_defaults
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.utils.helpers import sync_workspace_templates
 
 
 class TestMergeMissingDefaults:
-    """Tests for _merge_missing_defaults recursive config merging."""
+    """Tests for recursive config default merging."""
 
     def test_adds_missing_top_level_keys(self):
         existing = {"a": 1}
         defaults = {"a": 1, "b": 2, "c": 3}
 
-        result = _merge_missing_defaults(existing, defaults)
+        result = merge_missing_defaults(existing, defaults)
 
         assert result == {"a": 1, "b": 2, "c": 3}
 
@@ -42,7 +41,7 @@ class TestMergeMissingDefaults:
         existing = {"a": "custom_value"}
         defaults = {"a": "default_value"}
 
-        result = _merge_missing_defaults(existing, defaults)
+        result = merge_missing_defaults(existing, defaults)
 
         assert result == {"a": "custom_value"}
 
@@ -64,7 +63,7 @@ class TestMergeMissingDefaults:
             }
         }
 
-        result = _merge_missing_defaults(existing, defaults)
+        result = merge_missing_defaults(existing, defaults)
 
         assert result == {
             "level1": {
@@ -77,19 +76,19 @@ class TestMergeMissingDefaults:
         }
 
     def test_returns_existing_if_not_dict(self):
-        assert _merge_missing_defaults("string", {"a": 1}) == "string"
-        assert _merge_missing_defaults([1, 2, 3], {"a": 1}) == [1, 2, 3]
-        assert _merge_missing_defaults(None, {"a": 1}) is None
-        assert _merge_missing_defaults(42, {"a": 1}) == 42
+        assert merge_missing_defaults("string", {"a": 1}) == "string"
+        assert merge_missing_defaults([1, 2, 3], {"a": 1}) == [1, 2, 3]
+        assert merge_missing_defaults(None, {"a": 1}) is None
+        assert merge_missing_defaults(42, {"a": 1}) == 42
 
     def test_returns_existing_if_defaults_not_dict(self):
-        assert _merge_missing_defaults({"a": 1}, "string") == {"a": 1}
-        assert _merge_missing_defaults({"a": 1}, None) == {"a": 1}
+        assert merge_missing_defaults({"a": 1}, "string") == {"a": 1}
+        assert merge_missing_defaults({"a": 1}, None) == {"a": 1}
 
     def test_handles_empty_dicts(self):
-        assert _merge_missing_defaults({}, {"a": 1}) == {"a": 1}
-        assert _merge_missing_defaults({"a": 1}, {}) == {"a": 1}
-        assert _merge_missing_defaults({}, {}) == {}
+        assert merge_missing_defaults({}, {"a": 1}) == {"a": 1}
+        assert merge_missing_defaults({"a": 1}, {}) == {"a": 1}
+        assert merge_missing_defaults({}, {}) == {}
 
     def test_backfills_channel_config(self):
         """Real-world scenario: backfill missing channel fields."""
@@ -106,7 +105,7 @@ class TestMergeMissingDefaults:
             "allowFrom": [],
         }
 
-        result = _merge_missing_defaults(existing_channel, default_channel)
+        result = merge_missing_defaults(existing_channel, default_channel)
 
         assert result["msgFormat"] == "plain"
         assert result["allowFrom"] == []
@@ -271,14 +270,16 @@ class TestGetFieldDisplayName:
     def test_adds_seconds_suffix(self):
         field_info = SimpleNamespace(description=None)
         name = _get_field_display_name("timeout_s", field_info)
-        # Contains "(Seconds)" with title case
-        assert "(Seconds)" in name or "(seconds)" in name
+        assert "Seconds" in name or "seconds" in name
+        assert "(" not in name
+        assert ")" not in name
 
     def test_adds_ms_suffix(self):
         field_info = SimpleNamespace(description=None)
         name = _get_field_display_name("delay_ms", field_info)
-        # Contains "(Ms)" or "(ms)"
-        assert "(Ms)" in name or "(ms)" in name
+        assert "Ms" in name or "ms" in name
+        assert "(" not in name
+        assert ")" not in name
 
 
 class TestFormatValue:
@@ -374,6 +375,15 @@ class TestSyncWorkspaceTemplates:
 
         assert (workspace / "memory").exists() or (workspace / "skills").exists()
 
+    def test_creates_prompt_readme_without_dream_override(self, tmp_path):
+        workspace = tmp_path / "workspace"
+
+        added = sync_workspace_templates(workspace, silent=True)
+
+        assert "prompts/README.md" in {path.replace("\\", "/") for path in added}
+        assert (workspace / "prompts" / "README.md").exists()
+        assert not (workspace / "prompts" / "dream.md").exists()
+
     def test_returns_list_of_added_files(self, tmp_path):
         """Should return list of relative paths for added files."""
         workspace = tmp_path / "workspace"
@@ -452,9 +462,20 @@ class TestConfigurePydanticModelDrafts:
             onboard_wizard, "_input_with_existing", lambda *_args, **_kwargs: text_value
         )
 
-    def test_discarding_section_keeps_original_model_unchanged(self, monkeypatch):
+    def test_back_commits_section_draft(self, monkeypatch):
         model = _SimpleDraftModel()
         self._patch_prompt_helpers(monkeypatch, ["first", "back"])
+
+        result = _configure_pydantic_model(model, "Simple")
+
+        assert result is not None
+        updated = cast(_SimpleDraftModel, result)
+        assert updated.api_key == "secret"
+        assert model.api_key == ""
+
+    def test_cancel_keeps_original_model_unchanged(self, monkeypatch):
+        model = _SimpleDraftModel()
+        self._patch_prompt_helpers(monkeypatch, ["first", None])
 
         result = _configure_pydantic_model(model, "Simple")
 
@@ -472,7 +493,7 @@ class TestConfigurePydanticModelDrafts:
         assert updated.api_key == "secret"
         assert model.api_key == ""
 
-    def test_nested_section_back_discards_nested_edits(self, monkeypatch):
+    def test_nested_section_back_commits_nested_edits(self, monkeypatch):
         model = _OuterDraftModel()
         self._patch_prompt_helpers(monkeypatch, ["first", "first", "back", "done"])
 
@@ -480,7 +501,7 @@ class TestConfigurePydanticModelDrafts:
 
         assert result is not None
         updated = cast(_OuterDraftModel, result)
-        assert updated.nested.api_key == ""
+        assert updated.nested.api_key == "secret"
         assert model.nested.api_key == ""
 
     def test_nested_section_done_commits_nested_edits(self, monkeypatch):
@@ -501,30 +522,25 @@ class TestRunOnboardExitBehavior:
 
         responses = iter(
             [
+                "[A] Advanced Settings",
                 "[A] Agent Settings",
                 KeyboardInterrupt(),
                 "[X] Exit Without Saving",
             ]
         )
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_configure_general_settings(config, section):
             if section == "Agent Settings":
                 config.agents.defaults.model = "test/provider-model"
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
@@ -656,8 +672,8 @@ class TestValidateFieldConstraint:
 
     def test_real_send_max_retries_field(self):
         """Validate against the actual ChannelsConfig.send_max_retries field."""
-        from nanobot.config.schema import ChannelsConfig
         from nanobot.cli.onboard import _validate_field_constraint
+        from nanobot.config.schema import ChannelsConfig
 
         field_info = ChannelsConfig.model_fields["send_max_retries"]
         assert _validate_field_constraint(3, field_info) is None
@@ -681,7 +697,7 @@ class TestGetConstraintHint:
         assert _get_constraint_hint(field_info) == ""
 
     def test_ge_le_range(self):
-        """Field with ge+le should show '(min-max)'."""
+        """Field with ge+le should show a min-max suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -691,9 +707,11 @@ class TestGetConstraintHint:
         hint = _get_constraint_hint(field_info)
         assert "0" in hint
         assert "10" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
     def test_ge_only(self):
-        """Field with only ge should show '(>= N)'."""
+        """Field with only ge should show a >= suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -703,9 +721,11 @@ class TestGetConstraintHint:
         hint = _get_constraint_hint(field_info)
         assert "0" in hint
         assert ">=" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
     def test_le_only(self):
-        """Field with only le should show '(<= N)'."""
+        """Field with only le should show a <= suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -715,15 +735,19 @@ class TestGetConstraintHint:
         hint = _get_constraint_hint(field_info)
         assert "100" in hint
         assert "<=" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
     def test_real_send_max_retries_hint(self):
-        """Actual ChannelsConfig.send_max_retries should show '(0-10)'."""
+        """Actual ChannelsConfig.send_max_retries should show a 0-10 suffix."""
         from nanobot.config.schema import ChannelsConfig
 
         field_info = ChannelsConfig.model_fields["send_max_retries"]
         hint = _get_constraint_hint(field_info)
         assert "0" in hint
         assert "10" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
 
 class TestInputTextWithValidation:
@@ -838,64 +862,714 @@ class TestApiServerRegistration:
         config = Config()
         from nanobot.config.schema import ApiConfig
 
-        new_api = ApiConfig(host="0.0.0.0", port=9999)
+        new_api = ApiConfig(host="0.0.0.0", port=9999, api_key="secret")
         _SETTINGS_SETTER["API Server"](config, new_api)
         assert config.api.host == "0.0.0.0"
         assert config.api.port == 9999
+        assert config.api.api_key == "secret"
 
 
 class TestMainMenuUpdate:
     """Tests for main menu including new Channel Common and API Server items."""
 
-    def test_main_menu_dispatch_includes_channel_common(self):
-        """Main menu dispatch should route [H] to Channel Common."""
-        from nanobot.cli.onboard import run_onboard
+    def test_choice_viewport_keeps_long_menus_within_terminal_height(self):
+        """Long provider menus should render as a bounded scrolling slice."""
+        assert onboard_wizard._choice_viewport(selected_index=0, total=20, visible_count=5) == (0, 5)
+        assert onboard_wizard._choice_viewport(selected_index=10, total=20, visible_count=5) == (
+            8,
+            13,
+        )
+        assert onboard_wizard._choice_viewport(selected_index=19, total=20, visible_count=5) == (
+            15,
+            20,
+        )
 
-        # We verify by checking the dispatch table is set up correctly
-        # The menu items are defined inline in run_onboard, so we test
-        # that _configure_general_settings handles the new sections.
-        from nanobot.cli.onboard import _SETTINGS_SECTIONS, _SETTINGS_GETTER, _SETTINGS_SETTER
+    def test_choice_viewport_handles_tiny_terminals(self):
+        """A one-row menu is still usable instead of failing as window-too-small."""
+        assert onboard_wizard._choice_viewport(selected_index=3, total=5, visible_count=0) == (3, 4)
 
-        assert "Channel Common" in _SETTINGS_SECTIONS
-        assert "Channel Common" in _SETTINGS_GETTER
-        assert "Channel Common" in _SETTINGS_SETTER
+    def test_main_menu_hides_save_actions_until_needed(self):
+        """The first screen should not show save or summary actions before edits."""
+        from nanobot.cli.onboard import _get_main_menu_choices
 
-    def test_main_menu_dispatch_includes_api_server(self):
-        """Main menu dispatch should route [I] to API Server."""
-        from nanobot.cli.onboard import _SETTINGS_SECTIONS, _SETTINGS_GETTER, _SETTINGS_SETTER
+        clean_choices = _get_main_menu_choices(False)
+        dirty_choices = _get_main_menu_choices(True)
 
-        assert "API Server" in _SETTINGS_SECTIONS
-        assert "API Server" in _SETTINGS_GETTER
-        assert "API Server" in _SETTINGS_SETTER
+        assert clean_choices == [
+            "[Q] Quick Start",
+            "[A] Advanced Settings",
+            "[X] Exit",
+        ]
+        assert "[S] Save and Exit" not in clean_choices
+        assert "[V] View Configuration Summary" not in clean_choices
+        assert "[S] Save and Exit" in dirty_choices
+        assert "[X] Exit Without Saving" in dirty_choices
 
-    def test_run_onboard_channel_common_edit(self, monkeypatch):
-        """run_onboard should handle [H] Channel Common correctly."""
+    def test_run_onboard_quick_start_edit(self, monkeypatch):
+        """run_onboard should route [Q] to Quick Start."""
         initial_config = Config()
 
         responses = iter([
-            "[H] Channel Common",
-            KeyboardInterrupt(),
-            "[S] Save and Exit",
+            "[Q] Quick Start",
         ])
+
+        def fake_select_with_back(*_args, **_kwargs):
+            return next(responses)
+
+        def fake_quick_start(config):
+            config.agents.defaults.bot_name = "quickbot"
+            return True
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
+        monkeypatch.setattr(onboard_wizard, "_configure_quick_start", fake_quick_start)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is True
+        assert result.config.agents.defaults.bot_name == "quickbot"
+
+    def test_main_menu_default_resets_after_returning_from_advanced(self, monkeypatch):
+        """Returning from Advanced should not leave its item visually selected."""
+        initial_config = Config()
+        responses = iter([
+            "[A] Advanced Settings",
+            "<- Back",
+            "[X] Exit",
+        ])
+        main_defaults: list[str | None] = []
+
+        def fake_select_with_back(prompt, _choices, default=None):
+            if prompt == "What would you like to do?":
+                main_defaults.append(default)
+            return next(responses)
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is False
+        assert main_defaults == [None, None]
+
+    def test_ask_prompt_shortens_escape_timeout(self):
+        """Questionary text prompts should not wait the default timeout on Escape."""
+
+        class FakePrompt:
+            def __init__(self):
+                self.application = SimpleNamespace(ttimeoutlen=0.5, timeoutlen=1.0)
+
+            def ask(self):
+                return "ok"
+
+        prompt = FakePrompt()
+
+        assert onboard_wizard._ask_prompt(prompt) == "ok"
+        assert prompt.application.ttimeoutlen == onboard_wizard._PROMPT_ESCAPE_TIMEOUT_SECONDS
+        assert prompt.application.timeoutlen == onboard_wizard._PROMPT_ESCAPE_TIMEOUT_SECONDS
+
+    def test_quick_start_provider_choices_include_all_chat_providers(self):
+        """Quick Start should be driven by the provider registry, not a short allowlist."""
+        from nanobot.providers.registry import PROVIDERS
+
+        choices = onboard_wizard._get_quick_start_provider_choices()
+        selected_provider_names = set(choices.values())
+        expected_provider_names = set()
+        seen_display_names: set[str] = set()
+        for spec in PROVIDERS:
+            if spec.name == "custom" or spec.is_oauth or spec.is_transcription_only:
+                continue
+            if spec.display_name in seen_display_names:
+                continue
+            seen_display_names.add(spec.display_name)
+            expected_provider_names.add(spec.name)
+        expected_provider_names.add("custom")
+
+        assert selected_provider_names == expected_provider_names
+        assert "assemblyai" not in selected_provider_names
+        assert choices["OpenCode Zen"] == "opencode"
+        assert choices[onboard_wizard._QUICK_START_CUSTOM_PROVIDER_CHOICE] == "custom"
+
+    def test_quick_start_provider_choice_skips_advanced_prompts(self, monkeypatch):
+        """The beginner path should ask for provider credentials and model."""
+        config = Config()
+
+        def fail_websocket_config(*_args, **_kwargs):
+            raise AssertionError("Quick Start should not open WebSocket settings")
+
+        pause_messages: list[str] = []
 
         class FakePrompt:
             def __init__(self, response):
                 self.response = response
 
             def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
                 return self.response
 
+        monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-ds-test")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "deepseek-v4-flash",
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(
+                confirm=lambda *a, **kw: FakePrompt(True),
+                password=lambda *a, **kw: FakePrompt("webui-secret"),
+            ),
+        )
+        monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_websocket_config)
+        monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": pause_messages.append(message))
+
+        assert onboard_wizard._configure_quick_start(config) is True
+
+        assert pause_messages == ["Press Enter to save and exit..."]
+        assert config.providers.deepseek.api_key == "sk-ds-test"
+        assert config.providers.deepseek.api_base == "https://api.deepseek.com"
+        assert config.agents.defaults.model_preset == "primary"
+        assert config.model_presets["primary"].provider == "deepseek"
+        assert config.model_presets["primary"].model == "deepseek-v4-flash"
+        websocket = getattr(config.channels, "websocket")
+        assert websocket["enabled"] is True
+        assert websocket["websocketRequiresToken"] is True
+        assert websocket["tokenIssueSecret"] == "webui-secret"
+
+    def test_quick_start_provider_menu_escape_returns_back(self, monkeypatch):
+        """Esc from the first Quick Start menu should return to the main menu."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_select_with_back",
+            lambda *a, **kw: onboard_wizard._BACK_PRESSED,
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is onboard_wizard._BACK_PRESSED
+        assert "primary" not in config.model_presets
+
+    def test_quick_start_provider_back_skips_pause(self, monkeypatch):
+        """Returning from Quick Start should not require an extra Enter key press."""
+        config = Config()
+        pause_messages: list[str] = []
+
+        def fail_websocket_defaults(*_args, **_kwargs):
+            raise AssertionError("Back navigation should not continue Quick Start")
+
+        monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_configure_quick_start_provider",
+            lambda *_args: onboard_wizard._BACK_PRESSED,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_enable_quick_start_websocket_defaults",
+            fail_websocket_defaults,
+        )
+        monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": pause_messages.append(message))
+
+        assert onboard_wizard._configure_quick_start(config) is False
+        assert pause_messages == []
+
+    def test_quick_start_websocket_decline_rolls_back_provider_defaults(self, monkeypatch):
+        """A failed WebSocket step should not leave saveable Quick Start defaults behind."""
+        config = Config()
+        original = config.model_dump(by_alias=True)
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-ds-test")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "deepseek-v4-flash",
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(confirm=lambda *a, **kw: FakePrompt(False)),
+        )
+        monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": None)
+
+        assert onboard_wizard._configure_quick_start(config) is False
+
+        assert config.model_dump(by_alias=True) == original
+        assert getattr(config.channels, "websocket", None) is None
+
+    def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
+        """Known providers should ask users for the model instead of fetching one."""
+        config = Config()
+        model_prompts: list[tuple[str, str, str]] = []
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenRouter")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-or-test")
+
+        def fake_model_input(prompt, current, provider):
+            model_prompts.append((prompt, current, provider))
+            return "openai/gpt-4o-mini"
+
+        monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", fake_model_input)
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert model_prompts == [("Model ID", "", "openrouter")]
+        assert config.providers.openrouter.api_key == "sk-or-test"
+        assert config.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+        assert config.model_presets["primary"].provider == "openrouter"
+        assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
+
+    def test_quick_start_local_provider_skips_api_key(self, monkeypatch):
+        """Local providers should only need a model when they have a default base URL."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "Ollama")
+
+        def fail_text_input(*_args, **_kwargs):
+            raise AssertionError("Ollama Quick Start should not require an API key")
+
+        monkeypatch.setattr(onboard_wizard, "_input_text", fail_text_input)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "llama3.2",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.ollama.api_key is None
+        assert config.providers.ollama.api_base == "http://localhost:11434/v1"
+        assert config.model_presets["primary"].provider == "ollama"
+        assert config.model_presets["primary"].model == "llama3.2"
+
+    def test_quick_start_openai_stores_key_and_model_without_base(self, monkeypatch):
+        """OpenAI should support key-only setup without storing a default base URL."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenAI")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-openai-test")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "gpt-4o-mini",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.openai.api_key == "sk-openai-test"
+        assert config.providers.openai.api_base is None
+        assert config.model_presets["primary"].provider == "openai"
+        assert config.model_presets["primary"].model == "gpt-4o-mini"
+
+    def test_quick_start_api_key_escape_returns_to_provider_choice(self, monkeypatch):
+        """Esc from an API-key prompt should go back to provider selection."""
+        config = Config()
+        provider_answers = iter(["DeepSeek", "OpenAI"])
+        api_key_answers = iter([onboard_wizard._BACK_PRESSED, "sk-openai-test"])
+        selected_providers: list[str] = []
+
         def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+            selected = next(provider_answers)
+            selected_providers.append(selected)
+            return selected
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: next(api_key_answers))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "gpt-4o-mini",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert selected_providers == ["DeepSeek", "OpenAI"]
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.openai.api_key == "sk-openai-test"
+        assert config.model_presets["primary"].provider == "openai"
+
+    def test_quick_start_zhipu_coding_plan_uses_coding_base_url(self, monkeypatch):
+        """Zhipu Coding Plan should not use the standard Zhipu base URL."""
+        config = Config()
+        choices = iter(["Zhipu AI", "Coding Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "zhipu-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "glm-4.6",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.zhipu.api_key == "zhipu-key"
+        assert config.providers.zhipu.api_base == "https://open.bigmodel.cn/api/coding/paas/v4"
+        assert config.model_presets["primary"].provider == "zhipu"
+        assert config.model_presets["primary"].model == "glm-4.6"
+
+    def test_quick_start_minimax_mainland_token_plan_uses_mainland_base_url(self, monkeypatch):
+        """MiniMax mainland token plan should not use the global MiniMax base URL."""
+        config = Config()
+        choices = iter(["MiniMax", "Mainland China Token Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "minimax-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "MiniMax-M2",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.minimax.api_key == "minimax-key"
+        assert config.providers.minimax.api_base == "https://api.minimaxi.com/v1"
+        assert config.model_presets["primary"].provider == "minimax"
+        assert config.model_presets["primary"].model == "MiniMax-M2"
+
+    def test_quick_start_stepfun_step_plan_uses_plan_base_url(self, monkeypatch):
+        """StepFun Step Plan should not use the standard StepFun base URL."""
+        config = Config()
+        choices = iter(["Step Fun", "Step Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "stepfun-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "step-3.5-flash",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.stepfun.api_key == "stepfun-key"
+        assert config.providers.stepfun.api_base == "https://api.stepfun.ai/step_plan/v1"
+        assert config.model_presets["primary"].provider == "stepfun"
+        assert config.model_presets["primary"].model == "step-3.5-flash"
+
+    def test_quick_start_xiaomi_mimo_token_plan_uses_token_plan_base_url(self, monkeypatch):
+        """Xiaomi MiMo Token Plan should not use the standard MiMo base URL."""
+        config = Config()
+        choices = iter(["Xiaomi MIMO", "Token Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "mimo-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "mimo-v2.5-pro",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.xiaomi_mimo.api_key == "mimo-key"
+        assert config.providers.xiaomi_mimo.api_base == "https://token-plan-sgp.xiaomimimo.com/v1"
+        assert config.model_presets["primary"].provider == "xiaomi_mimo"
+        assert config.model_presets["primary"].model == "mimo-v2.5-pro"
+
+    def test_quick_start_custom_base_url_asks_for_model_id(self, monkeypatch):
+        """Custom providers should ask for base URL and model ID."""
+        config = Config()
+        text_answers = iter(["sk-custom-test", "https://api.example.test/v1"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_select_with_back",
+            lambda *a, **kw: onboard_wizard._QUICK_START_CUSTOM_PROVIDER_CHOICE,
+        )
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: next(text_answers))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "custom-model",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.custom.api_key == "sk-custom-test"
+        assert config.providers.custom.api_base == "https://api.example.test/v1"
+        assert config.model_presets["primary"].provider == "custom"
+        assert config.model_presets["primary"].model == "custom-model"
+
+    def test_quick_start_provider_without_default_base_url_prompts_for_base(self, monkeypatch):
+        """Providers that require an endpoint should ask for a base URL in Quick Start."""
+        config = Config()
+        text_answers = iter(["azure-key", "https://azure.example.test/openai"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "Azure OpenAI")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: next(text_answers))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "deployment-name",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.azure_openai.api_key == "azure-key"
+        assert config.providers.azure_openai.api_base == "https://azure.example.test/openai"
+        assert config.model_presets["primary"].provider == "azure_openai"
+        assert config.model_presets["primary"].model == "deployment-name"
+
+    def test_quick_start_websocket_step_explains_channel_enablement(self, monkeypatch):
+        """Quick Start should confirm and protect WebSocket for WebUI."""
+        config = Config()
+        messages: list[str] = []
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda message="", *a, **kw: messages.append(str(message)))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(
+                confirm=lambda *a, **kw: FakePrompt(True),
+                password=lambda *a, **kw: FakePrompt("webui-secret"),
+            ),
+        )
+
+        assert onboard_wizard._enable_quick_start_websocket_defaults(config) is True
+
+        assert any("WebSocket channel" in message for message in messages)
+        assert any("http://127.0.0.1:8765" in message for message in messages)
+        websocket = getattr(config.channels, "websocket")
+        assert websocket["enabled"] is True
+        assert websocket["websocketRequiresToken"] is True
+        assert websocket["tokenIssueSecret"] == "webui-secret"
+
+    def test_quick_start_websocket_step_can_be_declined(self, monkeypatch):
+        """Declining WebSocket should stop Quick Start before changing channel config."""
+        config = Config()
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(confirm=lambda *a, **kw: FakePrompt(False)),
+        )
+
+        assert onboard_wizard._enable_quick_start_websocket_defaults(config) is False
+        assert getattr(config.channels, "websocket", None) is None
+
+    def test_quick_start_websocket_requires_password(self, monkeypatch):
+        """Accepting WebSocket with an empty password should not enable the channel."""
+        config = Config()
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(
+                confirm=lambda *a, **kw: FakePrompt(True),
+                password=lambda *a, **kw: FakePrompt(""),
+            ),
+        )
+
+        assert onboard_wizard._enable_quick_start_websocket_defaults(config) is False
+        assert getattr(config.channels, "websocket", None) is None
+
+    def test_quick_start_requires_api_key_before_setting_defaults(self, monkeypatch):
+        """Quick Start should not create a ready-looking config without an API key."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "")
+
+        assert onboard_wizard._configure_quick_start_provider(config) is False
+
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.deepseek.api_base is None
+        assert config.providers.custom.api_key is None
+        assert config.providers.custom.api_base is None
+        assert "primary" not in config.model_presets
+
+    def test_quick_start_requires_model_id_before_setting_defaults(self, monkeypatch):
+        """Quick Start should not create a preset without an explicit model ID."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-ds-test")
+        monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", lambda *a, **kw: "")
+
+        assert onboard_wizard._configure_quick_start_provider(config) is False
+
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.deepseek.api_base is None
+        assert "primary" not in config.model_presets
+
+    def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):
+        """Quick Start summary should retain the missing-key status."""
+        config = Config()
+        config.model_presets["primary"] = ModelPresetConfig(
+            model="deepseek-v4-flash",
+            provider="deepseek",
+        )
+
+        captured: dict[str, list[tuple[str, str]]] = {}
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_print_summary_panel",
+            lambda rows, _title: captured.setdefault("rows", rows),
+        )
+
+        onboard_wizard._show_quick_start_summary(config)
+
+        rows = dict(captured["rows"])
+        assert rows["Status"] == "DeepSeek API key missing"
+        assert rows["WebSocket channel"] == "enabled"
+
+    def test_configure_login_channel_defaults_to_login(self, monkeypatch):
+        """The channel wizard should start login before exposing advanced fields."""
+        from nanobot.channels.base import BaseChannel
+
+        config = Config()
+        calls: dict[str, Any] = {}
+
+        class LoginConfig(BaseModel):
+            enabled: bool = False
+
+        class LoginChannel(BaseChannel):
+            name = "loginchat"
+            display_name = "Login Chat"
+
+            async def login(self, force: bool = False) -> bool:
+                calls["force"] = force
+                return True
+
+            async def start(self) -> None:
+                pass
+
+            async def stop(self) -> None:
+                pass
+
+            async def send(self, msg) -> None:
+                pass
+
+        def fail_configure(*_args, **_kwargs):
+            raise AssertionError("Default action should run login, not open advanced fields")
+
+        monkeypatch.setattr(onboard_wizard, "_get_channel_names", lambda: {"loginchat": "Login Chat"})
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_channel_config_class",
+            lambda channel: LoginConfig if channel == "loginchat" else None,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_channel_class",
+            lambda channel: LoginChannel if channel == "loginchat" else None,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_select_with_back",
+            lambda *_args, **_kwargs: onboard_wizard._CHANNEL_LOGIN_CHOICE,
+        )
+        monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_configure)
+
+        onboard_wizard._configure_channel(config, "loginchat")
+
+        loginchat = getattr(config.channels, "loginchat")
+        assert loginchat["enabled"] is True
+        assert calls == {"force": False}
+
+    def test_main_menu_dispatch_includes_channel_common(self):
+        """Advanced menu dispatch should route [H] to Channel Common."""
+
+        # We verify by checking the dispatch table is set up correctly
+        # The menu items are defined inline in run_onboard, so we test
+        # that _configure_general_settings handles the new sections.
+        from nanobot.cli.onboard import _SETTINGS_GETTER, _SETTINGS_SECTIONS, _SETTINGS_SETTER
+
+        assert "Channel Common" in _SETTINGS_SECTIONS
+        assert "Channel Common" in _SETTINGS_GETTER
+        assert "Channel Common" in _SETTINGS_SETTER
+
+    def test_main_menu_dispatch_includes_api_server(self):
+        """Advanced menu dispatch should route [I] to API Server."""
+        from nanobot.cli.onboard import _SETTINGS_GETTER, _SETTINGS_SECTIONS, _SETTINGS_SETTER
+
+        assert "API Server" in _SETTINGS_SECTIONS
+        assert "API Server" in _SETTINGS_GETTER
+        assert "API Server" in _SETTINGS_SETTER
+
+    def test_run_onboard_channel_common_edit(self, monkeypatch):
+        """run_onboard should handle [H] Channel Common through Advanced Settings."""
+        initial_config = Config()
+
+        responses = iter([
+            "[A] Advanced Settings",
+            "[H] Channel Common",
+            KeyboardInterrupt(),
+            "[S] Save and Exit",
+        ])
+
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_configure_general_settings(config, section):
             if section == "Channel Common":
                 config.channels.send_tool_hints = True
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
@@ -904,33 +1578,28 @@ class TestMainMenuUpdate:
         assert result.config.channels.send_tool_hints is True
 
     def test_run_onboard_api_server_edit(self, monkeypatch):
-        """run_onboard should handle [I] API Server correctly."""
+        """run_onboard should handle [I] API Server through Advanced Settings."""
         initial_config = Config()
 
         responses = iter([
+            "[A] Advanced Settings",
             "[I] API Server",
             KeyboardInterrupt(),
             "[S] Save and Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_configure_general_settings(config, section):
             if section == "API Server":
                 config.api.port = 9999
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
@@ -939,32 +1608,28 @@ class TestMainMenuUpdate:
         assert result.config.api.port == 9999
 
     def test_view_summary_calls_pause(self, monkeypatch):
-        """[V] View Summary should pause before returning to main menu."""
+        """Advanced [V] View Summary should pause before returning to the menu."""
         initial_config = Config()
         pause_called = {"n": 0}
 
         responses = iter([
+            "[A] Advanced Settings",
             "[V] View Configuration Summary",
-            "[S] Save and Exit",
+            KeyboardInterrupt(),
+            "[X] Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_pause():
             pause_called["n"] += 1
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         # _pause is called inside _show_summary, so we patch it there
         monkeypatch.setattr(onboard_wizard, "_pause", fake_pause)
         # Suppress summary output but still call _pause
@@ -974,7 +1639,7 @@ class TestMainMenuUpdate:
 
         result = run_onboard(initial_config=initial_config)
 
-        assert result.should_save is True
+        assert result.should_save is False
         assert pause_called["n"] == 1
 
 
@@ -1003,6 +1668,19 @@ class TestInputTextEmptyString:
         result = _input_text("Name", "old", "str")
         assert result is None
 
+    def test_escape_returns_back_pressed(self, monkeypatch):
+        """_input_text should preserve the local back sentinel."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(
+                text=lambda *a, **kw: SimpleNamespace(ask=lambda: onboard_wizard._BACK_PRESSED)
+            ),
+        )
+
+        result = _input_text("Name", "old", "str")
+        assert result is onboard_wizard._BACK_PRESSED
+
 
 class TestIsStrOrNone:
     """Tests for _is_str_or_none helper."""
@@ -1014,6 +1692,7 @@ class TestIsStrOrNone:
 
     def test_optional_str_true(self):
         from typing import Optional
+
         from nanobot.cli.onboard import _is_str_or_none
 
         assert _is_str_or_none(Optional[str]) is True
@@ -1035,7 +1714,7 @@ class TestConfigurePydanticModelEmptyString:
     def test_optional_str_empty_string_becomes_none(self, monkeypatch):
         """Entering '' for an optional str field should set it to None."""
         from pydantic import BaseModel
-        from nanobot.cli.onboard import _is_str_or_none
+
 
         class M(BaseModel):
             api_key: str | None = None
@@ -1130,12 +1809,7 @@ class TestModelPresetWizard:
                 self.response = response
 
             def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
                 return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
 
         def fake_text(*_args, **_kwargs):
             return FakePrompt(next(responses))
@@ -1147,9 +1821,7 @@ class TestModelPresetWizard:
             return next(responses)
 
         monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
-        monkeypatch.setattr(
-            onboard_wizard, "questionary", SimpleNamespace(select=fake_select, text=fake_text)
-        )
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(text=fake_text))
         monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fake_configure)
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
         monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None))
@@ -1167,12 +1839,12 @@ class TestModelPresetWizard:
         from nanobot.config.schema import ModelPresetConfig
 
         config = Config()
-        config.model_presets["old"] = ModelPresetConfig(model="x")
+        config.model_presets["old - preset"] = ModelPresetConfig(model="x")
         _MODEL_PRESET_CACHE.clear()
-        _MODEL_PRESET_CACHE.update({"old", "default"})
+        _MODEL_PRESET_CACHE.update({"old - preset", "default"})
 
         responses = iter([
-            "old (x)",
+            "old - preset - x",
             "Delete",
             True,
             "<- Back",
@@ -1205,8 +1877,8 @@ class TestModelPresetWizard:
 
         _configure_model_presets(config)
 
-        assert "old" not in config.model_presets
-        assert "old" not in _MODEL_PRESET_CACHE
+        assert "old - preset" not in config.model_presets
+        assert "old - preset" not in _MODEL_PRESET_CACHE
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_field_handler(self, monkeypatch):
@@ -1225,14 +1897,18 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_field_handler_clear(self, monkeypatch):
-        """_handle_model_preset_field should clear preset when (clear/unset) chosen."""
-        from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _handle_model_preset_field
+        """_handle_model_preset_field should clear preset when Clear value is chosen."""
+        from nanobot.cli.onboard import (
+            _CLEAR_CHOICE,
+            _MODEL_PRESET_CACHE,
+            _handle_model_preset_field,
+        )
         from nanobot.config.schema import AgentDefaults
 
         _MODEL_PRESET_CACHE.clear()
         _MODEL_PRESET_CACHE.add("fast")
 
-        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "(clear/unset)")
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: _CLEAR_CHOICE)
 
         defaults = AgentDefaults(model_preset="fast")
         _handle_model_preset_field(defaults, "model_preset", "Model Preset", "fast")
@@ -1246,27 +1922,23 @@ class TestModelPresetWizard:
         assert callable(_configure_model_presets)
 
     def test_run_onboard_model_presets_edit(self, monkeypatch):
-        """run_onboard should handle [M] Model Presets correctly."""
+        """run_onboard should handle [M] Model Presets through Advanced Settings."""
         from nanobot.config.schema import ModelPresetConfig
 
         initial_config = Config()
 
         responses = iter([
+            "[A] Advanced Settings",
             "[M] Model Presets",
+            KeyboardInterrupt(),
             "[S] Save and Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         preset_mutated = {"n": 0}
 
@@ -1274,7 +1946,7 @@ class TestModelPresetWizard:
             preset_mutated["n"] += 1
             config.model_presets["test"] = ModelPresetConfig(model="gpt-test")
 
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_model_presets", fake_configure_model_presets)
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
@@ -1333,3 +2005,27 @@ class TestModelPresetWizard:
         defaults = AgentDefaults()
         _handle_provider_field(defaults, "provider", "Provider", "auto")
         assert defaults.provider == "anthropic"
+
+    def test_search_provider_field_handler(self, monkeypatch):
+        """_handle_search_provider_field should set the search engine from choices."""
+        from nanobot.agent.tools.web import WebSearchConfig
+        from nanobot.cli.onboard import _handle_search_provider_field
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "keenable")
+
+        cfg = WebSearchConfig()
+        _handle_search_provider_field(cfg, "provider", "Provider", "duckduckgo")
+        assert cfg.provider == "keenable"
+
+    def test_provider_field_dispatch_is_model_type_aware(self):
+        """WebSearchConfig.provider must not be hijacked by the LLM provider handler."""
+        from nanobot.agent.tools.web import WebSearchConfig
+        from nanobot.cli.onboard import (
+            _handle_provider_field,
+            _handle_search_provider_field,
+            _resolve_field_handler,
+        )
+        from nanobot.config.schema import AgentDefaults
+
+        assert _resolve_field_handler(WebSearchConfig(), "provider") is _handle_search_provider_field
+        assert _resolve_field_handler(AgentDefaults(), "provider") is _handle_provider_field

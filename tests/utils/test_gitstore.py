@@ -2,11 +2,12 @@
 
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from nanobot.utils.gitstore import GitStore
+from nanobot.utils.gitstore import GitStore, GitStoreError
 
 
 @pytest.fixture
@@ -62,11 +63,13 @@ class TestLineAges:
         assert len(ages) == 2
         assert all(a.age_days == 30 for a in ages)
 
-    def test_annotate_failure_returns_empty(self, tmp_path):
-        """If annotate fails, line_ages should return [] gracefully."""
-        git = GitStore(tmp_path, tracked_files=["MEMORY.md"])
-        # Don't init — annotate will fail
-        assert git.line_ages("MEMORY.md") == []
+    def test_annotate_failure_is_explicit(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("important\n", encoding="utf-8")
+        git.auto_commit("initial")
+
+        with patch("dulwich.porcelain.annotate", side_effect=OSError("broken repo")):
+            with pytest.raises(GitStoreError, match="annotation failed"):
+                git.line_ages("MEMORY.md")
 
     def test_partial_edit_only_updates_changed_lines(self, git, tmp_path):
         """Only modified lines should reflect the new commit's timestamp."""
@@ -96,6 +99,51 @@ class TestLineAges:
         age_by_line = {line: age.age_days for line, age in zip(lines, ages, strict=True)}
         assert age_by_line["- new"] == 0
         assert age_by_line["- keep"] == 30
+
+
+class TestSummarizeWorkingTree:
+    """Ground-truth diff summary used to keep Dream audit records honest."""
+
+    def test_empty_when_not_initialized(self, tmp_path):
+        git = GitStore(tmp_path, tracked_files=["MEMORY.md"])
+        assert git.summarize_working_tree(["MEMORY.md"]) == ""
+
+    def test_empty_when_no_changes(self, git):
+        assert git.summarize_working_tree(["MEMORY.md", "SOUL.md"]) == ""
+
+    def test_summarizes_real_change(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("# Memory\n- new fact\n", encoding="utf-8")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: +2 -0" in summary
+        assert "new fact" in summary
+        assert "1 file changed, 2 insertions(+), 0 deletions(-)" in summary
+
+    def test_only_reports_requested_paths(self, git, tmp_path):
+        # MEMORY.md changes, but we only ask about the unchanged SOUL.md.
+        (tmp_path / "MEMORY.md").write_text("changed\n", encoding="utf-8")
+        assert git.summarize_working_tree(["SOUL.md"]) == ""
+
+    def test_counts_additions_and_removals(self, git, tmp_path):
+        (tmp_path / "MEMORY.md").write_text("# M\n- keep\n- new\n", encoding="utf-8")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: +3 -0" in summary
+
+    def test_detects_deletion(self, git, tmp_path):
+        # File removed from the working tree (must have content first; the
+        # fixture's tracked files start empty, so an empty-file delete is a no-op).
+        (tmp_path / "MEMORY.md").write_text("has content\n", encoding="utf-8")
+        git.auto_commit("add content")
+        (tmp_path / "MEMORY.md").unlink()
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert summary  # a removal is still a change
+        assert "deletion" in summary
+
+    def test_non_utf8_file_marked_binary_without_replacement_chars(self, git, tmp_path):
+        # Invalid UTF-8 must not leak replacement chars into the audit record.
+        (tmp_path / "MEMORY.md").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x01")
+        summary = git.summarize_working_tree(["MEMORY.md"])
+        assert "MEMORY.md: binary or non-UTF-8 file changed" in summary
+        assert "\ufffd" not in summary  # no U+FFFD replacement chars leaked
 
 
 class TestNestedRepoProtection:
@@ -179,6 +227,48 @@ class TestNestedRepoProtection:
 
         assert result is True
         assert (workspace / ".git").is_dir()
+
+    def test_staging_paths_are_absolute_from_workspace(self, tmp_path, monkeypatch):
+        """Git operations should not depend on the process working directory."""
+        from dulwich import porcelain
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        git = GitStore(workspace, tracked_files=["MEMORY.md"])
+
+        with patch.object(porcelain, "add", wraps=porcelain.add) as mock_add:
+            assert git.init() is True
+            assert len(git.log()) == 1
+
+            (workspace / "MEMORY.md").write_text("updated\n", encoding="utf-8")
+            assert git.auto_commit("update memory") is not None
+            assert len(git.log()) == 2
+
+        assert len(mock_add.call_args_list) == 2
+        for call in mock_add.call_args_list:
+            staging_paths = [Path(path) for path in call.kwargs["paths"]]
+            assert all(path.is_absolute() for path in staging_paths)
+            assert all(path.is_relative_to(workspace) for path in staging_paths)
+
+    def test_staging_paths_preserve_symlinks(self, tmp_path):
+        """Absolute staging paths should still identify the tracked symlink itself."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        target = tmp_path / "shared-memory.md"
+        target.write_text("shared\n", encoding="utf-8")
+        link = workspace / "MEMORY.md"
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+
+        git = GitStore(workspace, tracked_files=["MEMORY.md"])
+
+        staging_path = Path(git._staging_paths("MEMORY.md")[0])
+        assert staging_path == link.absolute()
+        assert staging_path.is_symlink()
 
     def test_init_refuses_inside_git_worktree(self, tmp_path):
         """init() should refuse when the parent checkout is a git worktree."""

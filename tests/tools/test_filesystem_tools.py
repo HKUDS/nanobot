@@ -78,6 +78,13 @@ class TestReadFileTool:
         assert "not found" in result
 
     @pytest.mark.asyncio
+    async def test_workspace_relative_builtin_skill_read_falls_back_to_packaged_skill(self, tool):
+        result = await tool.execute(path="skills/cron/SKILL.md", limit=5)
+
+        assert "Error" not in result
+        assert "cron" in result.lower()
+
+    @pytest.mark.asyncio
     async def test_missing_path_returns_clear_error(self, tool):
         result = await tool.execute()
         assert result == "Error reading file: Unknown path"
@@ -91,6 +98,22 @@ class TestReadFileTool:
         result = await tool.execute(path=str(f))
         assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
         assert "Use offset=" in result
+
+    @pytest.mark.asyncio
+    async def test_oversized_file_is_rejected_before_read(self, tool, tmp_path, monkeypatch):
+        f = tmp_path / "huge.txt"
+        with f.open("wb") as stream:
+            stream.truncate(ReadFileTool._MAX_FILE_SIZE_BYTES + 1)
+
+        def fail_read_bytes(self):
+            raise AssertionError("oversized file content should not be loaded")
+
+        monkeypatch.setattr(type(f), "read_bytes", fail_read_bytes)
+
+        result = await tool.execute(path=str(f))
+
+        assert "File too large to read" in result
+        assert "Maximum is 100 MiB" in result
 
 
 # ---------------------------------------------------------------------------

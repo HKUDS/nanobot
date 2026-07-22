@@ -25,8 +25,16 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "lucide-react": ["./node_modules/lucide-react"],
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-i18next": ["./node_modules/react-i18next"]
     }
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../nanobot/channels/*/webui/**/*.ts",
+    "../nanobot/channels/*/webui/**/*.tsx"
+  ]
 }

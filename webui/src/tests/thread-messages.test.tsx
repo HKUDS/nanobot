@@ -1,12 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  assistantCopyFlags,
+  assistantForkFlags,
   buildDisplayUnits,
   ThreadMessages,
+  unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
 import type { UIMessage } from "@/lib/types";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("ThreadMessages", () => {
   it("groups consecutive reasoning and tool rows into one timeline before the answer", () => {
@@ -70,6 +75,42 @@ describe("ThreadMessages", () => {
     );
 
     expect(screen.getByText("Forked from history")).toBeInTheDocument();
+  });
+
+  it("keeps turn unit keys stable across replayed ids and mutable turn sequence", () => {
+    const liveUnits = buildDisplayUnits([
+      { id: "optimistic-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 0, createdAt: 1 },
+      {
+        id: "live-a1",
+        role: "assistant",
+        content: "first answer slice",
+        turnId: "turn-1",
+        turnPhase: "answer",
+        turnSeq: 2,
+        createdAt: 2,
+      },
+      {
+        id: "live-a2",
+        role: "assistant",
+        content: "second answer slice",
+        turnId: "turn-1",
+        turnPhase: "answer",
+        turnSeq: 20,
+        createdAt: 3,
+      },
+    ]);
+    const replayUnits = buildDisplayUnits([
+      { id: "replayed-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 10, createdAt: 10 },
+      { id: "replayed-a1", role: "assistant", content: "first answer slice", turnId: "turn-1", turnPhase: "answer", turnSeq: 11, createdAt: 11 },
+      { id: "replayed-a2", role: "assistant", content: "second answer slice", turnId: "turn-1", turnPhase: "answer", turnSeq: 99, createdAt: 12 },
+    ]);
+
+    expect(unitKeysForDisplay(liveUnits)).toEqual(unitKeysForDisplay(replayUnits));
+    expect(unitKeysForDisplay(liveUnits)).toEqual([
+      "turn-turn-1-user",
+      "turn-turn-1-answer-1",
+      "turn-turn-1-answer-2",
+    ]);
   });
 
   it("keeps file edits as their own activity row inside a turn", () => {
@@ -254,6 +295,45 @@ describe("ThreadMessages", () => {
 
     expect(screen.getByLabelText(/edited foo\.txt/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/editing foo\.txt/i)).not.toBeInTheDocument();
+  });
+
+  it("times live activity from the user turn start", () => {
+    vi.useFakeTimers();
+    const startedAt = 1_700_000_000_000;
+    vi.setSystemTime(startedAt + 230_000);
+    const messages: UIMessage[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "run it",
+        turnId: "turn-1",
+        turnPhase: "user",
+        turnSeq: 1,
+        createdAt: startedAt,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "exec()",
+        traces: ["exec()"],
+        turnId: "turn-1",
+        turnPhase: "activity",
+        turnSeq: 2,
+        createdAt: startedAt + 220_000,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages, true);
+
+    expect(
+      units[1].type === "activity" ? units[1].startedAtMs : undefined,
+    ).toBe(startedAt);
+
+    render(<ThreadMessages messages={messages} isStreaming />);
+
+    expect(screen.getByText("Working for 3m 50s")).toBeInTheDocument();
+    expect(screen.queryByText("Working for 10s")).not.toBeInTheDocument();
   });
 
   it("folds final answer reasoning into the preceding activity timeline", () => {
@@ -667,7 +747,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
-  it("shows copy only on the last assistant slice before the next user turn", () => {
+  it("shows copy on every assistant slice while keeping fork on the last slice", () => {
     const messages: UIMessage[] = [
       {
         id: "early",
@@ -691,19 +771,26 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    render(
+      <ThreadMessages
+        messages={messages}
+        isStreaming={false}
+        onForkFromMessage={vi.fn()}
+      />,
+    );
 
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
     expect(screen.getByText("final reply")).toBeInTheDocument();
   });
 
-  it("shows copy only on the second assistant when two text slices appear before user", () => {
+  it("shows copy on adjacent assistant text slices", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
   });
 
   it("uses turn ids as activity grouping boundaries when available", () => {
@@ -730,7 +817,7 @@ describe("ThreadMessages", () => {
     ]);
   });
 
-  it("computes final assistant copy flags with user-boundary semantics", () => {
+  it("computes final assistant fork flags with user-boundary semantics", () => {
     const units = buildDisplayUnits([
       { id: "u1", role: "user", content: "one", createdAt: 1 },
       { id: "a1", role: "assistant", content: "draft", createdAt: 2 },
@@ -747,7 +834,7 @@ describe("ThreadMessages", () => {
       { id: "a3", role: "assistant", content: "next", createdAt: 6 },
     ]);
 
-    const flags = assistantCopyFlags(units);
+    const flags = assistantForkFlags(units);
     const assistantFlags = units
       .map((unit, index) =>
         unit.type === "message" && unit.message.role === "assistant"

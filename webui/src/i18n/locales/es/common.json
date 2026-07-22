@@ -76,6 +76,7 @@
       "image": "Imagen",
       "voice": "Voz",
       "browser": "Internet",
+      "channels": "Canales",
       "runtime": "Sistema",
       "advanced": "Seguridad",
       "cliApps": "Apps CLI",
@@ -121,6 +122,7 @@
       "presetModel": "Modelo del preajuste",
       "density": "Densidad",
       "activityMode": "Detalle de actividad",
+      "fileEditDisplay": "Vista de edición de archivos",
       "codeWrap": "Ajuste de código",
       "maxResults": "Resultados máximos",
       "timeout": "Tiempo de espera",
@@ -165,6 +167,7 @@
       "presetModel": "Cambia a Default para editar modelo y proveedor desde WebUI.",
       "density": "Solo se guarda en este navegador.",
       "activityMode": "Elige cuánto detalle de actividad del agente se muestra por defecto.",
+      "fileEditDisplay": "Elige si la actividad de edición muestra recuentos de líneas o el diff.",
       "codeWrap": "Mantiene legibles las líneas largas de código en pantallas pequeñas.",
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
@@ -214,6 +217,9 @@
       "compact": "Compacto",
       "auto": "Automático",
       "expanded": "Expandido",
+      "summary": "Resumen",
+      "diff": "Diff",
+      "collapsedDiff": "Diff contraído",
       "on": "Activado",
       "off": "Desactivado",
       "defaultPermission": "Permiso predeterminado",
@@ -454,22 +460,119 @@
       "noTools": "Ninguna",
       "testForTools": "Ejecuta Probar para inspeccionar y elegir herramientas individuales."
     },
+    "api": {
+      "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",
+      "description": "Conecta SDK y agentes mediante un endpoint /v1 local.",
+      "start": "Iniciar servidor API", "starting": "Iniciando...", "stop": "Detener", "stopping": "Deteniendo...",
+      "access": "Acceso", "thisDevice": "Este dispositivo", "localNetwork": "Red local",
+      "localHelp": "Solo este dispositivo puede conectarse.", "networkHelp": "Otros dispositivos pueden conectarse; se requiere una clave API.",
+      "port": "Puerto", "portHelp": "La API usa este puerto local.", "apiKey": "Clave API",
+      "apiKeyHelp": "Los clientes la envían como token Bearer.", "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
+      "apiKeyPlaceholder": "Introduce una clave API", "autoInstall": "El soporte API se instalará automáticamente al iniciarlo."
+    },
+    "observability": {
+      "title": "Observabilidad", "configured": "Las credenciales de trazas están disponibles para nanobot.",
+      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "enable": "Habilitar soporte de trazas"
+    },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
     },
     "apps": {
-      "description": "Agrega CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "Todo",
-      "filterCli": "Apps CLI",
-      "filterMcp": "Servicios MCP",
-      "enabledSummary": "{{count}} activados",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "description": "Añade herramientas a nanobot y luego úsalas con @ en el chat.",
+      "cliLabel": "App",
+      "mcpLabel": "Integración",
+      "channelLabel": "Canal",
+      "featureLabel": "Función",
+      "filterAll": "Listo",
+      "filterPlugins": "Complementos",
+      "filterCli": "Apps",
+      "filterMcp": "Integraciones",
+      "enabledSummary": "{{count}} listos",
+      "caption": "{{cli}} apps · {{mcp}} integraciones",
       "searchPlaceholder": "Buscar apps",
-      "featured": "Destacadas",
+      "featured": "Herramientas",
       "loading": "Cargando apps...",
-      "empty": "Ninguna app coincide con este filtro."
+      "empty": "Ninguna herramienta coincide con esta vista.",
+      "restartRequired": "Reinicia nanobot para aplicar apps y funciones actualizadas."
+    },
+    "channels": {
+      "description": "Conecta nanobot con apps de chat. Instalar soporte solo añade el paquete de integración; la mayoría de canales aún necesitan tokens o configuración del espacio de trabajo.",
+      "caption": "{{enabled}} activados · {{total}} canales",
+      "searchPlaceholder": "Buscar canales",
+      "backToChannels": "Todos los canales",
+      "catalog": "Canales",
+      "loading": "Cargando canales...",
+      "empty": "Ningún canal coincide con este filtro.",
+      "restartRequired": "Reinicia nanobot para aplicar el soporte de canales actualizado.",
+      "requires": "Requiere: {{requirements}}",
+      "setUp": "Configurar",
+      "setupGuide": "Guía de configuración",
+      "setupSummary": "Activar solo habilita el soporte en nanobot. Añade las credenciales de la plataforma y reinicia nanobot.",
+      "configKeys": "Claves de configuración",
+      "enable": "Activar canal",
+      "disable": "Desactivar canal",
+      "needsConfig": "Necesita configuración",
+      "connect": "Conectar",
+      "reconnect": "Reconectar",
+      "advanced": "Avanzado",
+      "checkAndEnable": "Comprobar y activar",
+      "checkConnection": "Comprobar conexión",
+      "checkedAndEnabled": "Comprobado y activado.",
+      "checking": "Comprobando...",
+      "checkOnly": "Solo comprobar",
+      "commandCopied": "Comando copiado.",
+      "commandCopyFailed": "No se pudo copiar el comando.",
+      "configuredInstances": "{{count}} instancias configuradas",
+      "connectPreview": "El siguiente paso es la conexión en el navegador. Por ahora, ejecuta el comando siguiente.",
+      "copyCommand": "Copiar comando",
+      "filterAll": "Todos",
+      "filterOff": "Desactivados",
+      "filterOn": "Activados",
+      "helperCopied": "{{name}} copiado.",
+      "helperCopyFailed": "No se pudo copiar {{name}}.",
+      "hideSecret": "Ocultar secreto",
+      "instanceConfigured": "Configurada",
+      "instanceNeedsSetup": "Requiere configuración",
+      "runtimeFailed": "Error al iniciar",
+      "runtimeStarting": "Iniciando",
+      "runtimeStopped": "No está en ejecución",
+      "managedByWebui": "Gestionado por WebUI",
+      "officialGuide": "Guía oficial",
+      "optional": "Opcional",
+      "providerPreset": "Proveedor",
+      "requiredSetup": "Configuración requerida",
+      "savedSecret": "Guardado",
+      "savedSecretPlaceholder": "Secreto guardado",
+      "savedSettings": "Configuración guardada.",
+      "saveSettings": "Guardar configuración",
+      "selectChannel": "Ver la configuración de {{name}}",
+      "setupSteps": "Siguientes pasos",
+      "showSecret": "Mostrar secreto",
+      "toggleChannel": "Canal {{name}}",
+      "toggleInstance": "Instancia {{name}}",
+      "tryIt": "Pruébalo",
+      "validationFailed": "Comprueba la configuración requerida antes de activar.",
+      "validation": {
+        "connected": "Conectado",
+        "configured": "Configurado manualmente",
+        "needs_setup": "Requiere configuración",
+        "invalid": "No válido",
+        "unsupported": "Configuración manual"
+      }
+    },
+    "nanobotFeatures": {
+      "enabled": "Activado",
+      "enable": "Activar",
+      "disable": "Desactivar",
+      "ready": "Listo",
+      "missingDependency": "Falta soporte",
+      "installSupport": "Instalar soporte",
+      "installConfirmTitle": "¿Instalar soporte para {{name}}?",
+      "installConfirmDescription": "nanobot añadirá lo que {{name}} necesita y luego lo activará. ¿Continuar?",
+      "installConfirmAction": "Instalar y activar",
+      "websocketRequired": "Requerido para WebUI",
+      "channelDisabled": "El canal está desactivado",
+      "notEnabled": "No activado"
     },
     "automations": {
       "filters": {
@@ -493,6 +596,7 @@
       "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
       "oneShot": "Una vez",
       "systemTask": "Automatización administrada por el sistema",
+      "localTrigger": "Activador local",
       "labels": {
         "schedule": "Programación",
         "next": "Siguiente",
@@ -551,11 +655,13 @@
         "weekdaysAt": "Días laborables a las {{time}}",
         "hourlyAt": "Cada hora en :{{minute}}",
         "hourlyWindow": "Cada hora {{start}}-{{end}} en :{{minute}}",
+        "local": "Activador local",
         "custom": "Programación personalizada"
       },
       "next": {
         "paused": "Pausada",
         "pending": "Ejecutándose ahora",
+        "local": "Esperando activador",
         "none": "Sin próxima ejecución"
       },
       "message": {
@@ -692,11 +798,13 @@
       "every": "Cada {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Activador local",
       "unknown": "Programación personalizada"
     },
     "next": {
       "label": "Siguiente: {{time}}",
       "disabled": "Pausada",
+      "local": "Esperando activador",
       "none": "Sin próxima ejecución"
     }
   },
@@ -791,12 +899,14 @@
         "every": "Cada {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Activador local",
         "unknown": "Programación personalizada"
       },
       "next": {
         "label": "Siguiente {{time}}",
         "pending": "Se ejecutará pronto",
         "disabled": "En pausa",
+        "local": "Esperando activador",
         "none": "Sin próxima ejecución"
       }
     },
@@ -824,7 +934,7 @@
         "edit": "Editar guía",
         "drag": "Arrastrar para reordenar"
       },
-      "attachImage": "Adjuntar imagen",
+      "attachImage": "Adjuntar archivos",
       "imageMode": {
         "label": "Generar imagen",
         "toggle": "Activar o desactivar modo de generación de imágenes",
@@ -854,11 +964,12 @@
       },
       "voiceErrors": {
         "unsupported": "Este navegador no admite entrada de voz.",
-        "permission": "Se requiere permiso de micrófono.",
+        "permission": "Permite el micrófono en la barra de direcciones y vuelve a intentarlo.",
         "notConfigured": "Configura primero un proveedor de transcripción.",
         "tooLong": "La grabación es demasiado larga.",
         "tooShort": "Mantén pulsado un poco más para grabar voz.",
         "noInput": "No se detectó entrada del micrófono.",
+        "noDevice": "No se encontró ningún micrófono. Conéctalo y vuelve a intentarlo.",
         "failed": "No se pudo transcribir el audio."
       },
       "slash": {
@@ -870,7 +981,7 @@
         "commands": {
           "new": {
             "title": "Nuevo chat",
-            "description": "Detiene la tarea actual e inicia una conversación nueva."
+            "description": "Restablece este chat e inicia una conversación nueva."
           },
           "stop": {
             "title": "Detener tarea actual",
@@ -904,9 +1015,17 @@
             "title": "Restaurar memoria",
             "description": "Revierte la memoria a una instantánea Dream anterior."
           },
+          "dream_prompt": {
+            "title": "Memoria de Dream",
+            "description": "Indica a Dream cómo organizar la memoria de este espacio de trabajo."
+          },
           "goal": {
             "title": "Objetivo a largo plazo",
             "description": "Indica al agente que trate esto como un objetivo sostenido en varios pasos."
+          },
+          "trigger": {
+            "title": "Crear trigger local",
+            "description": "Crea un trigger de CLI vinculado a esta sesion de chat."
           },
           "help": {
             "title": "Mostrar ayuda",
@@ -931,12 +1050,17 @@
       "encoding": "Procesando…",
       "remove": "Quitar adjunto",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "textTooLarge": "El texto del mensaje es demasiado grande (máximo {{max}})",
       "imageRejected": {
         "unsupported_type": "Tipo de archivo no compatible",
+        "empty_file": "No se pueden adjuntar archivos vacíos",
+        "too_many_attachments": "Máximo {{max}} adjuntos por mensaje",
         "too_many_images": "Máximo {{max}} imágenes por mensaje",
         "magic_mismatch": "El archivo no parece una imagen real",
         "decode_failed": "No se pudo decodificar esta imagen",
-        "too_large": "Imagen demasiado grande — prueba una más pequeña",
+        "too_large": "Archivo demasiado grande — prueba uno más pequeño",
+        "total_too_large": "Los archivos adjuntos son demasiado grandes en conjunto; elimina algunos o usa archivos más pequeños",
+        "transport_too_large": "Este archivo adjunto superaría el límite de transporte de la puerta de enlace",
         "io": "No se pudo leer este archivo"
       },
       "mentions": {
@@ -950,11 +1074,11 @@
         "mcpDescription": "Usar @{{name}} como servidor MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Modo de acceso al espacio de trabajo",
         "projectAria": "Elegir proyecto",
         "projectPlaceholder": "Seleccionar proyecto",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Permiso predeterminado",
+        "full": "Acceso completo"
       }
     },
     "scrollToBottom": "Desplazarse al final",
@@ -989,6 +1113,14 @@
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
+    "fileEditViewDiff": "Ver diff",
+    "fileEditViewLargeDiff": "Ver diff grande",
+    "fileEditDiffLineCount": "{{count}} líneas",
+    "fileEditUnchangedLinesHidden": "{{count}} líneas sin cambios ocultas",
+    "fileEditShowMoreLines": "Mostrar {{count}} líneas más",
+    "fileEditShowFewerLines": "Mostrar menos líneas",
+    "fileEditOpenFile": "Abrir archivo",
+    "fileEditDiffTruncated": "Diff truncado. Abre el archivo para ver el cambio completo.",
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",
@@ -1038,17 +1170,17 @@
       "body": "El servidor rechazó tu último mensaje por superar el tamaño permitido. Quita algunas imágenes o usa archivos más pequeños y vuelve a enviarlo."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "El espacio de trabajo no cambió",
+      "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Espacio de trabajo predeterminado",
       "manual": "Pegar ruta",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Usar ruta",
+      "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
     }
   }
 }

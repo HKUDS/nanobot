@@ -1,0 +1,39 @@
+{
+  "description": "Utilisez nanobot depuis les conversations Microsoft Teams.",
+  "requirements": "Identifiants de l’application bot Azure et endpoint de rappel public",
+  "setup": {
+    "docsLabel": "Ouvrir le guide Teams",
+    "officialLabel": "Ouvrir le portail développeur Teams",
+    "tryIt": "Installez l’application Teams et envoyez un message test.",
+    "summary": "Teams reçoit les messages via l’URL de rappel Bot Framework. Un endpoint HTTPS accessible est nécessaire en production.",
+    "steps": [
+      "Créez un bot Azure ou une application Teams et copiez l’App ID et le secret client.",
+      "Exposez le chemin de rappel en HTTPS et définissez-le comme endpoint de messagerie.",
+      "Enregistrez et activez Teams, puis installez l’application et envoyez un message test."
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID",
+        "help": "Copiez-le depuis l’inscription du bot Azure ou de l’application Teams."
+      },
+      "appPassword": {
+        "label": "Secret client",
+        "placeholder": "••••••",
+        "help": "Créez un secret client pour l’application Microsoft."
+      },
+      "tenantId": {
+        "label": "ID du locataire",
+        "placeholder": "ID de locataire facultatif"
+      },
+      "path": {
+        "label": "Chemin de rappel",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur Teams séparés par des virgules"
+      }
+    }
+  }
+}

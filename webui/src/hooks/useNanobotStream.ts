@@ -13,12 +13,11 @@ import type { StreamError } from "@/lib/nanobot-client";
 import type {
   InboundEvent,
   OutboundCliAppMention,
-  OutboundImageGeneration,
   OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
   ToolProgressEvent,
-  UIImage,
+  UIMediaAttachment,
   UIFileEdit,
   UIMessage,
   UITurnPhase,
@@ -42,6 +41,7 @@ type PendingStreamEvent =
 type UIMessageTurnFields = Pick<UIMessage, "turnId" | "turnPhase" | "turnSeq">;
 
 const FILE_EDIT_TOOL_NAMES = new Set(["write_file", "edit_file", "apply_patch"]);
+const STREAM_END_IDLE_DELAY_MS = 1000;
 
 function turnFieldsFromEvent(
   ev: { turn_id?: string; turn_phase?: UITurnPhase; turn_seq?: number },
@@ -272,8 +272,14 @@ function absorbCompleteAssistantMessage(
 }
 
 function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
+  if (edit.call_id && edit.path) return `${edit.call_id}|${edit.tool}|${edit.path}`;
   if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
   return `${edit.tool}|${edit.path}`;
+}
+
+function fileEditToolEventKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
+  if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
+  return fileEditKey(edit);
 }
 
 function toolEventFileEditKey(event: ToolProgressEvent): string | null {
@@ -292,7 +298,7 @@ function hasFileEditForToolEvent(messages: UIMessage[], event: ToolProgressEvent
   const key = toolEventFileEditKey(event);
   if (!key) return false;
   return messages.some((message) =>
-    message.fileEdits?.some((edit) => fileEditKey(edit) === key),
+    message.fileEdits?.some((edit) => fileEditToolEventKey(edit) === key),
   );
 }
 
@@ -305,7 +311,7 @@ function filterCoveredFileEditToolEvents(
 }
 
 function stripCoveredFileEditToolHints(message: UIMessage, edits: UIFileEdit[]): UIMessage {
-  const incomingKeys = new Set(edits.map(fileEditKey));
+  const incomingKeys = new Set(edits.map(fileEditToolEventKey));
   const events = message.toolEvents ?? [];
   if (!events.length || incomingKeys.size === 0) return message;
 
@@ -339,6 +345,44 @@ function stripCoveredFileEditToolHints(message: UIMessage, edits: UIFileEdit[]):
   };
 }
 
+function traceMessageIsEmpty(message: UIMessage): boolean {
+  const traces = message.traces;
+  const hasTrace = traces?.length
+    ? traces.some((line) => line.trim().length > 0)
+    : (message.content ?? "").trim().length > 0;
+  return (
+    message.kind === "trace"
+    && !hasTrace
+    && !message.toolEvents?.length
+    && !message.fileEdits?.length
+    && !message.media?.length
+  );
+}
+
+function stripCoveredFileEditToolHintsFromMessages(
+  messages: UIMessage[],
+  edits: UIFileEdit[],
+  turn: UIMessageTurnFields,
+): UIMessage[] {
+  if (edits.length === 0) return messages;
+  let next = messages;
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const candidate = next[i];
+    if (candidate.role === "user") break;
+    if (candidate.kind !== "trace") continue;
+    if (!matchesTurn(candidate, turn)) continue;
+    const cleaned = stripCoveredFileEditToolHints(candidate, edits);
+    if (cleaned === candidate) continue;
+    if (next === messages) next = [...messages];
+    if (traceMessageIsEmpty(cleaned)) {
+      next.splice(i, 1);
+    } else {
+      next[i] = cleaned;
+    }
+  }
+  return next;
+}
+
 function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
   if (!edit || !edit.tool || (!edit.path && !edit.pending)) return null;
   const inferredStatus =
@@ -367,7 +411,14 @@ function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit
     const edit = normalizeFileEdit(raw);
     if (!edit) continue;
     const key = fileEditKey(edit);
-    const existingIndex = indexByKey.get(key);
+    let existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined && edit.path) {
+      const eventKey = fileEditToolEventKey(edit);
+      const pendingIndex = next.findIndex((existing) =>
+        !existing.path && existing.pending && fileEditToolEventKey(existing) === eventKey,
+      );
+      if (pendingIndex >= 0) existingIndex = pendingIndex;
+    }
     if (existingIndex === undefined) {
       indexByKey.set(key, next.length);
       next.push(edit);
@@ -376,6 +427,7 @@ function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit
     const merged = { ...next[existingIndex], ...edit };
     if (edit.path && !edit.pending) delete merged.pending;
     next[existingIndex] = merged;
+    indexByKey.set(key, existingIndex);
   }
   return next;
 }
@@ -386,17 +438,21 @@ function findFileEditTraceIndex(
   incoming: UIFileEdit[],
 ): number | null {
   const incomingKeys = new Set(incoming.map(fileEditKey));
+  const incomingToolEventKeys = new Set(incoming.map(fileEditToolEventKey));
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
     if (candidate.role === "user") break;
     if (candidate.kind !== "trace") continue;
     if (segmentId && candidate.activitySegmentId === segmentId) return i;
     for (const existing of candidate.fileEdits ?? []) {
-      if (incomingKeys.has(fileEditKey(existing))) return i;
-    }
-    for (const event of candidate.toolEvents ?? []) {
-      const key = toolEventFileEditKey(event);
-      if (key && incomingKeys.has(key)) return i;
+      if (
+        incomingKeys.has(fileEditKey(existing))
+        || (
+          !existing.path
+          && existing.pending
+          && incomingToolEventKeys.has(fileEditToolEventKey(existing))
+        )
+      ) return i;
     }
   }
   return null;
@@ -408,22 +464,48 @@ function findFileEditTraceIndex(
  * separately (e.g. via ``fetchWebuiThread``) since the server only replays
  * live events.
  */
-/** Payload passed to ``send`` when the user attaches one or more images.
+/** Payload passed to ``send`` when the user attaches one or more files.
  *
  * ``media`` is handed to the wire client verbatim; ``preview`` powers the
- * optimistic user bubble (blob URLs so the preview appears before the server
- * acks the frame). Keeping the two separate lets the bubble re-use the local
- * blob URL even after the server persists the file under a different name. */
-export interface SendImage {
+ * optimistic user bubble. Keeping the two separate lets the bubble re-use the
+ * local data URL even after the server persists the file under a different
+ * name. */
+export interface SendAttachment {
   media: OutboundMedia;
-  preview: UIImage;
+  preview: UIMediaAttachment;
 }
 
 export interface SendOptions {
-  imageGeneration?: OutboundImageGeneration;
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];
   workspaceScope?: WorkspaceScopePayload | null;
+  sideChannel?: boolean;
+  finalizeActiveTurn?: boolean;
+}
+
+function eventExtendsModelActivity(ev: InboundEvent): boolean {
+  if (
+    ev.event === "delta"
+    || ev.event === "reasoning_delta"
+    || ev.event === "file_edit"
+  ) return true;
+  return ev.event === "message"
+    && (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning");
+}
+
+function finalizeStreamedTurn(
+  prev: UIMessage[],
+  turn: UIMessageTurnFields = {},
+): UIMessage[] {
+  return prev.map((m) =>
+    m.isStreaming && matchesTurn(m, turn)
+      ? { ...m, isStreaming: false, reasoningStreaming: false }
+      : m,
+  );
+}
+
+function eventTurnId(ev: InboundEvent): string | undefined {
+  return "turn_id" in ev && typeof ev.turn_id === "string" ? ev.turn_id : undefined;
 }
 
 export function useNanobotStream(
@@ -438,7 +520,7 @@ export function useNanobotStream(
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
-  send: (content: string, images?: SendImage[], options?: SendOptions) => void;
+  send: (content: string, images?: SendAttachment[], options?: SendOptions) => void;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
@@ -467,6 +549,7 @@ export function useNanobotStream(
   const pendingStreamEventsRef = useRef<PendingStreamEvent[]>([]);
   const streamFrameRef = useRef<number | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
+  const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
   /** Timer that defers ``isStreaming = false`` after ``stream_end``.
    *
    * When the model finishes a text segment and calls a tool, the server
@@ -489,6 +572,26 @@ export function useNanobotStream(
     }
     pendingStreamEventsRef.current = [];
   }, []);
+
+  const cancelStreamEndTimer = useCallback(() => {
+    if (streamEndTimerRef.current === null) return;
+    clearTimeout(streamEndTimerRef.current);
+    streamEndTimerRef.current = null;
+  }, []);
+
+  const isSideChannelEvent = useCallback((ev: InboundEvent) => {
+    const turnId = eventTurnId(ev);
+    return turnId !== undefined && sideChannelTurnIdsRef.current.has(turnId);
+  }, []);
+
+  const scheduleStreamEndTimer = useCallback((turn: UIMessageTurnFields = {}) => {
+    cancelStreamEndTimer();
+    streamEndTimerRef.current = setTimeout(() => {
+      streamEndTimerRef.current = null;
+      setIsStreaming(false);
+      setMessages((prev) => finalizeStreamedTurn(prev, turn));
+    }, STREAM_END_IDLE_DELAY_MS);
+  }, [cancelStreamEndTimer]);
 
   const createActivitySegmentId = useCallback((activate = true) => {
     activitySegmentCounterRef.current += 1;
@@ -701,13 +804,11 @@ export function useNanobotStream(
     closedAssistantStreamIdsRef.current.clear();
     clearActivitySegment();
     clearPendingStreamWork();
+    sideChannelTurnIdsRef.current.clear();
     suppressStreamUntilTurnEndRef.current = false;
-    if (streamEndTimerRef.current !== null) {
-      clearTimeout(streamEndTimerRef.current);
-      streamEndTimerRef.current = null;
-    }
+    cancelStreamEndTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, client, clearActivitySegment, clearPendingStreamWork]);
+  }, [chatId, client, cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
 
   useEffect(() => {
     if (hasPendingToolCalls) setIsStreaming(true);
@@ -717,13 +818,12 @@ export function useNanobotStream(
     if (!chatId) return;
 
     const handle = (ev: InboundEvent) => {
-      // Any incoming event while the debounce timer is alive means the model
-      // is still working (e.g. tool result arrived, more text to stream).
-      // Cancel the pending "stream ended" timer so we don't hide the spinner.
-      if (streamEndTimerRef.current !== null) {
-        clearTimeout(streamEndTimerRef.current);
-        streamEndTimerRef.current = null;
-      }
+      const sideChannelEvent = isSideChannelEvent(ev);
+      if (
+        streamEndTimerRef.current !== null
+        && !sideChannelEvent
+        && eventExtendsModelActivity(ev)
+      ) cancelStreamEndTimer();
 
       if (ev.event === "delta") {
         if (suppressStreamUntilTurnEndRef.current) return;
@@ -756,15 +856,14 @@ export function useNanobotStream(
       }
 
       if (ev.event === "stream_end") {
+        const turn = turnFieldsFromEvent(ev, "answer");
         flushPendingStreamEvents({
           closeAnswerSegment: true,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
-          turn: turnFieldsFromEvent(ev, "answer"),
+          turn,
         });
         if (suppressStreamUntilTurnEndRef.current) return;
-        // stream_end only means the text segment finished — the model may
-        // still be executing tools.  Do NOT reset isStreaming here; the
-        // definitive "turn is complete" signal is ``turn_end``.
+        scheduleStreamEndTimer(turn);
         return;
       }
 
@@ -803,10 +902,7 @@ export function useNanobotStream(
         setRunStartedAt(null);
         // Definitive signal that the turn is fully complete.  Cancel any
         // pending debounce timer and stop the loading indicator immediately.
-        if (streamEndTimerRef.current !== null) {
-          clearTimeout(streamEndTimerRef.current);
-          streamEndTimerRef.current = null;
-        }
+        cancelStreamEndTimer();
         setIsStreaming(false);
         setMessages((prev) => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
@@ -921,11 +1017,21 @@ export function useNanobotStream(
           ? ev.media_urls.map((m) => toMediaAttachment(m))
           : ev.media?.map((url) => toMediaAttachment({ url }));
         const hasMedia = !!media && media.length > 0;
+        if (sideChannelEvent) {
+          setMessages((prev) => absorbCompleteAssistantMessage(prev, {
+            content: ev.text,
+            ...(hasMedia ? { media } : {}),
+            ...(ev.source ? { source: ev.source } : {}),
+            ...turnFieldsFromEvent(ev, "answer"),
+          }));
+          if (typeof ev.turn_id === "string") sideChannelTurnIdsRef.current.delete(ev.turn_id);
+          return;
+        }
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
-        // Do NOT reset isStreaming here — only ``turn_end`` signals that
-        // the full turn (all tool calls + final text) is complete.
+        // Streaming state is closed by ``stream_end`` when present, or by
+        // ``turn_end`` for non-streamed and tool-heavy turns.
         clearActivitySegment();
         setMessages((prev) => {
           const activeId = buffer.current?.messageId;
@@ -966,16 +1072,15 @@ export function useNanobotStream(
         }
         setMessages((prev) => {
           let segmentId = eventSegmentId;
-          const base = prev;
+          const base = stripCoveredFileEditToolHintsFromMessages(prev, normalized, turn);
           const targetIndex = findFileEditTraceIndex(base, segmentId, normalized);
           if (targetIndex !== null) {
             const target = base[targetIndex];
             segmentId = target.activitySegmentId ?? segmentId ?? detachedActivitySegmentId();
             if (opensFileEditPhase) fileEditSegmentRef.current = segmentId;
-            const cleanedTarget = stripCoveredFileEditToolHints(target, normalized);
             const merged: UIMessage = {
-              ...cleanedTarget,
-              fileEdits: mergeFileEdits(cleanedTarget.fileEdits, normalized),
+              ...target,
+              fileEdits: mergeFileEdits(target.fileEdits, normalized),
               activitySegmentId: segmentId,
               ...turn,
             };
@@ -1012,12 +1117,10 @@ export function useNanobotStream(
       closedAssistantStreamIdsRef.current.clear();
       clearActivitySegment();
       clearPendingStreamWork();
-      if (streamEndTimerRef.current !== null) {
-        clearTimeout(streamEndTimerRef.current);
-        streamEndTimerRef.current = null;
-      }
+      cancelStreamEndTimer();
     };
   }, [
+    cancelStreamEndTimer,
     chatId,
     client,
     clearActivitySegment,
@@ -1025,28 +1128,41 @@ export function useNanobotStream(
     detachedActivitySegmentId,
     ensureActivitySegmentId,
     flushPendingStreamEvents,
+    isSideChannelEvent,
     onTurnEnd,
     schedulePendingStreamFlush,
+    scheduleStreamEndTimer,
   ]);
 
   const send = useCallback(
-    (content: string, images?: SendImage[], options?: SendOptions) => {
+    (content: string, images?: SendAttachment[], options?: SendOptions) => {
       if (!chatId) return;
-      const hasImages = !!images && images.length > 0;
-      // Text is optional when images are attached — the agent will still see
-      // the image blocks via ``media`` paths.
-      if (!hasImages && !content.trim()) return;
+      const hasAttachments = !!images && images.length > 0;
+      // Text is optional when files are attached — the agent will still see
+      // them via ``media`` paths.
+      if (!hasAttachments && !content.trim()) return;
 
+      const sideChannel = options?.sideChannel === true;
+      const finalizeActiveTurn = options?.finalizeActiveTurn === true;
       flushPendingStreamEvents();
+      if (finalizeActiveTurn) {
+        cancelStreamEndTimer();
+        setIsStreaming(false);
+      }
       const turnId = crypto.randomUUID();
-      const previews = hasImages ? images!.map((i) => i.preview) : undefined;
+      if (sideChannel) sideChannelTurnIdsRef.current.add(turnId);
+      const previews = hasAttachments ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => {
-        buffer.current = null;
-        activeAssistantRef.current = null;
-        closedAssistantStreamIdsRef.current.clear();
-        clearActivitySegment();
+        if (!sideChannel || finalizeActiveTurn) {
+          buffer.current = null;
+          activeAssistantRef.current = null;
+          closedAssistantStreamIdsRef.current.clear();
+          clearActivitySegment();
+          suppressStreamUntilTurnEndRef.current = false;
+        }
+        const base = finalizeActiveTurn ? finalizeStreamedTurn(prev) : prev;
         return [
-          ...pruneReasoningOnlyPlaceholders(prev),
+          ...(sideChannel ? base : pruneReasoningOnlyPlaceholders(base)),
           {
             id: crypto.randomUUID(),
             role: "user",
@@ -1055,19 +1171,20 @@ export function useNanobotStream(
             turnPhase: "user",
             turnSeq: 0,
             createdAt: Date.now(),
-            ...(previews ? { images: previews } : {}),
+            ...(previews ? { media: previews } : {}),
             ...(options?.cliApps?.length ? { cliApps: options.cliApps } : {}),
             ...(options?.mcpPresets?.length ? { mcpPresets: options.mcpPresets } : {}),
           },
         ];
       });
-      // Mark streaming immediately so the UI shows the loading indicator
-      // right away, before the first delta arrives from the server.
-      setIsStreaming(true);
-      const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
-      client.sendMessage(chatId, content, wireMedia, { ...options, turnId });
+      if (!sideChannel) setIsStreaming(true);
+      const wireMedia = hasAttachments ? images!.map((i) => i.media) : undefined;
+      const wireOptions = { ...options, turnId };
+      delete wireOptions.sideChannel;
+      delete wireOptions.finalizeActiveTurn;
+      client.sendMessage(chatId, content, wireMedia, wireOptions);
     },
-    [chatId, clearActivitySegment, client, flushPendingStreamEvents],
+    [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );
 
   const stop = useCallback(() => {

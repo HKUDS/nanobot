@@ -188,6 +188,32 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
   });
 
+  it("clears stale run strip when reconnecting after a dropped socket", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: true,
+      maxBackoffMs: 10,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "running",
+      started_at: 12_345,
+    });
+
+    lastSocket().close();
+
+    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(FakeSocket.instances.length).toBeGreaterThan(1);
+  });
+
   it("clears run strip when a turn_end arrives without idle", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -500,33 +526,6 @@ describe("NanobotClient", () => {
       turn_id: "turn-1",
       webui: true,
     });
-  });
-
-  it("includes image generation options in outbound messages", () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    lastSocket().fakeOpen();
-
-    client.sendMessage(
-      "chat-img",
-      "draw a banner",
-      undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: "16:9" } },
-    );
-
-    expect(lastSocket().sent).toContain(
-      JSON.stringify({
-        type: "message",
-        chat_id: "chat-img",
-        content: "draw a banner",
-        image_generation: { enabled: true, aspect_ratio: "16:9" },
-        webui: true,
-      }),
-    );
   });
 
   it("includes CLI app attachments in outbound messages", () => {

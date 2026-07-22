@@ -15,6 +15,8 @@ from typing import Any
 import json_repair
 from loguru import logger
 
+from nanobot.utils.helpers import sanitize_surrogates_deep
+
 STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
@@ -53,6 +55,18 @@ class ToolCallRequest:
     extra_content: dict[str, Any] | None = None
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
+
+    def has_valid_name(self) -> bool:
+        """Whether this call carries a usable (non-empty string) tool name.
+
+        ToolCallRequest.name is typed ``str`` but not enforced at runtime: a
+        model/gateway can emit a degenerate call with ``name=None`` or ``""``.
+        Such a call cannot be executed and, if persisted and replayed, makes
+        upstream APIs reject the whole request (e.g. Anthropic-style
+        ``messages.content.N.tool_use.name: Input should be a valid string``),
+        which permanently wedges the session.
+        """
+        return isinstance(self.name, str) and bool(self.name)
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
@@ -260,9 +274,18 @@ class LLMProvider(ABC):
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Sanitize message content: fix empty blocks, strip internal _meta fields."""
+        """Sanitize message content: fix empty blocks, strip internal _meta fields.
+
+        Also strips unpaired UTF-16 surrogate code points from every string leaf
+        as a defense-in-depth pass before the payload leaves the process. Lone
+        surrogates (e.g. leaking from a Windows console, prompt_toolkit history,
+        or a truncated JSON round-trip) otherwise cause ``UnicodeEncodeError:
+        'utf-8' codec can't encode characters ... surrogates not allowed`` when
+        the HTTP client serializes the request body.
+        """
         result: list[dict[str, Any]] = []
-        for msg in messages:
+        for raw_msg in messages:
+            msg = {key: value for key, value in raw_msg.items() if key != "_meta"}
             content = msg.get("content")
 
             if isinstance(content, str) and not content:
@@ -305,7 +328,10 @@ class LLMProvider(ABC):
                 continue
 
             result.append(msg)
-        return result
+        # Defense-in-depth: scrub lone UTF-16 surrogates from every string leaf.
+        # This is idempotent and no-op when messages are already clean.
+        sanitized = sanitize_surrogates_deep(result)
+        return sanitized if isinstance(sanitized, list) else result
 
     @staticmethod
     def _tool_name(tool: dict[str, Any]) -> str:

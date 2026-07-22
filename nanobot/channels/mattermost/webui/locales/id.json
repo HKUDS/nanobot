@@ -1,0 +1,43 @@
+{
+  "description": "Gunakan nanobot dari channel dan DM Mattermost.",
+  "requirements": "URL server Mattermost, token bot, dan akses channel",
+  "setup": {
+    "docsLabel": "Buka panduan Mattermost",
+    "officialLabel": "Buka panduan bot Mattermost",
+    "tryIt": "Sebut bot di channel Mattermost atau kirim pesan langsung.",
+    "summary": "Mattermost terhubung melalui akun bot di server dan menerima pesan channel serta pesan langsung.",
+    "steps": [
+      "Buat akun bot Mattermost dan salin token aksesnya.",
+      "Masukkan URL server dan berikan akses ke tim serta channel tujuan.",
+      "Simpan dan aktifkan Mattermost, lalu sebut bot atau kirim DM."
+    ],
+    "fields": {
+      "serverUrl": {
+        "label": "URL server",
+        "placeholder": "https://mattermost.example.com",
+        "help": "Gunakan URL dasar workspace Mattermost."
+      },
+      "token": {
+        "label": "Token bot",
+        "placeholder": "Token bot Mattermost",
+        "help": "Buat dari akun bot Mattermost."
+      },
+      "teamId": {
+        "label": "ID tim",
+        "placeholder": "ID tim opsional"
+      },
+      "groupPolicy": {
+        "label": "Perilaku grup",
+        "choices": {
+          "mention": "Hanya sebutan",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      }
+    }
+  }
+}

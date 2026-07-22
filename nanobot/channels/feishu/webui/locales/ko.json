@@ -1,0 +1,73 @@
+{
+  "description": "Feishu 채팅과 그룹에서 nanobot을 사용합니다.",
+  "requirements": "Feishu 앱 자격 증명, 이벤트 구독 및 게이트웨이",
+  "setup": {
+    "primaryAction": "Feishu 연결",
+    "docsLabel": "Feishu 설정 가이드 열기",
+    "officialLabel": "Feishu 콘솔 열기",
+    "tryIt": "DM을 보내거나 그룹에서 Feishu 어시스턴트를 멘션하세요.",
+    "summary": "QR 코드로 Feishu 앱을 만들거나 연결하고 자격 증명을 자동 저장합니다.",
+    "steps": [
+      "연결을 클릭하고 휴대폰의 Feishu 또는 Lark로 QR 코드를 스캔하세요.",
+      "앱 연결을 승인하면 nanobot이 App ID와 Secret을 자동 저장합니다.",
+      "봇에 DM을 보내거나 Feishu 그룹에서 멘션하세요."
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "현재 Secret을 유지하려면 비워 두세요",
+        "help": "자격 증명을 교체할 때만 새 App Secret을 붙여 넣으세요."
+      },
+      "domain": {
+        "label": "지역",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "그룹 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "topicIsolation": {
+        "label": "주제 격리",
+        "choices": {
+          "true": "주제별로 세션 분리",
+          "false": "그룹에서 하나의 세션 공유"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "{{name}} 어시스턴트",
+    "configured": "연결됨",
+    "needsSetup": "인증 필요",
+    "noAppId": "App ID 없음",
+    "createAnother": "다른 어시스턴트 만들기",
+    "createHint": "다른 팀이나 워크플로를 위한 별도 Feishu 봇을 만드세요.",
+    "createAssistant": "어시스턴트 만들기",
+    "reconnect": "다시 연결",
+    "countNone": "연결된 어시스턴트 없음",
+    "countOne": "어시스턴트 1개 연결됨",
+    "countMany": "어시스턴트 {{count}}개 연결됨",
+    "qrAlt": "Feishu 연결 QR 코드",
+    "scanTitle": "Feishu로 스캔",
+    "scanDescription": "휴대폰의 Feishu 또는 Lark로 스캔하세요. 승인 후 nanobot이 설정을 완료합니다.",
+    "waiting": "승인을 기다리는 중...",
+    "connected": "Feishu가 연결되었습니다.",
+    "stopped": "연결이 중지되었습니다.",
+    "connecting": "연결 중..."
+  }
+}

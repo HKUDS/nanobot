@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
@@ -194,15 +194,21 @@ def _is_blocked_device(path: str | Path) -> bool:
     return False
 
 
-def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
-    """Parse a page range like '2-5' into 0-based (start, end) inclusive."""
-    parts = pages.strip().split("-")
-    if len(parts) == 1:
-        p = int(parts[0])
-        return max(0, p - 1), min(p - 1, total - 1)
-    start = int(parts[0])
-    end = int(parts[1])
-    return max(0, start - 1), min(end - 1, total - 1)
+def _builtin_skill_read_path(path: str) -> Path | None:
+    """Map workspace-relative skills/<name>/... reads onto bundled skills."""
+    from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+    requested = Path(path)
+    if requested.is_absolute():
+        return None
+    parts = requested.parts
+    if len(parts) < 2 or parts[0] != "skills":
+        return None
+    root = BUILTIN_SKILLS_DIR.resolve()
+    candidate = (root / Path(*parts[1:])).resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 @tool_parameters(
@@ -231,6 +237,7 @@ class ReadFileTool(_FsTool):
     _scopes = {"core", "subagent", "memory"}
 
     _MAX_CHARS = 128_000
+    _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
     _DEFAULT_LIMIT = 2000
     _MAX_PDF_PAGES = 20
 
@@ -268,19 +275,30 @@ class ReadFileTool(_FsTool):
     ) -> Any:
         try:
             if not path:
-                return "Error reading file: Unknown path"
+                return ToolResult.error("Error reading file: Unknown path")
 
             # Device path blacklist
             if _is_blocked_device(path):
-                return f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
+                return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
 
             fp = self._resolve_read(path)
-            if _is_blocked_device(fp):
-                return f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
             if not fp.exists():
-                return f"Error: File not found: {path}"
+                fp = _builtin_skill_read_path(path) or fp
+            if _is_blocked_device(fp):
+                return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
+            if not fp.exists():
+                return ToolResult.error(f"Error: File not found: {path}")
             if not fp.is_file():
-                return f"Error: Not a file: {path}"
+                return ToolResult.error(f"Error: Not a file: {path}")
+
+            file_size = fp.stat().st_size
+            if file_size > self._MAX_FILE_SIZE_BYTES:
+                size_mib = file_size / (1024 * 1024)
+                max_mib = self._MAX_FILE_SIZE_BYTES // (1024 * 1024)
+                return ToolResult.error(
+                    f"Error: File too large to read ({size_mib:.1f} MiB). "
+                    f"Maximum is {max_mib} MiB."
+                )
 
             # PDF support
             if fp.suffix.lower() == ".pdf":
@@ -343,7 +361,7 @@ class ReadFileTool(_FsTool):
                 mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
                 if mime and mime.startswith("image/"):
                     return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
-                return f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported."
+                return ToolResult.error(f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported.")
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but
@@ -357,7 +375,7 @@ class ReadFileTool(_FsTool):
             if offset < 1:
                 offset = 1
             if offset > total:
-                return f"Error: offset {offset} is beyond end of file ({total} lines)"
+                return ToolResult.error(f"Error: offset {offset} is beyond end of file ({total} lines)")
 
             start = offset - 1
             end = min(start + (limit or self._DEFAULT_LIMIT), total)
@@ -381,54 +399,38 @@ class ReadFileTool(_FsTool):
             self._file_states.record_read(fp, offset=offset, limit=limit)
             return result
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error reading file: {e}"
+            return ToolResult.error(f"Error reading file: {e}")
 
     def _read_pdf(self, fp: Path, pages: str | None) -> str:
-        try:
-            import fitz  # pymupdf
-        except ImportError:
-            return "Error: PDF reading requires pymupdf. Install with: pip install pymupdf"
+        from nanobot.utils.document import PdfPageRangeError, PdfSafetyError, extract_pdf_pages
 
         try:
-            doc = fitz.open(str(fp))
+            extraction = extract_pdf_pages(
+                fp,
+                pages=pages,
+                max_pages=self._MAX_PDF_PAGES,
+                max_chars=self._MAX_CHARS,
+            )
+        except PdfPageRangeError:
+            return ToolResult.error(f"Error: Invalid page range '{pages}'. Use format like '1-5'.")
+        except PdfSafetyError as e:
+            return ToolResult.error(f"Error reading PDF: {e}")
         except Exception as e:
-            return f"Error reading PDF: {e}"
+            return ToolResult.error(f"Error reading PDF: {e}")
 
-        total_pages = len(doc)
-        if pages:
-            try:
-                start, end = _parse_page_range(pages, total_pages)
-            except (ValueError, IndexError):
-                doc.close()
-                return f"Error: Invalid page range '{pages}'. Use format like '1-5'."
-            if start > end or start >= total_pages:
-                doc.close()
-                return f"Error: Page range '{pages}' is out of bounds (document has {total_pages} pages)."
-        else:
-            start = 0
-            end = min(total_pages - 1, self._MAX_PDF_PAGES - 1)
-
-        if end - start + 1 > self._MAX_PDF_PAGES:
-            end = start + self._MAX_PDF_PAGES - 1
-
-        parts: list[str] = []
-        for i in range(start, end + 1):
-            page = doc[i]
-            text = page.get_text().strip()
-            if text:
-                parts.append(f"--- Page {i + 1} ---\n{text}")
-        doc.close()
-
-        if not parts:
+        if not extraction.text:
             return f"(PDF has no extractable text: {fp})"
 
-        result = "\n\n".join(parts)
-        if end < total_pages - 1:
-            result += f"\n\n(Showing pages {start + 1}-{end + 1} of {total_pages}. Use pages='{end + 2}-{min(end + 1 + self._MAX_PDF_PAGES, total_pages)}' to continue.)"
-        if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
+        result = extraction.text
+        if extraction.end_page < extraction.total_pages - 1:
+            next_start = extraction.end_page + 2
+            next_end = min(extraction.end_page + 1 + self._MAX_PDF_PAGES, extraction.total_pages)
+            result += (
+                f"\n\n(Showing pages {extraction.start_page + 1}-{extraction.end_page + 1} "
+                f"of {extraction.total_pages}. Use pages='{next_start}-{next_end}' to continue.)"
+            )
         return result
 
     def _read_office_doc(self, fp: Path) -> str:
@@ -437,10 +439,10 @@ class ReadFileTool(_FsTool):
         result = extract_text(fp)
 
         if result is None:
-            return f"Error: Unsupported file format: {fp.suffix}"
+            return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
 
         if result.startswith("[error:"):
-            return f"Error reading {fp.suffix.upper()} file: {result}"
+            return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {result}")
 
         if not result:
             return f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
@@ -492,9 +494,9 @@ class WriteFileTool(_FsTool):
             self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error writing file: {e}"
+            return ToolResult.error(f"Error writing file: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +602,15 @@ class _MatchSpan:
     end: int
     text: str
     line: int
+
+
+def _match_end_line(match: _MatchSpan) -> int:
+    comparable = match.text[:-1] if match.text.endswith("\n") else match.text
+    return match.line + comparable.count("\n")
+
+
+def _match_covers_line(match: _MatchSpan, line: int) -> bool:
+    return match.line <= line <= _match_end_line(match)
 
 
 def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
@@ -775,7 +786,10 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         ),
         line_hint=IntegerSchema(
             1,
-            description="Optional 1-based line hint used to choose the nearest match.",
+            description=(
+                "Optional exact 1-based target line copied from read_file. "
+                "The selected old_text match must cover this line."
+            ),
             minimum=1,
             nullable=True,
         ),
@@ -807,8 +821,9 @@ class EditFileTool(_FsTool):
             "with old_text copied from read_file. For multi-file, structural, "
             "or generated code edits, prefer apply_patch. If old_text matches "
             "multiple times, provide more context or set occurrence, line_hint, "
-            "replace_all, and expected_replacements. Shows closest-match "
-            "diagnostics on failure."
+            "replace_all, and expected_replacements. When editing from numbered "
+            "read_file output, set line_hint to the exact target line. "
+            "Shows closest-match diagnostics on failure."
         )
 
     @staticmethod
@@ -830,11 +845,11 @@ class EditFileTool(_FsTool):
             if new_text is None:
                 raise ValueError("Unknown new_text")
             if occurrence is not None and occurrence < 1:
-                return "Error: occurrence must be >= 1."
+                return ToolResult.error("Error: occurrence must be >= 1.")
             if line_hint is not None and line_hint < 1:
-                return "Error: line_hint must be >= 1."
+                return ToolResult.error("Error: line_hint must be >= 1.")
             if expected_replacements is not None and expected_replacements < 1:
-                return "Error: expected_replacements must be >= 1."
+                return ToolResult.error("Error: expected_replacements must be >= 1.")
 
             fp = self._resolve_write(path)
 
@@ -853,14 +868,14 @@ class EditFileTool(_FsTool):
             except OSError:
                 fsize = 0
             if fsize > self._MAX_EDIT_FILE_SIZE:
-                return f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB."
+                return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
 
             # Create-file: old_text='' but file exists and not empty → reject
             if old_text == "":
                 raw = fp.read_bytes()
                 content = raw.decode("utf-8")
                 if content.strip():
-                    return f"Error: Cannot create file — {path} already exists and is not empty."
+                    return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
                 fp.write_text(new_text, encoding="utf-8")
                 self._file_states.record_write(fp)
                 return f"Successfully edited {fp}"
@@ -878,41 +893,26 @@ class EditFileTool(_FsTool):
                 return self._not_found_msg(old_text, content, path)
             count = len(matches)
             if replace_all and occurrence is not None:
-                return "Error: occurrence cannot be used with replace_all=true."
+                return ToolResult.error("Error: occurrence cannot be used with replace_all=true.")
             if replace_all and line_hint is not None:
-                return "Error: line_hint cannot be used with replace_all=true."
+                return ToolResult.error("Error: line_hint cannot be used with replace_all=true.")
             if occurrence is not None and line_hint is not None:
-                return "Error: line_hint cannot be used with occurrence."
-            if count > 1 and not replace_all:
-                if occurrence is not None:
-                    if occurrence > count:
-                        return (
-                            f"Error: occurrence {occurrence} is out of range; "
-                            f"old_text appears {count} times."
-                        )
-                elif line_hint is not None:
-                    nearest = min(matches, key=lambda match: abs(match.line - line_hint))
-                    distance = abs(nearest.line - line_hint)
-                    if sum(1 for match in matches if abs(match.line - line_hint) == distance) > 1:
-                        return (
-                            f"Error: line_hint {line_hint} is ambiguous; "
-                            f"old_text appears {count} times."
-                        )
-                else:
-                    line_numbers = [match.line for match in matches]
-                    preview = ", ".join(f"line {n}" for n in line_numbers[:3])
-                    if len(line_numbers) > 3:
-                        preview += ", ..."
-                    location_hint = f" at {preview}" if preview else ""
-                    return (
-                        f"Warning: old_text appears {count} times{location_hint}. "
-                        "Provide more context, set occurrence to choose one match, "
-                        "or set replace_all=true."
-                    )
-            elif occurrence is not None and occurrence > count:
-                return (
+                return ToolResult.error("Error: line_hint cannot be used with occurrence.")
+            if occurrence is not None and occurrence > count:
+                return ToolResult.error(
                     f"Error: occurrence {occurrence} is out of range; "
-                    f"old_text appears {count} time."
+                    f"old_text appears {count} time(s)."
+                )
+            if count > 1 and not replace_all and occurrence is None and line_hint is None:
+                line_numbers = [match.line for match in matches]
+                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+                if len(line_numbers) > 3:
+                    preview += ", ..."
+                location_hint = f" at {preview}" if preview else ""
+                return (
+                    f"Warning: old_text appears {count} times{location_hint}. "
+                    "Provide more context, set occurrence to choose one match, "
+                    "or set replace_all=true."
                 )
 
             norm_new = new_text.replace("\r\n", "\n")
@@ -923,12 +923,29 @@ class EditFileTool(_FsTool):
 
             if replace_all:
                 selected = matches
+            elif occurrence is not None:
+                selected = [matches[occurrence - 1]]
             elif line_hint is not None:
-                selected = [min(matches, key=lambda match: abs(match.line - line_hint))]
+                candidates = [match for match in matches if _match_covers_line(match, line_hint)]
+                if not candidates:
+                    locations = ", ".join(f"line {match.line}" for match in matches[:3])
+                    if len(matches) > 3:
+                        locations += ", ..."
+                    return ToolResult.error(
+                        f"Error: line_hint {line_hint} does not match the old_text location. "
+                        f"old_text appears at {locations}. Re-read the intended region and "
+                        "copy old_text that covers the target line."
+                    )
+                if len(candidates) > 1:
+                    return ToolResult.error(
+                        f"Error: line_hint {line_hint} is ambiguous; "
+                        f"old_text appears {len(candidates)} times on that line."
+                    )
+                selected = candidates
             else:
-                selected = [matches[occurrence - 1 if occurrence else 0]]
+                selected = [matches[0]]
             if expected_replacements is not None and len(selected) != expected_replacements:
-                return (
+                return ToolResult.error(
                     f"Error: expected {expected_replacements} replacements but "
                     f"would make {len(selected)}."
                 )
@@ -954,9 +971,9 @@ class EditFileTool(_FsTool):
                 msg = f"{warning}\n{msg}"
             return msg
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error editing file: {e}"
+            return ToolResult.error(f"Error editing file: {e}")
 
     def _file_not_found_msg(self, path: str, fp: Path) -> str:
         """Build an error message with 'Did you mean ...?' suggestions."""
@@ -969,7 +986,7 @@ class EditFileTool(_FsTool):
         parts = [f"Error: File not found: {path}"]
         if suggestions:
             parts.append("Did you mean: " + ", ".join(suggestions) + "?")
-        return "\n".join(parts)
+        return ToolResult.error("\n".join(parts))
 
     @staticmethod
     def _not_found_msg(old_text: str, content: str, path: str) -> str:
@@ -985,18 +1002,18 @@ class EditFileTool(_FsTool):
             hint_text = ""
             if hints:
                 hint_text = "\nPossible cause: " + ", ".join(hints) + "."
-            return (
+            return ToolResult.error(
                 f"Error: old_text not found in {path}."
                 f"{hint_text}\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
             )
 
         if hints:
-            return (
+            return ToolResult.error(
                 f"Error: old_text not found in {path}. "
                 f"Possible cause: {', '.join(hints)}. "
                 "Copy the exact text from read_file and try again."
             )
-        return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        return ToolResult.error(f"Error: old_text not found in {path}. No similar text found. Verify the file content.")
 
 
 # ---------------------------------------------------------------------------
@@ -1051,9 +1068,9 @@ class ListDirTool(_FsTool):
                 raise ValueError("Unknown path")
             dp = self._resolve(path)
             if not dp.exists():
-                return f"Error: Directory not found: {path}"
+                return ToolResult.error(f"Error: Directory not found: {path}")
             if not dp.is_dir():
-                return f"Error: Not a directory: {path}"
+                return ToolResult.error(f"Error: Not a directory: {path}")
 
             cap = max_entries or self._DEFAULT_MAX
             items: list[str] = []
@@ -1084,6 +1101,6 @@ class ListDirTool(_FsTool):
                 result += f"\n\n(truncated, showing first {cap} of {total} entries)"
             return result
         except PermissionError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error listing directory: {e}"
+            return ToolResult.error(f"Error listing directory: {e}")

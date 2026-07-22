@@ -6,16 +6,18 @@ import asyncio
 import os
 import re
 import shutil
+import signal
+import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from loguru import logger
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
@@ -39,6 +41,30 @@ from nanobot.security.workspace_access import current_scope_allows_loopback, cur
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
+
+
+def _reap_pid(pid: int) -> None:
+    """Best-effort ``waitpid`` to reap a child and prevent zombies.
+
+    Call this after killing or after normal completion of any subprocess
+    as a safety net — asyncio's child-watcher *should* have reaped it,
+    but in containers / edge-cases it sometimes doesn't.
+
+    Uses ``os`` capability checks rather than ``_IS_WINDOWS`` so this is
+    safe when tests patch the platform flag while still running on Windows
+    (``os.waitpid`` / ``os.WNOHANG`` do not exist there).
+    """
+    waitpid = getattr(os, "waitpid", None)
+    wnohang = getattr(os, "WNOHANG", None)
+    if waitpid is None or wnohang is None:
+        return
+    try:
+        waitpid(pid, wnohang)
+    except (ProcessLookupError, ChildProcessError):
+        # Already reaped, or not our child — both are fine.
+        pass
+    except OSError as exc:
+        logger.debug("_reap_pid({}): {}", pid, exc)
 
 
 # Policy note appended to recoverable workspace-boundary guard errors.
@@ -89,12 +115,20 @@ class _PreparedCommand:
             maximum=600,
         ),
         shell=StringSchema(
-            "Optional shell binary to launch. On Unix, supports sh, bash, or zsh.",
+            (
+                "Override the Windows shell only when needed. Omit to use "
+                "PowerShell by default (pwsh when available, else powershell). "
+                "Pass 'cmd' only for cmd.exe syntax or cmd built-ins."
+                if _IS_WINDOWS
+                else "Override the Unix shell only when needed. Omit to use "
+                "bash by default. Pass 'sh' for POSIX sh or 'zsh' for "
+                "zsh-specific syntax."
+            ),
             nullable=True,
         ),
         login=BooleanSchema(
-            description="Whether to run bash/zsh with login shell semantics (default true).",
-            default=True,
+            description="Whether to run bash/zsh with login shell semantics (default false).",
+            default=False,
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
@@ -156,6 +190,7 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
+            session_manager=getattr(ctx, "exec_session_manager", None),
         )
 
     def __init__(
@@ -227,6 +262,13 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
+        platform_note = (
+            "On Windows, use PowerShell syntax by default; pass shell='cmd' "
+            "only for cmd-specific commands. "
+            if _IS_WINDOWS
+            else "On Unix, commands run through bash by default; pass shell='sh' "
+            "or shell='zsh' when needed. "
+        )
         return (
             "Execute a shell command and return its output. "
             "Use this for tests, builds, package commands, git commands, and "
@@ -234,6 +276,7 @@ class ExecTool(Tool):
             "inspection and apply_patch/write_file/edit_file for file changes "
             "instead of cat, shell find/grep, echo, or sed. "
             "Use -y or --yes flags to avoid interactive prompts. "
+            f"{platform_note}"
             "For long-running or interactive commands, pass yield_time_ms; "
             "if the command keeps running, exec returns a session_id that can "
             "be polled or written to with write_stdin. Output is truncated at "
@@ -256,7 +299,7 @@ class ExecTool(Tool):
         command = command or cmd
         working_dir = working_dir or workdir
         if not command:
-            return "Error: Missing command. Provide command or cmd."
+            return ToolResult.error("Error: Missing command. Provide command or cmd.")
         if max_output_chars is None:
             max_output_chars = max_output_tokens
 
@@ -267,6 +310,7 @@ class ExecTool(Tool):
         if yield_time_ms is not None:
             return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await self._spawn(
                 prepared.command,
@@ -283,10 +327,15 @@ class ExecTool(Tool):
                 )
             except asyncio.TimeoutError:
                 await self._kill_process(process)
-                return f"Error: Command timed out after {prepared.timeout} seconds"
+                return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
             except asyncio.CancelledError:
                 await self._kill_process(process)
                 raise
+
+            # Safety-net reap: asyncio *should* have reaped the child via
+            # communicate(), but in containers the child-watcher sometimes
+            # misses it, leaving a zombie.
+            _reap_pid(process.pid)
 
             output_parts = []
 
@@ -314,7 +363,11 @@ class ExecTool(Tool):
             return result
 
         except Exception as e:
-            return f"Error executing command: {str(e)}"
+            # Kill and reap the child if it was spawned but an unexpected
+            # error prevented communicate() from completing.
+            if process is not None:
+                await self._kill_process(process)
+            return ToolResult.error(f"Error executing command: {str(e)}")
 
     async def _execute_session(
         self,
@@ -339,9 +392,10 @@ class ExecTool(Tool):
                     MAX_OUTPUT_CHARS,
                 ),
             )
-            return format_session_poll(session_id, poll)
+            result = format_session_poll(session_id, poll)
+            return ToolResult.error(result) if poll.timed_out else result
         except Exception as exc:
-            return f"Error executing command: {exc}"
+            return ToolResult.error(f"Error executing command: {exc}")
 
     def _resolve_timeout(self, timeout: int | None) -> int | None:
         """Resolve the effective hard timeout in seconds (None = no limit).
@@ -383,12 +437,12 @@ class ExecTool(Tool):
                 requested = Path(cwd).expanduser().resolve()
                 resolved_root = Path(workspace_root).expanduser().resolve()
             except Exception:
-                return (
+                return ToolResult.error(
                     "Error: working_dir could not be resolved"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
             if not is_path_within(requested, resolved_root):
-                return (
+                return ToolResult.error(
                     "Error: working_dir is outside the configured workspace"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
@@ -432,7 +486,7 @@ class ExecTool(Tool):
             env=env,
             timeout=effective_timeout,
             shell_program=shell_program,
-            login=True if login is None else login,
+            login=False if login is None else login,
         )
 
     def _compose_path(self, current_path: str) -> str:
@@ -461,23 +515,38 @@ class ExecTool(Tool):
     async def _spawn(
         command: str, cwd: str, env: dict[str, str],
         shell_program: str | None = None,
-        login: bool = True,
+        login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
+        process_tree: bool = False,
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
-            if "\n" in command:
-                return await asyncio.create_subprocess_exec(
-                    "powershell", "-NoProfile", "-Command", command,
+            # Default to PowerShell so single-line and multi-line commands
+            # share the same shell semantics.  cmd.exe is reachable via the
+            # explicit shell="cmd" parameter (see _resolve_shell).
+            default_program = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+            program = shell_program or default_program
+            program_name = PureWindowsPath(program).name.lower()
+            if program_name in ("cmd", "cmd.exe"):
+                cmd_env = {**env, "COMSPEC": program}
+                return await asyncio.create_subprocess_shell(
+                    command,
                     stdin=stdin,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
-                    env=env,
+                    env=cmd_env,
                 )
-            return await asyncio.create_subprocess_shell(
-                command,
+            command = ExecTool._normalize_powershell_command(command)
+            command = (
+                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
+                f"{command}\n"
+                "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
+            )
+            return await asyncio.create_subprocess_exec(
+                program, "-NoProfile", "-NonInteractive", "-Command", command,
                 stdin=stdin,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -497,52 +566,138 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            **({"start_new_session": True} if process_tree else {}),
         )
+
+    @staticmethod
+    def _normalize_powershell_command(command: str) -> str:
+        stripped = command.lstrip()
+        if not stripped or stripped[0] not in {"'", '"'}:
+            return command
+
+        quote = stripped[0]
+        end = stripped.find(quote, 1)
+        if end == -1 or end + 1 >= len(stripped) or not stripped[end + 1].isspace():
+            return command
+
+        executable = stripped[1:end]
+        looks_like_windows_executable = (
+            bool(re.match(r"^[A-Za-z]:[\\/]", executable))
+            or executable.startswith(r"\\")
+            or executable.lower().endswith((".exe", ".cmd", ".bat", ".ps1"))
+        )
+        if not looks_like_windows_executable:
+            return command
+
+        leading = command[: len(command) - len(stripped)]
+        return f"{leading}& {stripped}"
 
     @staticmethod
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:
         if not shell:
             return None, None
-        if _IS_WINDOWS:
-            return None, "Error: shell parameter is not supported on Windows"
         if "\0" in shell or "\n" in shell or "\r" in shell:
-            return None, "Error: shell contains invalid characters"
+            return None, ToolResult.error("Error: shell contains invalid characters")
+        if _IS_WINDOWS:
+            win_allowed = {"powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"}
+            path = Path(shell).expanduser()
+            if path.is_absolute():
+                name = path.name.lower()
+                if name not in win_allowed:
+                    return None, ToolResult.error(
+                        f"Error: unsupported shell {shell!r}. "
+                        "Allowed: powershell, pwsh, cmd"
+                    )
+                if not path.is_file():
+                    return None, ToolResult.error(f"Error: shell is not found: {shell}")
+                return str(path), None
+            if "/" in shell or "\\" in shell:
+                return None, ToolResult.error("Error: shell must be a shell name or absolute path")
+            if shell.lower() not in win_allowed:
+                return None, ToolResult.error(
+                    f"Error: unsupported shell {shell!r}. "
+                    "Allowed: powershell, pwsh, cmd"
+                )
+            if shell.lower() in ("cmd", "cmd.exe"):
+                resolved = os.environ.get("COMSPEC") or shutil.which("cmd") or "cmd"
+                return resolved, None
+            resolved = shutil.which(shell) or shell
+            return resolved, None
         allowed = {"sh", "bash", "zsh"}
         path = Path(shell).expanduser()
         if path.is_absolute():
             if path.name not in allowed:
-                return None, f"Error: unsupported shell {shell!r}. Allowed: bash, sh, zsh"
+                return None, ToolResult.error(f"Error: unsupported shell {shell!r}. Allowed: bash, sh, zsh")
             if not path.is_file() or not os.access(path, os.X_OK):
-                return None, f"Error: shell is not executable: {shell}"
+                return None, ToolResult.error(f"Error: shell is not executable: {shell}")
             return str(path), None
         if "/" in shell or "\\" in shell:
-            return None, "Error: shell must be a shell name or absolute path"
+            return None, ToolResult.error("Error: shell must be a shell name or absolute path")
         if shell not in allowed:
-            return None, f"Error: unsupported shell {shell!r}. Allowed: bash, sh, zsh"
+            return None, ToolResult.error(f"Error: unsupported shell {shell!r}. Allowed: bash, sh, zsh")
         resolved = shutil.which(shell)
         if not resolved:
-            return None, f"Error: shell not found: {shell}"
+            return None, ToolResult.error(f"Error: shell not found: {shell}")
         return resolved, None
 
     @staticmethod
     async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies."""
-        process.kill()
+        """Kill a subprocess and reap it to prevent zombies.
+
+        Safe to call when the process has already exited (e.g. generic
+        exception handlers after a successful ``communicate()``): skips
+        ``kill()`` and only runs the safety-net reap.
+        """
+        if process.returncode is not None:
+            _reap_pid(process.pid)
+            return
         try:
+            with suppress(ProcessLookupError):
+                process.kill()
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=5.0)
         finally:
-            if not _IS_WINDOWS:
+            _reap_pid(process.pid)
+
+    @staticmethod
+    async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        """Kill a session process and descendants, then reap the root process."""
+        if process.returncode is not None:
+            _reap_pid(process.pid)
+            return
+        try:
+            if _IS_WINDOWS:
+                with suppress(OSError, asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            subprocess.run,
+                            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        ),
+                        timeout=5.0,
+                    )
+            else:
                 try:
-                    os.waitpid(process.pid, os.WNOHANG)
-                except (ProcessLookupError, ChildProcessError) as e:
-                    logger.debug("Process already reaped or not found: {}", e)
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    process.kill()
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+        finally:
+            _reap_pid(process.pid)
 
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
 
-        On Unix, only HOME/LANG/TERM are passed; ``bash -l`` sources the
-        user's profile which sets PATH and other essentials.
+        On Unix, only HOME/LANG/TERM are passed by default. If callers request
+        ``login=True``, bash/zsh may source the user's profile and add PATH or
+        other variables.
 
         On Windows, ``cmd.exe`` has no login-profile mechanism, so a curated
         set of system variables (including PATH) is forwarded.  API keys and
@@ -600,17 +755,20 @@ class ExecTool(Tool):
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
-        # from the hardcoded deny list via configuration.
-        explicitly_allowed = bool(self.allow_patterns) and any(
-            re.search(p, lower) for p in self.allow_patterns
+        # from the hardcoded deny list via configuration. A chained command is
+        # only explicitly allowed when every top-level shell segment matches.
+        segments = self._split_shell_segments(lower)
+        explicitly_allowed = bool(self.allow_patterns) and bool(segments) and all(
+            any(re.fullmatch(pattern, segment) for pattern in self.allow_patterns)
+            for segment in segments
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):
-                    return "Error: Command blocked by deny pattern filter"
+                    return ToolResult.error("Error: Command blocked by deny pattern filter")
 
             if self.allow_patterns:
-                return "Error: Command blocked by allowlist filter (not in allowlist)"
+                return ToolResult.error("Error: Command blocked by allowlist filter (not in allowlist)")
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(
@@ -620,12 +778,12 @@ class ExecTool(Tool):
             ),
         ):
             # The runner turns this marker into a non-retryable security hint.
-            return "Error: Command blocked by safety guard (internal/private URL detected)"
+            return ToolResult.error("Error: Command blocked by safety guard (internal/private URL detected)")
 
         should_restrict = self.restrict_to_workspace if restrict_to_workspace is None else restrict_to_workspace
         if should_restrict:
             if "..\\" in cmd or "../" in cmd:
-                return (
+                return ToolResult.error(
                     "Error: Command blocked by safety guard (path traversal detected)"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
@@ -660,12 +818,90 @@ class ExecTool(Tool):
                 if not allowed and resolved_workspace is not None:
                     allowed = is_path_within(p, resolved_workspace)
                 if p.is_absolute() and not allowed:
-                    return (
+                    return ToolResult.error(
                         "Error: Command blocked by safety guard (path outside working dir)"
                         + _WORKSPACE_BOUNDARY_NOTE
                     )
 
         return None
+
+    @staticmethod
+    def _split_shell_segments(command: str) -> list[str]:
+        """Split shell commands on top-level chaining operators."""
+        segments: list[str] = []
+        current: list[str] = []
+        quote: str | None = None
+        escaped = False
+        paren_depth = 0
+        i = 0
+
+        while i < len(command):
+            ch = command[i]
+
+            if escaped:
+                current.append(ch)
+                escaped = False
+                i += 1
+                continue
+
+            if ch == "\\" and quote != "'":
+                current.append(ch)
+                escaped = True
+                i += 1
+                continue
+
+            if quote is not None:
+                current.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                continue
+
+            if ch in {"'", '"', "`"}:
+                current.append(ch)
+                quote = ch
+                i += 1
+                continue
+
+            if ch == "(":
+                paren_depth += 1
+                current.append(ch)
+                i += 1
+                continue
+
+            if ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+                current.append(ch)
+                i += 1
+                continue
+
+            operator_len = 0
+            if paren_depth == 0:
+                if command.startswith(("&&", "||"), i):
+                    operator_len = 2
+                elif ch == "&" and not (
+                    (i > 0 and command[i - 1] in "<>") or command.startswith("&>", i)
+                ):
+                    current.append(ch)
+                    operator_len = 1
+                elif ch in {";", "|"}:
+                    operator_len = 1
+
+            if operator_len:
+                segment = "".join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                i += operator_len
+                continue
+
+            current.append(ch)
+            i += 1
+
+        segment = "".join(current).strip()
+        if segment:
+            segments.append(segment)
+        return segments
 
     @classmethod
     def _is_benign_device_path(cls, path: str) -> bool:

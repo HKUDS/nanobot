@@ -15,7 +15,7 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { getHostApi } from "@/lib/runtime";
+import { getRuntimeHost } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 import {
   isAbsoluteWorkspacePath,
@@ -55,8 +55,8 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const hostApi = getHostApi();
-  const nativeProjectPicker = !!hostApi;
+  const pickFolder = getRuntimeHost().pickFolder;
+  const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {
     if (!open) return;
@@ -90,23 +90,23 @@ export function WorkspaceProjectPicker({
   );
 
   const pickNativeFolder = useCallback(async () => {
-    if (!hostApi || disabled) return;
+    if (!pickFolder || disabled) return;
     setPickingFolder(true);
     try {
-      const picked = await hostApi.pickFolder();
+      const picked = await pickFolder();
       if (picked) applyProjectPath(picked);
     } catch (err) {
       setPathError((err as Error).message);
     } finally {
       setPickingFolder(false);
     }
-  }, [applyProjectPath, disabled, hostApi]);
+  }, [applyProjectPath, disabled, pickFolder]);
 
   if (!visible || !defaultScope || !onChange) return null;
 
   if (nativeProjectPicker) {
     return (
-      <div className="flex min-w-0 items-center rounded-b-[28px] border-t border-border/25 bg-muted/60 px-3 py-1.5 dark:bg-white/[0.055] sm:px-4">
+      <div className="flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
         <button
           type="button"
           disabled={disabled || pickingFolder}
@@ -133,7 +133,7 @@ export function WorkspaceProjectPicker({
   }
 
   return (
-    <div className="flex min-w-0 items-center rounded-b-[28px] border-t border-border/25 bg-muted/60 px-3 py-1.5 dark:bg-white/[0.055] sm:px-4">
+    <div className="flex min-w-0 items-center rounded-b-[28px] bg-muted/45 px-3 py-1.5 dark:bg-white/[0.045] sm:px-4">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -254,7 +254,7 @@ export function WorkspaceAccessMenu({
           variant="ghost"
           aria-label={t("thread.composer.workspace.accessAria")}
           className={cn(
-            "max-w-[min(12.5rem,42vw)] rounded-[10px] border border-transparent font-semibold shadow-none",
+            "min-w-0 max-w-[min(7rem,30vw)] whitespace-nowrap rounded-[10px] border border-transparent font-semibold shadow-none sm:max-w-[min(12.5rem,42vw)]",
             isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
             isFull
               ? "bg-transparent text-orange-600 hover:bg-orange-500/8 dark:text-orange-300 dark:hover:bg-orange-400/10"
@@ -266,7 +266,7 @@ export function WorkspaceAccessMenu({
           ) : (
             <Hand className={cn("mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
           )}
-          <span className="truncate">
+          <span className={cn("min-w-0 truncate", isFull && "hidden sm:inline")}>
             {t(isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default")}
           </span>
           <ChevronDown className={cn("ml-1.5 shrink-0", isHero ? "h-3 w-3" : "h-3 w-3")} />

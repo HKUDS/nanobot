@@ -61,6 +61,71 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "skill-creator" in prompt
 
+    def test_prompt_embeds_current_memory_file_contents(self, store):
+        """Dream must see the real current file contents (Tier 4) so it edits the
+        files, not a stale mental model."""
+        store.append_history("hello")
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+        assert "## Current Memory Files" in prompt
+        assert "### SOUL.md" in prompt
+        assert "### USER.md" in prompt
+        assert "### memory/MEMORY.md" in prompt
+        # Real current contents are embedded verbatim.
+        assert "Project X active" in prompt
+        assert "Helpful" in prompt
+
+    def test_prompt_renders_missing_files_as_empty(self, tmp_path):
+        store = MemoryStore(tmp_path)  # no durable files written
+        store.append_history("hello")
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+        assert "(empty)" in prompt
+
+    def test_workspace_dream_prompt_overrides_default(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text(
+            "Custom Dream prompt.",
+            encoding="utf-8",
+        )
+        store.append_history("keep this fact")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert prompt.startswith("Custom Dream prompt.")
+        assert "memory consolidation engine" not in prompt
+        assert "## Conversation History" in prompt
+        assert "keep this fact" in prompt
+
+    def test_workspace_dream_prompt_override_is_capped(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("x" * 40_000, encoding="utf-8")
+        store.append_history("keep this fact")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "x" * 40_000 not in prompt
+        assert "... (truncated)" in prompt
+        assert "## Conversation History" in prompt
+        assert "keep this fact" in prompt
+
+    def test_empty_workspace_dream_prompt_uses_default(self, store):
+        store.dream_prompt_file.parent.mkdir(parents=True)
+        store.dream_prompt_file.write_text("  \n", encoding="utf-8")
+        store.append_history("test")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "memory consolidation engine" in prompt
+
     def test_truncates_long_entries(self, store):
         long_content = "x" * 2000
         store.append_history(long_content)
@@ -524,48 +589,142 @@ class TestEphemeralHooks:
         spy.before_iteration.assert_called()
 
 class TestDreamCommitMessage:
-    async def test_commit_includes_response_summary(self, tmp_path):
-        """Git auto-commit after Dream should include the LLM response in the body."""
-        import subprocess
-        from unittest.mock import AsyncMock, MagicMock
+    def test_commit_message_reflects_real_diff_not_narrative(self, tmp_path):
+        """The Dream commit message must mirror the real git diff and ignore the
+        LLM's narrative, so ``/dream-log`` can never lie.
 
-        from nanobot.agent.memory import MemoryStore
+        Regression for the hallucinated-commit bug: commit ``a72ca2a`` claimed a
+        "Medical Research" section that never reached the diff.
+        """
+        import subprocess
 
         store = MemoryStore(tmp_path)
         store.write_soul("# Soul")
         store.write_memory("# Memory")
-        store.append_history("user discussed project goals")
-
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(return_value=MagicMock(
-            content="Identified 2 new facts about project goals",
-            finish_reason="stop",
-            tool_calls=[],
-            usage={},
-        ))
-
         store.git.init()
         store.git.auto_commit("initial state")
 
-        # Simulate what the cron handler does: produce a resp with content,
-        # build the commit message via the actual function, then commit.
-        resp_content = "Identified 2 new facts about project goals"
-        resp = MagicMock(content=resp_content)
-        msg = MemoryStore.build_dream_commit_message(
-            "dream: periodic memory consolidation", resp,
-        )
+        # A real edit to a tracked content file.
+        store.write_memory("# Memory\n- DMSO research notes")
 
-        # Write a change so auto_commit has something to commit
-        store.write_memory("# Memory\n- Updated by Dream")
+        # A lying narrative the old code would have appended verbatim.
+        lying = "Added a Medical Research section (Mastic Gum, DMSO) to MEMORY.md"
+        diff_body = store.dream_content_diff()
+        assert diff_body, "real edit must be detected"
+        assert "DMSO research notes" in diff_body
+        assert lying not in diff_body
+
+        msg = MemoryStore.build_dream_commit_message(
+            "dream: periodic memory consolidation", diff_body,
+        )
+        assert lying not in msg
+        assert "DMSO research notes" in msg
+
         sha = store.git.auto_commit(msg)
         assert sha is not None
-
         log = subprocess.check_output(
             ["git", "log", "-1", "--format=%B"],
             cwd=str(tmp_path), text=True,
         ).strip()
         assert "dream: periodic memory consolidation" in log
-        assert "Identified 2 new facts" in log
+        assert "DMSO research notes" in log
+        assert lying not in log
+
+    def test_commit_message_is_bare_prefix_when_no_changes(self, tmp_path):
+        """A no-op Dream run yields only the prefix — never a narrated summary."""
+        store = MemoryStore(tmp_path)
+        store.write_soul("# Soul")
+        store.write_memory("# Memory")
+        store.git.init()
+        store.git.auto_commit("initial state")
+
+        # No edits at all.
+        assert store.dream_content_diff() == ""
+        msg = MemoryStore.build_dream_commit_message(
+            "dream: manual run", store.dream_content_diff(),
+        )
+        assert msg == "dream: manual run"
+
+    def test_build_commit_message_ignores_none_and_empty_body(self):
+        assert MemoryStore.build_dream_commit_message("dream: x", "") == "dream: x"
+        assert MemoryStore.build_dream_commit_message("dream: x", None) == "dream: x"
+        assert MemoryStore.build_dream_commit_message("dream: x", "  ") == "dream: x"
+        assert (
+            MemoryStore.build_dream_commit_message("dream: x", "SOUL.md: +1 -0")
+            == "dream: x\n\nSOUL.md: +1 -0"
+        )
+
+
+class TestDreamContentDiff:
+    """The ground-truth signal that gates cursor advance and commit messages."""
+
+    def test_empty_when_git_not_initialized(self, store):
+        assert store.dream_content_diff() == ""
+
+    def test_empty_when_no_tracked_changes(self, store):
+        store.git.init()
+        store.git.auto_commit("initial")
+        assert store.dream_content_diff() == ""
+
+    def test_ignores_platform_line_ending_normalization(self, store, monkeypatch):
+        import subprocess
+
+        system_config = store.workspace / "system.gitconfig"
+        global_config = store.workspace / "global.gitconfig"
+        system_config.touch()
+        global_config.touch()
+        subprocess.run(
+            [
+                "git", "config", "--file", str(system_config),
+                "core.autocrlf", "false",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+
+        store.soul_file.write_bytes(b"# Soul\r\n- Helpful")
+        store.memory_file.write_bytes(b"# Memory\r\n- Project X active")
+        store.git.init()
+
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "--", "SOUL.md", "memory/MEMORY.md"],
+            cwd=store.workspace,
+            text=True,
+        )
+        assert status == ""
+        assert store.dream_content_diff() == ""
+
+    @pytest.mark.parametrize(
+        ("before", "after", "changed"),
+        [
+            (b"# Memory\r\n", b"# Memory\n", False),
+            (b"# Memory\n", b"# Memory", True),
+            (b"# Memory\r", b"# Memory\n", True),
+        ],
+    )
+    def test_only_ignores_crlf_lf_changes(self, store, before, after, changed):
+        store.memory_file.write_bytes(before)
+        store.git.init()
+
+        store.memory_file.write_bytes(after)
+
+        assert bool(store.dream_content_diff()) is changed
+
+    def test_reflects_real_content_edits(self, store):
+        store.git.init()
+        store.git.auto_commit("initial")
+        store.write_memory("# Memory\n- DMSO research notes")
+        diff = store.dream_content_diff()
+        assert diff
+        assert "memory/MEMORY.md" in diff
+        assert "DMSO research notes" in diff
+
+    def test_ignores_cursor_only_changes(self, store):
+        """Advancing the cursor must not count as a productive content edit."""
+        store.git.init()
+        store.git.auto_commit("initial")
+        store.set_last_dream_cursor(99)  # only memory/.dream_cursor changes
+        assert store.dream_content_diff() == ""

@@ -14,7 +14,7 @@ import httpx
 from loguru import logger
 from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -34,6 +34,24 @@ _VOLCENGINE_SEARCH_API_URL = "https://open.feedcoopapi.com/search_api/web_search
 _VOLCENGINE_TRAFFIC_TAG = "nanobot"
 _VOLCENGINE_TIME_RANGES = {"OneDay", "OneWeek", "OneMonth", "OneYear"}
 _VOLCENGINE_DATE_RANGE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$")
+
+
+# Single source of truth for selectable search providers (CLI wizard + WebUI).
+# "credential" describes what each provider needs: none / api_key / base_url /
+# optional_api_key.
+SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
+    {"name": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
+    {"name": "brave", "label": "Brave Search", "credential": "api_key"},
+    {"name": "tavily", "label": "Tavily", "credential": "api_key"},
+    {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
+    {"name": "jina", "label": "Jina", "credential": "api_key"},
+    {"name": "kagi", "label": "Kagi", "credential": "api_key"},
+    {"name": "exa", "label": "Exa", "credential": "api_key"},
+    {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "bocha", "label": "Bocha", "credential": "api_key"},
+    {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
+    {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
+)
 
 
 class WebSearchConfig(Base):
@@ -93,6 +111,39 @@ def _validate_url_safe(url: str) -> tuple[bool, str]:
     return validate_url_target(url)
 
 
+def _resolve_url_safe(url: str) -> tuple[bool, str, tuple[str, ...]]:
+    """Validate URL and return the resolved IPs to pin during the request."""
+    from nanobot.security.network import resolve_url_target
+
+    return resolve_url_target(url)
+
+
+def _pinned_dns_transport() -> httpx.AsyncBaseTransport:
+    from nanobot.security.network import PinnedDNSAsyncTransport
+
+    return PinnedDNSAsyncTransport()
+
+
+def _fetch_client_kwargs(proxy: str | None, timeout: float) -> dict[str, Any]:
+    from nanobot.security.network import httpx_env_proxy_mounts
+
+    kwargs: dict[str, Any] = {"timeout": timeout}
+    if proxy:
+        kwargs["proxy"] = proxy
+    else:
+        kwargs["transport"] = _pinned_dns_transport()
+        mounts = httpx_env_proxy_mounts()
+        if mounts:
+            kwargs["mounts"] = mounts
+    return kwargs
+
+
+def _unsafe_url_request_error(exc: BaseException) -> str | None:
+    from nanobot.security.network import UnsafeURLRequestError
+
+    return str(exc) if isinstance(exc, UnsafeURLRequestError) else None
+
+
 async def _get_with_safe_redirects(
     client: httpx.AsyncClient,
     url: str,
@@ -101,11 +152,17 @@ async def _get_with_safe_redirects(
     """GET a URL while validating every redirect target before requesting it."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg = _validate_url_safe(current_url)
+        is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
             return None, f"Redirect blocked: {error_msg}"
 
-        response = await client.get(current_url, headers=headers, follow_redirects=False)
+        try:
+            response = await client.get(current_url, headers=headers, follow_redirects=False)
+        except httpx.RequestError as exc:
+            unsafe_error = _unsafe_url_request_error(exc)
+            if unsafe_error is not None:
+                return None, f"Redirect blocked: {unsafe_error}"
+            raise
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
             return response, None
@@ -134,7 +191,7 @@ async def _stream_with_safe_redirects(
     """Open a streamed response while validating every redirect target first."""
     current_url = url
     for _ in range(MAX_REDIRECTS + 1):
-        is_valid, error_msg = _validate_url_safe(current_url)
+        is_valid, error_msg, _ = _resolve_url_safe(current_url)
         if not is_valid:
             return None, None, f"Redirect blocked: {error_msg}"
 
@@ -144,7 +201,13 @@ async def _stream_with_safe_redirects(
             headers=headers,
             follow_redirects=False,
         )
-        response = await stream.__aenter__()
+        try:
+            response = await stream.__aenter__()
+        except httpx.RequestError as exc:
+            unsafe_error = _unsafe_url_request_error(exc)
+            if unsafe_error is not None:
+                return None, None, f"Redirect blocked: {unsafe_error}"
+            raise
         is_redirect = 300 <= response.status_code < 400
         if not is_redirect:
             return response, stream, None
@@ -320,6 +383,9 @@ class WebSearchTool(Tool):
             return "volcengine" if api_key else "duckduckgo"
         if provider == "keenable":
             return "keenable"
+        if provider == "serper":
+            api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
+            return "serper" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -376,14 +442,16 @@ class WebSearchTool(Tool):
             )
         elif provider == "keenable":
             return await self._search_keenable(query, n)
+        elif provider == "serper":
+            return await self._search_serper(query, n)
         else:
-            return f"Error: unknown search provider '{provider}'"
+            return ToolResult.error(f"Error: unknown search provider '{provider}'")
 
     async def _search_olostep(self, query: str, n: int) -> str:
         try:
             from olostep import AsyncOlostep, Olostep_BaseError
         except ImportError:
-            return "Error: olostep package not installed. Run: pip install olostep"
+            return ToolResult.error("Error: olostep package not installed. Run: pip install olostep")
         api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
         if not api_key:
             logger.warning("OLOSTEP_API_KEY not set, falling back to DuckDuckGo")
@@ -427,9 +495,9 @@ class WebSearchTool(Tool):
             items = [{"title": answer_text or "Olostep answer", "url": "", "content": "\n".join(source_lines)}]
             return _format_results(query, items, n)
         except Olostep_BaseError as e:
-            return f"Olostep search error: {type(e).__name__}: {e}"
+            return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
         except Exception as e:
-            return f"Olostep search error: {type(e).__name__}: {e}"
+            return ToolResult.error(f"Error: Olostep search error: {type(e).__name__}: {e}")
 
     async def _search_brave(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("BRAVE_API_KEY", "")
@@ -463,13 +531,13 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return (
+                return ToolResult.error(
                     "Error: Brave search rate limited after retry. "
                     "Retry later or reduce consecutive web_search calls."
                 )
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
         except Exception as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
 
     async def _search_tavily(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("TAVILY_API_KEY", "")
@@ -487,7 +555,7 @@ class WebSearchTool(Tool):
                 r.raise_for_status()
             return _format_results(query, r.json().get("results", []), n)
         except Exception as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
 
     async def _search_keenable(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
@@ -522,10 +590,10 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return "Error: Keenable search rate limited. Try again later or reduce search frequency."
-            return f"Error: Keenable search failed ({e.response.status_code}): {e}"
+                return ToolResult.error("Error: Keenable search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Keenable search failed ({e.response.status_code}): {e}")
         except Exception as e:
-            return f"Error: Keenable search failed: {e}"
+            return ToolResult.error(f"Error: Keenable search failed: {e}")
 
     async def _search_searxng(self, query: str, n: int) -> str:
         base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
@@ -535,7 +603,7 @@ class WebSearchTool(Tool):
         endpoint = f"{base_url.rstrip('/')}/search"
         is_valid, error_msg = _validate_url(endpoint)
         if not is_valid:
-            return f"Error: invalid SearXNG URL: {error_msg}"
+            return ToolResult.error(f"Error: invalid SearXNG URL: {error_msg}")
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
@@ -547,7 +615,7 @@ class WebSearchTool(Tool):
                 r.raise_for_status()
             return _format_results(query, r.json().get("results", []), n)
         except Exception as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
 
     async def _search_jina(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("JINA_API_KEY", "")
@@ -598,7 +666,7 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except Exception as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
 
     async def _search_exa(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("EXA_API_KEY", "")
@@ -645,10 +713,47 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return "Error: Exa search rate limited. Try again later or reduce search frequency."
-            return f"Error: Exa search failed ({e.response.status_code}): {e}"
+                return ToolResult.error("Error: Exa search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Exa search failed ({e.response.status_code}): {e}")
         except Exception as e:
-            return f"Error: Exa search failed: {e}"
+            return ToolResult.error(f"Error: Exa search failed: {e}")
+
+    async def _search_serper(self, query: str, n: int) -> str:
+        """Search via Serper.dev (Google Search API)."""
+        api_key = self.config.api_key or os.environ.get("SERPER_API_KEY", "")
+        if not api_key:
+            logger.warning("SERPER_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            headers = {
+                "X-API-KEY": api_key,
+                "Content-Type": "application/json",
+                "User-Agent": self.user_agent,
+            }
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    "https://google.serper.dev/search",
+                    headers=headers,
+                    json={"q": query, "num": n},
+                    timeout=float(self.config.timeout),
+                )
+                r.raise_for_status()
+            items = [
+                {
+                    "title": result.get("title", ""),
+                    "url": result.get("link", ""),
+                    "content": result.get("snippet", ""),
+                }
+                for result in r.json().get("organic", [])
+                if isinstance(result, dict)
+            ]
+            return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                return ToolResult.error("Error: Serper search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Serper search failed ({e.response.status_code}): {e}")
+        except Exception as e:
+            return ToolResult.error(f"Error: Serper search failed: {e}")
 
     async def _search_volcengine(
         self,
@@ -672,7 +777,7 @@ class WebSearchTool(Tool):
             normalized_time_range = _normalize_volcengine_time_range(time_range) if time_range else None
             normalized_auth_level = _normalize_volcengine_auth_level(auth_level) if auth_level is not None else None
         except ValueError as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
 
         body: dict[str, Any] = {
             "Query": query,
@@ -705,18 +810,18 @@ class WebSearchTool(Tool):
             data = r.json()
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return "Error: Volcengine search rate limited. Try again later or reduce search frequency."
-            return f"Error: Volcengine search failed ({e.response.status_code}): {e}"
+                return ToolResult.error("Error: Volcengine search rate limited. Try again later or reduce search frequency.")
+            return ToolResult.error(f"Error: Volcengine search failed ({e.response.status_code}): {e}")
         except Exception as e:
-            return f"Error: Volcengine search failed: {e}"
+            return ToolResult.error(f"Error: Volcengine search failed: {e}")
 
         error = (data.get("ResponseMetadata") or {}).get("Error") or data.get("Error") or data.get("error")
         if error:
             if isinstance(error, dict):
                 code = error.get("Code") or error.get("code") or "unknown"
                 message = error.get("Message") or error.get("message") or error
-                return f"Error: Volcengine search error {code}: {message}"
-            return f"Error: Volcengine search error: {error}"
+                return ToolResult.error(f"Error: Volcengine search error {code}: {message}")
+            return ToolResult.error(f"Error: Volcengine search error: {error}")
 
         result = data.get("Result") or data
         web_results = result.get("WebResults") or result.get("webResults") or result.get("results") or []
@@ -759,7 +864,7 @@ class WebSearchTool(Tool):
             # We run it in a thread to avoid blocking the loop
             from ddgs import DDGS
 
-            ddgs = DDGS(timeout=10)
+            ddgs = DDGS(timeout=10, proxy=self.proxy)
             raw = await asyncio.wait_for(
                 asyncio.to_thread(ddgs.text, query, max_results=n),
                 timeout=self.config.timeout,
@@ -773,7 +878,7 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except Exception as e:
             logger.warning("DuckDuckGo search failed: {}", e)
-            return f"Error: DuckDuckGo search failed ({e})"
+            return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
 
     async def _search_bocha(self, query: str, n: int, freshness: str = "noLimit") -> str:
         api_key = self.config.api_key or os.environ.get("BOCHA_API_KEY", "")
@@ -801,7 +906,7 @@ class WebSearchTool(Tool):
                     timeout=self.config.timeout,
                 )
                 if r.status_code == 429:
-                    return "Error: Bocha search rate-limited (HTTP 429). Wait and retry."
+                    return ToolResult.error("Error: Bocha search rate-limited (HTTP 429). Wait and retry.")
                 r.raise_for_status()
             data = r.json()
             wrapped_data = data.get("data") if isinstance(data, dict) else None
@@ -821,9 +926,9 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
-            return f"Error: Bocha search HTTP {e.response.status_code}: {e.response.text[:200]}"
+            return ToolResult.error(f"Error: Bocha search HTTP {e.response.status_code}: {e.response.text[:200]}")
         except Exception as e:
-            return f"Error: {e}"
+            return ToolResult.error(f"Error: {e}")
 
 
 @tool_parameters(
@@ -893,7 +998,9 @@ class WebFetchTool(Tool):
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
-            async with httpx.AsyncClient(proxy=self.proxy, timeout=15.0) as client:
+            async with httpx.AsyncClient(
+                **_fetch_client_kwargs(self.proxy, 15.0),
+            ) as client:
                 r, stream, redirect_error = await _stream_with_safe_redirects(
                     client,
                     url,
@@ -914,6 +1021,9 @@ class WebFetchTool(Tool):
                     if stream is not None:
                         await stream.__aexit__(None, None, None)
         except Exception as e:
+            unsafe_error = _unsafe_url_request_error(e)
+            if unsafe_error is not None:
+                return json.dumps({"error": f"URL validation failed: {unsafe_error}", "url": url}, ensure_ascii=False)
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         result = None
@@ -963,8 +1073,7 @@ class WebFetchTool(Tool):
         """Local fallback using readability-lxml."""
         try:
             async with httpx.AsyncClient(
-                timeout=30.0,
-                proxy=self.proxy,
+                **_fetch_client_kwargs(self.proxy, 30.0),
             ) as client:
                 r, redirect_error = await _get_with_safe_redirects(
                     client,

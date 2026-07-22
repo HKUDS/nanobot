@@ -6,13 +6,13 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
+from nanobot.security.workspace_access import current_tool_workspace
 
 
 @tool_parameters(
@@ -45,7 +45,7 @@ from nanobot.config.paths import get_workspace_path
         required=["content"],
     )
 )
-class MessageTool(Tool, ContextAware):
+class MessageTool(Tool):
     """Tool to send messages to users on chat channels."""
 
     def __init__(
@@ -62,20 +62,10 @@ class MessageTool(Tool, ContextAware):
             Path(workspace).expanduser() if workspace is not None else get_workspace_path()
         )
         self._restrict_to_workspace = restrict_to_workspace
-        self._default_channel: ContextVar[str] = ContextVar(
-            "message_default_channel", default=default_channel
-        )
-        self._default_chat_id: ContextVar[str] = ContextVar(
-            "message_default_chat_id", default=default_chat_id
-        )
-        self._default_message_id: ContextVar[str | None] = ContextVar(
-            "message_default_message_id",
-            default=default_message_id,
-        )
-        self._default_metadata: ContextVar[dict[str, Any]] = ContextVar(
-            "message_default_metadata",
-            default={},
-        )
+        self._fallback_channel = default_channel
+        self._fallback_chat_id = default_chat_id
+        self._fallback_message_id = default_message_id
+        self._fallback_metadata: dict[str, Any] = {}
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
         self._turn_delivered_media_var: ContextVar[tuple[str, ...]] = ContextVar(
             "message_turn_delivered_media",
@@ -98,13 +88,6 @@ class MessageTool(Tool, ContextAware):
             workspace=ctx.workspace,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
         )
-
-    def set_context(self, ctx: RequestContext) -> None:
-        """Set the current message context."""
-        self._default_channel.set(ctx.channel)
-        self._default_chat_id.set(ctx.chat_id)
-        self._default_message_id.set(ctx.message_id)
-        self._default_metadata.set(dict(ctx.metadata or {}))
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -198,9 +181,24 @@ class MessageTool(Tool, ContextAware):
                 not isinstance(row, list) or any(not isinstance(label, str) for label in row)
                 for row in buttons
             ):
-                return "Error: buttons must be a list of list of strings"
-        default_channel = self._default_channel.get()
-        default_chat_id = self._default_chat_id.get()
+                return ToolResult.error("Error: buttons must be a list of list of strings")
+        request_ctx = current_request_context()
+        default_channel = (
+            request_ctx.channel if request_ctx is not None else self._fallback_channel
+        )
+        default_chat_id = (
+            request_ctx.chat_id if request_ctx is not None else self._fallback_chat_id
+        )
+        default_message_id = (
+            request_ctx.message_id
+            if request_ctx is not None
+            else self._fallback_message_id
+        )
+        default_metadata = (
+            request_ctx.metadata
+            if request_ctx is not None
+            else self._fallback_metadata
+        )
         channel = channel or default_channel
         explicit_chat_id = chat_id
         if (
@@ -210,7 +208,7 @@ class MessageTool(Tool, ContextAware):
             and str(explicit_chat_id).strip() != ""
             and str(explicit_chat_id).strip() != str(default_chat_id).strip()
         ):
-            return (
+            return ToolResult.error(
                 "Error: chat_id does not match the active WebSocket conversation. "
                 "Omit chat_id (and usually channel) so delivery uses the current "
                 "conversation id from context — WebSocket client_id strings "
@@ -224,23 +222,23 @@ class MessageTool(Tool, ContextAware):
         # to the wrong chat entirely.
         same_target = channel == default_channel and chat_id == default_chat_id
         if same_target:
-            message_id = message_id or self._default_message_id.get()
+            message_id = message_id or default_message_id
         else:
             message_id = None
 
         if not channel or not chat_id:
-            return "Error: No target channel/chat specified"
+            return ToolResult.error("Error: No target channel/chat specified")
 
         if not self._send_callback:
-            return "Error: Message sending not configured"
+            return ToolResult.error("Error: Message sending not configured")
 
         if media:
             try:
                 media = self._resolve_media(media)
             except (OSError, PermissionError, ValueError) as e:
-                return f"Error: media path is not allowed: {str(e)}"
+                return ToolResult.error(f"Error: media path is not allowed: {str(e)}")
 
-        metadata = dict(self._default_metadata.get()) if same_target else {}
+        metadata = dict(default_metadata) if same_target else {}
         if message_id:
             metadata["message_id"] = message_id
         if self._record_channel_delivery_var.get() or media:
@@ -270,4 +268,4 @@ class MessageTool(Tool, ContextAware):
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
             return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
-            return f"Error sending message: {str(e)}"
+            return ToolResult.error(f"Error sending message: {str(e)}")

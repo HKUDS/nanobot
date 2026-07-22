@@ -1,0 +1,15 @@
+{
+  "description": "ローカルのブラウザワークベンチから nanobot を利用します。",
+  "requirements": "ローカルゲートウェイと WebSocket トークン",
+  "setup": {
+    "docsLabel": "WebSocket 設定ガイドを開く",
+    "officialLabel": "ローカル WebUI を開く",
+    "tryIt": "WebUI を開き、短いメッセージを送信します。",
+    "summary": "ブラウザワークベンチには WebSocket が必要で、nanobot webui コマンドによって準備されます。",
+    "steps": [
+      "webui コマンドで nanobot を起動します。",
+      "ターミナルに表示されたローカル URL を開きます。",
+      "ブラウザワークベンチの使用中は WebSocket を有効にしておきます。"
+    ]
+  }
+}

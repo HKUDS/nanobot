@@ -1,4 +1,4 @@
-"""Tests for sustained goal tools (`long_task`, `complete_goal`)."""
+"""Tests for sustained goal tools (``create_goal``, ``update_goal``)."""
 
 from __future__ import annotations
 
@@ -7,39 +7,79 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.context import RequestContext
-from nanobot.agent.tools.long_task import (
-    CompleteGoalTool,
-    LongTaskTool,
+from nanobot.agent.tools.context import (
+    RequestContext,
+    current_request_context,
+    request_context,
 )
+from nanobot.agent.tools.long_task import (
+    CreateGoalTool,
+    UpdateGoalTool,
+)
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
-from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.goal_state import GOAL_STATE_KEY, MAX_GOAL_OBJECTIVE_CHARS
 from nanobot.session.manager import SessionManager
+from nanobot.session.turn_continuation import should_finalize_on_max_iterations
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
-def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:
-    lt = LongTaskTool(sessions=sm)
-    cg = CompleteGoalTool(sessions=sm)
-    rc = RequestContext(
-        channel="websocket",
-        chat_id="c1",
-        session_key="websocket:c1",
-        metadata={},
+def _goal_metadata() -> dict[str, object]:
+    return {
+        "original_command": "/goal",
+        "original_content": "/goal implement the agreed plan",
+        "goal_requested": True,
+    }
+
+
+def _request_context(
+    *,
+    chat_id: str = "c1",
+    metadata: dict[str, object] | None = None,
+    original_user_text: str | None = "/goal implement the agreed plan",
+    channel: str = "websocket",
+) -> RequestContext:
+    return RequestContext(
+        channel=channel,
+        chat_id=chat_id,
+        session_key=f"{channel}:{chat_id}",
+        original_user_text=original_user_text,
+        metadata=metadata if metadata is not None else _goal_metadata(),
     )
-    lt.set_context(rc)
-    cg.set_context(rc)
-    return lt, cg
+
+
+def _tools(
+    sm: SessionManager,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> tuple[CreateGoalTool, UpdateGoalTool, RequestContext]:
+    create = CreateGoalTool(sessions=sm)
+    update = UpdateGoalTool(sessions=sm)
+    rc = _request_context(metadata=metadata)
+    return create, update, rc
+
+
+async def _execute(tool, ctx: RequestContext, *, allowed: bool = True, **kwargs):
+    with request_context(ctx), goal_mutation_permission(allowed):
+        return await tool.execute(**kwargs)
 
 
 @pytest.mark.asyncio
-async def test_long_task_records_goal_metadata(tmp_path):
+async def test_create_goal_records_goal_metadata(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, _cg = _tools(sm)
+    create, _update, ctx = _tools(sm)
+    sm.get_or_create("websocket:c1").metadata["_sustained_goal_continuation_rounds"] = 12
 
-    out = await lt.execute(goal="Do the thing", ui_summary="thing")
+    out = await _execute(
+        create,
+        ctx,
+        objective="Do the thing",
+        ui_summary="thing",
+    )
     assert "Goal recorded" in out
 
     sess = sm.get_or_create("websocket:c1")
@@ -48,26 +88,50 @@ async def test_long_task_records_goal_metadata(tmp_path):
     assert blob["status"] == "active"
     assert blob["objective"] == "Do the thing"
     assert blob["ui_summary"] == "thing"
+    assert "_sustained_goal_continuation_rounds" not in sess.metadata
+    assert "_sustained_goal_continuation_rounds" not in (
+        SessionManager(tmp_path).get_or_create("websocket:c1").metadata
+    )
+    assert not should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata=sess.metadata,
+    )
 
 
 @pytest.mark.asyncio
-async def test_long_task_rejects_second_active_goal(tmp_path):
+async def test_create_goal_rejects_without_explicit_goal_permission(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, _cg = _tools(sm)
+    create, _update, ctx = _tools(sm)
+    sess = sm.get_or_create("websocket:c1")
+    sess.add_message("user", "/goal implement the old plan")
+    sess.add_message("assistant", "The old goal is complete.")
+    sess.add_message("user", "Handle this as an ordinary one-time task.")
 
-    await lt.execute(goal="First")
-    out = await lt.execute(goal="Second")
-    assert "already active" in out
+    out = await _execute(
+        create,
+        ctx,
+        allowed=False,
+        objective="Implement another plan.",
+    )
+
+    assert "create_goal is unavailable for this turn" in str(out)
+    assert "/goal <task>" in str(out)
+    assert GOAL_STATE_KEY not in sess.metadata
 
 
 @pytest.mark.asyncio
-async def test_complete_goal_closes_active_goal(tmp_path):
+async def test_update_goal_complete_closes_active_goal(tmp_path):
     sm = SessionManager(tmp_path)
-    lt, cg = _tools(sm)
+    create, update, ctx = _tools(sm)
 
-    await lt.execute(goal="X")
-    out = await cg.execute(recap="Done.")
+    with request_context(ctx), goal_mutation_permission(True):
+        await create.execute(objective="X")
+        out = await update.execute(action="complete", recap="Done.")
+        denied = await create.execute(objective="Another")
+        assert goal_mutation_allowed() is False
+
     assert "marked complete" in out
+    assert "create_goal is unavailable for this turn" in str(denied)
 
     sess = sm.get_or_create("websocket:c1")
     blob = sess.metadata.get(GOAL_STATE_KEY)
@@ -76,50 +140,244 @@ async def test_complete_goal_closes_active_goal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, update, ctx = _tools(sm)
+
+    await _execute(create, ctx, objective="Old")
+    sess = sm.get_or_create("websocket:c1")
+    sess.metadata["_sustained_goal_continuation_rounds"] = 12
+    sm.save(sess)
+    out = await _execute(
+        update,
+        _request_context(),
+        action="replace",
+        objective="New",
+        ui_summary="new",
+    )
+
+    assert "Goal replaced" in out
+    blob = sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
+    assert blob["status"] == "active"
+    assert blob["objective"] == "New"
+    assert blob["previous_objective"] == "Old"
+    assert blob["ui_summary"] == "new"
+    assert "_sustained_goal_continuation_rounds" not in sess.metadata
+    assert "_sustained_goal_continuation_rounds" not in (
+        SessionManager(tmp_path).get_or_create("websocket:c1").metadata
+    )
+    assert not should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata=sess.metadata,
+    )
+
+
+@pytest.mark.asyncio
+async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypatch):
+    sm = SessionManager(tmp_path)
+    create, update, _context = _tools(sm)
+    sess = sm.get_or_create("websocket:c1")
+    sess.metadata["marker"] = {"keep": True}
+    sess.metadata["_sustained_goal_continuation_rounds"] = 12
+    original_save = sm.save
+    create_context = _request_context()
+
+    def fail_save(_session, **_kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(sm, "save", fail_save)
+    with pytest.raises(OSError, match="disk unavailable"):
+        await _execute(create, create_context, objective="Old")
+
+    assert sess.metadata == {
+        "marker": {"keep": True},
+        "_sustained_goal_continuation_rounds": 12,
+    }
+    assert GOAL_STATE_KEY not in SessionManager(tmp_path).get_or_create("websocket:c1").metadata
+
+    monkeypatch.setattr(sm, "save", original_save)
+    assert "Goal recorded" in await _execute(create, create_context, objective="Old")
+    sess.metadata["_sustained_goal_continuation_rounds"] = 12
+    sm.save(sess)
+    replace_context = _request_context()
+
+    monkeypatch.setattr(sm, "save", fail_save)
+    with pytest.raises(OSError, match="disk unavailable"):
+        await _execute(update, replace_context, action="replace", objective="New")
+
+    assert sess.metadata[GOAL_STATE_KEY]["objective"] == "Old"
+    assert sess.metadata["_sustained_goal_continuation_rounds"] == 12
+    persisted = SessionManager(tmp_path).get_or_create("websocket:c1").metadata
+    assert persisted[GOAL_STATE_KEY]["objective"] == "Old"
+    assert persisted["_sustained_goal_continuation_rounds"] == 12
+
+    monkeypatch.setattr(sm, "save", original_save)
+    assert "Goal replaced" in await _execute(
+        update,
+        replace_context,
+        action="replace",
+        objective="New",
+    )
+    assert "_sustained_goal_continuation_rounds" not in sess.metadata
+    assert (
+        SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]
+        == "New"
+    )
+
+
+@pytest.mark.asyncio
+async def test_goal_tools_reject_oversized_objectives(tmp_path):
+    sm = SessionManager(tmp_path)
+    create = CreateGoalTool(sessions=sm)
+    create_context = _request_context()
+    oversized = "x" * (MAX_GOAL_OBJECTIVE_CHARS + 1)
+
+    create_out = await _execute(create, create_context, objective=oversized)
+
+    assert f"must not exceed {MAX_GOAL_OBJECTIVE_CHARS}" in str(create_out)
+    assert GOAL_STATE_KEY not in sm.get_or_create("websocket:c1").metadata
+    assert "Goal recorded" in await _execute(
+        create,
+        create_context,
+        objective="x" * MAX_GOAL_OBJECTIVE_CHARS,
+    )
+
+    update = UpdateGoalTool(sessions=sm)
+    replace_context = _request_context()
+    replace_out = await _execute(update, replace_context, action="replace", objective=oversized)
+
+    assert f"must not exceed {MAX_GOAL_OBJECTIVE_CHARS}" in str(replace_out)
+    assert len(sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]) == (
+        MAX_GOAL_OBJECTIVE_CHARS
+    )
+
+
+@pytest.mark.asyncio
+async def test_active_goal_create_failure_preserves_permission_for_replace(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, update, initial_context = _tools(sm)
+    assert "Goal recorded" in await _execute(create, initial_context, objective="Old")
+
+    replacement_context = _request_context()
+    with request_context(replacement_context), goal_mutation_permission(True):
+        create_out = await create.execute(objective="New")
+        assert goal_mutation_allowed() is True
+        replace_out = await update.execute(action="replace", objective="New")
+        assert goal_mutation_allowed() is True
+
+    assert "already active" in str(create_out)
+    assert "Goal replaced" in replace_out
+
+
+@pytest.mark.asyncio
+async def test_update_goal_replace_requires_explicit_goal_permission(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, update, initial_context = _tools(sm)
+    assert "Goal recorded" in await _execute(create, initial_context, objective="Old")
+    ordinary_context = _request_context(original_user_text="Continue the existing objective.")
+
+    unauthorized = await _execute(
+        update,
+        ordinary_context,
+        allowed=False,
+        action="replace",
+        objective="Unrequested",
+    )
+
+    assert "replacing the goal is unavailable for this turn" in str(unauthorized)
+    assert "/goal <task>" in str(unauthorized)
+    assert sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"] == "Old"
+    replace_context = _request_context()
+
+    with request_context(replace_context), goal_mutation_permission(True):
+        assert "Goal replaced" in await update.execute(action="replace", objective="New")
+        reused = await update.execute(action="replace", objective="Another")
+        assert goal_mutation_allowed() is True
+
+    assert "Goal replaced" in reused
+    assert sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"] == "Another"
+
+
+@pytest.mark.asyncio
 async def test_goal_tools_keep_request_context_per_task(tmp_path):
     sm = SessionManager(tmp_path)
-    lt = LongTaskTool(sessions=sm)
-    cg = CompleteGoalTool(sessions=sm)
-    ctx_a = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
-    ctx_b = RequestContext(channel="websocket", chat_id="b", session_key="websocket:b")
+    create = CreateGoalTool(sessions=sm)
+    update = UpdateGoalTool(sessions=sm)
+    ctx_a = RequestContext(
+        channel="websocket",
+        chat_id="a",
+        session_key="websocket:a",
+        metadata=_goal_metadata(),
+    )
+    ctx_b = RequestContext(
+        channel="websocket",
+        chat_id="b",
+        session_key="websocket:b",
+        metadata=_goal_metadata(),
+    )
 
-    lt.set_context(ctx_a)
-    task_a = asyncio.create_task(lt.execute(goal="Goal A"))
-    lt.set_context(ctx_b)
-    task_b = asyncio.create_task(lt.execute(goal="Goal B"))
+    task_a = asyncio.create_task(_execute(create, ctx_a, objective="Goal A"))
+    task_b = asyncio.create_task(_execute(create, ctx_b, objective="Goal B"))
     await asyncio.gather(task_a, task_b)
 
     assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["objective"] == "Goal A"
     assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["objective"] == "Goal B"
 
-    cg.set_context(ctx_a)
-    done_a = asyncio.create_task(cg.execute(recap="Done A"))
-    cg.set_context(ctx_b)
-    done_b = asyncio.create_task(cg.execute(recap="Done B"))
-    await asyncio.gather(done_a, done_b)
+    a_revoked = asyncio.Event()
+
+    async def complete_a() -> None:
+        with request_context(ctx_a), goal_mutation_permission(True):
+            await update.execute(action="complete", recap="Done A")
+            assert goal_mutation_allowed() is False
+            a_revoked.set()
+
+    async def replace_b() -> None:
+        with request_context(ctx_b), goal_mutation_permission(True):
+            await a_revoked.wait()
+            assert goal_mutation_allowed() is True
+            await update.execute(action="replace", objective="Goal B2")
+
+    await asyncio.gather(complete_a(), replace_b())
 
     assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["recap"] == "Done A"
-    assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["recap"] == "Done B"
+    assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["objective"] == "Goal B2"
 
 
 @pytest.mark.asyncio
-async def test_goal_tools_context_isolated_across_tool_types(tmp_path):
-    """LongTaskTool and CompleteGoalTool must not share routing context."""
+async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path):
     sm = SessionManager(tmp_path)
-    lt = LongTaskTool(sessions=sm)
-    cg = CompleteGoalTool(sessions=sm)
-    ctx = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
+    create = CreateGoalTool(sessions=sm)
+    update = UpdateGoalTool(sessions=sm)
+    registry = ToolRegistry()
+    registry.register(create)
+    registry.register(update)
+    sess = sm.get_or_create("websocket:c1")
+    sess.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Old"}
+    sm.save(sess)
+    ctx = _request_context()
 
-    lt.set_context(ctx)
-    assert cg._request_ctx.get() is None
+    with request_context(ctx), goal_mutation_permission(True):
+        create_out = await registry.execute("create_goal", {"objective": "New"})
+        complete_out = await registry.execute(
+            "update_goal",
+            {"action": "complete", "recap": "Old goal done."},
+        )
+        denied_out = await registry.execute("create_goal", {"objective": "Denied"})
+        assert goal_mutation_allowed() is False
 
-    cg.set_context(ctx)
-    assert lt._request_ctx.get() is ctx
-    assert cg._request_ctx.get() is ctx
+    assert "already active" in str(create_out)
+    assert "marked complete" in str(complete_out)
+    assert "create_goal is unavailable for this turn" in str(denied_out)
+    assert current_request_context() is None
+
+    leaked_out = await registry.execute("create_goal", {"objective": "Leaked"})
+
+    assert "missing routing context" in str(leaked_out)
+    assert sess.metadata[GOAL_STATE_KEY]["status"] == "completed"
 
 
 @pytest.mark.asyncio
-async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
+async def test_goal_state_events_publish_active_then_inactive(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     runtime_events = RuntimeEventBus()
@@ -129,85 +387,82 @@ async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
         sessions=sm,
         schedule_background=lambda _coro: None,
     ).subscribe(runtime_events)
-    lt = LongTaskTool(sessions=sm, runtime_events=runtime_events)
-    rc = RequestContext(
-        channel="websocket",
-        chat_id="chat-99",
-        session_key="websocket:chat-99",
-        metadata={},
+    create = CreateGoalTool(sessions=sm, runtime_events=runtime_events)
+    update = UpdateGoalTool(sessions=sm, runtime_events=runtime_events)
+    rc = _request_context(chat_id="chat-99")
+    await _execute(
+        create,
+        rc,
+        objective="Objective alpha",
+        ui_summary="alpha",
     )
-    lt.set_context(rc)
-
-    await lt.execute(goal="Objective alpha", ui_summary="alpha")
 
     bus.publish_outbound.assert_awaited_once()
     call = bus.publish_outbound.await_args.args[0]
     assert call.channel == "websocket"
     assert call.chat_id == "chat-99"
-    assert call.metadata.get("_goal_state_sync") is True
-    assert call.metadata["goal_state"] == {
+    assert isinstance(call.event, GoalStateSyncEvent)
+    assert call.event.goal_state == {
         "active": True,
         "ui_summary": "alpha",
         "objective": "Objective alpha",
     }
 
-
-@pytest.mark.asyncio
-async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
-    bus = MagicMock()
-    bus.publish_outbound = AsyncMock()
-    runtime_events = RuntimeEventBus()
-    sm = SessionManager(tmp_path)
-    WebuiTurnCoordinator(
-        bus=bus,
-        sessions=sm,
-        schedule_background=lambda _coro: None,
-    ).subscribe(runtime_events)
-    lt = LongTaskTool(sessions=sm, runtime_events=runtime_events)
-    cg = CompleteGoalTool(sessions=sm, runtime_events=runtime_events)
-    rc = RequestContext(
-        channel="websocket",
-        chat_id="chat-z",
-        session_key="websocket:chat-z",
-        metadata={},
-    )
-    lt.set_context(rc)
-    await lt.execute(goal="X")
-
     bus.publish_outbound.reset_mock()
-    cg.set_context(rc)
-    await cg.execute(recap="Done.")
+    await _execute(
+        update,
+        RequestContext(
+            channel="websocket",
+            chat_id="chat-99",
+            session_key="websocket:chat-99",
+        ),
+        action="complete",
+        recap="Done.",
+    )
 
     bus.publish_outbound.assert_awaited_once()
     call = bus.publish_outbound.await_args.args[0]
-    assert call.metadata["goal_state"] == {"active": False}
+    assert isinstance(call.event, GoalStateSyncEvent)
+    assert call.event.goal_state == {"active": False}
 
 
 @pytest.mark.asyncio
-async def test_complete_goal_without_active_is_noop_message(tmp_path):
+async def test_update_goal_without_active_is_noop_message(tmp_path):
     sm = SessionManager(tmp_path)
-    _lt, cg = _tools(sm)
+    _create, update, ctx = _tools(sm)
 
-    out = await cg.execute(recap="n/a")
+    out = await _execute(update, ctx, action="complete", recap="n/a")
     assert "No active" in out
 
 
 @pytest.mark.asyncio
-async def test_long_task_skips_ws_publish_without_bus(tmp_path):
-    sm = SessionManager(tmp_path)
-    lt, _cg = _tools(sm)
-    out = await lt.execute(goal="Solo", ui_summary="s")
-    assert "Goal recorded" in out
-
-
-@pytest.mark.asyncio
-async def test_long_task_and_complete_goal_registered(tmp_path):
+async def test_goal_tools_registered_in_base_registry(tmp_path):
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
-    lt = loop.tools.get("long_task")
-    cg = loop.tools.get("complete_goal")
-    assert lt is not None and lt.name == "long_task"
-    assert cg is not None and cg.name == "complete_goal"
+    create = loop.tools.get("create_goal")
+    update = loop.tools.get("update_goal")
+    assert create is not None and create.name == "create_goal"
+    assert update is not None and update.name == "update_goal"
+    assert set(create.parameters["properties"]) == {"objective", "ui_summary"}
+    assert create.parameters["required"] == ["objective"]
+    assert (
+        create.parameters["properties"]["objective"]["maxLength"]
+        == MAX_GOAL_OBJECTIVE_CHARS
+    )
+    assert (
+        update.parameters["properties"]["objective"]["maxLength"]
+        == MAX_GOAL_OBJECTIVE_CHARS
+    )
+    model_visible_contract = " ".join(
+        (
+            create.description,
+            str(create.parameters),
+            update.description,
+            str(update.parameters),
+        )
+    ).lower()
+    assert "authoriz" not in model_visible_contract
+    assert "/goal" not in model_visible_contract

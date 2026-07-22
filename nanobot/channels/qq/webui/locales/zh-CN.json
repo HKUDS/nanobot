@@ -1,0 +1,38 @@
+{
+  "description": "在 QQ 会话中使用 nanobot。",
+  "requirements": "QQ 机器人凭据和网关",
+  "setup": {
+    "docsLabel": "打开 QQ 配置指南",
+    "officialLabel": "打开 QQ 机器人后台",
+    "tryIt": "从 QQ 发送一条私聊或群聊测试消息。",
+    "summary": "QQ 使用官方机器人凭据和 WebSocket 长连接。",
+    "steps": [
+      "在 QQ 开放平台创建机器人并复制 App ID 和 Secret。",
+      "选择消息格式和可选的发送者白名单。",
+      "保存并启用 QQ，然后发送一条私聊或群聊测试消息。"
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ 机器人 App ID",
+        "help": "从 QQ 开放平台复制。"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••",
+        "help": "离开 QQ 凭据页面前请妥善保存。"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "Open ID，用逗号分隔"
+      },
+      "msgFormat": {
+        "label": "消息格式",
+        "choices": {
+          "plain": "纯文本",
+          "markdown": "Markdown"
+        }
+      }
+    }
+  }
+}

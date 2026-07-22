@@ -76,6 +76,7 @@
       "image": "Image",
       "voice": "Voice",
       "browser": "Web",
+      "channels": "Channels",
       "cliApps": "CLI Apps",
       "mcp": "MCP",
       "runtime": "System",
@@ -141,6 +142,7 @@
       "presetModel": "Preset model",
       "density": "Density",
       "activityMode": "Activity detail",
+      "fileEditDisplay": "File edit display",
       "codeWrap": "Code wrapping",
       "brandLogos": "Brand logos",
       "maxResults": "Max results",
@@ -187,6 +189,7 @@
       "presetModel": "Switch to Default to edit model and provider from the WebUI.",
       "density": "Stored only in this browser.",
       "activityMode": "Choose how much agent activity chrome to show by default.",
+      "fileEditDisplay": "Choose whether file edit activity opens as line counts or a diff.",
       "codeWrap": "Keep long code lines readable on smaller screens.",
       "brandLogos": "Show third-party provider and CLI logos in Settings.",
       "maxResults": "Results returned by each web_search call.",
@@ -234,21 +237,21 @@
       "searchPlaceholder": "Search CLIs",
       "loading": "Loading CLI Apps...",
       "empty": "No CLI Apps match this filter.",
-      "statusInstalled": "CLI installed",
+      "statusInstalled": "App ready",
       "statusMissing": "Missing",
       "statusAvailable": "Available",
       "statusUnsupported": "Unsupported",
-      "statusNotInstalled": "CLI not installed",
+      "statusNotInstalled": "App not installed",
       "requires": "Requires",
-      "test": "Test CLI",
-      "update": "Update CLI",
-      "uninstall": "Uninstall CLI",
-      "install": "Install CLI",
+      "test": "Test app",
+      "update": "Update app",
+      "uninstall": "Uninstall app",
+      "install": "Install app",
       "readyTitle": "@{{name}} is ready",
       "readyStatus": "Ready",
       "readyTry": "Try @{{name}}",
       "readyCopied": "Copied",
-      "readyPrompt": "Use @{{name}} to inspect what this CLI can do.",
+      "readyPrompt": "Ask nanobot to use @{{name}} for this task.",
       "openChat": "Open chat",
       "unsupported": "Unsupported",
       "unavailable": "Unavailable",
@@ -268,8 +271,8 @@
       "filterInstalled": "Enabled",
       "filterNotInstalled": "Not enabled",
       "searchPlaceholder": "Search MCP presets",
-      "moreOptions": "More MCP options",
-      "moreOptionsSubtitle": "Add a custom server or import mcp.json.",
+      "moreOptions": "Add integration",
+      "moreOptionsSubtitle": "Connect a custom tool server or import an existing configuration.",
       "customTitle": "Custom MCP",
       "customSubtitle": "Add any stdio, HTTP, or SSE MCP server.",
       "customAction": "Custom",
@@ -329,6 +332,9 @@
       "compact": "Compact",
       "auto": "Auto",
       "expanded": "Expanded",
+      "summary": "Summary",
+      "diff": "Diff",
+      "collapsedDiff": "Collapsed diff",
       "on": "On",
       "off": "Off",
       "defaultPermission": "Default Permission",
@@ -457,19 +463,129 @@
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
     },
+    "api": {
+      "title": "API server",
+      "openaiCompatible": "OpenAI-compatible API",
+      "description": "Connect SDKs and agents through a local /v1 endpoint.",
+      "start": "Start API server",
+      "starting": "Starting...",
+      "stop": "Stop",
+      "stopping": "Stopping...",
+      "access": "Access",
+      "thisDevice": "This device",
+      "localNetwork": "Local network",
+      "localHelp": "Only this device can connect.",
+      "networkHelp": "Other devices can connect; an API key is required.",
+      "port": "Port",
+      "portHelp": "The API uses this local port.",
+      "apiKey": "API key",
+      "apiKeyHelp": "Clients send this as a Bearer token.",
+      "apiKeyRequired": "Required before exposing the API to your network.",
+      "apiKeyPlaceholder": "Enter an API key",
+      "autoInstall": "API support will be installed automatically when you start it."
+    },
+    "observability": {
+      "title": "Observability",
+      "configured": "Tracing credentials are available to nanobot.",
+      "environment": "Set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY, then restart nanobot.",
+      "enable": "Enable tracing support"
+    },
     "apps": {
-      "description": "Add app CLIs and MCP services nanobot can use from chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "All",
-      "filterCli": "CLI apps",
-      "filterMcp": "MCP services",
-      "enabledSummary": "{{count}} enabled",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Search Apps",
-      "featured": "Featured",
+      "description": "Add tools to nanobot, then @ them in chat.",
+      "cliLabel": "App",
+      "mcpLabel": "Integration",
+      "channelLabel": "Channel",
+      "featureLabel": "Feature",
+      "filterAll": "Ready",
+      "filterPlugins": "Plugins",
+      "filterCli": "Apps",
+      "filterMcp": "Integrations",
+      "enabledSummary": "{{count}} ready",
+      "caption": "{{cli}} apps · {{mcp}} integrations",
+      "searchPlaceholder": "Search tools",
+      "featured": "Tools",
       "loading": "Loading Apps...",
-      "empty": "No apps match this filter."
+      "empty": "No tools match this view.",
+      "restartRequired": "Restart nanobot to apply updated apps and integrations."
+    },
+    "channels": {
+      "description": "Connect chat apps, email, and WebUI to nanobot.",
+      "caption": "{{enabled}} running · {{total}} channels",
+      "searchPlaceholder": "Search channels",
+      "backToChannels": "All channels",
+      "catalog": "Channels",
+      "loading": "Loading Channels...",
+      "empty": "No channels match this filter.",
+      "restartRequired": "Restart nanobot to apply updated channel support.",
+      "requires": "Requires: {{requirements}}",
+      "setUp": "Set up",
+      "setupGuide": "Setup guide",
+      "setupSummary": "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
+      "configKeys": "Config keys",
+      "enable": "Enable channel",
+      "disable": "Disable channel",
+      "needsConfig": "Needs setup",
+      "connect": "Connect",
+      "reconnect": "Reconnect",
+      "advanced": "Advanced",
+      "checkAndEnable": "Check and enable",
+      "checkConnection": "Check connection",
+      "checkedAndEnabled": "Checked and enabled.",
+      "checking": "Checking...",
+      "checkOnly": "Check only",
+      "commandCopied": "Command copied.",
+      "commandCopyFailed": "Could not copy command.",
+      "configuredInstances": "{{count}} instances configured",
+      "connectPreview": "The in-browser connect flow is next. For now, run the command below.",
+      "copyCommand": "Copy command",
+      "filterAll": "All",
+      "filterOff": "Not running",
+      "filterOn": "Running",
+      "helperCopied": "{{name}} copied.",
+      "helperCopyFailed": "Could not copy {{name}}.",
+      "hideSecret": "Hide secret",
+      "instanceConfigured": "Configured",
+      "instanceNeedsSetup": "Needs setup",
+      "runtimeFailed": "Failed",
+      "runtimeStarting": "Starting",
+      "runtimeStopped": "Not running",
+      "managedByWebui": "Managed by WebUI",
+      "officialGuide": "Official guide",
+      "optional": "Optional",
+      "providerPreset": "Provider",
+      "requiredSetup": "Required setup",
+      "savedSecret": "Saved",
+      "savedSecretPlaceholder": "Saved secret",
+      "savedSettings": "Saved settings.",
+      "saveSettings": "Save settings",
+      "selectChannel": "View {{name}} settings",
+      "setupSteps": "Next steps",
+      "showSecret": "Show secret",
+      "toggleChannel": "{{name}} channel",
+      "toggleInstance": "{{name}} instance",
+      "tryIt": "Try it",
+      "validationFailed": "Check the required setup before enabling.",
+      "validation": {
+        "connected": "Connected",
+        "configured": "Configured manually",
+        "needs_setup": "Needs setup",
+        "invalid": "Invalid",
+        "unsupported": "Manual setup"
+      }
+    },
+    "nanobotFeatures": {
+      "enabled": "Enabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "ready": "Ready",
+      "missingDependency": "Support missing",
+      "installSupport": "Install support",
+      "installConfirmTitle": "Install support for {{name}}?",
+      "installConfirmDescription": "nanobot will add what {{name}} needs, then turn it on. Continue?",
+      "installConfirmAction": "Install and enable",
+      "websocketRequired": "Required for WebUI",
+      "channelDisabled": "Channel is disabled",
+      "notEnabled": "Not enabled"
     },
     "automations": {
       "filters": {
@@ -493,6 +609,7 @@
       "emptyHint": "Create one from where it should run so nanobot keeps the right context.",
       "oneShot": "One-time",
       "systemTask": "System-managed automation",
+      "localTrigger": "Local trigger",
       "labels": {
         "schedule": "Schedule",
         "next": "Next",
@@ -551,11 +668,13 @@
         "weekdaysAt": "Weekdays at {{time}}",
         "hourlyAt": "Hourly at :{{minute}}",
         "hourlyWindow": "Hourly {{start}}-{{end}} at :{{minute}}",
+        "local": "Local trigger",
         "custom": "Custom schedule"
       },
       "next": {
         "paused": "Paused",
         "pending": "Running now",
+        "local": "Waiting for trigger",
         "none": "No next run"
       },
       "message": {
@@ -692,11 +811,13 @@
       "every": "Every {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Local trigger",
       "unknown": "Custom schedule"
     },
     "next": {
       "label": "Next: {{time}}",
       "disabled": "Paused",
+      "local": "Waiting for trigger",
       "none": "No next run"
     }
   },
@@ -791,12 +912,14 @@
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Local trigger",
         "unknown": "Custom schedule"
       },
       "next": {
         "label": "{{time}}",
         "pending": "Runs shortly",
         "disabled": "Paused",
+        "local": "Waiting for trigger",
         "none": "No next run"
       }
     },
@@ -824,7 +947,7 @@
         "edit": "Edit guidance",
         "drag": "Drag to reorder"
       },
-      "attachImage": "Attach image",
+      "attachImage": "Attach files",
       "imageMode": {
         "label": "Image Generation",
         "toggle": "Toggle image generation mode",
@@ -854,11 +977,12 @@
       },
       "voiceErrors": {
         "unsupported": "Voice input is not supported in this browser.",
-        "permission": "Microphone permission is required.",
+        "permission": "Allow microphone access in the address bar, then retry.",
         "notConfigured": "Configure a transcription provider first.",
         "tooLong": "Recording is too long.",
         "tooShort": "Hold a little longer to record voice.",
         "noInput": "No microphone input detected.",
+        "noDevice": "No microphone was found. Connect a microphone and try again.",
         "failed": "Could not transcribe audio."
       },
       "slash": {
@@ -880,7 +1004,7 @@
         "commands": {
           "new": {
             "title": "New chat",
-            "description": "Stop the current task and start a fresh conversation."
+            "description": "Reset this chat and start a fresh conversation."
           },
           "stop": {
             "title": "Stop current task",
@@ -914,9 +1038,17 @@
             "title": "Restore memory",
             "description": "Revert memory to a previous Dream snapshot."
           },
+          "dream_prompt": {
+            "title": "Dream memory",
+            "description": "Tell Dream how to organize this workspace's memory."
+          },
           "goal": {
             "title": "Long-running goal",
             "description": "Tell the agent to treat this as a sustained multi-step goal."
+          },
+          "trigger": {
+            "title": "Create local trigger",
+            "description": "Create a CLI trigger bound to this chat session."
           },
           "help": {
             "title": "Show help",
@@ -941,12 +1073,17 @@
       "encoding": "Encoding…",
       "remove": "Remove attachment",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "textTooLarge": "Message text is too large (max {{max}})",
       "imageRejected": {
         "unsupported_type": "Unsupported file type",
+        "empty_file": "Empty files cannot be attached",
+        "too_many_attachments": "Max {{max}} attachments per message",
         "too_many_images": "Max {{max}} images per message",
         "magic_mismatch": "File doesn't look like a real image",
         "decode_failed": "Couldn't decode this image",
-        "too_large": "Image is too large — try a smaller one",
+        "too_large": "File is too large — try a smaller one",
+        "total_too_large": "Attachments are too large together — remove some or use smaller files",
+        "transport_too_large": "This attachment would exceed the gateway transport limit",
         "io": "Couldn't read this file"
       },
       "workspace": {
@@ -1005,7 +1142,15 @@
     "forkFromHere": "Fork",
     "copyReply": "Copy",
     "copiedReply": "Copied",
-    "turnLatencyTitle": "Response time (end-to-end)"
+    "turnLatencyTitle": "Response time (end-to-end)",
+    "fileEditViewDiff": "View diff",
+    "fileEditViewLargeDiff": "View large diff",
+    "fileEditDiffLineCount": "{{count}} lines",
+    "fileEditUnchangedLinesHidden": "{{count}} unchanged lines hidden",
+    "fileEditShowMoreLines": "Show {{count}} more lines",
+    "fileEditShowFewerLines": "Show fewer lines",
+    "fileEditOpenFile": "Open file",
+    "fileEditDiffTruncated": "Diff truncated. Open the file for the full change."
   },
   "lightbox": {
     "title": "Image preview",

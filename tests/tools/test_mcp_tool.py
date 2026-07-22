@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import httpx
@@ -14,11 +16,14 @@ from nanobot.agent.tools.mcp import (
     MCPResourceWrapper,
     MCPToolWrapper,
     _normalize_windows_stdio_command,
+    _sanitize_mcp_tool_name,
     _sanitize_name,
     connect_mcp_servers,
 )
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.config.schema import MCPServerConfig
+
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 
 
 class _FakeTextContent:
@@ -36,9 +41,21 @@ class _FakeBlobResourceContents:
         self.blob = blob
 
 
+class _FakeImageContent:
+    def __init__(self, data: str, mime_type: str = "image/png") -> None:
+        self.data = data
+        self.mimeType = mime_type
+
+
 @pytest.fixture
 def fake_mcp_runtime() -> dict[str, object | None]:
     return {"session": None}
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +67,7 @@ def _fake_mcp_module(
         TextContent=_FakeTextContent,
         TextResourceContents=_FakeTextResourceContents,
         BlobResourceContents=_FakeBlobResourceContents,
+        ImageContent=_FakeImageContent,
     )
 
     class _FakeStdioServerParameters:
@@ -124,6 +142,35 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
         inputSchema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
+
+
+@pytest.mark.asyncio
+async def test_connect_missing_servers_propagates_external_cancellation(monkeypatch) -> None:
+    started = asyncio.Event()
+
+    async def connect_mcp_servers(_servers: dict, _registry: ToolRegistry) -> dict:
+        started.set()
+        await asyncio.sleep(60)
+        return {}
+
+    class State:
+        pass
+
+    state = State()
+    state._mcp_closing = False
+    state._mcp_servers = {"test": MCPServerConfig(command="fake")}
+    state._mcp_stacks = {}
+    state._mcp_connecting = False
+    monkeypatch.setattr(mcp_mod, "connect_mcp_servers", connect_mcp_servers)
+
+    task = asyncio.create_task(mcp_mod.connect_missing_servers(state, ToolRegistry()))
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert state._mcp_connecting is False
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:
@@ -296,6 +343,121 @@ async def test_execute_returns_text_blocks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_wraps_mcp_is_error_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent("Error: server-side MCP failure")],
+            isError=True,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "Error: server-side MCP failure"
+    assert is_tool_error_result(wrapper.name, result)
+
+
+@pytest.mark.asyncio
+async def test_execute_contains_malformed_success_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool returned malformed content: TypeError)"
+    assert is_tool_error_result(wrapper.name, result)
+
+
+@pytest.mark.asyncio
+async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=None)
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, {})
+
+    assert is_tool_error_result(wrapper.name, result)
+    assert "MCP tool returned malformed content" in result
+    assert "Analyze the error above and try a different approach" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_success_text_that_starts_with_error() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[_FakeTextContent("Error: generated report successfully")],
+            isError=False,
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "Error: generated report successfully"
+    assert not is_tool_error_result(wrapper.name, result)
+
+
+# Smallest valid 1x1 PNG, base64 without the data: prefix.
+_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+    "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            content=[
+                _FakeTextContent("here you go"),
+                _FakeImageContent(_PNG_B64, "image/png"),
+            ]
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute(prompt="a cat", model="sdxl")
+
+    payload = json.loads(result)
+    assert payload["text"] == "here you go"
+    assert len(payload["artifacts"]) == 1
+    artifact = payload["artifacts"][0]
+    assert artifact["mime"] == "image/png"
+    assert artifact["prompt"] == "a cat"
+    assert artifact["provider"] == "mcp:test"
+    assert Path(artifact["path"]).is_file()
+    # The base64 payload must NOT leak into the model-facing result.
+    assert _PNG_B64 not in result
+    assert "message tool" in payload["next_step"]
+
+
+@pytest.mark.asyncio
+async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
+    from nanobot.config.loader import set_config_path
+
+    set_config_path(tmp_path / "config.json")
+
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(content=[_FakeImageContent("not-valid-base64!!", "image/png")])
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "(MCP tool returned an image that could not be stored)"
+
+
+@pytest.mark.asyncio
 async def test_execute_returns_timeout_message() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         await asyncio.sleep(1)
@@ -306,6 +468,7 @@ async def test_execute_returns_timeout_message() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call timed out after 0.01s)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 @pytest.mark.asyncio
@@ -318,6 +481,7 @@ async def test_execute_handles_server_cancelled_error() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call was cancelled)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 @pytest.mark.asyncio
@@ -349,6 +513,7 @@ async def test_execute_handles_generic_exception() -> None:
     result = await wrapper.execute()
 
     assert result == "(MCP tool call failed: RuntimeError)"
+    assert is_tool_error_result(wrapper.name, result)
 
 
 def _make_tool_def(name: str) -> SimpleNamespace:
@@ -418,6 +583,26 @@ async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_supports_limited_wrapped_names(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    long_tool_name = "tool-" + "very-long-name-" * 8
+    wrapped_name = _sanitize_mcp_tool_name(f"mcp_test_{long_tool_name}")
+    assert len(wrapped_name) == 64
+
+    fake_mcp_runtime["session"] = _make_fake_session([long_tool_name, "other"])
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=[wrapped_name])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == [wrapped_name]
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
@@ -431,6 +616,79 @@ async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
         await stack.aclose()
 
     assert registry.tool_names == []
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_empty_list_blocks_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """enabledTools: [] (deny-all) must also block resource and prompt registration."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo"],
+        resource_names=["secret_data"],
+        prompt_names=["admin_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=[])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == []
+    # Resources and prompts must also be blocked
+    assert not any("secret_data" in name for name in registry.tool_names)
+    assert not any("admin_prompt" in name for name in registry.tool_names)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_specific_list_blocks_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """enabledTools with specific tool names must not leak resources or prompts."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo", "other"],
+        resource_names=["secret_data"],
+        prompt_names=["admin_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["demo"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    # Only the allowed tool should be registered
+    assert "mcp_test_demo" in registry.tool_names
+    assert "mcp_test_other" not in registry.tool_names
+    # Resources and prompts must not leak
+    assert not any("secret_data" in name for name in registry.tool_names)
+    assert not any("admin_prompt" in name for name in registry.tool_names)
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_prompts(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    """enabledTools: ['*'] should allow all tools, resources, and prompts."""
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["demo"],
+        resource_names=["public_data"],
+        prompt_names=["help_prompt"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert "mcp_test_demo" in registry.tool_names
+    assert any("public_data" in name for name in registry.tool_names)
+    assert any("help_prompt" in name for name in registry.tool_names)
 
 
 @pytest.mark.asyncio
@@ -493,6 +751,8 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
     [
         MCPServerConfig(url="http://127.0.0.1:9/sse"),
         MCPServerConfig(type="streamableHttp", url="http://127.0.0.1:9/mcp"),
+        MCPServerConfig(url="http://169.254.169.254/sse"),
+        MCPServerConfig(type="streamableHttp", url="http://169.254.169.254/mcp"),
     ],
 )
 async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
@@ -522,6 +782,115 @@ async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
 
 
 @pytest.mark.asyncio
+async def test_validate_mcp_request_url_rejects_loopback_without_whitelist() -> None:
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    configure_ssrf_whitelist([])
+    request = httpx.Request("GET", "http://127.0.0.1/private")
+
+    with pytest.raises(httpx.RequestError, match="Blocked unsafe MCP URL"):
+        await mcp_mod._validate_mcp_request_url(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        MCPServerConfig(type="sse", url="https://mcp.example.com/sse"),
+        MCPServerConfig(type="streamableHttp", url="https://mcp.example.com/mcp"),
+    ],
+)
+async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_transport(
+    config: MCPServerConfig,
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    client_kwargs: list[dict[str, object]] = []
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            client_kwargs.append(kwargs)
+
+        async def __aenter__(self) -> object:
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            return False
+
+    @asynccontextmanager
+    async def _capturing_sse_client(_url: str, httpx_client_factory=None):
+        assert httpx_client_factory is not None
+        async with httpx_client_factory():
+            pass
+        yield object(), object()
+
+    @asynccontextmanager
+    async def _capturing_streamable_http_client(_url: str, http_client=None):
+        assert http_client is not None
+        yield object(), object(), object()
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        lambda **_kwargs: httpx.MockTransport(
+            lambda request: httpx.Response(200, request=request)
+        ),
+    )
+    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _capturing_sse_client)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _capturing_streamable_http_client,
+    )
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"remote": config}, registry)
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert client_kwargs
+    assert all("transport" in kwargs for kwargs in client_kwargs)
+    assert all("mounts" in kwargs for kwargs in client_kwargs)
+
+
+def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("NO_PROXY", "mcp.example.com")
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        lambda **_kwargs: httpx.MockTransport(
+            lambda request: httpx.Response(200, request=request)
+        ),
+    )
+
+    kwargs = mcp_mod._pinned_transport_kwargs()
+
+    assert "transport" in kwargs
+    assert any(transport is None for transport in kwargs["mounts"].values())
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("config", "expected_transport"),
     [
@@ -541,7 +910,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     sent_urls: list[str] = []
     used_transports: list[str] = []
 
-    def _validate(url: str) -> tuple[bool, str]:
+    def _validate(url: str, **_kwargs: object) -> tuple[bool, str]:
         checked_urls.append(url)
         if url == "http://127.0.0.1/private":
             return False, "loopback blocked"
@@ -583,6 +952,11 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda **_kwargs: httpx.MockTransport(_handler),
+    )
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
     monkeypatch.setattr(
@@ -666,6 +1040,11 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
 
     monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        mcp_mod,
+        "PinnedDNSAsyncTransport",
+        lambda: httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
         "streamable_http_client",
@@ -1104,3 +1483,62 @@ async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
         await stack.aclose()
 
     assert registry.tool_names == ["mcp_test_My_Tool"]
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://user:secret@host.example/sse", "https://host.example/..."),
+        ("https://host.example:8443/mcp?token=abc#frag", "https://host.example:8443/..."),
+        ("https://user:secret@[::1]:8443/sse?token=abc", "https://[::1]:8443/..."),
+        ("https://host.example/sse", "https://host.example/..."),
+        ("https://host.example", "https://host.example"),
+        ("https://host.example/", "https://host.example/"),
+    ],
+)
+def test_redact_url_strips_credentials_and_query(url: str, expected: str) -> None:
+    assert mcp_mod._redact_url(url) == expected
+
+def test_mcp_tool_name_keeps_short_name():
+    name = _sanitize_mcp_tool_name("mcp_myserver_resource_myres")
+    assert name == "mcp_myserver_resource_myres"
+
+
+def test_mcp_tool_name_limits_long_name():
+    long_name = "mcp_" + "a" * 100
+    name = _sanitize_mcp_tool_name(long_name)
+
+    assert len(name) <= 64
+    assert name.startswith("mcp_")
+
+
+def test_long_server_name_tools_are_matched_by_server_name() -> None:
+    server_name = "very-long-server-name-" * 4
+    tool_def = SimpleNamespace(
+        name="search",
+        description="search tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    other_tool_def = SimpleNamespace(
+        name="search",
+        description="other search tool",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), server_name, tool_def)
+    other_wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "other", other_tool_def)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    registry.register(other_wrapper)
+
+    assert len(wrapper.name) == 64
+    assert not wrapper.name.startswith(mcp_mod._tool_prefix(server_name))
+
+    mcp_mod._attach_reconnect_handlers(SimpleNamespace(), registry, {server_name})
+    assert wrapper._reconnect is not None
+    assert other_wrapper._reconnect is None
+
+    removed = mcp_mod._unregister_server_tools(SimpleNamespace(), registry, server_name)
+
+    assert removed == 1
+    assert wrapper.name not in registry.tool_names
+    assert other_wrapper.name in registry.tool_names

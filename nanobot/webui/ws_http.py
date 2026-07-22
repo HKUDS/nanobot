@@ -26,8 +26,14 @@ from websockets.http11 import Response
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.runtime_context import public_history_messages
+from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from nanobot.webui.file_preview import (
+    WebUIFilePreviewError,
+    file_preview_availability_payload,
+    file_preview_payload,
+)
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -43,6 +49,9 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.http_utils import (
     http_response as _http_response,
+)
+from nanobot.webui.http_utils import (
+    is_local_browser_request as _is_local_browser_request,
 )
 from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
@@ -65,6 +74,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
+from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.session_automations import (
     all_automations_payload,
@@ -89,6 +99,7 @@ if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
+    from nanobot.triggers.local_store import LocalTriggerStore
 
 
 def _decode_api_key(raw_key: str) -> str | None:
@@ -149,11 +160,16 @@ class GatewayHTTPHandler:
         bus: MessageBus,
         tokens: GatewayTokenStore,
         media: WebUIMediaGateway,
+        ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
+        local_trigger_store: LocalTriggerStore | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+        local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
+        channel_feature_action: Callable[..., Any] | None = None,
+        channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -163,11 +179,14 @@ class GatewayHTTPHandler:
         self.bus = bus
         self.tokens = tokens
         self.media = media
+        self.ingress = ingress
         self.workspaces = workspaces
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
         self.cron_service = cron_service
+        self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
+        self.local_trigger_pending_ids = local_trigger_pending_ids
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -184,6 +203,8 @@ class GatewayHTTPHandler:
             error_response=_http_error,
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
+            channel_feature_action=channel_feature_action,
+            channel_runtime_status=channel_runtime_status,
         )
 
     def workspace_controls_available(self, connection: Any) -> bool:
@@ -225,7 +246,7 @@ class GatewayHTTPHandler:
             return self._handle_bootstrap(connection, request)
 
         # Settings routes (delegated)
-        response = await self.settings_routes.dispatch(request, got)
+        response = await self.settings_routes.dispatch(connection, request, got)
         if response is not None:
             return response
 
@@ -300,33 +321,44 @@ class GatewayHTTPHandler:
 
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
+        is_local_browser = _is_local_browser_request(connection, request.headers)
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not _is_localhost(connection):
+        elif not is_local_browser:
             return _http_error(403, "bootstrap is localhost-only")
 
-        if not self.tokens.can_issue(include_api_token=True):
+        api_token_allowed = bool(secret) or is_local_browser
+        if not self.tokens.can_issue(include_api_token=api_token_allowed):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
                 status=429,
                 content_type="application/json; charset=utf-8",
             )
-        token = self.tokens.issue_token(self.config.token_ttl_s, api_token=True)
+        token = self.tokens.issue_token(self.config.token_ttl_s)
+        api_token = (
+            self.tokens.issue_api_token(self.config.token_ttl_s)
+            if api_token_allowed
+            else None
+        )
 
         ws_url = self._bootstrap_ws_url(request)
         expected_path = _normalize_config_path(self.config.path)
-        return _http_json_response(
-            {
-                "token": token,
-                "ws_path": expected_path,
-                "ws_url": ws_url,
-                "expires_in": self.config.token_ttl_s,
-                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
-                "runtime_surface": self._runtime_surface,
-                "runtime_capabilities": self._capabilities,
-            }
-        )
+        payload = {
+            "token": token,
+            "ws_path": expected_path,
+            "ws_url": ws_url,
+            "expires_in": self.config.token_ttl_s,
+            "limits": self.ingress.bootstrap_limits(
+                max_frame_bytes=self.config.max_message_bytes,
+            ),
+            "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+            "runtime_surface": self._runtime_surface,
+            "runtime_capabilities": self._capabilities,
+        }
+        if api_token is not None:
+            payload["api_token"] = api_token
+        return _http_json_response(payload)
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
@@ -409,6 +441,9 @@ class GatewayHTTPHandler:
         messages = data.get("messages")
         if isinstance(messages, list):
             scrub_subagent_messages_for_channel(messages)
+            data["messages"] = public_history_messages(
+                message for message in messages if isinstance(message, dict)
+            )
         self.media.augment_media_urls(data)
         return _http_json_response(data)
 
@@ -465,13 +500,18 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        path = _query_first(_parse_query(request.path), "path")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path")
+        is_probe = _query_first(query, "probe") == "1"
         try:
-            payload = file_preview_payload(
-                path,
-                scope=self.workspaces.scope_for_session_key(decoded_key),
-            )
+            scope = self.workspaces.scope_for_session_key(decoded_key)
+            if is_probe:
+                payload = file_preview_availability_payload(path, scope=scope)
+            else:
+                payload = file_preview_payload(path, scope=scope)
         except WebUIFilePreviewError as e:
+            if is_probe and e.status in {400, 403, 404, 415}:
+                return _http_json_response({"available": False})
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
 
@@ -483,13 +523,12 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        pending_job_ids: set[str] = set()
-        if self.cron_pending_job_ids is not None:
-            pending_job_ids = self.cron_pending_job_ids(decoded_key)
+        pending_job_ids = self._pending_automation_ids_for_session(decoded_key)
         return _http_json_response(
             session_automations_payload(
                 self.cron_service,
                 decoded_key,
+                local_trigger_store=self.local_trigger_store,
                 pending_job_ids=pending_job_ids,
             )
         )
@@ -506,7 +545,11 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         query = _parse_query(request.path)
         delete_automations = (_query_first(query, "delete_automations") or "").lower()
-        automation_jobs = session_automation_jobs(self.cron_service, decoded_key)
+        automation_jobs = session_automation_jobs(
+            self.cron_service,
+            decoded_key,
+            local_trigger_store=self.local_trigger_store,
+        )
         if automation_jobs and delete_automations not in {"1", "true", "yes"}:
             return _http_json_response(
                 {
@@ -515,9 +558,13 @@ class GatewayHTTPHandler:
                     "automations": serialize_automation_jobs(automation_jobs),
                 }
             )
-        if automation_jobs and self.cron_service is not None:
+        if automation_jobs:
             for job in automation_jobs:
-                self.cron_service.remove_job(job.id)
+                if isinstance(job, LocalTrigger):
+                    if self.local_trigger_store is not None:
+                        self.local_trigger_store.delete(job.id)
+                elif self.cron_service is not None:
+                    self.cron_service.remove_job(job.id)
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
@@ -548,14 +595,37 @@ class GatewayHTTPHandler:
                 pending.update(self.cron_pending_job_ids(session_key))
         return pending
 
+    def _pending_local_trigger_ids_for_all(self) -> set[str]:
+        if self.local_trigger_store is None or self.local_trigger_pending_ids is None:
+            return set()
+        pending: set[str] = set()
+        for trigger in self.local_trigger_store.list_triggers(include_disabled=True):
+            session_key = trigger.session_key
+            if not session_key and trigger.channel and trigger.chat_id:
+                session_key = f"{trigger.channel}:{trigger.chat_id}"
+            if session_key:
+                pending.update(self.local_trigger_pending_ids(session_key))
+        return pending
+
+    def _pending_automation_ids_for_session(self, session_key: str) -> set[str]:
+        pending: set[str] = set()
+        if self.cron_pending_job_ids is not None:
+            pending.update(self.cron_pending_job_ids(session_key))
+        if self.local_trigger_pending_ids is not None:
+            pending.update(self.local_trigger_pending_ids(session_key))
+        return pending
+
     def _handle_webui_automations(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
+        pending_job_ids = self._pending_cron_job_ids_for_all()
+        pending_job_ids.update(self._pending_local_trigger_ids_for_all())
         return _http_json_response(
             all_automations_payload(
                 self.cron_service,
+                local_trigger_store=self.local_trigger_store,
                 session_manager=self.session_manager,
-                pending_job_ids=self._pending_cron_job_ids_for_all(),
+                pending_job_ids=pending_job_ids,
             )
         )
 
@@ -566,13 +636,19 @@ class GatewayHTTPHandler:
     ) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if self.cron_service is None:
-            return _http_error(503, "cron service unavailable")
+        if self.cron_service is None and self.local_trigger_store is None:
+            return _http_error(503, "automation service unavailable")
 
         query = _parse_query(request.path)
         job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
         if not job_id:
             return _http_error(400, "missing automation id")
+        trigger = self.local_trigger_store.get(job_id) if self.local_trigger_store else None
+        if trigger is not None:
+            return self._handle_local_trigger_action(request, action, trigger)
+
+        if self.cron_service is None:
+            return _http_error(404, "automation not found")
         job = self.cron_service.get_job(job_id)
         if job is None:
             return _http_error(404, "automation not found")
@@ -613,6 +689,40 @@ class GatewayHTTPHandler:
                 return _http_error(404, "automation not found")
             if result == "protected":
                 return _http_error(403, "system automation is protected")
+        else:
+            return _http_error(404, "unknown automation action")
+
+        return self._handle_webui_automations(request)
+
+    def _handle_local_trigger_action(
+        self,
+        request: WsRequest,
+        action: str,
+        trigger: LocalTrigger,
+    ) -> Response:
+        if self.local_trigger_store is None:
+            return _http_error(503, "trigger service unavailable")
+        if action == "enable":
+            if self.local_trigger_store.enable(trigger.id, enabled=True) is None:
+                return _http_error(404, "automation not found")
+        elif action == "disable":
+            if self.local_trigger_store.enable(trigger.id, enabled=False) is None:
+                return _http_error(404, "automation not found")
+        elif action == "delete":
+            if not self.local_trigger_store.delete(trigger.id):
+                return _http_error(404, "automation not found")
+        elif action == "run":
+            return _http_error(409, "local trigger requires a CLI message")
+        elif action == "update":
+            values = _automation_values_from_request(request)
+            if values is None:
+                return _http_error(400, "invalid automation update payload")
+            parsed = _parse_local_trigger_update(values)
+            if isinstance(parsed, str):
+                return _http_error(400, parsed)
+            if parsed:
+                if self.local_trigger_store.update(trigger.id, **parsed) is None:
+                    return _http_error(404, "automation not found")
         else:
             return _http_error(404, "unknown automation action")
 
@@ -827,6 +937,22 @@ def _parse_automation_update(
             return schedule_error
         update["schedule"] = parsed_schedule
         update["delete_after_run"] = parsed_schedule.kind == "at"
+    return update
+
+
+def _parse_local_trigger_update(values: dict[str, Any]) -> dict[str, Any] | str:
+    update: dict[str, Any] = {}
+    if "name" in values:
+        raw_name = values.get("name")
+        if not isinstance(raw_name, str):
+            return "name must be a string"
+        name = raw_name.strip()
+        if not name:
+            return "name cannot be empty"
+        update["name"] = name
+    forbidden = [key for key in ("message", "schedule") if key in values]
+    if forbidden:
+        return "local trigger updates only support name"
     return update
 
 

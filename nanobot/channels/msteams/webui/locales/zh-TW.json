@@ -1,0 +1,39 @@
+{
+  "description": "在 Microsoft Teams 對話中使用 nanobot。",
+  "requirements": "Azure 機器人應用程式憑證和公開回呼端點",
+  "setup": {
+    "docsLabel": "開啟 Teams 設定指南",
+    "officialLabel": "開啟 Teams 開發者後台",
+    "tryIt": "安裝 Teams 應用程式並傳送一則測試訊息。",
+    "summary": "Teams 透過 Bot Framework 回呼網址接收訊息；正式環境需要可存取的 HTTPS 端點。",
+    "steps": [
+      "建立 Azure Bot 或 Teams 應用程式，並複製 App ID 和用戶端密鑰。",
+      "透過 HTTPS 公開回呼路徑，並將其設為機器人的訊息端點。",
+      "儲存並啟用 Teams，然後安裝應用程式並傳送一則測試訊息。"
+    ],
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID",
+        "help": "從 Azure Bot 或 Teams 應用程式註冊頁面複製。"
+      },
+      "appPassword": {
+        "label": "用戶端密鑰",
+        "placeholder": "••••••",
+        "help": "為 Microsoft 應用程式建立用戶端密鑰。"
+      },
+      "tenantId": {
+        "label": "租用戶 ID",
+        "placeholder": "可選的租用戶 ID"
+      },
+      "path": {
+        "label": "回呼路徑",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "Teams 使用者 ID，以逗號分隔"
+      }
+    }
+  }
+}

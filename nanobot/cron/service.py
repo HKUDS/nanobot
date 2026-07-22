@@ -1,6 +1,7 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
+import errno
 import json
 import os
 import time
@@ -22,6 +23,12 @@ from nanobot.cron.types import (
     CronRunRecord,
     CronSchedule,
     CronStore,
+)
+from nanobot.utils.run_records import (
+    safe_run_record_name,
+)
+from nanobot.utils.run_records import (
+    write_run_record as write_automation_run_record,
 )
 
 
@@ -215,62 +222,7 @@ class CronService:
                 jobs = []
                 version = data.get("version", 1)
                 for j in data.get("jobs", []):
-                    job = CronJob(
-                        id=j["id"],
-                        name=j["name"],
-                        enabled=j.get("enabled", True),
-                        schedule=CronSchedule(
-                            kind=j["schedule"]["kind"],
-                            at_ms=j["schedule"].get("atMs"),
-                            every_ms=j["schedule"].get("everyMs"),
-                            expr=j["schedule"].get("expr"),
-                            tz=j["schedule"].get("tz"),
-                        ),
-                        payload=CronPayload(
-                            kind=j["payload"].get("kind", "agent_turn"),
-                            message=j["payload"].get("message", ""),
-                            deliver=j["payload"].get("deliver", False),
-                            channel=j["payload"].get("channel"),
-                            to=j["payload"].get("to"),
-                            channel_meta=(
-                                j["payload"].get("channelMeta")
-                                or j["payload"].get("channel_meta")
-                                or {}
-                            ),
-                            session_key=j["payload"].get("sessionKey") or j["payload"].get("session_key"),
-                            origin_channel=(
-                                j["payload"].get("originChannel")
-                                or j["payload"].get("origin_channel")
-                            ),
-                            origin_chat_id=(
-                                j["payload"].get("originChatId")
-                                or j["payload"].get("origin_chat_id")
-                            ),
-                            origin_metadata=(
-                                j["payload"].get("originMetadata")
-                                or j["payload"].get("origin_metadata")
-                                or {}
-                            ),
-                        ),
-                        state=CronJobState(
-                            next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
-                            last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
-                            last_status=j.get("state", {}).get("lastStatus"),
-                            last_error=j.get("state", {}).get("lastError"),
-                            run_history=[
-                                CronRunRecord(
-                                    run_at_ms=r["runAtMs"],
-                                    status=r["status"],
-                                    duration_ms=r.get("durationMs", 0),
-                                    error=r.get("error"),
-                                )
-                                for r in j.get("state", {}).get("runHistory", [])
-                            ],
-                        ),
-                        created_at_ms=j.get("createdAtMs", 0),
-                        updated_at_ms=j.get("updatedAtMs", 0),
-                        delete_after_run=j.get("deleteAfterRun", False),
-                    )
+                    job = CronJob.from_store_dict(j)
                     _normalize_agent_turn_job(job)
                     jobs.append(job)
             except Exception:
@@ -357,6 +309,25 @@ class CronService:
 
         return self._store
 
+    def _require_store(self) -> CronStore:
+        """Return a usable store or raise a clear error.
+
+        ``_load_store`` deliberately returns ``None`` when the first load sees
+        a corrupt on-disk store and no previous in-memory snapshot exists.  The
+        public API requires a concrete store object before touching
+        ``store.jobs``; raising here keeps callers from seeing an accidental
+        ``AttributeError`` and, more importantly, prevents follow-up saves from
+        treating a corrupt store as an empty one.
+        """
+        store = self._load_store()
+        if store is None:
+            raise RuntimeError(
+                f"cron store at {self.store_path} could not be loaded and was preserved "
+                "as a .corrupt-<ts> backup; refusing to operate to avoid overwriting "
+                "scheduled jobs. Inspect the corrupt backup and restore jobs.json manually."
+            )
+        return store
+
     def _save_store(self) -> None:
         """Save jobs to disk."""
         if not self._store:
@@ -437,11 +408,15 @@ class CronService:
             os.replace(tmp_path, path)
             # fsync the parent directory so the rename itself is durable.
             # Skip on Windows where opening a directory raises PermissionError;
-            # NTFS journals metadata synchronously so this is a no-op there.
+            # some shared filesystems reject directory fsync with EINVAL.
             with suppress(PermissionError):
                 fd = os.open(str(path.parent), os.O_RDONLY)
                 try:
-                    os.fsync(fd)
+                    try:
+                        os.fsync(fd)
+                    except OSError as exc:
+                        if exc.errno != errno.EINVAL:
+                            raise
                 finally:
                     os.close(fd)
         except BaseException:
@@ -450,20 +425,11 @@ class CronService:
 
     @staticmethod
     def _safe_run_record_name(run_id: str) -> str:
-        return "".join(c if c.isalnum() or c in "._-" else "_" for c in run_id)
+        return safe_run_record_name(run_id)
 
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""
-        name = self._safe_run_record_name(run_id)
-        if not name:
-            name = str(uuid.uuid4())
-        path = self._run_records_dir / f"{name}.json"
-        payload = {
-            **record,
-            "run_id": run_id,
-            "updated_at_ms": _now_ms(),
-        }
-        self._atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False))
+        write_automation_run_record(self._run_records_dir, run_id, record)
 
     async def start(self) -> None:
         """Start the cron service."""
@@ -622,7 +588,7 @@ class CronService:
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""
-        store = self._load_store()
+        store = self._require_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
 
@@ -684,7 +650,7 @@ class CronService:
         _normalize_agent_turn_job(job)
         self._enforce_agent_binding(job)
         if self._running:
-            store = self._load_store()
+            store = self._require_store()
             store.jobs.append(job)
             self._save_store()
             self._arm_timer()
@@ -696,7 +662,7 @@ class CronService:
 
     def register_system_job(self, job: CronJob) -> CronJob:
         """Register an internal system job (idempotent on restart)."""
-        store = self._load_store()
+        store = self._require_store()
         now = _now_ms()
         job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
         job.created_at_ms = now
@@ -710,7 +676,7 @@ class CronService:
 
     def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
         """Remove a job by ID, unless it is a protected system job."""
-        store = self._load_store()
+        store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
         if job is None:
             return "not_found"
@@ -735,7 +701,7 @@ class CronService:
 
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""
-        store = self._load_store()
+        store = self._require_store()
         for job in store.jobs:
             if job.id == job_id:
                 job.enabled = enabled
@@ -770,7 +736,7 @@ class CronService:
         For ``channel`` and ``to``, pass an explicit value (including ``None``)
         to update; omit (sentinel ``...``) to leave unchanged.
         """
-        store = self._load_store()
+        store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
         if job is None:
             return "not_found"
@@ -815,7 +781,7 @@ class CronService:
         was_running = self._running
         self._running = True
         try:
-            store = self._load_store()
+            store = self._require_store()
             for job in store.jobs:
                 if job.id == job_id:
                     if self._is_unbound_agent_job(job):
@@ -835,12 +801,12 @@ class CronService:
 
     def get_job(self, job_id: str) -> CronJob | None:
         """Get a job by ID."""
-        store = self._load_store()
+        store = self._require_store()
         return next((j for j in store.jobs if j.id == job_id), None)
 
     def status(self) -> dict:
         """Get service status."""
-        store = self._load_store()
+        store = self._require_store()
         return {
             "enabled": self._running,
             "jobs": len(store.jobs),

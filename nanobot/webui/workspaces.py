@@ -27,6 +27,14 @@ _LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE = "restricted"
 _WEBUI_SCOPE_CHANNEL = "websocket"
 
 
+def _scope_change_is_non_escalating(current: WorkspaceScope, requested: WorkspaceScope) -> bool:
+    """Allow a remote request only when it keeps the project and does not add access."""
+    return (
+        requested.project_path == current.project_path
+        and (not current.restrict_to_workspace or requested.restrict_to_workspace)
+    )
+
+
 def webui_workspace_state_path() -> Path:
     return get_webui_dir() / "workspace-state.json"
 
@@ -214,11 +222,10 @@ class WebUIWorkspaceController:
         session_key: str | None,
         controls_available: bool,
     ) -> WorkspaceScope:
+        current = self.scope_for_session_key(session_key) if session_key else self.default_scope()
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
-        if raw is None and session_key:
-            scope = self.scope_for_session_key(session_key)
-        elif raw is None:
-            scope = self.default_scope()
+        if raw is None:
+            scope = current
         else:
             scope = validate_workspace_scope_payload(
                 raw,
@@ -226,7 +233,7 @@ class WebUIWorkspaceController:
                 default_restrict_to_workspace=self._default_restrict_to_workspace,
                 source_channel=_WEBUI_SCOPE_CHANNEL,
             )
-        if not controls_available and scope.metadata() != self.default_scope().metadata():
+        if not controls_available and not _scope_change_is_non_escalating(current, scope):
             raise WorkspaceScopeError("workspace controls are localhost-only", status=403)
         return scope
 

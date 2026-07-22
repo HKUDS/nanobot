@@ -1,0 +1,43 @@
+{
+  "description": "在 Mattermost 频道和私信中使用 nanobot。",
+  "requirements": "Mattermost 服务器地址、机器人令牌和频道权限",
+  "setup": {
+    "docsLabel": "打开 Mattermost 配置指南",
+    "officialLabel": "打开 Mattermost 机器人指南",
+    "tryIt": "在 Mattermost 频道中提及机器人，或向它发送私信。",
+    "summary": "Mattermost 通过服务器中的机器人账户连接，并监听频道和私信。",
+    "steps": [
+      "创建 Mattermost 机器人账户并复制访问令牌。",
+      "填写服务器地址，并授予机器人访问目标团队和频道的权限。",
+      "保存并启用 Mattermost，然后提及机器人或发送私信。"
+    ],
+    "fields": {
+      "serverUrl": {
+        "label": "服务器地址",
+        "placeholder": "https://mattermost.example.com",
+        "help": "填写 Mattermost 工作区的基础地址。"
+      },
+      "token": {
+        "label": "机器人令牌",
+        "placeholder": "Mattermost 机器人令牌",
+        "help": "从 Mattermost 机器人账户创建。"
+      },
+      "teamId": {
+        "label": "团队 ID",
+        "placeholder": "可选的团队 ID"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      }
+    }
+  }
+}

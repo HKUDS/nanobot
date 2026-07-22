@@ -5,6 +5,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import GoalStatusEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session.webui_turns import WebuiTurnCoordinator
@@ -54,13 +55,13 @@ async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
         events.append(await loop.bus.consume_outbound())
 
     statuses = [
-        event.metadata
+        event.event
         for event in events
-        if event.metadata.get("_goal_status") is True
+        if isinstance(event.event, GoalStatusEvent)
     ]
-    assert [status["goal_status"] for status in statuses] == ["running", "idle"]
-    assert isinstance(statuses[0].get("started_at"), float)
-    assert "started_at" not in statuses[1]
+    assert [status.status for status in statuses] == ["running", "idle"]
+    assert isinstance(statuses[0].started_at, float)
+    assert statuses[1].started_at is None
 
 
 @pytest.mark.asyncio

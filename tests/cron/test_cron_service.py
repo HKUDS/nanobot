@@ -25,6 +25,84 @@ def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
     }
 
 
+def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "every_ms": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "session_key": "websocket:chat-1",
+                        },
+                        "state": {
+                            "run_history": [
+                                {"run_at_ms": 1000, "status": "ok", "duration_ms": 12},
+                            ],
+                        },
+                        "created_at_ms": 0,
+                        "updated_at_ms": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].payload.session_key == "websocket:chat-1"
+    assert jobs[0].state.run_history[0].run_at_ms == 1000
+    assert jobs[0].state.run_history[0].duration_ms == 12
+
+
+def test_load_jobs_coerces_string_schedule_and_state_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": "60000"},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "nextRunAtMs": "100",
+                            "lastRunAtMs": "50",
+                        },
+                        "createdAtMs": 0,
+                        "updatedAtMs": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].schedule.every_ms == 60_000
+    assert jobs[0].state.next_run_at_ms == 100
+    assert jobs[0].state.last_run_at_ms == 50
+
+
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 
@@ -50,6 +128,18 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
 
     assert job.schedule.tz == "America/Vancouver"
     assert job.state.next_run_at_ms is not None
+
+
+def test_write_run_record_uses_cron_runs_dir(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    service.write_run_record("job:1", {"status": "queued"})
+
+    record_path = tmp_path / "cron" / "runs" / "job_1.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["run_id"] == "job:1"
+    assert record["status"] == "queued"
+    assert record["updated_at_ms"] > 0
 
 
 @pytest.mark.asyncio
@@ -687,6 +777,36 @@ async def test_external_update_preserves_run_history_records(tmp_path):
     fresh._save_store()
 
 
+def test_stale_instance_remove_preserves_external_add(tmp_path) -> None:
+    """A stopped instance must not save a stale snapshot over another instance's job."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    schedule = CronSchedule(kind="every", every_ms=60_000)
+    service_a = CronService(store_path)
+    service_b = CronService(store_path)
+
+    first = service_a.add_job(
+        name="first",
+        schedule=schedule,
+        message="first",
+        **_bound_chat("first"),
+    )
+
+    # Prime service_b with a view that does not include later external changes.
+    assert [job.name for job in service_b.list_jobs(include_disabled=True)] == ["first"]
+
+    service_a.add_job(
+        name="second",
+        schedule=schedule,
+        message="second",
+        **_bound_chat("second"),
+    )
+
+    assert service_b.remove_job(first.id) == "removed"
+
+    reloaded = CronService(store_path)
+    assert [job.name for job in reloaded.list_jobs(include_disabled=True)] == ["second"]
+
+
 # ── timer race regression tests ──
 
 
@@ -925,3 +1045,44 @@ async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> 
         next_run = j["state"]["nextRunAtMs"]
         assert next_run is not None
         assert next_run > now_ms, f"Job '{j['name']}' next_run should be in the future"
+
+
+def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "t",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "hi",
+                            "sessionKey": "websocket:chat-1",
+                        },
+                        "state": {
+                            "runHistory": [
+                                {"runAtMs": None, "status": "ok", "durationMs": None},
+                            ],
+                        },
+                        "createdAtMs": None,
+                        "updatedAtMs": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jobs, _version = CronService(store_path)._load_jobs()
+    assert jobs is not None
+    assert jobs[0].state.run_history[0].run_at_ms == 0
+    assert jobs[0].state.run_history[0].duration_ms == 0
+    assert jobs[0].state.run_history[0].status == "ok"
+    assert jobs[0].created_at_ms == 0
+    assert jobs[0].updated_at_ms == 0

@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import secrets
 import string
 import time
@@ -58,6 +59,7 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
+_KIMI_K3_MODEL = "kimi-k3"
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
@@ -70,6 +72,11 @@ _KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.7-code",
     "kimi-k2.7-code-highspeed",
 })
+_KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.5",
+    "kimi-k2.6",
+})
+_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
 # because it does not support thinking.
@@ -92,9 +99,20 @@ _THINKING_STYLE_MAP: dict[str, Any] = {
 _GATEWAY_REASONING_STYLE_MAP: dict[str, Any] = {
     "reasoning_effort": lambda effort: {"reasoning": {"effort": effort}},
 }
+_QWEN_THINKING_MODELS: frozenset[str] = frozenset({
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-max-preview",
+    "qwen3.6-plus",
+    "qwen3.6-flash",
+    "qwen3.5-plus",
+    "qwen3.5-flash",
+})
+
 _MODEL_THINKING_STYLES: dict[str, str] = {
     **dict.fromkeys(_KIMI_THINKING_MODELS, "thinking_type"),
     **dict.fromkeys(_MIMO_THINKING_MODELS, "thinking_type"),
+    **dict.fromkeys(_QWEN_THINKING_MODELS, "enable_thinking"),
 }
 
 
@@ -107,9 +125,9 @@ def _provider_prefix_key(name: str) -> str:
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
-    """Return True for models that reject ``max_tokens`` (GPT-5 family, o-series)."""
+    """Return True for models that require ``max_completion_tokens``."""
     slug = _model_slug(model_name)
-    return "gpt-5" in slug or any(
+    return slug == _KIMI_K3_MODEL or "gpt-5" in slug or any(
         slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
     )
 
@@ -163,6 +181,62 @@ def _float_env(name: str, default: float) -> float:
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
+
+
+def _strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```") or not stripped.endswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
+    """Normalize common text-format tool call blocks into structured calls."""
+    if not content or "<tool_call>" not in content:
+        return content, []
+
+    tool_calls: list[ToolCallRequest] = []
+    spans: list[tuple[int, int]] = []
+    for match in _TEXT_TOOL_CALL_RE.finditer(content):
+        try:
+            payload = json.loads(_strip_json_fence(match.group(1)))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        nested = payload.get("tool_call")
+        if isinstance(nested, dict):
+            payload = nested
+        function = payload.get("function")
+        if not isinstance(function, dict):
+            function = payload
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+
+        arguments = function.get("arguments", payload.get("arguments", {}))
+        tool_calls.append(ToolCallRequest(
+            id=str(payload.get("id") or _short_tool_id()),
+            name=name,
+            arguments=parse_tool_arguments(arguments),
+        ))
+        spans.append(match.span())
+
+    if not tool_calls:
+        return content, []
+
+    visible_parts: list[str] = []
+    last = 0
+    for start, end in spans:
+        visible_parts.append(content[last:start])
+        last = end
+    visible_parts.append(content[last:])
+    visible_content = "".join(visible_parts).strip() or None
+    return visible_content, tool_calls
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -358,6 +432,7 @@ class OpenAICompatProvider(LLMProvider):
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
+        proxy: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -366,6 +441,7 @@ class OpenAICompatProvider(LLMProvider):
         self._extra_body = extra_body or {}
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
+        self._proxy = proxy or None
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -396,7 +472,14 @@ class OpenAICompatProvider(LLMProvider):
 
         timeout_s = _openai_compat_timeout_s()
         http_client: httpx.AsyncClient | None = None
-        if self._is_local:
+        if self._proxy:
+            http_client = httpx.AsyncClient(
+                timeout=timeout_s,
+                proxy=self._proxy,
+                trust_env=False,
+                follow_redirects=True,
+            )
+        elif self._is_local:
             # Local model servers (Ollama, llama.cpp, vLLM) often close idle
             # HTTP connections before the client-side keepalive expires. When
             # two LLM calls happen seconds apart (e.g. heartbeat _decide then
@@ -645,9 +728,12 @@ class OpenAICompatProvider(LLMProvider):
     ) -> bool:
         """Return True when the model accepts a temperature parameter.
 
-        GPT-5 family and reasoning models (o1/o3/o4) reject temperature
-        when reasoning_effort is set to anything other than ``"none"``.
+        Kimi K3 uses a fixed temperature that should be omitted. GPT-5 family
+        and reasoning models (o1/o3/o4) reject temperature when
+        reasoning_effort is set to anything other than ``"none"``.
         """
+        if _model_slug(model_name) == _KIMI_K3_MODEL:
+            return False
         if reasoning_effort and reasoning_effort.lower() != "none":
             return False
         name = model_name.lower()
@@ -697,6 +783,16 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
+        # Moonshot selects the only valid temperature from the K2.5/K2.6 thinking mode:
+        # 1.0 when enabled and 0.6 when disabled. Omitting the parameter lets the API
+        # apply the matching value for both its default and explicit thinking controls.
+        if (
+            spec
+            and spec.name == "moonshot"
+            and _model_slug(model_name) in _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS
+        ):
+            kwargs.pop("temperature", None)
+
         # Normalize reasoning_effort into a semantic form (OpenAI vocab)
         # used for internal decisions, and a wire form actually sent out.
         # "minimum" is accepted as a DashScope-native alias for "minimal".
@@ -707,6 +803,17 @@ class OpenAICompatProvider(LLMProvider):
                 semantic_effort = "minimal"
 
         wire_effort = reasoning_effort
+        slug = _model_slug(model_name)
+        if slug == _KIMI_K3_MODEL and semantic_effort is not None:
+            # K3 always reasons and currently accepts only the top-level
+            # reasoning_effort="max". Preserve disabled/default semantics by
+            # omitting the field; normalize older enabled presets to "max" so
+            # switching from a K2.x model does not send an unsupported value.
+            if semantic_effort in ("none", "minimal"):
+                wire_effort = None
+            else:
+                semantic_effort = "max"
+                wire_effort = "max"
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
@@ -744,7 +851,6 @@ class OpenAICompatProvider(LLMProvider):
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
-            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
                 if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
@@ -1131,20 +1237,29 @@ class OpenAICompatProvider(LLMProvider):
                 if reasoning_content is None:
                     reasoning_content = m.get("reasoning_content")
 
+            # Deduplicate tool call IDs (same pattern as streaming path)
+            # Some providers reuse the same ID for parallel tool calls.
+            _seen_tc_ids: set[str] = set()
             parsed_tool_calls = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = parse_tool_arguments(fn.get("arguments", {}))
                 ec, prov, fn_prov = _extract_tc_extras(tc)
+                raw_id = str(tc_map.get("id") or _short_tool_id())
+                if not raw_id or raw_id in _seen_tc_ids:
+                    raw_id = _short_tool_id()
+                _seen_tc_ids.add(raw_id)
                 parsed_tool_calls.append(ToolCallRequest(
-                    id=str(tc_map.get("id") or _short_tool_id()),
+                    id=raw_id,
                     name=str(fn.get("name") or ""),
                     arguments=args,
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
                 ))
+            if not parsed_tool_calls:
+                content, parsed_tool_calls = _extract_text_tool_calls(content)
 
             return LLMResponse(
                 content=content,
@@ -1190,6 +1305,8 @@ class OpenAICompatProvider(LLMProvider):
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
             ))
+        if not tool_calls:
+            content, tool_calls = _extract_text_tool_calls(content)
 
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
@@ -1327,19 +1444,24 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
+        content = "".join(content_parts) or None
+        tool_calls = [
+            ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=b["name"],
+                arguments=parse_tool_arguments(b["arguments"]),
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            )
+            for b in tc_bufs.values()
+        ]
+        if not tool_calls:
+            content, tool_calls = _extract_text_tool_calls(content)
+
         return LLMResponse(
-            content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=b["name"],
-                    arguments=parse_tool_arguments(b["arguments"]),
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-            ],
+            content=content,
+            tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,

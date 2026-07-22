@@ -1,0 +1,30 @@
+{
+  "description": "在 WhatsApp 對話中使用 nanobot。",
+  "requirements": "WhatsApp 連接設定和閘道",
+  "setup": {
+    "primaryAction": "連接 WhatsApp",
+    "docsLabel": "開啟 WhatsApp 設定指南",
+    "officialLabel": "開啟 WhatsApp 說明",
+    "tryIt": "終端機登入完成後，向已連接的帳戶傳送一則 WhatsApp 私訊。",
+    "summary": "使用要執行機器人的 WhatsApp 帳戶掃描二維碼即可完成連接。",
+    "steps": [
+      "執行下方顯示的 WhatsApp 登入指令。",
+      "用手機 WhatsApp 掃描終端機中的二維碼。",
+      "登入後返回這裡，啟用 WhatsApp，然後傳送一則私訊測試。"
+    ],
+    "fields": {
+      "allowFrom": {
+        "label": "允許的聯絡人",
+        "placeholder": "電話號碼或 WhatsApp ID"
+      },
+      "groupPolicy": {
+        "label": "群組行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      }
+    }
+  }
+}

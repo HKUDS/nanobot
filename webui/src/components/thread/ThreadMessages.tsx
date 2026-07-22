@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -12,27 +12,13 @@ interface ThreadMessagesProps {
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
 export type DisplayUnit = TurnUnit;
-
-/** True when this unit index is the last assistant text slice before the next user message (or end of thread). */
-export function isFinalAssistantSliceBeforeNextUser(
-  units: DisplayUnit[],
-  index: number,
-): boolean {
-  const u = units[index];
-  if (u.type !== "message" || u.message.role !== "assistant") return true;
-  for (let j = index + 1; j < units.length; j++) {
-    const v = units[j];
-    if (v.type === "message" && v.message.role === "user") break;
-    return false;
-  }
-  return true;
-}
 
 export function buildDisplayUnits(
   messages: UIMessage[],
@@ -43,7 +29,7 @@ export function buildDisplayUnits(
   });
 }
 
-export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
+export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
   const flags = new Array<boolean>(units.length).fill(true);
   let hasLaterUnitBeforeUser = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
@@ -66,6 +52,7 @@ export function ThreadMessages({
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
+  slashCommands = [],
   forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
@@ -76,11 +63,12 @@ export function ThreadMessages({
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
   );
-  const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
+  const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
     [isStreaming, units],
   );
+  const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
   let nextUserIndex = hiddenUserMessageCount;
 
   return (
@@ -102,13 +90,13 @@ export function ThreadMessages({
             ? unit.message.id
             : undefined;
         const forkIndex =
-          unit.type === "message" && unit.message.role === "assistant" && copyFlags[index]
+          unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
         if (unit.type === "message" && unit.message.role === "user") nextUserIndex += 1;
 
         return (
-          <Fragment key={unitKey(unit, index)}>
+          <Fragment key={unitKeys[index]}>
             <div className={marginTop} data-user-prompt-id={userPromptId}>
               {unit.type === "activity" ? (
                 <AgentActivityCluster
@@ -116,6 +104,7 @@ export function ThreadMessages({
                   isTurnStreaming={liveActivityClusterIndices.has(index)}
                   hasBodyBelow={hasBodyBelow}
                   turnLatencyMs={unit.turnLatencyMs}
+                  startedAtMs={unit.startedAtMs}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   onOpenFilePreview={onOpenFilePreview}
@@ -123,13 +112,9 @@ export function ThreadMessages({
               ) : (
                 <MessageBubble
                   message={unit.message}
-                  showAssistantCopyAction={
-                    unit.message.role === "assistant"
-                      ? copyFlags[index]
-                      : true
-                  }
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  slashCommands={slashCommands}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromHere={
                     onForkFromMessage && forkIndex !== undefined
@@ -191,12 +176,38 @@ function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
   return indices;
 }
 
-function unitKey(unit: DisplayUnit, index: number): string {
+export function unitKeysForDisplay(units: DisplayUnit[]): string[] {
+  const occurrences = new Map<string, number>();
+  return units.map((unit, index) => {
+    const base = unitKeyBase(unit, index);
+    if (!base.startsWith("turn-") || base.endsWith("-user")) return base;
+    const next = (occurrences.get(base) ?? 0) + 1;
+    occurrences.set(base, next);
+    return `${base}-${next}`;
+  });
+}
+
+function unitKeyBase(unit: DisplayUnit, index: number): string {
   if (unit.type === "activity") {
-    const anchor = unit.messages[0]?.id;
-    return anchor != null ? `activity-${anchor}` : `activity-idx-${index}`;
+    const anchor = unit.messages[0];
+    const turnKey = stableTurnMessageKey(anchor, "activity");
+    if (turnKey) return turnKey;
+    const anchorId = anchor?.id;
+    return anchorId != null ? `activity-${anchorId}` : `activity-idx-${index}`;
   }
+  const turnKey = stableTurnMessageKey(unit.message);
+  if (turnKey) return turnKey;
   return unit.message.id;
+}
+
+function stableTurnMessageKey(message: UIMessage | undefined, fallbackPhase?: string): string | null {
+  if (!message?.turnId) return null;
+  const phase = message.turnPhase ?? fallbackPhase ?? message.kind ?? message.role;
+  if (message.role === "user") return `turn-${message.turnId}-user`;
+  if (message.kind === "trace") {
+    return `turn-${message.turnId}-${phase}-${message.activitySegmentId ?? "activity"}`;
+  }
+  return `turn-${message.turnId}-${phase}`;
 }
 
 function marginAfterPrevUnit(prev: DisplayUnit): string {

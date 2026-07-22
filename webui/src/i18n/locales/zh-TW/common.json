@@ -7,27 +7,27 @@
     },
     "error": {
       "title": "無法連線到 nanobot",
-      "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
+      "gatewayHint": "請確認閘道已啟動（`nanobot gateway`），並且目前頁面與閘道在同一台機器上開啟。"
     },
     "auth": {
       "title": "需要驗證",
-      "hint": "輸入 gateway 設定中 tokenIssueSecret 配置的密鑰。",
+      "hint": "請輸入閘道設定中 tokenIssueSecret 所設定的金鑰。",
       "placeholder": "密碼",
       "submit": "連線",
       "invalid": "密碼無效，請再試一次。"
     },
     "account": {
       "section": "帳戶",
-      "logoutHint": "中斷此瀏覽器與 gateway 的連線。",
+      "logoutHint": "中斷此瀏覽器與閘道的連線。",
       "logout": "登出"
     },
     "system": {
       "section": "系統",
       "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
       "restart": "重新啟動 nanobot",
-      "restarting": "正在重新啟動...",
+      "restarting": "正在重新啟動…",
       "restartEngine": "重新啟動引擎",
-      "restartingEngine": "正在重新啟動引擎..."
+      "restartingEngine": "正在重新啟動引擎…"
     },
     "restart": {
       "completed": "重新啟動已完成，耗時 {{seconds}} 秒。"
@@ -54,7 +54,7 @@
       "label": "語言",
       "ariaLabel": "切換語言"
     },
-    "apps": "應用",
+    "apps": "應用程式",
     "automations": "自動任務",
     "skills": {
       "title": "技能"
@@ -64,7 +64,7 @@
     "backToChat": "返回聊天",
     "sidebar": {
       "title": "設定",
-      "ariaLabel": "設定分區"
+      "ariaLabel": "設定區段"
     },
     "nav": {
       "general": "一般",
@@ -72,15 +72,16 @@
       "overview": "概覽",
       "appearance": "外觀",
       "models": "模型",
-      "providers": "提供商",
+      "providers": "供應商",
       "image": "圖片",
       "voice": "語音",
       "browser": "網頁",
+      "channels": "通訊管道",
       "runtime": "系統",
       "advanced": "安全",
-      "cliApps": "CLI 應用",
+      "cliApps": "CLI 應用程式",
       "mcp": "MCP",
-      "apps": "應用",
+      "apps": "應用程式",
       "automations": "自動任務",
       "skills": "技能"
     },
@@ -99,12 +100,12 @@
       "identity": "身分",
       "webuiSafety": "WebUI 安全",
       "capabilities": "能力",
-      "cliApps": "CLI 應用",
+      "cliApps": "CLI 應用程式",
       "mcp": "MCP 服務",
-      "apps": "應用",
-      "nativeHost": "原生宿主",
-      "hostSafety": "App 安全",
-      "voiceInput": "語音辨識"
+      "apps": "應用程式",
+      "nativeHost": "原生主機",
+      "hostSafety": "應用程式安全",
+      "voiceInput": "語音輸入"
     },
     "rows": {
       "theme": "主題",
@@ -112,15 +113,16 @@
       "provider": "供應商",
       "model": "模型",
       "restart": "重新啟動 nanobot",
-      "configPath": "配置路徑",
+      "configPath": "設定檔路徑",
       "activePreset": "目前預設",
       "gateway": "閘道",
-      "restartState": "重啟狀態",
-      "pendingChanges": "待套用更改",
+      "restartState": "重新啟動狀態",
+      "pendingChanges": "待套用變更",
       "selectedPreset": "已選預設",
       "presetModel": "預設模型",
       "density": "密度",
       "activityMode": "活動細節",
+      "fileEditDisplay": "檔案編輯顯示",
       "codeWrap": "程式碼換行",
       "maxResults": "最大結果數",
       "timeout": "逾時",
@@ -139,7 +141,7 @@
       "timezone": "時區",
       "workspacePath": "預設工作區",
       "localServiceAccess": "本機服務",
-      "webuiDefaultAccess": "預設權限",
+      "webuiDefaultAccess": "預設存取權",
       "currentModel": "目前設定",
       "brandLogos": "品牌 Logo",
       "cliAppsCatalog": "目錄",
@@ -149,8 +151,8 @@
       "diagnostics": "診斷",
       "contextWindow": "上下文視窗",
       "transcription": "語音轉寫",
-      "transcriptionProvider": "提供商",
-      "transcriptionProviderStatus": "提供商狀態",
+      "transcriptionProvider": "供應商",
+      "transcriptionProviderStatus": "供應商狀態",
       "transcriptionModel": "模型",
       "transcriptionLanguage": "語言",
       "voiceLimits": "限制"
@@ -160,44 +162,45 @@
       "language": "選擇 WebUI 使用的語言。",
       "provider": "選擇處理新模型請求的供應商。",
       "model": "設定 nanobot 預設使用的模型名稱。",
-      "configPath": "目前閘道使用中的配置檔。",
+      "configPath": "目前閘道使用中的設定檔。",
       "selectedPreset": "命名預設在此為唯讀；請在 config.json 中編輯。",
       "presetModel": "切回 Default 後可在 WebUI 中編輯模型與供應商。",
       "density": "只儲存在此瀏覽器中。",
-      "activityMode": "選擇預設顯示多少 agent 活動細節。",
+      "activityMode": "選擇預設顯示多少 Agent 活動細節。",
+      "fileEditDisplay": "選擇檔案編輯活動預設顯示行數或差異。",
       "codeWrap": "讓長程式碼行在小螢幕上也易讀。",
-      "maxResults": "每次 web_search 呼叫返回的結果數。",
+      "maxResults": "每次呼叫 web_search 所回傳的結果數。",
       "timeout": "搜尋供應商請求逾時前的秒數。",
-      "jinaReader": "可用時為 web_fetch 使用 Jina Reader。",
-      "imageGeneration": "配置圖片供應商後，在聊天中開放 generate_image。",
+      "jinaReader": "若可用，則讓 web_fetch 使用 Jina Reader。",
+      "imageGeneration": "設定圖片供應商後，即可在聊天中使用 generate_image。",
       "imageProvider": "選擇 generate_image 使用的註冊供應商。",
-      "imageProviderStatus": "圖片生成會重用「供應商」中的憑證。",
+      "imageProviderStatus": "圖片生成功能會沿用 [供應商] 中的憑證。",
       "imageModel": "傳送給所選圖片供應商的模型名稱。",
       "defaultAspectRatio": "提示詞未指定比例時使用。",
       "defaultImageSize": "傳送給支援此選項的供應商的尺寸提示。",
-      "maxImagesPerTurn": "單次 generate_image 請求可生成的圖片上限。",
-      "botName": "顯示在 nanobot 使用顯示名稱的位置。",
+      "maxImagesPerTurn": "單次 generate_image 請求可產生的圖片數上限。",
+      "botName": "顯示於 nanobot 所有使用顯示名稱的位置。",
       "botIcon": "顯示在 Bot 名稱旁的短 emoji 或文字。",
-      "timezone": "用於排程和需要時間感知的回覆。",
-      "localServiceAccess": "允許完全訪問權限下的 shell 命令訪問 localhost 服務。",
-      "webuiDefaultAccess": "用於沒有單獨專案權限的 Web 聊天。",
-      "securityManagedControls": "網頁抓取始終保護本機、內網和 metadata 服務。核心渠道安全仍由 config.json 管理。",
+      "timezone": "用於排程，以及需要時間資訊的回覆。",
+      "localServiceAccess": "允許具有完整存取權的 shell 命令存取 localhost 服務。",
+      "webuiDefaultAccess": "用於未指定個別專案權限的 Web 聊天。",
+      "securityManagedControls": "網頁擷取一律會阻擋對本機、私人網路及中繼資料服務的存取。核心通訊管道的安全性仍由 config.json 管理。",
       "currentModel": "用於新的回覆。",
       "selectedModelProvider": "由選取的模型決定。",
       "selectedModelValue": "由選取的模型決定。",
-      "brandLogos": "在設定中顯示第三方提供商和 CLI 圖示。",
-      "cliAppsCatalog": "只安裝 nanobot 可在本機執行的應用 CLI 轉接器；不會改動原生應用。",
-      "cliAppsFilter": "按應用、類別或能力搜尋。",
+      "brandLogos": "在設定中顯示第三方供應商與 CLI 圖示。",
+      "cliAppsCatalog": "只安裝 nanobot 可在本機執行的應用程式專用 CLI 轉接器；不會改動原生應用程式。",
+      "cliAppsFilter": "依應用程式、類別或功能搜尋。",
       "logs": "開啟原生引擎日誌資料夾。",
-      "diagnostics": "匯出一份用於支援排查的小型執行報告。",
-      "localServiceAccessNative": "允許完全訪問權限下的 shell 命令訪問這台 Mac 上的服務。",
-      "webuiDefaultAccessNative": "用於沒有單獨專案權限的原生聊天。",
-      "contextWindow": "選擇此模型配置的預設上下文預算。",
-      "transcription": "送出前先把麥克風輸入轉寫到輸入框。聊天渠道的語音訊息也使用同一組設定。",
-      "transcriptionProvider": "使用「提供商」中對應提供商的憑證。",
-      "transcriptionProviderStatus": "API Key 仍保存在 providers 裡，不寫進 transcription 設定。",
-      "transcriptionModel": "除非提供商需要自訂模型 ID，否則保持解析後的預設值即可。",
-      "transcriptionLanguage": "可選 ISO-639 語言提示，例如 en、zh、ja 或 ko。"
+      "diagnostics": "匯出一份簡短的執行階段報告，以供疑難排解。",
+      "localServiceAccessNative": "允許具有完整存取權的 shell 命令存取這臺 Mac 上的服務。",
+      "webuiDefaultAccessNative": "用於未指定個別專案權限的原生聊天。",
+      "contextWindow": "選擇此模型設定的預設上下文預算。",
+      "transcription": "送出前先將麥克風輸入轉寫至輸入框。聊天通訊管道的語音訊息也會使用同一組設定。",
+      "transcriptionProvider": "使用 [供應商] 中對應供應商的憑證。",
+      "transcriptionProviderStatus": "API 金鑰仍儲存在 providers 中，不會寫入 transcription 設定。",
+      "transcriptionModel": "除非供應商需要自訂模型 ID，否則保留解析後的預設值即可。",
+      "transcriptionLanguage": "選填的 ISO-639 語言提示，例如 en、zh、ja 或 ko。"
     },
     "values": {
       "light": "淺色",
@@ -205,7 +208,7 @@
       "notAvailable": "不可用",
       "enabled": "已啟用",
       "disabled": "已停用",
-      "restartPending": "等待重啟",
+      "restartPending": "等待重新啟動",
       "ready": "就緒",
       "privateEngine": "私有引擎",
       "unixSocket": "Unix socket",
@@ -214,27 +217,30 @@
       "compact": "緊湊",
       "auto": "自動",
       "expanded": "展開",
+      "summary": "摘要",
+      "diff": "差異",
+      "collapsedDiff": "摺疊差異",
       "on": "開啟",
       "off": "關閉",
       "defaultPermission": "預設權限",
-      "fullAccess": "完全訪問權限",
-      "configured": "已配置",
-      "notConfigured": "未配置",
+      "fullAccess": "完整存取權",
+      "configured": "已設定",
+      "notConfigured": "未設定",
       "pending": "等待中",
-      "restartingEngine": "正在重啟"
+      "restartingEngine": "正在重新啟動"
     },
     "status": {
-      "loading": "正在載入設定...",
+      "loading": "正在載入設定…",
       "loadError": "無法載入設定",
-      "unsaved": "有未儲存的更改。",
+      "unsaved": "有未儲存的變更。",
       "upToDate": "已是最新。",
       "savedRestart": "已儲存。重新啟動 nanobot 後生效。",
-      "restartAfterSaving": "儲存更改後，在合適時重啟。",
-      "savedRestartApply": "已儲存。準備好後重啟。",
-      "imageProviderRestart": "圖片供應商更改已儲存。準備好後重啟。",
-      "hostRestartAfterSaving": "儲存後 nanobot 會重啟引擎。",
-      "hostRestartPending": "已儲存。準備好後會重啟引擎。",
-      "hostApiUnavailable": "宿主操作僅在原生應用中可用。",
+      "restartAfterSaving": "請先儲存變更，準備就緒後再重新啟動。",
+      "savedRestartApply": "已儲存。準備就緒後即可重新啟動。",
+      "imageProviderRestart": "已儲存圖片供應商變更。準備就緒後即可重新啟動。",
+      "hostRestartAfterSaving": "儲存變更後，nanobot 將重新啟動引擎。",
+      "hostRestartPending": "已儲存。準備就緒後將重新啟動引擎。",
+      "hostApiUnavailable": "主機操作僅能在原生應用程式中使用。",
       "logsOpened": "已開啟日誌資料夾。",
       "logsOpenFailed": "無法開啟日誌資料夾。",
       "diagnosticsExported": "診斷已匯出到 {{path}}。",
@@ -247,28 +253,28 @@
       "cancel": "取消",
       "open": "開啟",
       "export": "匯出",
-      "opening": "正在開啟...",
-      "exporting": "正在匯出..."
+      "opening": "正在開啟…",
+      "exporting": "正在匯出…"
     },
     "byok": {
-      "description": "自帶 provider key。Nanobot 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
+      "description": "使用自備的供應商金鑰。Nanobot 會從目前的設定檔讀取這些值，只有已設定的供應商可在 [一般] 設定中選擇。",
       "configured": "已設定",
       "notConfigured": "未設定",
       "configuredSection": "已設定",
       "notConfiguredSection": "未設定",
       "showMore": "再顯示 {{count}} 個",
       "showLess": "收合",
-      "apiKey": "API key",
-      "apiBase": "API base",
-      "apiKeyPlaceholder": "輸入 API key",
-      "apiKeyConfiguredPlaceholder": "留空則保留目前 key",
-      "configuredKeyHint": "已設定的 key",
-      "apiBasePlaceholder": "使用 provider 預設地址",
-      "apiKeyRequired": "需要 API key 才能設定此 provider。",
-      "showApiKey": "顯示 API key",
-      "hideApiKey": "隱藏 API key",
-      "noConfiguredProviders": "沒有已設定的 provider",
-      "configureFirst": "請先在 BYOK 設定 provider。",
+      "apiKey": "API 金鑰",
+      "apiBase": "API 基礎網址",
+      "apiKeyPlaceholder": "輸入 API 金鑰",
+      "apiKeyConfiguredPlaceholder": "留空以保留目前的金鑰",
+      "configuredKeyHint": "已設定的金鑰",
+      "apiBasePlaceholder": "使用供應商預設位址",
+      "apiKeyRequired": "必須輸入 API 金鑰才能設定此供應商。",
+      "showApiKey": "顯示 API 金鑰",
+      "hideApiKey": "隱藏 API 金鑰",
+      "noConfiguredProviders": "沒有已設定的供應商",
+      "configureFirst": "請先在 BYOK 中設定供應商。",
       "openByok": "開啟 BYOK",
       "tabs": {
         "ariaLabel": "BYOK 憑證類型",
@@ -276,49 +282,49 @@
         "webSearch": "網頁搜尋"
       },
       "webSearch": {
-        "provider": "搜尋 provider",
-        "providerHelp": "選擇 web search 工具使用的後端。",
-        "selectProvider": "選擇 provider",
+        "provider": "搜尋供應商",
+        "providerHelp": "選擇網頁搜尋工具使用的後端。",
+        "selectProvider": "選擇供應商",
         "credentials": "憑證",
-        "noCredentialRequired": "不需要 key",
-        "noCredentialHelp": "DuckDuckGo 不需要儲存 API key。",
-        "apiKeyHelp": "儲存到 config 後只顯示遮罩提示。",
+        "noCredentialRequired": "不需要金鑰",
+        "noCredentialHelp": "使用 DuckDuckGo 不需要儲存 API 金鑰。",
+        "apiKeyHelp": "金鑰會儲存在設定檔中，儲存後以遮罩顯示。",
         "baseUrl": "Base URL",
-        "baseUrlHelp": "SearXNG 需要你自己的實例網址。",
+        "baseUrlHelp": "SearXNG 需要自行架設的執行個體網址。",
         "baseUrlPlaceholder": "https://search.example.com",
-        "apiKeyRequired": "此搜尋 provider 需要 API key。",
+        "apiKeyRequired": "此搜尋供應商需要 API 金鑰。",
         "baseUrlRequired": "SearXNG 需要 Base URL。",
         "missingCredential": "填寫必要憑證後才能儲存。",
-        "saveHint": "變更會套用到新的 web search 請求。"
+        "saveHint": "變更會套用至新的網頁搜尋請求。"
       }
     },
     "overview": {
       "model": "目前模型",
       "providers": "供應商",
-      "configuredCount": "已配置 {{count}} 個",
+      "configuredCount": "已設定 {{count}} 個",
       "totalProviders": "共 {{count}} 個可用",
       "webSearch": "網頁搜尋",
       "imageGeneration": "圖片生成",
-      "voiceInput": "語音辨識",
+      "voiceInput": "語音輸入",
       "workspace": "工作區"
     },
     "usage": {
-      "title": "Token 活動",
-      "shortTitle": "Token Usage",
-      "subtitle": "最近 12 個月由供應商回報的 token 用量。",
-      "empty": "新的模型回覆產生後，這裡會顯示 token 活動。",
-      "totalTokens": "累計 Token 數",
-      "peakTokens": "峰值 Token 數",
-      "thirtyDayTokens": "30 天 Token 數",
+      "title": "Token 用量",
+      "shortTitle": "Token 用量",
+      "subtitle": "最近 12 個月由供應商回報的 Token 用量。",
+      "empty": "模型產生新回覆後，此處會顯示 Token 用量。",
+      "totalTokens": "Token 總數",
+      "peakTokens": "Token 峰值",
+      "thirtyDayTokens": "30 天 Token 用量",
       "currentStreak": "目前連續天數",
       "longestStreak": "最長連續天數",
       "daysValue": "{{count}} 天",
       "last30": "30 天",
-      "activeDays": "活躍天數",
+      "activeDays": "使用天數",
       "requests": "請求數",
       "estimated": "估算",
       "includesEstimates": "包含估算",
-      "cellTitle": "{{date}}：{{tokens}} tokens，{{requests}} 次請求",
+      "cellTitle": "{{date}}：{{tokens}} 個 Token，{{requests}} 次請求",
       "sources": {
         "user": "對話",
         "api": "API",
@@ -336,27 +342,27 @@
       "selectProvider": "選擇供應商",
       "selectAspect": "選擇比例",
       "selectSize": "選擇尺寸",
-      "configureProvider": "配置供應商",
-      "missingCredential": "啟用圖片生成前請先配置此供應商。"
+      "configureProvider": "設定供應商",
+      "missingCredential": "啟用圖片生成功能前，請先設定此供應商。"
     },
     "models": {
       "selectModel": "選擇模型",
-      "addConfiguration": "新增配置",
-      "newConfiguration": "新增模型配置",
+      "addConfiguration": "新增設定",
+      "newConfiguration": "新增模型設定",
       "newConfigurationHelp": "將供應商與模型儲存為一鍵選項。",
-      "configurationName": "配置名稱",
-      "configurationNameHelp": "重新命名這個已儲存的模型配置。",
+      "configurationName": "設定名稱",
+      "configurationNameHelp": "重新命名這個已儲存的模型設定。",
       "configurationNamePlaceholder": "快速寫作",
       "searchModels": "搜尋或輸入模型 ID",
       "useCustomModel": "使用",
-      "loadingModels": "正在載入模型...",
+      "loadingModels": "正在載入模型…",
       "searchCatalog": "搜尋供應商目錄來選擇模型。",
       "modelsAvailable": "可用",
       "noModelResults": "沒有符合的模型。",
-      "loadFailed": "模型列表不可用。",
+      "loadFailed": "無法取得模型清單。",
       "unsupportedModelList": "手動輸入模型 ID。",
-      "providerNotConfigured": "載入模型前請先配置此供應商。",
-      "autoProviderCustomOnly": "自動供應商模式使用自訂模型 ID。"
+      "providerNotConfigured": "載入模型前請先設定此供應商。",
+      "autoProviderCustomOnly": "自動選擇供應商時會使用自訂模型 ID。"
     },
     "timezone": {
       "select": "選擇時區",
@@ -365,24 +371,24 @@
     },
     "cliApps": {
       "allCategories": "全部分類",
-      "availableCount": "{{count}} 個應用",
-      "installedCount": "已安裝 {{count}} 個",
+      "availableCount": "{{count}} 個應用程式",
+      "installedCount": "已安裝 {{count}} 個 CLI",
       "summary": "已安裝 {{installed}} / {{total}} 個 CLI",
       "filterAll": "全部",
       "filterInstalled": "已安裝的 CLI",
       "filterNotInstalled": "未安裝",
       "searchPlaceholder": "搜尋 CLI",
-      "statusInstalled": "已安裝",
+      "statusInstalled": "應用程式已就緒",
       "statusAvailable": "可用",
       "statusMissing": "缺少相依項",
       "statusUnsupported": "不支援",
       "statusNotInstalled": "未安裝",
       "unsupported": "不支援",
-      "loading": "正在載入 CLI 應用...",
-      "empty": "沒有符合此篩選條件的 CLI 應用。",
+      "loading": "正在載入 CLI 應用程式…",
+      "empty": "沒有符合此篩選條件的 CLI 應用程式。",
       "readyTitle": "@{{name}} 已就緒",
       "readyStatus": "就緒",
-      "readyPrompt": "使用 @{{name}} 查看這個 CLI 能做什麼。",
+      "readyPrompt": "請 nanobot 使用 @{{name}} 完成這項任務。",
       "readyTry": "試用 @{{name}}",
       "readyCopied": "已複製",
       "openChat": "開啟聊天",
@@ -392,14 +398,14 @@
       "uninstall": "解除安裝 CLI",
       "install": "安裝 CLI",
       "unavailable": "不可用",
-      "noDescription": "暫無描述。"
+      "noDescription": "目前沒有描述。"
     },
     "about": {
       "version": "版本",
-      "checking": "正在檢查...",
+      "checking": "正在檢查…",
       "checkForUpdates": "檢查更新",
       "upToDate": "已是最新版本",
-      "updateAvailable": "有可用更新 v{{version}}"
+      "updateAvailable": "已有 v{{version}} 版更新"
     },
     "mcp": {
       "allCategories": "全部分類",
@@ -408,13 +414,13 @@
       "filterInstalled": "已啟用",
       "filterNotInstalled": "未啟用",
       "searchPlaceholder": "搜尋 MCP 預設",
-      "moreOptions": "更多 MCP 選項",
-      "moreOptionsSubtitle": "新增自訂服務，或匯入 mcp.json。",
+      "moreOptions": "新增整合",
+      "moreOptionsSubtitle": "連線自訂工具伺服器，或匯入現有設定。",
       "customTitle": "自訂 MCP",
-      "customSubtitle": "新增任意 stdio、HTTP 或 SSE MCP 服務。",
+      "customSubtitle": "新增任何 stdio、HTTP 或 SSE MCP 伺服器。",
       "customAction": "自訂",
       "importAction": "匯入",
-      "serverName": "服務名稱",
+      "serverName": "伺服器名稱",
       "serverUrl": "URL",
       "transport": "傳輸方式",
       "command": "指令",
@@ -427,19 +433,19 @@
       "saveCustom": "儲存 MCP",
       "configImport": "匯入 mcp.json",
       "importConfig": "匯入",
-      "restartRequired": "重新啟動 nanobot 以連接更新後的 MCP 工具。",
+      "restartRequired": "重新啟動 nanobot 以連線更新後的 MCP 工具。",
       "toolsFound": "{{count}} 個工具",
-      "loading": "正在載入 MCP 預設...",
+      "loading": "正在載入 MCP 預設…",
       "empty": "沒有符合此篩選條件的 MCP 預設。",
-      "openDocs": "開啟文件",
+      "openDocs": "開啟說明文件",
       "test": "測試",
       "remove": "移除",
       "enable": "啟用",
       "enabled": "已啟用",
-      "setup": "連接",
-      "configure": "連接",
-      "connectTitle": "連接 {{name}}",
-      "connectHint": "從你的帳號設定中加入金鑰。",
+      "setup": "連線",
+      "configure": "連線",
+      "connectTitle": "連線 {{name}}",
+      "connectHint": "請從帳號設定新增金鑰。",
       "saveAndEnable": "儲存並啟用",
       "updateSetup": "更新設定",
       "configured": "已設定",
@@ -452,31 +458,127 @@
       "toolScope": "工具",
       "allTools": "全部",
       "noTools": "無",
-      "testForTools": "執行測試以檢查並選擇個別工具。"
+      "testForTools": "執行 [測試] 以檢視並選擇個別工具。"
+    },
+    "api": {
+      "title": "API 伺服器", "openaiCompatible": "OpenAI 相容 API", "description": "讓 SDK 與其他 Agent 透過本機 /v1 端點連線 nanobot。",
+      "start": "啟動 API 伺服器", "starting": "正在啟動…", "stop": "停止", "stopping": "正在停止…",
+      "access": "存取範圍", "thisDevice": "僅此裝置", "localNetwork": "區域網路",
+      "localHelp": "只有目前裝置可以連線。", "networkHelp": "區域網路內其他裝置可以連線，因此必須設定 API 金鑰。",
+      "port": "連接埠", "portHelp": "API 伺服器使用的本機連接埠。", "apiKey": "API 金鑰", "apiKeyHelp": "API 呼叫端會以 Bearer Token 傳送此金鑰。",
+      "apiKeyRequired": "向區域網路開放 API 前必須設定金鑰。", "apiKeyPlaceholder": "輸入 API 金鑰",
+      "autoInstall": "啟動時會自動安裝 API 支援。"
+    },
+    "observability": {
+      "title": "可觀測性", "configured": "nanobot 已偵測到追蹤憑證。",
+      "environment": "設定 LANGFUSE_SECRET_KEY 和 LANGFUSE_PUBLIC_KEY 後重新啟動 nanobot。", "enable": "啟用追蹤支援"
     },
     "legal": {
-      "thirdPartyBrands": "產品名稱、標誌與品牌均屬於其各自擁有者。使用僅為識別用途，並不代表背書。"
+      "thirdPartyBrands": "產品名稱、Logo 與品牌均為各自擁有者的財產。僅供識別之用，不代表任何形式的背書。"
     },
     "apps": {
-      "description": "新增 nanobot 可在聊天中使用的 App CLI 和 MCP 服務。",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
+      "description": "將工具新增至 nanobot，再於聊天中使用 @ 指定工具。",
+      "cliLabel": "應用程式",
+      "mcpLabel": "整合",
+      "channelLabel": "通訊管道",
+      "featureLabel": "功能",
+      "filterAll": "就緒",
+      "filterPlugins": "外掛程式",
+      "filterCli": "應用程式",
+      "filterMcp": "整合",
+      "enabledSummary": "{{count}} 個就緒",
+      "caption": "{{cli}} 個應用程式 · {{mcp}} 個整合服務",
+      "searchPlaceholder": "搜尋工具",
+      "featured": "工具",
+      "loading": "正在載入應用程式…",
+      "empty": "沒有符合條件的工具。",
+      "restartRequired": "重新啟動 nanobot 以套用更新後的應用程式與整合服務。"
+    },
+    "channels": {
+      "description": "將聊天應用程式、電子郵件與 WebUI 連線至 nanobot。",
+      "caption": "已啟用 {{enabled}} 個 · 共 {{total}} 個通訊管道",
+      "searchPlaceholder": "搜尋通訊管道",
+      "backToChannels": "所有通訊管道",
+      "catalog": "通訊管道",
+      "loading": "正在載入通訊管道…",
+      "empty": "沒有符合條件的通訊管道。",
+      "restartRequired": "重新啟動 nanobot 以套用更新後的通訊管道支援。",
+      "requires": "需要：{{requirements}}",
+      "setUp": "設定",
+      "setupGuide": "設定指南",
+      "setupSummary": "啟用此通訊管道只會開啟 nanobot 的支援功能。請新增平台憑證，然後重新啟動 nanobot。",
+      "configKeys": "設定欄位",
+      "enable": "啟用通訊管道",
+      "disable": "停用通訊管道",
+      "needsConfig": "需要設定",
+      "connect": "連線",
+      "reconnect": "重新連線",
+      "advanced": "進階",
+      "checkAndEnable": "檢查並啟用",
+      "checkConnection": "檢查連線",
+      "checkedAndEnabled": "已檢查並啟用。",
+      "checking": "正在檢查...",
+      "checkOnly": "僅檢查",
+      "commandCopied": "指令已複製。",
+      "commandCopyFailed": "無法複製指令。",
+      "configuredInstances": "已設定 {{count}} 個執行個體",
+      "connectPreview": "下一步將在瀏覽器內連線。目前請先執行下方指令。",
+      "copyCommand": "複製指令",
       "filterAll": "全部",
-      "filterCli": "CLI 應用",
-      "filterMcp": "MCP 服務",
-      "enabledSummary": "已啟用 {{count}} 個",
-      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP",
-      "searchPlaceholder": "搜尋應用",
-      "featured": "精選",
-      "loading": "正在載入應用...",
-      "empty": "沒有符合的應用。"
+      "filterOff": "關閉",
+      "filterOn": "開啟",
+      "helperCopied": "已複製 {{name}}。",
+      "helperCopyFailed": "無法複製 {{name}}。",
+      "hideSecret": "隱藏密鑰",
+      "instanceConfigured": "已設定",
+      "instanceNeedsSetup": "需要設定",
+      "runtimeFailed": "啟動失敗",
+      "runtimeStarting": "正在啟動",
+      "runtimeStopped": "未執行",
+      "managedByWebui": "由 WebUI 管理",
+      "officialGuide": "官方指南",
+      "optional": "選填",
+      "providerPreset": "服務供應商",
+      "requiredSetup": "必要設定",
+      "savedSecret": "已儲存",
+      "savedSecretPlaceholder": "已儲存的密鑰",
+      "savedSettings": "設定已儲存。",
+      "saveSettings": "儲存設定",
+      "selectChannel": "檢視 {{name}} 設定",
+      "setupSteps": "後續步驟",
+      "showSecret": "顯示密鑰",
+      "toggleChannel": "{{name}} 渠道",
+      "toggleInstance": "{{name}} 執行個體",
+      "tryIt": "試試看",
+      "validationFailed": "啟用前請檢查必要設定。",
+      "validation": {
+        "connected": "已連線",
+        "configured": "手動設定",
+        "needs_setup": "需要設定",
+        "invalid": "無效",
+        "unsupported": "手動設定"
+      }
+    },
+    "nanobotFeatures": {
+      "enabled": "已啟用",
+      "enable": "啟用",
+      "disable": "停用",
+      "ready": "就緒",
+      "missingDependency": "缺少支援套件",
+      "installSupport": "安裝支援套件",
+      "installConfirmTitle": "安裝 {{name}} 的支援套件？",
+      "installConfirmDescription": "nanobot 將安裝 {{name}} 所需的元件並啟用支援。要繼續嗎？",
+      "installConfirmAction": "安裝並啟用",
+      "websocketRequired": "WebUI 需要此功能",
+      "channelDisabled": "通訊管道已停用",
+      "notEnabled": "未啟用"
     },
     "automations": {
       "filters": {
         "all": "全部",
-        "active": "執行中",
+        "active": "作用中",
         "paused": "已暫停",
-        "failed": "異常",
+        "failed": "需要處理",
         "system": "系統"
       },
       "sort": {
@@ -487,29 +589,30 @@
       },
       "search": "搜尋任務、訊息、關聯對話或排程",
       "queue": "任務佇列",
-      "loading": "正在載入自動任務...",
-      "noMatches": "目前檢視沒有符合的自動任務。",
+      "loading": "正在載入自動任務…",
+      "noMatches": "目前沒有符合條件的自動任務。",
       "empty": "尚無自動任務。",
-      "emptyHint": "請從它應該執行的來源處建立，這樣 nanobot 才能保留正確上下文。",
-      "oneShot": "一次性",
+      "emptyHint": "請從自動任務預定執行的對話中建立，讓 nanobot 保留正確的對話脈絡。",
+      "oneShot": "單次",
       "systemTask": "系統管理的自動任務",
+      "localTrigger": "本機觸發器",
       "labels": {
         "schedule": "排程",
         "next": "下次",
-        "origin": "關聯會話",
-        "created": "建立於",
-        "updated": "更新於"
+        "origin": "關聯對話",
+        "created": "建立時間",
+        "updated": "更新時間"
       },
       "runNow": "立即執行",
       "pause": "暫停",
-      "resume": "恢復",
+      "resume": "繼續",
       "edit": "編輯",
       "delete": "刪除",
       "protected": "受保護",
       "editTitle": "編輯自動任務",
       "save": "儲存",
       "deleteTitle": "刪除自動任務",
-      "deleteDescription": "這會從 cron 儲存中刪除 {{name}}，歷史聊天訊息會保留在會話中。",
+      "deleteDescription": "這會從 cron 儲存區移除 {{name}}，過往的聊天訊息仍會保留在該對話中。",
       "cancel": "取消",
       "status": {
         "system": "系統",
@@ -518,11 +621,11 @@
         "failed": "失敗",
         "completed": "已完成",
         "noSchedule": "無排程",
-        "active": "執行中"
+        "active": "作用中"
       },
       "origin": {
         "system": "系統",
-        "unknown": "未關聯會話"
+        "unknown": "沒有關聯的對話"
       },
       "channels": {
         "api": "API",
@@ -548,18 +651,20 @@
         "cronWithTz": "Cron {{expr}} · {{tz}}",
         "withTz": "{{summary}} · {{tz}}",
         "dailyAt": "每天 {{time}}",
-        "weekdaysAt": "工作日 {{time}}",
+        "weekdaysAt": "每週一至週五 {{time}}",
         "hourlyAt": "每小時第 {{minute}} 分鐘",
-        "hourlyWindow": "{{start}}-{{end}} 點每小時第 {{minute}} 分鐘",
+        "hourlyWindow": "每天 {{start}} 時至 {{end}} 時之間，於每小時第 {{minute}} 分鐘執行",
+        "local": "本機觸發器",
         "custom": "自訂排程"
       },
       "next": {
         "paused": "已暫停",
         "pending": "正在執行",
+        "local": "等待觸發",
         "none": "沒有下次執行"
       },
       "message": {
-        "showMore": "查看完整訊息",
+        "showMore": "檢視完整訊息",
         "showLess": "收起訊息"
       },
       "fields": {
@@ -575,7 +680,7 @@
       "scheduleTypes": {
         "every": "間隔",
         "cron": "Cron",
-        "at": "一次性"
+        "at": "單次"
       },
       "everyUnits": {
         "second": "秒",
@@ -595,58 +700,58 @@
     "oauth": {
       "authentication": "OAuth 認證",
       "signIn": "登入",
-      "signingIn": "登入中...",
+      "signingIn": "登入中…",
       "signInAgain": "重新登入",
       "signOut": "登出",
-      "signedInAs": "已登入為 {{account}}",
-      "signInHelp": "從這台裝置登入；不會在配置中儲存 API key。",
+      "signedInAs": "已使用 {{account}} 登入",
+      "signInHelp": "請從這臺裝置登入；系統不會將 API 金鑰儲存在設定中。",
       "signInRequired": "需要登入",
       "signInBeforeSaving": "將此 OAuth 供應商設為目前模型供應商前，請先登入。",
       "signedIn": "已登入",
       "notSignedIn": "未登入"
     },
     "skills": {
-      "description": "查看此 agent 在對話中可以載入的指令技能。",
+      "description": "檢閱此 Agent 可在對話期間載入的指令技能。",
       "caption": "{{available}} 個可用 · 共 {{total}} 個",
       "featured": "Agent 技能",
-      "empty": "暫無可用技能。",
+      "empty": "目前沒有可用的技能。",
       "sourceWorkspace": "自訂",
       "sourceBuiltin": "內建",
       "statusAvailable": "可用",
       "statusUnavailable": "不可用",
       "unavailableReason": "缺少：{{reason}}",
-      "openDetails": "查看 {{name}} 詳情",
-      "loadingDetail": "正在載入技能詳情...",
-      "loadFailed": "無法載入技能詳情。",
-      "descriptionTitle": "完整描述",
+      "openDetails": "開啟 {{name}} 的詳細資料",
+      "loadingDetail": "正在載入技能詳細資料…",
+      "loadFailed": "無法載入技能詳細資料。",
+      "descriptionTitle": "描述",
       "source": "來源",
       "status": "狀態",
       "requirements": "需求",
       "noRequirements": "沒有明確需求。",
       "commands": "命令",
       "environment": "環境變數",
-      "missingCommands": "缺 CLI",
-      "missingEnvironment": "缺 ENV",
-      "unavailableReasonLabel": "不可用原因",
+      "missingCommands": "缺少 CLI 指令",
+      "missingEnvironment": "缺少環境變數",
+      "unavailableReasonLabel": "無法使用的原因",
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "沒有原始說明。",
       "detailDescription": "{{name}} 的詳細資訊。"
     },
     "voice": {
-      "selectProvider": "選擇提供商",
-      "configureProvider": "設定提供商",
+      "selectProvider": "選擇供應商",
+      "configureProvider": "設定供應商",
       "languageAuto": "自動"
     }
   },
   "chat": {
     "fallbackTitle": "對話 {{id}}",
-    "forkTitle": "分叉：{{title}}",
+    "forkTitle": "分支：{{title}}",
     "loading": "載入中…",
-    "noSessions": "目前還沒有會話。",
+    "noSessions": "目前還沒有對話。",
     "showMore": "再顯示 {{count}} 個",
-    "collapsed": "已折疊 {{count}} 個對話",
+    "collapsed": "已隱藏 {{count}} 個對話",
     "showLess": "收起",
-    "actions": "「{{title}}」的會話操作",
+    "actions": "「{{title}}」的對話操作",
     "newInProject": "在 {{project}} 中開始新對話",
     "activity": {
       "running": "Agent 正在執行",
@@ -657,10 +762,10 @@
     "unpin": "取消置頂",
     "rename": "重新命名",
     "renameTitle": "重新命名對話",
-    "renameDescription": "為這個對話設定僅用於 WebUI 側邊欄的名稱。",
+    "renameDescription": "為這個對話選擇僅顯示於本機側邊欄的名稱。",
     "renamePlaceholder": "對話名稱",
     "renameProjectTitle": "重新命名專案",
-    "renameProjectDescription": "為這個專案設定僅用於 WebUI 側邊欄的名稱。",
+    "renameProjectDescription": "為這個專案選擇僅顯示於本機側邊欄的名稱。",
     "renameProjectPlaceholder": "專案名稱",
     "renameSave": "儲存",
     "archive": "封存",
@@ -684,7 +789,7 @@
     "description": "此操作無法復原。",
     "cancel": "取消",
     "confirm": "刪除",
-    "automationsDescription": "這個對話有關聯的自動任務。刪除對話也會刪除這些自動任務。",
+    "automationsDescription": "這個對話含有已排程的自動任務。刪除對話時也會一併刪除這些任務。",
     "moreAutomations": "另有 {{count}} 個",
     "confirmWithAutomations": "刪除",
     "schedule": {
@@ -692,11 +797,13 @@
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
-      "unknown": "自訂計畫"
+      "local": "本機觸發器",
+      "unknown": "自訂排程"
     },
     "next": {
       "label": "下次：{{time}}",
       "disabled": "已暫停",
+      "local": "等待觸發",
       "none": "沒有下次執行"
     }
   },
@@ -705,7 +812,7 @@
     "connecting": "連線中…",
     "open": "已連線",
     "reconnecting": "重新連線中…",
-    "closed": "已中斷",
+    "closed": "已中斷連線",
     "error": "連線錯誤"
   },
   "thread": {
@@ -714,95 +821,97 @@
       "greetings": {
         "workOn": "我們要一起做點什麼？",
         "start": "今天從哪裡開始？",
-        "build": "今天一起構建什麼？",
+        "build": "今天要一起打造什麼？",
         "tackle": "我們要一起解決什麼？"
       },
       "quickActions": {
         "plan": {
           "title": "建立專案計畫",
-          "prompt": "幫我為接下來要做的事情寫一份簡潔的專案計畫。"
+          "prompt": "請為我接下來要建置的內容擬定一份簡潔的專案計畫。"
         },
         "analyze": {
           "title": "分析這些資料",
-          "prompt": "幫我分析這些資料，並指出最重要的模式。"
+          "prompt": "請分析這些資料，並指出最重要的模式。"
         },
         "brainstorm": {
           "title": "腦力激盪想法",
-          "prompt": "圍繞這個問題腦力激盪幾個實用方案，並說明取捨。"
+          "prompt": "請針對這個問題提出幾個實用構想，並說明各自的取捨。"
         },
         "code": {
           "title": "撰寫程式碼",
-          "prompt": "幫我為這個任務撰寫程式碼，先從最小可用改動開始。"
+          "prompt": "請協助我撰寫這個任務所需的程式碼，先從最小且有用的變更開始。"
         },
         "summarize": {
-          "title": "總結這份文件",
-          "prompt": "幫我總結這份文件，並列出關鍵重點。"
+          "title": "摘要這份文件",
+          "prompt": "請摘要這份文件，並列出重點。"
         },
         "more": {
           "title": "更多",
-          "prompt": "展示幾個你在這個工作區裡可以幫我的實用方式。"
+          "prompt": "請列出幾種能在這個工作區提供協助的實用方式。"
         }
       },
       "imageQuickActions": {
         "icon": {
           "title": "設計應用程式圖示",
-          "prompt": "生成一個乾淨的 1:1 nanobot 應用程式圖示：友善的機器人、簡潔向量風格、柔和藍白配色，不要文字。"
+          "prompt": "請為 nanobot 產生一個簡潔的 1:1 應用程式圖示：友善的機器人、簡約向量風格、柔和的藍白配色，不含文字。"
         },
         "sticker": {
           "title": "製作貼圖",
-          "prompt": "生成一張可愛貼圖風格的小型機器人助理圖片，背景像透明貼紙，表情活潑有趣。"
+          "prompt": "請產生一張可愛的貼圖風格圖片，主角是小巧的機器人助理，背景看似透明，表情生動俏皮。"
         },
         "poster": {
           "title": "建立海報",
-          "prompt": "生成一張個人 AI 助理的精緻海報概念圖，現代構圖、清楚的視覺層級，適合登陸頁展示。"
+          "prompt": "請產生一張個人 AI 助理的精緻海報概念圖，採用現代構圖與鮮明的視覺層級，適合用於到達網頁。"
         },
         "product": {
-          "title": "產品樣機",
-          "prompt": "生成一張對話式 AI Web 應用的乾淨產品樣機圖，極簡介面、高級光影、真實裝置邊框。"
+          "title": "產品示意圖",
+          "prompt": "請產生一張對話式 AI Web 應用程式的簡潔產品示意圖，採用極簡介面、精緻打光與逼真的裝置外框。"
         },
         "portrait": {
-          "title": "風格化頭像",
-          "prompt": "生成一個友善 AI 夥伴的風格化頭像，柔和光線、細節豐富但親切，現代插畫風格。"
+          "title": "風格化人像",
+          "prompt": "請產生一幅風格化的友善 AI 夥伴人像，採用柔和光線與細緻親切的現代插畫風格。"
         },
         "edit": {
           "title": "編輯圖片",
-          "prompt": "幫我編輯一張圖片。先請我上傳或指定要編輯的圖片，然後生成編輯後的結果。"
+          "prompt": "請協助我編輯圖片；先詢問我要上傳或指定哪張圖片，再產生編輯結果。"
         }
       }
     },
     "header": {
       "toggleSidebar": "切換側邊欄",
       "newChat": "開始新對話",
-      "toggleTheme": "從頂部切換主題",
+      "toggleTheme": "切換佈景主題",
       "settings": "開啟設定",
-      "sessionInfo": "會話詳情"
+      "sessionInfo": "對話詳細資料"
     },
     "sessionInfo": {
-      "title": "會話",
+      "title": "對話",
       "untitled": "未命名對話",
       "automations": "自動任務",
       "count": "{{count}}",
-      "loading": "正在載入自動任務...",
+      "loading": "正在載入自動任務…",
       "loadFailed": "無法載入自動任務。",
-      "empty": "這個會話暫時沒有自動任務。",
+      "empty": "這個對話目前沒有自動任務。",
       "disabled": "已關閉",
       "schedule": {
         "at": "{{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "unknown": "自訂計畫"
+        "local": "本機觸發器",
+        "unknown": "自訂排程"
       },
       "next": {
-        "label": "下次 {{time}}",
+        "label": "{{time}}",
         "pending": "即將執行",
         "disabled": "已暫停",
+        "local": "等待觸發",
         "none": "沒有下次執行"
       }
     },
     "composer": {
       "placeholderThread": "輸入訊息…",
-      "placeholderHero": "你在想什麼？",
+      "placeholderHero": "任何問題都可以問…",
       "placeholderOpening": "正在開啟新對話…",
       "placeholderStreaming": "模型正在回覆…",
       "inputAria": "訊息輸入框",
@@ -810,32 +919,32 @@
       "runRuntimeTitle": "執行中 · {{elapsed}}",
       "goalStateStrip": "目標 · {{label}}",
       "goalStateFallback": "目標",
-      "goalStateExpandAria": "查看完整目標",
+      "goalStateExpandAria": "檢視完整目標",
       "goalStateSheetTitle": "目標",
       "goalStateCloseAria": "關閉目標",
       "send": "送出訊息",
       "stop": "停止回覆",
-      "modelNotConfigured": "模型未配置",
-      "configureModel": "配置模型",
+      "modelNotConfigured": "尚未設定模型",
+      "configureModel": "設定模型",
       "queued": {
-        "label": "待引導提示",
+        "label": "佇列中的引導訊息",
         "guide": "引導",
         "delete": "刪除引導",
         "edit": "編輯引導",
         "drag": "拖曳排序"
       },
-      "attachImage": "附加圖片",
+      "attachImage": "附加檔案",
       "imageMode": {
         "label": "圖片生成",
         "toggle": "切換圖片生成模式",
         "placeholder": "描述或編輯圖片…",
-        "aspectAria": "圖片畫幅",
-        "aspectLabel": "圖片畫幅",
+        "aspectAria": "圖片長寬比",
+        "aspectLabel": "圖片長寬比",
         "aspect": {
           "auto": "自動",
           "1_1": "方形 1:1",
           "3_4": "直式 3:4",
-          "9_16": "故事版 9:16",
+          "9_16": "限時動態 9:16",
           "4_3": "橫式 4:3",
           "16_9": "寬螢幕 16:9"
         }
@@ -847,18 +956,19 @@
         "voice": "語音輸入"
       },
       "voice": {
-        "hint": "點擊進行聽寫或長按",
+        "hint": "點選或長按以開始聽寫",
         "stop": "停止錄音",
-        "transcribing": "正在轉寫...",
+        "transcribing": "正在轉寫…",
         "recordingStatus": "正在錄音 {{time}}"
       },
       "voiceErrors": {
         "unsupported": "目前瀏覽器不支援語音輸入。",
-        "permission": "需要麥克風權限。",
-        "notConfigured": "請先設定轉寫提供商。",
+        "permission": "請在網址列允許麥克風後重試。",
+        "notConfigured": "請先設定轉寫供應商。",
         "tooLong": "錄音時間太長。",
-        "tooShort": "請稍微多錄一會兒。",
+        "tooShort": "請延長錄音時間。",
         "noInput": "沒有偵測到麥克風輸入。",
+        "noDevice": "找不到可用的麥克風，請連接後重試。",
         "failed": "語音轉寫失敗。"
       },
       "slash": {
@@ -870,46 +980,54 @@
         "commands": {
           "new": {
             "title": "新增對話",
-            "description": "停止目前任務，並開始新的對話。"
+            "description": "重置目前對話，並開始新的對話。"
           },
           "stop": {
             "title": "停止目前任務",
-            "description": "取消這個對話中正在執行的 agent 回合。"
+            "description": "取消這個對話中正在執行的 Agent 回合。"
           },
           "restart": {
             "title": "重新啟動 nanobot",
-            "description": "原地重新啟動 bot 進程。"
+            "description": "重新啟動目前的 bot 處理程序。"
           },
           "status": {
-            "title": "查看狀態",
-            "description": "顯示執行環境、provider 和 channel 狀態。"
+            "title": "檢視狀態",
+            "description": "顯示執行環境、供應商與通訊管道狀態。"
           },
           "model": {
             "title": "模型",
-            "description": "查看或切換目前模型預設。"
+            "description": "顯示目前使用的模型設定，或切換至其他設定。"
           },
           "history": {
-            "title": "查看對話歷史",
-            "description": "列印最近 N 則已持久化的對話訊息。"
+            "title": "檢視對話歷史",
+            "description": "列印最近 N 則已儲存的對話訊息。"
           },
           "dream": {
             "title": "執行 Dream",
             "description": "手動觸發記憶整理。"
           },
           "dream_log": {
-            "title": "查看 Dream 日誌",
-            "description": "查看上一次 Dream 整理變更了什麼。"
+            "title": "檢視 Dream 日誌",
+            "description": "檢視上一次 Dream 整理變更了什麼。"
           },
           "dream_restore": {
             "title": "恢復記憶",
-            "description": "將記憶恢復到之前的 Dream 快照。"
+            "description": "將記憶還原至先前的 Dream 快照。"
+          },
+          "dream_prompt": {
+            "title": "Dream 記憶",
+            "description": "設定 Dream 如何整理目前工作區的記憶。"
           },
           "goal": {
             "title": "長期目標",
             "description": "請助理把這則請求當成需要多步驟持續推進的目標。"
           },
+          "trigger": {
+            "title": "建立本機觸發器",
+            "description": "建立綁定到目前對話的 CLI 觸發器。"
+          },
           "help": {
-            "title": "查看說明",
+            "title": "檢視說明",
             "description": "列出可用的斜線命令。"
           },
           "pairing": {
@@ -924,48 +1042,53 @@
         "details": {
           "goalActive": "目標正在執行",
           "goalReady": "開始一個持續目標",
-          "history": "查看最近訊息",
+          "history": "檢視最近訊息",
           "stopRunning": "正在執行"
         }
       },
-      "encoding": "處理中…",
+      "encoding": "編碼中…",
       "remove": "移除附件",
       "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
+      "textTooLarge": "訊息文字過大（最大 {{max}}）",
       "imageRejected": {
         "unsupported_type": "不支援的檔案類型",
+        "empty_file": "無法附加空白檔案",
+        "too_many_attachments": "每則訊息最多 {{max}} 個附件",
         "too_many_images": "每則訊息最多 {{max}} 張圖片",
-        "magic_mismatch": "檔案看起來不像真正的圖片",
+        "magic_mismatch": "檔案內容似乎不是有效的圖片",
         "decode_failed": "無法解碼這張圖片",
-        "too_large": "圖片太大，請換一張小一點的",
+        "too_large": "檔案太大，請改用較小的檔案",
+        "total_too_large": "附件總大小過大，請移除部分檔案或改用較小的檔案",
+        "transport_too_large": "此附件會超過閘道的傳輸上限",
         "io": "無法讀取這個檔案"
       },
       "mentions": {
-        "ariaLabel": "應用",
-        "label": "應用",
-        "cliGroup": "CLI 應用",
-        "mcpGroup": "MCP 服務",
+        "ariaLabel": "應用程式",
+        "label": "應用程式",
+        "cliGroup": "CLI 應用程式",
+        "mcpGroup": "MCP 伺服器",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
-        "cliDescription": "使用 @{{name}} 呼叫本機 CLI",
-        "mcpDescription": "使用 @{{name}} 呼叫 MCP 服務"
+        "cliDescription": "將 @{{name}} 作為本機 CLI 應用程式使用",
+        "mcpDescription": "將 @{{name}} 作為 MCP 伺服器使用"
       },
       "workspace": {
-        "accessAria": "工作區存取權限",
+        "accessAria": "工作區存取模式",
         "projectAria": "選擇專案",
         "projectPlaceholder": "選擇專案",
         "default": "預設權限",
-        "full": "完全存取權限"
+        "full": "完整存取權"
       }
     },
     "scrollToBottom": "捲動到底部",
     "loadEarlier": "載入更早訊息",
-    "forkedFromHistory": "從歷史訊息分叉",
+    "forkedFromHistory": "從歷史訊息建立分支",
     "promptNavigator": {
-      "open": "開啟輸入導覽",
-      "title": "輸入列表",
-      "search": "搜尋輸入",
-      "noResults": "沒有符合的輸入。",
-      "jumpTo": "跳到輸入：{{label}}"
+      "open": "開啟提示詞導覽",
+      "title": "提示詞",
+      "search": "搜尋提示詞",
+      "noResults": "找不到符合的提示詞。",
+      "jumpTo": "跳到提示詞：{{label}}"
     }
   },
   "message": {
@@ -985,10 +1108,18 @@
     "agentActivityLiveSummary": "進行中… · {{reasoning}} 步 · {{tools}} 次工具呼叫",
     "agentActivityLiveToolsOnly": "進行中… · {{tools}} 次工具呼叫",
     "imageAttachment": "圖片附件",
-    "forkFromHere": "分叉",
+    "forkFromHere": "建立分支",
     "copyReply": "複製",
     "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",
+    "fileEditViewDiff": "檢視差異",
+    "fileEditViewLargeDiff": "檢視大型差異",
+    "fileEditDiffLineCount": "{{count}} 行",
+    "fileEditUnchangedLinesHidden": "已隱藏 {{count}} 行未修改內容",
+    "fileEditShowMoreLines": "顯示其餘 {{count}} 行",
+    "fileEditShowFewerLines": "收起部分行",
+    "fileEditOpenFile": "開啟檔案",
+    "fileEditDiffTruncated": "差異內容已截斷。請開啟檔案以檢視完整變更。",
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",
@@ -997,15 +1128,15 @@
     "activityWorkedFor": "已處理 {{duration}}",
     "cliActivityRunningOne": "正在使用 @{{name}}",
     "cliActivityRanOne": "已使用 @{{name}}",
-    "cliActivityFailedOne": "@{{name}} 失敗",
-    "cliActivityRunningMany": "正在使用 {{count}} 個 CLI 應用",
-    "cliActivityRanMany": "已使用 {{count}} 個 CLI 應用",
-    "cliActivityFailedMany": "{{count}} 個 CLI 應用失敗",
+    "cliActivityFailedOne": "使用 @{{name}} 失敗",
+    "cliActivityRunningMany": "正在使用 {{count}} 個 CLI 應用程式",
+    "cliActivityRanMany": "已使用 {{count}} 個 CLI 應用程式",
+    "cliActivityFailedMany": "{{count}} 個 CLI 應用程式失敗",
     "cliRunRunning": "使用中",
     "cliRunRan": "已使用",
     "cliRunFailed": "失敗",
     "automationSourceFallback": "自動化",
-    "automationTriggered": "自動觸發"
+    "automationTriggered": "已自動觸發"
   },
   "lightbox": {
     "title": "圖片預覽",
@@ -1017,11 +1148,11 @@
   "filePreview": {
     "aria": "檔案預覽",
     "close": "關閉檔案預覽",
-    "loading": "正在載入預覽...",
+    "loading": "正在載入預覽…",
     "failed": "無法預覽這個檔案。",
-    "routeMissing": "檔案預覽需要最新的 gateway。請重啟 nanobot gateway 後再試。",
+    "routeMissing": "檔案預覽需要最新版本的閘道。請重新啟動 nanobot 閘道後再試一次。",
     "resize": "調整檔案預覽寬度",
-    "truncated": "檔案較大，目前只顯示前半部分預覽。"
+    "truncated": "檔案較大，因此預覽內容已截斷。"
   },
   "code": {
     "fallbackLanguage": "程式碼",
@@ -1035,11 +1166,11 @@
   "errors": {
     "messageTooBig": {
       "title": "訊息過大",
-      "body": "伺服器因超過大小限制拒收了上一則訊息。可移除部分圖片或改用較小的圖片後再試。"
+      "body": "上一則訊息超過大小限制，因此伺服器拒絕接收。請移除部分圖片或改用較小的檔案，再重新送出。"
     },
     "workspaceScopeRejected": {
       "title": "工作區未變更",
-      "body": "閘道拒絕了要求的專案或存取權限，Nanobot 已繼續使用先前的工作區。"
+      "body": "閘道拒絕要求的專案或存取模式，因此 Nanobot 繼續使用先前的工作區。"
     }
   },
   "workspace": {

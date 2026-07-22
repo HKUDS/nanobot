@@ -1,0 +1,32 @@
+{
+  "displayName": "企业微信",
+  "description": "在企业微信工作会话中使用 nanobot。",
+  "requirements": "企业微信应用凭据和回调设置",
+  "setup": {
+    "docsLabel": "打开企业微信配置指南",
+    "officialLabel": "打开企业微信管理后台",
+    "tryIt": "向企业微信机器人发送一条测试消息。",
+    "summary": "企业微信需要管理后台中 AI 机器人的 Bot ID 和 Secret。",
+    "steps": [
+      "在企业微信中创建 AI 机器人并选择 API 模式。",
+      "将 Bot ID 和 Secret 复制到 nanobot。",
+      "保存并启用企业微信，然后发送一条测试消息。"
+    ],
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "企业微信 Bot ID",
+        "help": "从企业微信 AI 机器人 API 模式页面复制。"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••",
+        "help": "请妥善保管企业微信机器人 Secret。"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      }
+    }
+  }
+}

@@ -76,6 +76,7 @@
       "image": "Gambar",
       "voice": "Suara",
       "browser": "Internet",
+      "channels": "Kanal",
       "runtime": "Sistem",
       "advanced": "Keamanan",
       "cliApps": "Aplikasi CLI",
@@ -121,6 +122,7 @@
       "presetModel": "Model preset",
       "density": "Kerapatan",
       "activityMode": "Detail aktivitas",
+      "fileEditDisplay": "Tampilan edit file",
       "codeWrap": "Bungkus kode",
       "maxResults": "Hasil maksimum",
       "timeout": "Batas waktu",
@@ -165,6 +167,7 @@
       "presetModel": "Beralih ke Default untuk mengedit model dan penyedia dari WebUI.",
       "density": "Hanya disimpan di browser ini.",
       "activityMode": "Pilih seberapa banyak detail aktivitas agen yang ditampilkan secara default.",
+      "fileEditDisplay": "Pilih aktivitas edit file dibuka sebagai jumlah baris atau diff.",
       "codeWrap": "Menjaga baris kode panjang tetap terbaca di layar kecil.",
       "maxResults": "Resultados devueltos por cada llamada web_search.",
       "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
@@ -214,6 +217,9 @@
       "compact": "Ringkas",
       "auto": "Otomatis",
       "expanded": "Diperluas",
+      "summary": "Ringkasan",
+      "diff": "Diff",
+      "collapsedDiff": "Diff diciutkan",
       "on": "Aktif",
       "off": "Nonaktif",
       "defaultPermission": "Izin default",
@@ -454,22 +460,118 @@
       "noTools": "Tidak ada",
       "testForTools": "Jalankan Uji untuk memeriksa dan memilih alat individual."
     },
+    "api": {
+      "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan SDK dan agen melalui endpoint /v1 lokal.",
+      "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",
+      "access": "Akses", "thisDevice": "Perangkat ini", "localNetwork": "Jaringan lokal",
+      "localHelp": "Hanya perangkat ini yang dapat terhubung.", "networkHelp": "Perangkat lain dapat terhubung; kunci API diperlukan.",
+      "port": "Port", "portHelp": "API menggunakan port lokal ini.", "apiKey": "Kunci API", "apiKeyHelp": "Klien mengirimkannya sebagai token Bearer.",
+      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.", "apiKeyPlaceholder": "Masukkan kunci API",
+      "autoInstall": "Dukungan API akan dipasang otomatis saat dimulai."
+    },
+    "observability": {
+      "title": "Observabilitas", "configured": "Kredensial tracing tersedia untuk nanobot.",
+      "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.", "enable": "Aktifkan dukungan tracing"
+    },
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
     },
     "apps": {
-      "description": "Tambahkan CLI aplikasi dan layanan MCP yang dapat digunakan nanobot dari chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "Semua",
-      "filterCli": "Aplikasi CLI",
-      "filterMcp": "Layanan MCP",
-      "enabledSummary": "{{count}} aktif",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "description": "Tambahkan alat ke nanobot, lalu gunakan dengan @ di chat.",
+      "cliLabel": "Aplikasi",
+      "mcpLabel": "Integrasi",
+      "channelLabel": "Kanal",
+      "featureLabel": "Fitur",
+      "filterAll": "Siap",
+      "filterPlugins": "Plugin",
+      "filterCli": "Aplikasi",
+      "filterMcp": "Integrasi",
+      "enabledSummary": "{{count}} siap",
+      "caption": "{{cli}} aplikasi · {{mcp}} integrasi",
       "searchPlaceholder": "Cari aplikasi",
-      "featured": "Unggulan",
+      "featured": "Alat",
       "loading": "Memuat aplikasi...",
-      "empty": "Tidak ada aplikasi yang cocok."
+      "empty": "Tidak ada alat yang cocok dengan tampilan ini.",
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan aplikasi dan fitur yang diperbarui."
+    },
+    "channels": {
+      "description": "Hubungkan nanobot ke aplikasi chat. Memasang dukungan hanya menambahkan paket integrasi; sebagian besar kanal tetap memerlukan token atau pengaturan workspace.",
+      "caption": "{{enabled}} aktif · {{total}} kanal",
+      "searchPlaceholder": "Cari kanal",
+      "backToChannels": "Semua kanal",
+      "catalog": "Kanal",
+      "loading": "Memuat kanal...",
+      "empty": "Tidak ada kanal yang cocok dengan filter ini.",
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan dukungan kanal yang diperbarui.",
+      "requires": "Memerlukan: {{requirements}}",
+      "setUp": "Siapkan",
+      "setupGuide": "Panduan setup",
+      "setupSummary": "Mengaktifkan hanya menyalakan dukungan nanobot. Tambahkan kredensial platform, lalu mulai ulang nanobot.",
+      "configKeys": "Kunci konfigurasi",
+      "enable": "Aktifkan kanal",
+      "disable": "Nonaktifkan kanal",
+      "needsConfig": "Perlu konfigurasi",
+      "connect": "Hubungkan",
+      "reconnect": "Hubungkan ulang",
+      "advanced": "Lanjutan",
+      "checkAndEnable": "Periksa dan aktifkan",
+      "checkConnection": "Periksa koneksi",
+      "checkedAndEnabled": "Sudah diperiksa dan diaktifkan.",
+      "checking": "Memeriksa...",
+      "checkOnly": "Periksa saja",
+      "commandCopied": "Perintah disalin.",
+      "commandCopyFailed": "Tidak dapat menyalin perintah.",
+      "configuredInstances": "{{count}} instans dikonfigurasi",
+      "connectPreview": "Langkah berikutnya adalah koneksi di browser. Untuk saat ini, jalankan perintah di bawah.",
+      "copyCommand": "Salin perintah",
+      "filterAll": "Semua",
+      "filterOff": "Nonaktif",
+      "filterOn": "Aktif",
+      "helperCopied": "{{name}} disalin.",
+      "helperCopyFailed": "Tidak dapat menyalin {{name}}.",
+      "hideSecret": "Sembunyikan rahasia",
+      "instanceConfigured": "Dikonfigurasi",
+      "instanceNeedsSetup": "Perlu penyiapan",
+      "runtimeFailed": "Gagal dimulai",
+      "runtimeStarting": "Memulai",
+      "runtimeStopped": "Tidak berjalan",
+      "managedByWebui": "Dikelola oleh WebUI",
+      "officialGuide": "Panduan resmi",
+      "optional": "Opsional",
+      "providerPreset": "Penyedia",
+      "requiredSetup": "Penyiapan wajib",
+      "savedSecret": "Tersimpan",
+      "savedSecretPlaceholder": "Rahasia tersimpan",
+      "savedSettings": "Pengaturan disimpan.",
+      "saveSettings": "Simpan pengaturan",
+      "selectChannel": "Lihat pengaturan {{name}}",
+      "setupSteps": "Langkah berikutnya",
+      "showSecret": "Tampilkan rahasia",
+      "toggleChannel": "Kanal {{name}}",
+      "toggleInstance": "Instans {{name}}",
+      "tryIt": "Coba",
+      "validationFailed": "Periksa penyiapan wajib sebelum mengaktifkan.",
+      "validation": {
+        "connected": "Terhubung",
+        "configured": "Dikonfigurasi manual",
+        "needs_setup": "Perlu penyiapan",
+        "invalid": "Tidak valid",
+        "unsupported": "Penyiapan manual"
+      }
+    },
+    "nanobotFeatures": {
+      "enabled": "Aktif",
+      "enable": "Aktifkan",
+      "disable": "Nonaktifkan",
+      "ready": "Siap",
+      "missingDependency": "Dukungan belum terpasang",
+      "installSupport": "Instal dukungan",
+      "installConfirmTitle": "Instal dukungan untuk {{name}}?",
+      "installConfirmDescription": "nanobot akan menambahkan yang dibutuhkan {{name}}, lalu mengaktifkannya. Lanjutkan?",
+      "installConfirmAction": "Instal dan aktifkan",
+      "websocketRequired": "Wajib untuk WebUI",
+      "channelDisabled": "Kanal dinonaktifkan",
+      "notEnabled": "Belum aktif"
     },
     "automations": {
       "filters": {
@@ -493,6 +595,7 @@
       "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
       "oneShot": "Satu kali",
       "systemTask": "Automasi yang dikelola sistem",
+      "localTrigger": "Pemicu lokal",
       "labels": {
         "schedule": "Jadwal",
         "next": "Berikutnya",
@@ -551,11 +654,13 @@
         "weekdaysAt": "Hari kerja pukul {{time}}",
         "hourlyAt": "Setiap jam pada :{{minute}}",
         "hourlyWindow": "Setiap jam {{start}}-{{end}} pada :{{minute}}",
+        "local": "Pemicu lokal",
         "custom": "Jadwal khusus"
       },
       "next": {
         "paused": "Dijeda",
         "pending": "Sedang berjalan",
+        "local": "Menunggu pemicu",
         "none": "Tidak ada jadwal berikutnya"
       },
       "message": {
@@ -692,11 +797,13 @@
       "every": "Setiap {{duration}}",
       "cron": "Cron {{expr}}",
       "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "local": "Pemicu lokal",
       "unknown": "Jadwal khusus"
     },
     "next": {
       "label": "Berikutnya: {{time}}",
       "disabled": "Dijeda",
+      "local": "Menunggu pemicu",
       "none": "Tidak ada jadwal berikutnya"
     }
   },
@@ -791,12 +898,14 @@
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "local": "Pemicu lokal",
         "unknown": "Jadwal khusus"
       },
       "next": {
         "label": "Berikutnya {{time}}",
         "pending": "Segera berjalan",
         "disabled": "Dijeda",
+        "local": "Menunggu pemicu",
         "none": "Tidak ada jadwal berikutnya"
       }
     },
@@ -824,7 +933,7 @@
         "edit": "Edit panduan",
         "drag": "Seret untuk mengurutkan"
       },
-      "attachImage": "Lampirkan gambar",
+      "attachImage": "Lampirkan file",
       "imageMode": {
         "label": "Buat gambar",
         "toggle": "Alihkan mode pembuatan gambar",
@@ -854,11 +963,12 @@
       },
       "voiceErrors": {
         "unsupported": "Input suara tidak didukung di browser ini.",
-        "permission": "Izin mikrofon diperlukan.",
+        "permission": "Izinkan mikrofon di bilah alamat, lalu coba lagi.",
         "notConfigured": "Konfigurasikan penyedia transkripsi terlebih dahulu.",
         "tooLong": "Rekaman terlalu panjang.",
         "tooShort": "Tahan sedikit lebih lama untuk merekam suara.",
         "noInput": "Tidak ada input mikrofon yang terdeteksi.",
+        "noDevice": "Mikrofon tidak ditemukan. Hubungkan mikrofon lalu coba lagi.",
         "failed": "Tidak dapat mentranskripsi audio."
       },
       "slash": {
@@ -870,7 +980,7 @@
         "commands": {
           "new": {
             "title": "Obrolan baru",
-            "description": "Hentikan tugas saat ini dan mulai percakapan baru."
+            "description": "Reset chat ini dan mulai percakapan baru."
           },
           "stop": {
             "title": "Hentikan tugas saat ini",
@@ -904,9 +1014,17 @@
             "title": "Pulihkan memori",
             "description": "Kembalikan memori ke snapshot Dream sebelumnya."
           },
+          "dream_prompt": {
+            "title": "Memori Dream",
+            "description": "Atur cara Dream menyusun memori workspace ini."
+          },
           "goal": {
             "title": "Tujuan jangka panjang",
             "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."
+          },
+          "trigger": {
+            "title": "Buat trigger lokal",
+            "description": "Buat trigger CLI yang terikat ke sesi chat ini."
           },
           "help": {
             "title": "Tampilkan bantuan",
@@ -931,12 +1049,17 @@
       "encoding": "Memproses…",
       "remove": "Hapus lampiran",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "textTooLarge": "Teks pesan terlalu besar (maksimum {{max}})",
       "imageRejected": {
         "unsupported_type": "Tipe file tidak didukung",
+        "empty_file": "File kosong tidak dapat dilampirkan",
+        "too_many_attachments": "Maksimal {{max}} lampiran per pesan",
         "too_many_images": "Maksimal {{max}} gambar per pesan",
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
         "decode_failed": "Tidak dapat mendekode gambar ini",
-        "too_large": "Gambar terlalu besar — coba yang lebih kecil",
+        "too_large": "File terlalu besar — coba yang lebih kecil",
+        "total_too_large": "Total lampiran terlalu besar — hapus beberapa atau gunakan file yang lebih kecil",
+        "transport_too_large": "Lampiran ini akan melebihi batas transport gateway",
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {
@@ -950,11 +1073,11 @@
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP"
       },
       "workspace": {
-        "accessAria": "Workspace access mode",
+        "accessAria": "Mode akses workspace",
         "projectAria": "Pilih proyek",
         "projectPlaceholder": "Pilih proyek",
-        "default": "Default Permission",
-        "full": "Full Access"
+        "default": "Izin default",
+        "full": "Akses penuh"
       }
     },
     "scrollToBottom": "Gulir ke bawah",
@@ -989,6 +1112,14 @@
     "copyReply": "Salin",
     "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
+    "fileEditViewDiff": "Lihat diff",
+    "fileEditViewLargeDiff": "Lihat diff besar",
+    "fileEditDiffLineCount": "{{count}} baris",
+    "fileEditUnchangedLinesHidden": "{{count}} baris tidak berubah disembunyikan",
+    "fileEditShowMoreLines": "Tampilkan {{count}} baris lagi",
+    "fileEditShowFewerLines": "Tampilkan lebih sedikit baris",
+    "fileEditOpenFile": "Buka file",
+    "fileEditDiffTruncated": "Diff dipotong. Buka file untuk melihat perubahan lengkap.",
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",
     "activityThoughtFor": "Selesai berpikir dalam {{duration}}",
@@ -1038,17 +1169,17 @@
       "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
     },
     "workspaceScopeRejected": {
-      "title": "Workspace was not changed",
-      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "title": "Workspace tidak berubah",
+      "body": "Gateway menolak proyek atau mode akses yang diminta, jadi Nanobot tetap memakai workspace sebelumnya."
     }
   },
   "workspace": {
     "dialog": {
-      "defaultProject": "Default workspace",
+      "defaultProject": "Workspace default",
       "manual": "Tempel path",
       "manualPlaceholder": "/Users/name/project",
-      "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "usePath": "Gunakan path",
+      "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
   }
 }

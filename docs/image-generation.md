@@ -1,10 +1,19 @@
 # Image Generation
 
-nanobot can generate and edit images through the `generate_image` tool. In the WebUI, users can enable **Image Generation** from the composer, choose an aspect ratio, and keep iterating on generated images inside the same chat.
+nanobot can generate and edit images through the `generate_image` tool. Enable the tool in WebUI Settings, then ask for an image normally in chat; the agent decides when to call it and can keep iterating on generated images in the same conversation.
 
-The feature is disabled by default. Enable it in `~/.nanobot/config.json`, configure a supported image provider, then restart the gateway.
+The feature is disabled by default. Open **Settings → Image**, choose a configured provider and model, enable image generation, save, and restart when prompted. If that screen is not available in your installed version, use the manual config below.
 
 ## Quick Setup
+
+**WebUI**
+
+1. Add the image provider credential under **Settings → Models** if it is not already configured.
+2. Open **Settings → Image**.
+3. Select the provider and image model, then enable image generation.
+4. Save, restart when prompted, and ask for a simple test image.
+
+**Manual config**
 
 This snippet uses the current built-in image-generation default so the JSON has concrete names. It is not a provider recommendation; replace `provider` and `model` with any supported image provider and model you intend to use.
 
@@ -25,18 +34,16 @@ This snippet uses the current built-in image-generation default so the JSON has 
 }
 ```
 
-See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Ollama, StepFun, and Zhipu configuration examples.
+See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Ollama, StepFun, Zhipu, and ModelScope configuration examples.
 
 > [!TIP]
 > Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
 
 ## WebUI Usage
 
-In the WebUI composer:
-
-1. Click **Image Generation**.
-2. Choose an aspect ratio: `Auto`, `1:1`, `3:4`, `9:16`, `4:3`, or `16:9`.
-3. Describe the image or the edit you want.
+1. Open Settings and enable **Image Generation** with a configured provider and model.
+2. Describe the image or edit you want in chat.
+3. Include an aspect ratio or size in the request when the configured defaults are not suitable.
 4. Attach reference images when editing an existing image.
 
 Generated images are rendered as assistant media in the chat. Follow-up prompts such as "make it warmer", "change the background", or "try a 16:9 version" can reuse the most recent generated artifact.
@@ -48,7 +55,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Current built-in image provider default. Supported values: `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Current built-in image provider default. Supported values: `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu`, `modelscope` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -272,7 +279,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
   "providers": {
     "stepfun": {
       "apiKey": "${STEPFUN_API_KEY}",
-      "apiBase": "https://api.stepfun.com/step_plan/v1"
+      "apiBase": "https://api.stepfun.ai/step_plan/v1"
     }
   },
   "tools": {
@@ -285,7 +292,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
 }
 ```
 
-`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.com/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
+`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.ai/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
 
 ### Zhipu
 
@@ -311,6 +318,29 @@ Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be speci
 ```
 
 Other supported models: `cogview-4`, `cogview-4-250304`, `cogview-3-flash`. Reference images are not supported by this integration.
+
+### ModelScope
+
+ModelScope (魔搭社区) API-Inference supports text-to-image generation and image editing via an async task pattern.
+
+Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be specified as `WIDTHxHEIGHT` (e.g. `1024x1024`, `1664x928`) or using aspect ratio presets.
+
+```json
+{
+  "providers": {
+    "modelscope": {
+      "apiKey": "${MODELSCOPE_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "modelscope",
+      "model": "Qwen/Qwen-Image-2512"
+    }
+  }
+}
+```
 
 ## Artifacts
 
@@ -366,7 +396,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
+| `unsupported image generation provider` | Use `openrouter`, `openai`, `openai_codex`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu`, or `modelscope` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |
