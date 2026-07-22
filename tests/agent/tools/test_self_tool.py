@@ -1078,6 +1078,21 @@ class TestSecurityAttributeProtection:
         result = await tool.execute(action="set", key="web_config.enable", value=False)
         assert "read-only" in result
 
+    @pytest.mark.asyncio
+    async def test_modify_model_presets_dotpath_blocked(self):
+        """The config-derived model preset catalog is inspectable but not mutable."""
+        presets = {"fast": {"model": "fast-model"}}
+        tool = _make_tool(runtime_state=_make_mock_loop(model_presets=presets))
+
+        result = await tool.execute(
+            action="set",
+            key="model_presets.other",
+            value={"model": "other-model"},
+        )
+
+        assert "read-only" in result
+        assert presets == {"fast": {"model": "fast-model"}}
+
 
 # ---------------------------------------------------------------------------
 # current iteration count (Fix #2)

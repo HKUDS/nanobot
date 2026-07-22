@@ -171,6 +171,20 @@ def test_resolver_refreshes_preset_catalog_after_invalidation() -> None:
     assert set(resolver.model_presets) == {"new"}
 
 
+def test_resolver_model_presets_are_read_only() -> None:
+    resolver = ModelRuntimeResolver(
+        _runtime(),
+        model_presets={"fast": ModelPresetConfig(model="fast-model")},
+    )
+
+    with pytest.raises(TypeError):
+        resolver.model_presets["other"] = ModelPresetConfig(  # type: ignore[index]
+            model="other-model"
+        )
+
+    assert set(resolver.model_presets) == {"fast"}
+
+
 def test_resolver_model_override_is_derived_without_default_mutation() -> None:
     initial = _runtime()
     resolver = ModelRuntimeResolver(initial)

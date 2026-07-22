@@ -76,6 +76,7 @@ class MyTool(Tool):
         "_current_iteration",  # updated by runner only
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
+        "model_presets",  # config-derived catalog; changes require config reload
         "workspace_sandbox",  # read-only view of workspace enforcement level
         "request",  # current message routing metadata
     })

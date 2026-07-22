@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from types import MappingProxyType
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -51,7 +52,7 @@ class ModelRuntimeResolver:
     @property
     def model_presets(self) -> Mapping[str, ModelPresetConfig]:
         self._refresh_preset_catalog()
-        return self._model_presets
+        return MappingProxyType(self._model_presets)
 
     @property
     def model_preset(self) -> str | None:
