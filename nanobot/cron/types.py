@@ -154,7 +154,9 @@ class CronJob:
             id=data["id"],
             name=data["name"],
             enabled=data.get("enabled", True),
-            schedule=CronSchedule.from_store_dict(data["schedule"]),
+            schedule=CronSchedule.from_store_dict(
+                data.get("schedule") or {"kind": "every"}
+            ),
             payload=CronPayload.from_store_dict(data.get("payload") or {}),
             state=CronJobState.from_store_dict(data.get("state") or {}),
             created_at_ms=_store_int(get_camel_snake(data, "createdAtMs", "created_at_ms", 0)),
