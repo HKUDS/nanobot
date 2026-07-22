@@ -12,6 +12,11 @@
       "保存并启用 Telegram，然后向机器人发送私信或在群组中提及它。"
     ],
     "fields": {
+      "name": {
+        "label": "机器人名称",
+        "placeholder": "客服机器人",
+        "help": "仅在本地用于区分不同的 Telegram 机器人。"
+      },
       "token": {
         "label": "机器人令牌",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "{{name}} 机器人",
+    "running": "运行中",
+    "needsToken": "需要令牌",
+    "defaultInstance": "默认机器人",
+    "instanceId": "实例 {{id}}",
+    "finishSetup": "检查并完成配置",
+    "connectFirst": "连接第一个机器人",
+    "addAnother": "添加另一个机器人",
+    "connectFirstHint": "粘贴 BotFather 令牌；nanobot 会先验证，再保存配置。",
+    "addAnotherHint": "为不同角色、用户群或工作流使用独立的 Telegram 机器人。",
+    "addBot": "添加机器人",
+    "connectBot": "检查并连接",
+    "tokenRequired": "请先填写 BotFather 令牌。",
+    "botName": "机器人名称",
+    "botNamePlaceholder": "客服机器人",
+    "botToken": "机器人令牌",
+    "hideToken": "隐藏令牌",
+    "showToken": "显示令牌",
+    "secretHint": "保存后，令牌会始终保持隐藏。",
+    "cancel": "取消",
+    "checkHint": "使用 Telegram 验证已保存的令牌。",
+    "checkConnection": "检查连接",
+    "connectedAs": "已连接为 {{name}}。",
+    "connected": "Telegram 已接受保存的令牌。",
+    "configuredUnverified": "已找到保存的令牌，但 Telegram 暂时无法完成验证。",
+    "invalidToken": "Telegram 拒绝了这个机器人令牌。",
+    "checkFailed": "暂时无法检查连接。",
+    "defaultBotName": "Telegram 机器人",
+    "numberedBotName": "Telegram 机器人 {{number}}",
+    "countNone": "尚未配置机器人",
+    "countOne": "已配置 1 个机器人 · {{running}} 个运行中",
+    "countMany": "已配置 {{count}} 个机器人 · {{running}} 个运行中"
   }
 }

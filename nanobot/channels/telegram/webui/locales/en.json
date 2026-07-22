@@ -12,6 +12,11 @@
       "Save and enable Telegram, then send the bot a direct message or mention it in a group."
     ],
     "fields": {
+      "name": {
+        "label": "Bot name",
+        "placeholder": "Support bot",
+        "help": "A local label used to tell your Telegram bots apart."
+      },
       "token": {
         "label": "Bot token",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "{{name}} bot",
+    "running": "Running",
+    "needsToken": "Needs token",
+    "defaultInstance": "Default bot",
+    "instanceId": "Instance {{id}}",
+    "finishSetup": "Check and finish setup",
+    "connectFirst": "Connect your first bot",
+    "addAnother": "Add another bot",
+    "connectFirstHint": "Paste a BotFather token. nanobot will verify it before saving anything.",
+    "addAnotherHint": "Use a separate Telegram bot for another role, audience, or workflow.",
+    "addBot": "Add bot",
+    "connectBot": "Check and connect",
+    "tokenRequired": "Enter the BotFather token first.",
+    "botName": "Bot name",
+    "botNamePlaceholder": "Support bot",
+    "botToken": "Bot token",
+    "hideToken": "Hide token",
+    "showToken": "Show token",
+    "secretHint": "The token stays masked after it is saved.",
+    "cancel": "Cancel",
+    "checkHint": "Verify the saved token with Telegram.",
+    "checkConnection": "Check connection",
+    "connectedAs": "Connected as {{name}}.",
+    "connected": "Telegram accepted the saved token.",
+    "configuredUnverified": "A saved token was found, but Telegram could not verify it right now.",
+    "invalidToken": "Telegram rejected this bot token.",
+    "checkFailed": "The connection could not be checked.",
+    "defaultBotName": "Telegram bot",
+    "numberedBotName": "Telegram bot {{number}}",
+    "countNone": "No bots configured",
+    "countOne": "1 bot configured · {{running}} running",
+    "countMany": "{{count}} bots configured · {{running}} running"
   }
 }

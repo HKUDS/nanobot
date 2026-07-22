@@ -986,6 +986,27 @@ def test_derive_topic_session_key_uses_thread_id() -> None:
     assert TelegramChannel._derive_topic_session_key(message) == "telegram:-100123:topic:42"
 
 
+def test_derive_topic_session_key_isolated_by_named_bot() -> None:
+    message = SimpleNamespace(
+        chat_id=-100123,
+        message_thread_id=42,
+    )
+
+    assert TelegramChannel._derive_topic_session_key(
+        message,
+        "telegram.product",
+    ) == "telegram.product:-100123:topic:42"
+
+
+def test_named_bot_uses_scoped_runtime_name() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(instance_id="product"),
+        MessageBus(),
+    )
+
+    assert channel.name == "telegram.product"
+
+
 def test_derive_topic_session_key_private_dm_thread() -> None:
     """Private DM threads (Telegram Threaded Mode) must get their own session key."""
     message = SimpleNamespace(

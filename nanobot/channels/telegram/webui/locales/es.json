@@ -12,6 +12,11 @@
       "Guarda y activa Telegram; después envía un DM o menciona el bot en un grupo."
     ],
     "fields": {
+      "name": {
+        "label": "Nombre del bot",
+        "placeholder": "Bot de soporte",
+        "help": "Una etiqueta local para distinguir tus bots de Telegram."
+      },
       "token": {
         "label": "Token del bot",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "Bot {{name}}",
+    "running": "En ejecución",
+    "needsToken": "Necesita token",
+    "defaultInstance": "Bot predeterminado",
+    "instanceId": "Instancia {{id}}",
+    "finishSetup": "Comprobar y finalizar",
+    "connectFirst": "Conecta tu primer bot",
+    "addAnother": "Añadir otro bot",
+    "connectFirstHint": "Pega un token de BotFather. nanobot lo verificará antes de guardar nada.",
+    "addAnotherHint": "Usa un bot de Telegram separado para otro rol, público o flujo de trabajo.",
+    "addBot": "Añadir bot",
+    "connectBot": "Comprobar y conectar",
+    "tokenRequired": "Introduce primero el token de BotFather.",
+    "botName": "Nombre del bot",
+    "botNamePlaceholder": "Bot de soporte",
+    "botToken": "Token del bot",
+    "hideToken": "Ocultar token",
+    "showToken": "Mostrar token",
+    "secretHint": "El token permanece oculto después de guardarlo.",
+    "cancel": "Cancelar",
+    "checkHint": "Verifica el token guardado con Telegram.",
+    "checkConnection": "Comprobar conexión",
+    "connectedAs": "Conectado como {{name}}.",
+    "connected": "Telegram aceptó el token guardado.",
+    "configuredUnverified": "Se encontró un token guardado, pero Telegram no pudo verificarlo ahora.",
+    "invalidToken": "Telegram rechazó este token de bot.",
+    "checkFailed": "No se pudo comprobar la conexión.",
+    "defaultBotName": "Bot de Telegram",
+    "numberedBotName": "Bot de Telegram {{number}}",
+    "countNone": "No hay bots configurados",
+    "countOne": "1 bot configurado · {{running}} en ejecución",
+    "countMany": "{{count}} bots configurados · {{running}} en ejecución"
   }
 }

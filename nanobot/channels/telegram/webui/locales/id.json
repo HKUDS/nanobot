@@ -12,6 +12,11 @@
       "Simpan dan aktifkan Telegram, lalu kirim DM atau sebut bot di grup."
     ],
     "fields": {
+      "name": {
+        "label": "Nama bot",
+        "placeholder": "Bot dukungan",
+        "help": "Label lokal untuk membedakan bot Telegram Anda."
+      },
       "token": {
         "label": "Token bot",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "Bot {{name}}",
+    "running": "Berjalan",
+    "needsToken": "Perlu token",
+    "defaultInstance": "Bot default",
+    "instanceId": "Instans {{id}}",
+    "finishSetup": "Periksa dan selesaikan",
+    "connectFirst": "Hubungkan bot pertama Anda",
+    "addAnother": "Tambahkan bot lain",
+    "connectFirstHint": "Tempel token BotFather. nanobot akan memverifikasinya sebelum menyimpan.",
+    "addAnotherHint": "Gunakan bot Telegram terpisah untuk peran, audiens, atau alur kerja lain.",
+    "addBot": "Tambah bot",
+    "connectBot": "Periksa dan hubungkan",
+    "tokenRequired": "Masukkan token BotFather terlebih dahulu.",
+    "botName": "Nama bot",
+    "botNamePlaceholder": "Bot dukungan",
+    "botToken": "Token bot",
+    "hideToken": "Sembunyikan token",
+    "showToken": "Tampilkan token",
+    "secretHint": "Token tetap disamarkan setelah disimpan.",
+    "cancel": "Batal",
+    "checkHint": "Verifikasi token tersimpan dengan Telegram.",
+    "checkConnection": "Periksa koneksi",
+    "connectedAs": "Terhubung sebagai {{name}}.",
+    "connected": "Telegram menerima token tersimpan.",
+    "configuredUnverified": "Token tersimpan ditemukan, tetapi Telegram belum dapat memverifikasinya.",
+    "invalidToken": "Telegram menolak token bot ini.",
+    "checkFailed": "Koneksi tidak dapat diperiksa.",
+    "defaultBotName": "Bot Telegram",
+    "numberedBotName": "Bot Telegram {{number}}",
+    "countNone": "Belum ada bot yang dikonfigurasi",
+    "countOne": "1 bot dikonfigurasi · {{running}} berjalan",
+    "countMany": "{{count}} bot dikonfigurasi · {{running}} berjalan"
   }
 }

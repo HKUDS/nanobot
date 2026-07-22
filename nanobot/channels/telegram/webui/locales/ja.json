@@ -12,6 +12,11 @@
       "保存して Telegram を有効にし、DM を送るかグループでメンションします。"
     ],
     "fields": {
+      "name": {
+        "label": "ボット名",
+        "placeholder": "サポートボット",
+        "help": "Telegram ボットを区別するためのローカル名です。"
+      },
       "token": {
         "label": "ボットトークン",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "{{name}} ボット",
+    "running": "実行中",
+    "needsToken": "トークンが必要",
+    "defaultInstance": "既定のボット",
+    "instanceId": "インスタンス {{id}}",
+    "finishSetup": "確認して設定を完了",
+    "connectFirst": "最初のボットを接続",
+    "addAnother": "別のボットを追加",
+    "connectFirstHint": "BotFather トークンを貼り付けてください。nanobot は保存前に検証します。",
+    "addAnotherHint": "別の役割、利用者、ワークフローには個別の Telegram ボットを使用します。",
+    "addBot": "ボットを追加",
+    "connectBot": "確認して接続",
+    "tokenRequired": "先に BotFather トークンを入力してください。",
+    "botName": "ボット名",
+    "botNamePlaceholder": "サポートボット",
+    "botToken": "ボットトークン",
+    "hideToken": "トークンを隠す",
+    "showToken": "トークンを表示",
+    "secretHint": "保存後もトークンはマスクされます。",
+    "cancel": "キャンセル",
+    "checkHint": "保存済みトークンを Telegram で検証します。",
+    "checkConnection": "接続を確認",
+    "connectedAs": "{{name}} として接続しました。",
+    "connected": "Telegram が保存済みトークンを受け付けました。",
+    "configuredUnverified": "保存済みトークンは見つかりましたが、現在 Telegram で検証できません。",
+    "invalidToken": "Telegram がこのボットトークンを拒否しました。",
+    "checkFailed": "接続を確認できませんでした。",
+    "defaultBotName": "Telegram ボット",
+    "numberedBotName": "Telegram ボット {{number}}",
+    "countNone": "設定済みボットはありません",
+    "countOne": "1 個のボットを設定済み · {{running}} 個が実行中",
+    "countMany": "{{count}} 個のボットを設定済み · {{running}} 個が実行中"
   }
 }

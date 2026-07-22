@@ -12,6 +12,11 @@
       "저장하고 Telegram을 활성화한 다음 DM을 보내거나 그룹에서 멘션하세요."
     ],
     "fields": {
+      "name": {
+        "label": "봇 이름",
+        "placeholder": "지원 봇",
+        "help": "Telegram 봇을 구분하기 위한 로컬 이름입니다."
+      },
       "token": {
         "label": "봇 토큰",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "{{name}} 봇",
+    "running": "실행 중",
+    "needsToken": "토큰 필요",
+    "defaultInstance": "기본 봇",
+    "instanceId": "인스턴스 {{id}}",
+    "finishSetup": "확인하고 설정 완료",
+    "connectFirst": "첫 번째 봇 연결",
+    "addAnother": "다른 봇 추가",
+    "connectFirstHint": "BotFather 토큰을 붙여 넣으세요. nanobot이 저장 전에 확인합니다.",
+    "addAnotherHint": "다른 역할, 사용자 또는 워크플로에는 별도의 Telegram 봇을 사용하세요.",
+    "addBot": "봇 추가",
+    "connectBot": "확인하고 연결",
+    "tokenRequired": "먼저 BotFather 토큰을 입력하세요.",
+    "botName": "봇 이름",
+    "botNamePlaceholder": "지원 봇",
+    "botToken": "봇 토큰",
+    "hideToken": "토큰 숨기기",
+    "showToken": "토큰 표시",
+    "secretHint": "저장 후에도 토큰은 마스킹됩니다.",
+    "cancel": "취소",
+    "checkHint": "저장된 토큰을 Telegram에서 확인합니다.",
+    "checkConnection": "연결 확인",
+    "connectedAs": "{{name}}(으)로 연결되었습니다.",
+    "connected": "Telegram이 저장된 토큰을 승인했습니다.",
+    "configuredUnverified": "저장된 토큰을 찾았지만 지금은 Telegram에서 확인할 수 없습니다.",
+    "invalidToken": "Telegram이 이 봇 토큰을 거부했습니다.",
+    "checkFailed": "연결을 확인할 수 없습니다.",
+    "defaultBotName": "Telegram 봇",
+    "numberedBotName": "Telegram 봇 {{number}}",
+    "countNone": "설정된 봇 없음",
+    "countOne": "봇 1개 설정됨 · {{running}}개 실행 중",
+    "countMany": "봇 {{count}}개 설정됨 · {{running}}개 실행 중"
   }
 }

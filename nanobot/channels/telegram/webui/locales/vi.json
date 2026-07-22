@@ -12,6 +12,11 @@
       "Lưu và bật Telegram, sau đó gửi tin nhắn riêng hoặc nhắc bot trong nhóm."
     ],
     "fields": {
+      "name": {
+        "label": "Tên bot",
+        "placeholder": "Bot hỗ trợ",
+        "help": "Tên cục bộ để phân biệt các bot Telegram."
+      },
       "token": {
         "label": "Token bot",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "Bot {{name}}",
+    "running": "Đang chạy",
+    "needsToken": "Cần token",
+    "defaultInstance": "Bot mặc định",
+    "instanceId": "Phiên bản {{id}}",
+    "finishSetup": "Kiểm tra và hoàn tất",
+    "connectFirst": "Kết nối bot đầu tiên",
+    "addAnother": "Thêm bot khác",
+    "connectFirstHint": "Dán token BotFather. nanobot sẽ xác minh trước khi lưu.",
+    "addAnotherHint": "Dùng bot Telegram riêng cho vai trò, nhóm người dùng hoặc quy trình khác.",
+    "addBot": "Thêm bot",
+    "connectBot": "Kiểm tra và kết nối",
+    "tokenRequired": "Hãy nhập token BotFather trước.",
+    "botName": "Tên bot",
+    "botNamePlaceholder": "Bot hỗ trợ",
+    "botToken": "Token bot",
+    "hideToken": "Ẩn token",
+    "showToken": "Hiện token",
+    "secretHint": "Token vẫn được che sau khi lưu.",
+    "cancel": "Hủy",
+    "checkHint": "Xác minh token đã lưu với Telegram.",
+    "checkConnection": "Kiểm tra kết nối",
+    "connectedAs": "Đã kết nối với tên {{name}}.",
+    "connected": "Telegram đã chấp nhận token đã lưu.",
+    "configuredUnverified": "Đã tìm thấy token lưu sẵn, nhưng Telegram chưa thể xác minh lúc này.",
+    "invalidToken": "Telegram đã từ chối token bot này.",
+    "checkFailed": "Không thể kiểm tra kết nối.",
+    "defaultBotName": "Bot Telegram",
+    "numberedBotName": "Bot Telegram {{number}}",
+    "countNone": "Chưa cấu hình bot",
+    "countOne": "Đã cấu hình 1 bot · {{running}} đang chạy",
+    "countMany": "Đã cấu hình {{count}} bot · {{running}} đang chạy"
   }
 }

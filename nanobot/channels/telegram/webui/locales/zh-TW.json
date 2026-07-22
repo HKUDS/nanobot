@@ -12,6 +12,11 @@
       "儲存並啟用 Telegram，然後傳送私訊或在群組中提及機器人。"
     ],
     "fields": {
+      "name": {
+        "label": "機器人名稱",
+        "placeholder": "客服機器人",
+        "help": "僅在本機用來區分不同的 Telegram 機器人。"
+      },
       "token": {
         "label": "機器人權杖",
         "placeholder": "123456:ABC...",
@@ -31,5 +36,39 @@
         }
       }
     }
+  },
+  "custom": {
+    "toggleBot": "{{name}} 機器人",
+    "running": "執行中",
+    "needsToken": "需要權杖",
+    "defaultInstance": "預設機器人",
+    "instanceId": "執行個體 {{id}}",
+    "finishSetup": "檢查並完成設定",
+    "connectFirst": "連接第一個機器人",
+    "addAnother": "新增另一個機器人",
+    "connectFirstHint": "貼上 BotFather 權杖；nanobot 會先驗證，再儲存設定。",
+    "addAnotherHint": "為不同角色、使用者群或工作流程使用獨立的 Telegram 機器人。",
+    "addBot": "新增機器人",
+    "connectBot": "檢查並連接",
+    "tokenRequired": "請先輸入 BotFather 權杖。",
+    "botName": "機器人名稱",
+    "botNamePlaceholder": "客服機器人",
+    "botToken": "機器人權杖",
+    "hideToken": "隱藏權杖",
+    "showToken": "顯示權杖",
+    "secretHint": "儲存後，權杖會持續保持隱藏。",
+    "cancel": "取消",
+    "checkHint": "使用 Telegram 驗證已儲存的權杖。",
+    "checkConnection": "檢查連線",
+    "connectedAs": "已連接為 {{name}}。",
+    "connected": "Telegram 已接受儲存的權杖。",
+    "configuredUnverified": "已找到儲存的權杖，但 Telegram 目前無法完成驗證。",
+    "invalidToken": "Telegram 拒絕了這個機器人權杖。",
+    "checkFailed": "目前無法檢查連線。",
+    "defaultBotName": "Telegram 機器人",
+    "numberedBotName": "Telegram 機器人 {{number}}",
+    "countNone": "尚未設定機器人",
+    "countOne": "已設定 1 個機器人 · {{running}} 個執行中",
+    "countMany": "已設定 {{count}} 個機器人 · {{running}} 個執行中"
   }
 }
