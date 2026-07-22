@@ -295,6 +295,7 @@ class AgentLoop:
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
         local_trigger_store: Any | None = None,
+        idle_compact_check_interval_seconds: int = 0,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -443,6 +444,8 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
+        self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
+        self._next_idle_compact_check_at = time.monotonic()
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
@@ -498,6 +501,7 @@ class AgentLoop:
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
+            idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
@@ -1000,6 +1004,18 @@ class AgentLoop:
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
+    def _check_expired_sessions_if_due(self) -> None:
+        """Scan idle sessions no more often than the configured interval."""
+        now = time.monotonic()
+        if now < self._next_idle_compact_check_at:
+            return
+        self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
+        self.auto_compact.check_expired(
+            self._schedule_background,
+            self.runtime_for_session,
+            active_session_keys=self._pending_queues.keys(),
+        )
+
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
@@ -1011,11 +1027,7 @@ class AgentLoop:
                 try:
                     msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    self.auto_compact.check_expired(
-                        self._schedule_background,
-                        self.runtime_for_session,
-                        active_session_keys=self._pending_queues.keys(),
-                    )
+                    self._check_expired_sessions_if_due()
                     continue
                 except asyncio.CancelledError:
                     # Preserve real task cancellation so shutdown can complete cleanly.
