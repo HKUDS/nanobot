@@ -63,6 +63,7 @@
     "connectedAs": "Terhubung sebagai {{name}}.",
     "connected": "Telegram menerima token tersimpan.",
     "configuredUnverified": "Token tersimpan ditemukan, tetapi Telegram belum dapat memverifikasinya.",
+    "verificationUnavailable": "Telegram belum dapat memverifikasi token ini. Coba lagi sebelum menghubungkannya.",
     "invalidToken": "Telegram menolak token bot ini.",
     "checkFailed": "Koneksi tidak dapat diperiksa.",
     "defaultBotName": "Bot Telegram",

@@ -63,6 +63,7 @@
     "connectedAs": "Conectado como {{name}}.",
     "connected": "O Telegram aceitou o token salvo.",
     "configuredUnverified": "Um token salvo foi encontrado, mas o Telegram não pôde verificá-lo agora.",
+    "verificationUnavailable": "O Telegram não pôde verificar este token agora. Tente novamente antes de conectar.",
     "invalidToken": "O Telegram rejeitou este token de bot.",
     "checkFailed": "Não foi possível verificar a conexão.",
     "defaultBotName": "Bot do Telegram",

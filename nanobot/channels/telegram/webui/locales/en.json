@@ -63,6 +63,7 @@
     "connectedAs": "Connected as {{name}}.",
     "connected": "Telegram accepted the saved token.",
     "configuredUnverified": "A saved token was found, but Telegram could not verify it right now.",
+    "verificationUnavailable": "Telegram could not verify this token right now. Try again before connecting.",
     "invalidToken": "Telegram rejected this bot token.",
     "checkFailed": "The connection could not be checked.",
     "defaultBotName": "Telegram bot",

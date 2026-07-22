@@ -63,6 +63,7 @@
     "connectedAs": "已連接為 {{name}}。",
     "connected": "Telegram 已接受儲存的權杖。",
     "configuredUnverified": "已找到儲存的權杖，但 Telegram 目前無法完成驗證。",
+    "verificationUnavailable": "Telegram 目前無法驗證此權杖，請稍後重試再連線。",
     "invalidToken": "Telegram 拒絕了這個機器人權杖。",
     "checkFailed": "目前無法檢查連線。",
     "defaultBotName": "Telegram 機器人",

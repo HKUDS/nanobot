@@ -61,12 +61,18 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                     )
                 )
             except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                rejected = status_code in {400, 401, 403, 404}
                 checks.append(
                     check(
                         "get_me",
                         "Bot identity",
-                        "warn",
-                        f"Telegram could not verify the token: HTTP {exc.response.status_code}.",
+                        "fail" if rejected else "warn",
+                        (
+                            f"Telegram rejected the token: HTTP {status_code}."
+                            if rejected
+                            else f"Telegram could not verify the token: HTTP {status_code}."
+                        ),
                     )
                 )
             except Exception:

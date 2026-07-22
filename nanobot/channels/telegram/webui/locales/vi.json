@@ -63,6 +63,7 @@
     "connectedAs": "Đã kết nối với tên {{name}}.",
     "connected": "Telegram đã chấp nhận token đã lưu.",
     "configuredUnverified": "Đã tìm thấy token lưu sẵn, nhưng Telegram chưa thể xác minh lúc này.",
+    "verificationUnavailable": "Telegram chưa thể xác minh token này. Hãy thử lại trước khi kết nối.",
     "invalidToken": "Telegram đã từ chối token bot này.",
     "checkFailed": "Không thể kiểm tra kết nối.",
     "defaultBotName": "Bot Telegram",

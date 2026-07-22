@@ -97,6 +97,27 @@ def _telegram_instance_inputs(
     return ([section] if section else [_base_telegram_instance_config(defaults)]), None
 
 
+def _webhook_listener(config: dict[str, Any]) -> tuple[str, int] | None:
+    mode = str(config.get("mode") or "polling").strip().lower()
+    if mode != "webhook":
+        return None
+
+    host = str(
+        config.get("webhookListenHost")
+        or config.get("webhook_listen_host")
+        or "127.0.0.1"
+    ).strip().lower()
+    raw_port = config.get(
+        "webhookListenPort",
+        config.get("webhook_listen_port", 8081),
+    )
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("webhookListenPort must be an integer") from exc
+    return host, port
+
+
 def telegram_instance_specs(
     section: Any,
     defaults: dict[str, Any],
@@ -109,6 +130,7 @@ def telegram_instance_specs(
     specs: list[ChannelInstanceSpec] = []
     instance_ids: set[str] = set()
     token_owners: dict[str, str] = {}
+    webhook_owners: dict[tuple[str, int], str] = {}
     for index, raw in enumerate(raw_specs):
         if not isinstance(raw, dict):
             logger.warning("Skipping invalid Telegram instance at index {}: expected an object", index)
@@ -144,7 +166,34 @@ def telegram_instance_specs(
                     token_owners[token],
                 )
                 continue
+
+        listener: tuple[str, int] | None = None
+        if enabled_only:
+            try:
+                listener = _webhook_listener(config)
+            except ValueError as exc:
+                logger.warning(
+                    "Skipping Telegram instance '{}' because its webhook listener is invalid: {}",
+                    instance_id,
+                    exc,
+                )
+                continue
+            if listener is not None:
+                if listener in webhook_owners:
+                    host, port = listener
+                    logger.warning(
+                        "Skipping Telegram instance '{}' because webhook listener {}:{} is already used by instance '{}'",
+                        instance_id,
+                        host,
+                        port,
+                        webhook_owners[listener],
+                    )
+                    continue
+
+        if enabled_only and token:
             token_owners[token] = instance_id
+        if listener is not None:
+            webhook_owners[listener] = instance_id
 
         specs.append(ChannelInstanceSpec(instance_id=instance_id, config=config))
 
@@ -157,6 +206,7 @@ def canonical_telegram_section(section: Any, defaults: dict[str, Any]) -> dict[s
     instances: list[dict[str, Any]] = []
     instance_ids: set[str] = set()
     token_owners: dict[str, str] = {}
+    webhook_owners: dict[tuple[str, int], str] = {}
 
     for index, raw in enumerate(raw_specs):
         if not isinstance(raw, dict):
@@ -182,6 +232,18 @@ def canonical_telegram_section(section: Any, defaults: dict[str, Any]) -> dict[s
             if token in token_owners:
                 raise ValueError("Telegram bot token is already used by another instance")
             token_owners[token] = instance_id
+
+        if bool(config.get("enabled", defaults.get("enabled", False))):
+            listener = _webhook_listener(config)
+            if listener is not None:
+                if listener in webhook_owners:
+                    host, port = listener
+                    owner = webhook_owners[listener]
+                    raise ValueError(
+                        f"Telegram webhook listener {host}:{port} is already used by instance "
+                        f"'{owner}'"
+                    )
+                webhook_owners[listener] = instance_id
         instances.append(config)
 
     return {"instances": instances}

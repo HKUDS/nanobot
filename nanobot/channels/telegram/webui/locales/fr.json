@@ -63,6 +63,7 @@
     "connectedAs": "Connecté en tant que {{name}}.",
     "connected": "Telegram a accepté le jeton enregistré.",
     "configuredUnverified": "Un jeton enregistré a été trouvé, mais Telegram ne peut pas le vérifier maintenant.",
+    "verificationUnavailable": "Telegram ne peut pas vérifier ce jeton maintenant. Réessayez avant de le connecter.",
     "invalidToken": "Telegram a refusé ce jeton de bot.",
     "checkFailed": "La connexion n’a pas pu être vérifiée.",
     "defaultBotName": "Bot Telegram",

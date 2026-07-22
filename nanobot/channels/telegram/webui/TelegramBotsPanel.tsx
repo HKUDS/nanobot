@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 const NAME_KEY = "channels.telegram.name";
 const TOKEN_KEY = "channels.telegram.token";
+const GROUP_POLICY_KEY = "channels.telegram.groupPolicy";
 
 export function TelegramBotsPanel({
   token,
@@ -189,7 +190,7 @@ function TelegramBotCreator({
   );
 }
 
-function TelegramCredentialsForm({
+export function TelegramCredentialsForm({
   token,
   instanceId,
   initialName = "",
@@ -237,8 +238,13 @@ function TelegramCredentialsForm({
         { [TOKEN_KEY]: nextToken },
         { instanceId },
       );
-      if (!validation.can_enable) {
-        setError(validationMessage(validation, tx));
+      if (!validation.can_enable || validation.status !== "connected") {
+        setError(validation.status === "configured"
+          ? tx(
+            "custom.verificationUnavailable",
+            "Telegram could not verify this token right now. Try again before connecting.",
+          )
+          : validationMessage(validation, tx));
         return;
       }
 
@@ -366,7 +372,7 @@ function TelegramCredentialsForm({
   );
 }
 
-function TelegramConnectionCheck({
+export function TelegramConnectionCheck({
   token,
   instance,
 }: {
@@ -378,21 +384,32 @@ function TelegramConnectionCheck({
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const checkRevision = useRef(0);
+
+  useEffect(() => {
+    checkRevision.current += 1;
+    setBusy(false);
+    setValidation(null);
+    setError(null);
+  }, [instance]);
 
   const checkConnection = async () => {
+    const revision = checkRevision.current + 1;
+    checkRevision.current = revision;
     setBusy(true);
     setError(null);
     try {
-      setValidation(await validateChannel(
+      const result = await validateChannel(
         token,
         "telegram",
         {},
         { instanceId: instance.id },
-      ));
+      );
+      if (revision === checkRevision.current) setValidation(result);
     } catch (err) {
-      setError((err as Error).message);
+      if (revision === checkRevision.current) setError((err as Error).message);
     } finally {
-      setBusy(false);
+      if (revision === checkRevision.current) setBusy(false);
     }
   };
 
@@ -476,13 +493,23 @@ function defaultTelegramInstance(feature: NanobotFeatureInfo): NanobotChannelIns
   };
 }
 
-function isVisibleTelegramInstance(instance: NanobotChannelInstanceInfo): boolean {
-  return instance.configured
-    || instance.enabled
-    || instance.configured_fields.some((field) => field !== NAME_KEY);
+export function isVisibleTelegramInstance(instance: NanobotChannelInstanceInfo): boolean {
+  if (instance.configured || instance.enabled) return true;
+
+  return instance.configured_fields.some((field) => {
+    if (field === NAME_KEY) {
+      const name = instance.config_values[NAME_KEY]?.trim();
+      return Boolean(name && name !== "nanobot");
+    }
+    if (field === GROUP_POLICY_KEY) {
+      const policy = instance.config_values[GROUP_POLICY_KEY]?.trim();
+      return Boolean(policy && policy !== "mention");
+    }
+    return true;
+  });
 }
 
-function nextTelegramInstanceId(instances: NanobotChannelInstanceInfo[]): string {
+export function nextTelegramInstanceId(instances: NanobotChannelInstanceInfo[]): string {
   const reusableDefault = instances.find((instance) => instance.id === "default");
   if (!reusableDefault || !isVisibleTelegramInstance(reusableDefault)) return "default";
 

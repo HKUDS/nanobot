@@ -63,6 +63,7 @@
     "connectedAs": "{{name}} として接続しました。",
     "connected": "Telegram が保存済みトークンを受け付けました。",
     "configuredUnverified": "保存済みトークンは見つかりましたが、現在 Telegram で検証できません。",
+    "verificationUnavailable": "現在 Telegram でこのトークンを検証できません。接続する前にもう一度お試しください。",
     "invalidToken": "Telegram がこのボットトークンを拒否しました。",
     "checkFailed": "接続を確認できませんでした。",
     "defaultBotName": "Telegram ボット",

@@ -115,6 +115,16 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 nanobot plugins enable telegram
 ```
 
+For the normal setup path, open **Settings → Channels → Telegram** in the
+WebUI. Paste a BotFather token under **Connect your first bot**; nanobot checks
+the token before saving it. Use **Add bot** to connect more Telegram bots. Each
+bot has its own local name, token, connection check, and on/off switch.
+
+Existing single-bot settings appear automatically as **Default bot**, so you do
+not need to enter the saved token again. See the
+[step-by-step Telegram guide](./guides/telegram-ai-agent.md) for the full flow
+and connection-status explanations.
+
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
 - Send `/newbot`, follow prompts
@@ -133,6 +143,36 @@ nanobot plugins enable telegram
   }
 }
 ```
+
+The flat example above remains the simplest manual setup for one bot. If you
+manage `config.json` directly and need several bots, give each entry a unique
+ID, name, and BotFather token:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "instances": [
+        {
+          "id": "default",
+          "name": "Personal bot",
+          "enabled": true,
+          "token": "FIRST_BOT_TOKEN"
+        },
+        {
+          "id": "support",
+          "name": "Support bot",
+          "enabled": true,
+          "token": "SECOND_BOT_TOKEN"
+        }
+      ]
+    }
+  }
+}
+```
+
+Use letters, numbers, `_`, or `-` in an ID. The name is only a label shown in
+nanobot. Turning off one entry leaves the other bots running.
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
 >
@@ -171,6 +211,11 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 > `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot still serializes Telegram updates per conversation before forwarding them to the agent.
 >
 > `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path nanobot listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
+>
+> When several enabled bots use webhook mode, assign a different
+> `webhookListenPort` to every bot. The default is `8081`, so the next bots can
+> use `8082`, `8083`, and so on. Long-polling bots do not need local webhook
+> ports.
 
 </details>
 

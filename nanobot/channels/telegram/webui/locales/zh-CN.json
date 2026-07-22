@@ -63,6 +63,7 @@
     "connectedAs": "已连接为 {{name}}。",
     "connected": "Telegram 已接受保存的令牌。",
     "configuredUnverified": "已找到保存的令牌，但 Telegram 暂时无法完成验证。",
+    "verificationUnavailable": "Telegram 暂时无法验证此令牌，请稍后重试再连接。",
     "invalidToken": "Telegram 拒绝了这个机器人令牌。",
     "checkFailed": "暂时无法检查连接。",
     "defaultBotName": "Telegram 机器人",
