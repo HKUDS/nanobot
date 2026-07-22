@@ -62,6 +62,13 @@ def _fake_provider(name: str, *, max_tokens: int = 8192) -> MagicMock:
     return provider
 
 
+async def _admit_fake_runtime(bot, session_key, callback, runtime=None) -> None:
+    admitted = runtime or bot._loop.runtime_for_session(
+        bot._loop.sessions.get_or_create(session_key)
+    )
+    await callback(admitted)
+
+
 def test_from_config_missing_file():
     with pytest.raises(FileNotFoundError):
         Nanobot.from_config("/nonexistent/config.json")
@@ -633,8 +640,9 @@ async def test_run_model_preset_override_is_per_run(tmp_path):
         model="openai/gpt-4.1-mini",
         context_window_tokens=2048,
         signature=("preset", "fast"),
+        model_preset="fast",
     )
-    override_runtime = runtime_from_provider_snapshot(override, model_preset="fast")
+    override_runtime = runtime_from_provider_snapshot(override)
     bot._loop.runtime_resolver.resolve_override = MagicMock(
         return_value=override_runtime
     )
@@ -775,10 +783,12 @@ async def test_stream_yields_text_events_in_order(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(
-        message, *, session_key, on_stream, on_stream_end, hooks, runtime
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
     ):
         assert message == "hi"
         assert session_key == "sdk:default"
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         await on_stream("Hel")
         await on_stream("lo")
         await on_stream_end(resuming=False)
@@ -812,8 +822,10 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(
-        message, *, session_key, on_stream, on_stream_end, hooks, runtime
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
     ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         await on_stream("done")
         await on_stream_end(resuming=False)
         ctx = AgentRunHookContext(
@@ -856,8 +868,10 @@ async def test_run_streamed_cancel_releases_full_queue_without_consuming(tmp_pat
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(
-        message, *, session_key, on_stream, on_stream_end, hooks, runtime
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
     ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         for i in range(400):
             await on_stream(str(i))
         await on_stream_end(resuming=False)
@@ -921,7 +935,8 @@ async def test_run_streamed_forwards_runtime_options(tmp_path):
     assert callable(kwargs["on_stream"])
     assert callable(kwargs["on_stream_end"])
     assert kwargs["hooks"]
-    assert kwargs["runtime"] is bot._loop.runtime_resolver.runtime
+    assert "runtime" not in kwargs
+    assert callable(kwargs["on_runtime_admitted"])
 
 
 @pytest.mark.asyncio
@@ -951,10 +966,12 @@ async def test_run_streamed_model_override_reports_admitted_runtime(tmp_path):
         on_stream,
         on_stream_end,
         hooks,
+        on_runtime_admitted,
         runtime,
     ):
         assert runtime is override_runtime
         assert bot._loop.runtime_resolver.runtime is original_runtime
+        await on_runtime_admitted(runtime)
         await on_stream("ok")
         await on_stream_end(resuming=False)
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
@@ -995,8 +1012,10 @@ async def test_run_streamed_emits_tool_events(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(
-        message, *, session_key, on_stream, on_stream_end, hooks, runtime
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
     ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         calls = [
             ToolCallRequest(id="call_ok", name="read_file", arguments={"path": "README.md"}),
             ToolCallRequest(id="call_bad", name="exec", arguments={"cmd": "false"}),
@@ -1043,8 +1062,10 @@ async def test_run_streamed_emits_reasoning_events(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(
-        message, *, session_key, on_stream, on_stream_end, hooks, runtime
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
     ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         for hook in hooks:
             await hook.emit_reasoning("thinking")
             await hook.emit_reasoning_end()
@@ -1072,8 +1093,10 @@ async def test_stream_generator_break_cancels_underlying_run(tmp_path):
     cancelled = asyncio.Event()
 
     async def fake_process_direct(
-        message, *, session_key, on_stream, on_stream_end, hooks, runtime
+        message, *, session_key, on_stream, on_stream_end, hooks, on_runtime_admitted,
+        runtime=None
     ):
+        await _admit_fake_runtime(bot, session_key, on_runtime_admitted, runtime)
         try:
             await on_stream("first")
             await asyncio.sleep(10)
@@ -1387,7 +1410,7 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     await bot.sessions.ingest("sdk:history", [{"role": "user", "content": "hello"}])
     runtime = bot._loop.llm_runtime()
-    bot._loop.llm_runtime = MagicMock(return_value=runtime)  # type: ignore[method-assign]
+    bot._loop.runtime_for_session = MagicMock(return_value=runtime)  # type: ignore[method-assign]
 
     bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
     snapshot = await bot.runtime.compact_session("sdk:history")

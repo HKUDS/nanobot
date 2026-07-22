@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from nanobot.config.schema import ModelPresetConfig
@@ -10,14 +12,29 @@ from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
 
 PresetSnapshotLoader = Callable[[str], ProviderSnapshot]
+PresetCatalogLoader = Callable[[], Mapping[str, ModelPresetConfig]]
 
 
-def default_selection_signature(signature: tuple[object, ...] | None) -> tuple[object, ...] | None:
-    return signature[:2] if signature else None
+def default_selection_signature(
+    signature: tuple[object, ...] | None,
+    model_preset: str | None = None,
+) -> tuple[object, ...] | None:
+    return (model_preset, *signature[:2]) if signature else None
 
 
 def configured_model_presets(config: Any) -> dict[str, ModelPresetConfig]:
     return {**config.model_presets, "default": config.resolve_default_preset()}
+
+
+def load_model_preset_catalog(
+    config_path: Path | None = None,
+) -> dict[str, ModelPresetConfig]:
+    """Load the current preset catalog from the configured file."""
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+
+    return configured_model_presets(
+        resolve_config_env_vars(load_config(config_path)),
+    )
 
 
 def make_preset_snapshot_loader(
@@ -40,6 +57,7 @@ def build_static_preset_snapshot(
         context_window_tokens=preset.context_window_tokens,
         signature=("model_preset", name, preset.model_dump_json()),
         generation=preset.to_generation_settings(),
+        model_preset=name,
     )
 
 
@@ -51,7 +69,7 @@ def build_runtime_preset_snapshot(
     loader: PresetSnapshotLoader | None,
 ) -> ProviderSnapshot:
     if loader is not None:
-        return loader(name)
+        return replace(loader(name), model_preset=name)
     return build_static_preset_snapshot(provider, name, presets[name])
 
 

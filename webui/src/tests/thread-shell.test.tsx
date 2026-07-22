@@ -94,7 +94,7 @@ function expectSendMessageWithTurn(
   );
 }
 
-function session(chatId: string) {
+function session(chatId: string, modelPreset?: string | null) {
   return {
     key: `websocket:${chatId}`,
     channel: "websocket" as const,
@@ -102,6 +102,7 @@ function session(chatId: string) {
     createdAt: null,
     updatedAt: null,
     preview: "",
+    modelPreset,
   };
 }
 
@@ -218,6 +219,20 @@ function modelSettings(model: string, provider: string): SettingsPayload {
     },
     requires_restart: false,
   };
+}
+
+function settingsWithFastPreset(): SettingsPayload {
+  const settings = modelSettings("deepseek-v4-pro", "deepseek");
+  settings.model_presets.push({
+    ...settings.model_presets[0]!,
+    name: "fast",
+    label: "Fast",
+    active: false,
+    is_default: false,
+    model: "openai-codex/gpt-5.5",
+    provider: "openai_codex",
+  });
+  return settings;
 }
 
 describe("ThreadShell", () => {
@@ -339,6 +354,61 @@ describe("ThreadShell", () => {
     });
 
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
+  });
+
+  it("resolves the composer model from the active session preset", async () => {
+    const client = makeClient();
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-fast", "fast")}
+          title="Fast session"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settingsWithFastPreset()}
+        />,
+        "deepseek-v4-pro",
+      ),
+    );
+
+    expect(await screen.findByTitle("gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    expect(screen.queryByTitle("deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+  });
+
+  it("uses the backend-resolved provider for an auto session preset", async () => {
+    const client = makeClient();
+    const settings = modelSettings("deepseek-v4-pro", "deepseek");
+    settings.providers.push({
+      name: "companyproxy",
+      label: "Company Proxy",
+      configured: true,
+    });
+    settings.model_presets.push({
+      ...settings.model_presets[0]!,
+      name: "fast",
+      label: "Fast",
+      active: false,
+      is_default: false,
+      model: "companyproxy/gpt-4",
+      provider: "auto",
+      resolved_provider: "companyproxy",
+    });
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-auto", "fast")}
+          title="Auto provider session"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+        />,
+        "deepseek-v4-pro",
+      ),
+    );
+
+    expect(await screen.findByTitle("gpt-4 · Company Proxy")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
   it("opens model settings from the unconfigured model badge", async () => {

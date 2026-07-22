@@ -237,7 +237,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.llm_runtime()
+    runtime = ctx.runtime or loop.runtime_for_session(session)
     ctx_est = 0
     with suppress(Exception):
         ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
@@ -286,11 +286,12 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     await loop._cancel_active_tasks(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     snapshot = session.messages[session.last_consolidated:]
+    if snapshot:
+        runtime = ctx.runtime or loop.runtime_for_session(session)
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        runtime = ctx.runtime or loop.llm_runtime()
         loop._schedule_background(
             loop.consolidator.archive(
                 snapshot,
@@ -315,20 +316,25 @@ def _model_preset_names(loop) -> list[str]:
     return ["default", *sorted(name for name in names if name != "default")]
 
 
-def _active_model_preset_name(loop) -> str:
-    return loop.model_preset or "default"
-
-
 def _command_error_message(exc: Exception) -> str:
     return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
 
 
-def _model_command_status(loop) -> str:
+def _model_command_status(loop, session) -> str:
     names = _model_preset_names(loop)
-    active = _active_model_preset_name(loop)
+    try:
+        runtime = loop.runtime_for_session(session)
+    except (KeyError, ValueError) as exc:
+        return "\n".join([
+            "## Model",
+            f"- Current selection error: {_command_error_message(exc)}",
+            f"- Available presets: {_format_preset_names(names)}",
+            "- Switch with `/model <preset>`.",
+        ])
+    active = runtime.model_preset or "default"
     return "\n".join([
         "## Model",
-        f"- Current model: `{loop.model}`",
+        f"- Current model: `{runtime.model}`",
         f"- Current preset: `{active}`",
         f"- Available presets: {_format_preset_names(names)}",
     ])
@@ -341,10 +347,11 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
     if not args:
+        session = ctx.session or loop.sessions.get_or_create(ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
-            content=_model_command_status(loop),
+            content=_model_command_status(loop, session),
             metadata=metadata,
         )
 
@@ -359,7 +366,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
     name = parts[0]
     try:
-        runtime = loop.set_model_preset(name)
+        runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -375,6 +382,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     max_tokens = runtime.generation.max_tokens
     lines = [
         f"Switched model preset to `{runtime.model_preset}`.",
+        "- Scope: current session",
         f"- Model: `{runtime.model}`",
         f"- Context window: {runtime.context_window_tokens}",
     ]

@@ -132,6 +132,7 @@ export async function listSessions(
     updated_at: string | null;
     title?: string;
     preview?: string;
+    model_preset?: string | null;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
   };
@@ -148,6 +149,7 @@ export async function listSessions(
     updatedAt: s.updated_at,
     title: s.title ?? "",
     preview: s.preview ?? "",
+    modelPreset: s.model_preset ?? null,
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
   }));

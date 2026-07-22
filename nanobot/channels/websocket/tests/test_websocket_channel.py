@@ -2942,6 +2942,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "updated_at": "2026-05-19T10:01:00Z",
             "title": "Running",
             "preview": "work",
+            "model_preset": "fast",
             "path": "/private/path",
         },
         {
@@ -2978,6 +2979,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "updated_at": "2026-05-19T10:01:00Z",
             "title": "Running",
             "preview": "work",
+            "model_preset": "fast",
             "run_started_at": 1_700_000_000.0,
         }
     ]

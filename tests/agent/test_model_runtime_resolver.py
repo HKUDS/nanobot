@@ -52,9 +52,10 @@ def test_provider_snapshot_has_one_canonical_runtime_conversion() -> None:
         model="snapshot-model",
         context_window_tokens=32_768,
         signature=("snapshot-model", "openai"),
+        model_preset="fast",
     )
 
-    runtime = runtime_from_provider_snapshot(snapshot, model_preset="fast")
+    runtime = runtime_from_provider_snapshot(snapshot)
 
     assert runtime.provider is provider
     assert runtime.model == "snapshot-model"
@@ -92,6 +93,82 @@ def test_resolver_resolves_preset_without_mutating_selected_runtime() -> None:
     assert resolver.model_preset is None
     assert initial.provider.generation == GenerationSettings(0.1, 1024, None)
     assert resolved.generation == GenerationSettings(0.5, 512, None)
+
+
+def test_resolver_reuses_preset_until_runtime_config_is_invalidated() -> None:
+    initial = _runtime()
+    preset = ModelPresetConfig(model="fast-model")
+    load_count = 0
+    preset_signature = ("fast-model", "auto", "initial")
+
+    def load_preset(_name: str) -> ProviderSnapshot:
+        nonlocal load_count
+        load_count += 1
+        return ProviderSnapshot(
+            provider=_provider(),
+            model="fast-model",
+            context_window_tokens=20_000,
+            signature=preset_signature,
+        )
+
+    resolver = ModelRuntimeResolver(
+        initial,
+        model_presets={"fast": preset},
+        preset_snapshot_loader=load_preset,
+    )
+
+    first = resolver.resolve_preset("fast")
+    second = resolver.resolve_preset("fast")
+
+    assert first is second
+    assert load_count == 1
+
+    preset_signature = ("fast-model", "auto", "new-credential")
+    resolver.invalidate()
+    refreshed = resolver.resolve_preset("fast")
+
+    assert refreshed is not first
+    assert load_count == 2
+
+
+def test_resolver_refreshes_preset_catalog_after_invalidation() -> None:
+    provider = _provider()
+    catalog = {
+        "old": ModelPresetConfig(model="old-model", provider="openai"),
+    }
+    default_name = "old"
+
+    def load_preset(name: str) -> ProviderSnapshot:
+        preset = catalog[name]
+        return ProviderSnapshot(
+            provider=provider,
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=(preset.model, preset.provider),
+            model_preset=name,
+        )
+
+    resolver = ModelRuntimeResolver(
+        runtime_from_provider_snapshot(load_preset("old")),
+        model_presets=catalog,
+        preset_catalog_loader=lambda: catalog,
+        configured_default_preset="old",
+        provider_snapshot_loader=lambda: load_preset(default_name),
+        preset_snapshot_loader=load_preset,
+    )
+
+    catalog["new"] = ModelPresetConfig(model="new-model", provider="openai")
+    default_name = "new"
+    resolver.invalidate()
+
+    assert resolver.admit().model_preset == "new"
+    assert set(resolver.model_presets) == {"old", "new"}
+
+    del catalog["old"]
+    resolver.invalidate()
+
+    assert resolver.admit().model_preset == "new"
+    assert set(resolver.model_presets) == {"new"}
 
 
 def test_resolver_model_override_is_derived_without_default_mutation() -> None:

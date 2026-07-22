@@ -1605,6 +1605,7 @@ def _run_gateway(
     health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
+    from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
@@ -1696,6 +1697,7 @@ def _run_gateway(
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=load_provider_snapshot,
+        preset_catalog_loader=load_model_preset_catalog,
         runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
@@ -2086,7 +2088,7 @@ def _run_gateway(
                 asyncio.create_task(
                     watch_config_file(
                         Path(config_path),
-                        lambda: agent.runtime_resolver.invalidate(),
+                        lambda: agent.invalidate_runtime_config(),
                     ),
                     name="nanobot-config-watcher",
                 ),

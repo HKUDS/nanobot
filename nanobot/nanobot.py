@@ -37,6 +37,7 @@ from nanobot.sdk.types import (
     StreamEventType,
     result_from_response,
 )
+from nanobot.utils.llm_runtime import LLMRuntime
 
 __all__ = [
     "Nanobot",
@@ -192,16 +193,40 @@ class Nanobot:
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
-        runtime = self._loop.runtime_resolver.resolve_override(
+        override_runtime = self._loop.runtime_resolver.resolve_override(
             model=model,
             model_preset=model_preset,
             config=self._config,
-        ) or self._loop.llm_runtime()
+        )
         queue: asyncio.Queue[StreamEvent | object] = asyncio.Queue(maxsize=256)
         emitter = SDKStreamEmitter(queue)
         stream_hook = SDKStreamingHook(emitter)
         capture = SDKCaptureHook()
         per_run_hooks = [capture, stream_hook, *(hooks or [])]
+        run_started = False
+
+        async def _emit_run_started(runtime: LLMRuntime | None = None) -> None:
+            nonlocal run_started
+            if run_started:
+                return
+            if runtime is None:
+                runtime = override_runtime
+            metadata: dict[str, Any] = {
+                "session_key": session_key,
+                "channel": channel,
+                "chat_id": chat_id,
+                "sender_id": sender_id,
+            }
+            if runtime is not None:
+                metadata.update({
+                    "model": runtime.model,
+                    "model_preset": runtime.model_preset,
+                })
+            await emitter.emit(StreamEvent(
+                type=STREAM_EVENT_RUN_STARTED,
+                metadata=metadata,
+            ))
+            run_started = True
 
         async def _on_stream(delta: str) -> None:
             await emitter.text_delta(delta)
@@ -220,24 +245,16 @@ class Nanobot:
                 on_stream=_on_stream,
                 on_stream_end=_on_stream_end,
             )
-            kwargs["runtime"] = runtime
-            await emitter.emit(StreamEvent(
-                type=STREAM_EVENT_RUN_STARTED,
-                metadata={
-                    "session_key": session_key,
-                    "channel": channel,
-                    "chat_id": chat_id,
-                    "sender_id": sender_id,
-                    "model": runtime.model,
-                    "model_preset": runtime.model_preset,
-                },
-            ))
+            kwargs["on_runtime_admitted"] = _emit_run_started
+            if override_runtime is not None:
+                kwargs["runtime"] = override_runtime
             try:
                 response = await self._loop.process_direct(
                     message,
                     **kwargs,
                     hooks=per_run_hooks,
                 )
+                await _emit_run_started()
                 await emitter.text_completed(resuming=False, force=False)
                 result = result_from_response(response, capture)
                 await emitter.emit(StreamEvent(
@@ -249,6 +266,7 @@ class Nanobot:
                 ))
                 return result
             except Exception as exc:
+                await _emit_run_started()
                 await emitter.emit(StreamEvent(
                     type=STREAM_EVENT_RUN_FAILED,
                     error=str(exc),

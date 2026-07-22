@@ -18,6 +18,7 @@ class ProviderSnapshot:
     context_window_tokens: int
     signature: tuple[object, ...]
     generation: GenerationSettings | None = None
+    model_preset: str | None = None
 
 
 def _resolve_model_preset(
@@ -261,6 +262,11 @@ def build_provider_snapshot(
     preset: ModelPresetConfig | None = None,
 ) -> ProviderSnapshot:
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
+    selected_preset = (
+        config.agents.defaults.model_preset
+        if preset_name is None and preset is None
+        else preset_name
+    )
     fallback_windows = [
         fallback.context_window_tokens
         for fallback in _resolve_fallback_presets(config, resolved)
@@ -271,6 +277,7 @@ def build_provider_snapshot(
         context_window_tokens=min([resolved.context_window_tokens, *fallback_windows]),
         signature=provider_signature(config, preset=resolved),
         generation=resolved.to_generation_settings(),
+        model_preset=selected_preset,
     )
 
 

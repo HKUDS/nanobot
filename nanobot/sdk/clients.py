@@ -196,7 +196,7 @@ class RuntimeClient:
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Run token/replay-window consolidation for one session."""
         session = self._loop.sessions.get_or_create(session_key)
-        runtime = self._loop.llm_runtime()
+        runtime = self._loop.runtime_for_session(session)
         await self._loop.consolidator.maybe_consolidate_by_tokens(
             session,
             runtime=runtime,
@@ -208,7 +208,8 @@ class RuntimeClient:
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 8) -> str | None:
         """Run idle-session compaction for one session and return the summary."""
-        runtime = self._loop.llm_runtime()
+        session = self._loop.sessions.get_or_create(session_key)
+        runtime = self._loop.runtime_for_session(session)
         return await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,

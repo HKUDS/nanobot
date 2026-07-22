@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -6,10 +7,15 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeModelChanged
 from nanobot.config.loader import save_config
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import GenerationSettings
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
+from nanobot.session.model_selection import (
+    SESSION_MODEL_PRESET_METADATA_KEY,
+    model_preset_from_metadata,
+)
 from nanobot.webui.settings_api import update_agent_settings
 
 
@@ -151,6 +157,99 @@ def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path
     assert runtime.model_preset is None
     assert loop.model_preset is None
     assert published == [("fast-model", None)]
+
+
+def test_named_default_refresh_is_used_by_sessions_without_override(tmp_path: Path) -> None:
+    provider = _provider("shared-model")
+    shared_signature = ("shared-model", "auto", "same-settings")
+    snapshots = {
+        "fast": ProviderSnapshot(
+            provider=provider,
+            model="shared-model",
+            context_window_tokens=16_000,
+            signature=shared_signature,
+            model_preset="fast",
+        ),
+        "deep": ProviderSnapshot(
+            provider=provider,
+            model="shared-model",
+            context_window_tokens=16_000,
+            signature=shared_signature,
+            model_preset="deep",
+        ),
+    }
+    default_snapshot = snapshots["deep"]
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="shared-model",
+        context_window_tokens=16_000,
+        provider_signature=shared_signature,
+        provider_snapshot_loader=lambda: default_snapshot,
+        model_presets={
+            name: ModelPresetConfig(model=snapshot.model)
+            for name, snapshot in snapshots.items()
+        },
+        model_preset="fast",
+        preset_snapshot_loader=snapshots.__getitem__,
+    )
+
+    loop.runtime_resolver.invalidate()
+    runtime = loop.llm_runtime()
+    session = loop.sessions.get_or_create("sdk:new-after-refresh")
+
+    assert runtime.model_preset == "deep"
+    assert loop.runtime_for_session(session).model_preset == "deep"
+    assert model_preset_from_metadata(session.metadata) is None
+
+
+@pytest.mark.asyncio
+async def test_config_invalidation_notifies_clients_before_session_runtime_refresh(
+    tmp_path: Path,
+) -> None:
+    provider = _provider("model-a")
+    catalog = {"fast": ModelPresetConfig(model="model-a")}
+    current_model = "model-a"
+    published: list[RuntimeModelChanged] = []
+
+    def load_preset(_name: str) -> ProviderSnapshot:
+        return ProviderSnapshot(
+            provider=provider,
+            model=current_model,
+            context_window_tokens=16_000,
+            signature=(current_model, "auto"),
+            model_preset="fast",
+        )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="model-a",
+        context_window_tokens=16_000,
+        provider_signature=("model-a", "auto"),
+        provider_snapshot_loader=lambda: load_preset("fast"),
+        model_presets=catalog,
+        preset_catalog_loader=lambda: catalog,
+        model_preset="fast",
+        preset_snapshot_loader=load_preset,
+    )
+    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    session = loop.sessions.get_or_create("websocket:chat")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
+    current_model = "model-b"
+    catalog["fast"] = ModelPresetConfig(model="model-b")
+
+    loop.invalidate_runtime_config()
+    runtime = loop.runtime_for_session(session)
+    await asyncio.sleep(0)
+
+    assert [(event.model, event.model_preset) for event in published] == [
+        ("model-a", "fast"),
+    ]
+    assert runtime.model == "model-b"
+    assert loop.model_presets["fast"].model == "model-b"
 
 
 def test_next_turn_captures_generation_changed_after_previous_admission(

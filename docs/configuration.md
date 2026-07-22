@@ -1298,7 +1298,7 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 ## Model Presets
 
-Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for startup selection, chat-command switching, and fallback chains.
+Model presets let you name a complete model configuration and select one per session with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for new-session defaults, chat-command switching, and fallback chains.
 
 Existing configs do not need to change. Direct `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and `reasoningEffort` fields still define the implicit `default` preset. For new configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 
@@ -1362,7 +1362,7 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 
 `default` is reserved and always means the implicit preset built from direct `agents.defaults.*` fields; do not define `modelPresets.default`. Use `/model default` to switch back to those direct fields in an existing config.
 
-Set `agents.defaults.modelPreset` to choose the startup preset. When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from direct `agents.defaults.*` fields. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
+Set `agents.defaults.modelPreset` to choose the preset followed by sessions that have no saved model selection. When `modelPreset` is `null` or omitted, such sessions follow the implicit `default` preset from direct `agents.defaults.*` fields. `/model <preset>` saves an override in the current session, so its future turns keep that preset across process restarts while other sessions remain unchanged. The command does not write the selection back to `config.json`.
 
 ### Model Fallbacks
 

@@ -60,5 +60,11 @@ class RuntimeState(Protocol):
 
     def set_runtime_context_window(self, context_window_tokens: int) -> Any: ...
 
+    def set_session_model_preset(
+        self,
+        session_key: str,
+        name: str,
+    ) -> Any: ...
+
     @property
     def model_preset(self) -> str | None: ...

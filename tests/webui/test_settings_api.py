@@ -464,6 +464,26 @@ def test_settings_payload_includes_dynamic_custom_provider(
     assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == DYNAMIC_PROVIDER_API_BASE
 
 
+def test_settings_payload_resolves_provider_for_each_auto_preset(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = _dynamic_provider_config()
+    config.model_presets["fast"] = ModelPresetConfig(
+        provider="auto",
+        model=f"{DYNAMIC_PROVIDER_NAME}/gpt-4",
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    presets = {row["name"]: row for row in payload["model_presets"]}
+
+    assert presets["fast"]["provider"] == "auto"
+    assert presets["fast"]["resolved_provider"] == DYNAMIC_PROVIDER_NAME
+
+
 def test_settings_payload_groups_opencode_compatibility_alias(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)

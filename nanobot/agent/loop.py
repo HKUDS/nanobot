@@ -79,6 +79,10 @@ from nanobot.session.manager import (
     SessionManager,
     replay_max_messages_for_context,
 )
+from nanobot.session.model_selection import (
+    SESSION_MODEL_PRESET_METADATA_KEY,
+    model_preset_from_metadata,
+)
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
@@ -129,7 +133,7 @@ class TurnContext:
     session_key: str
     state: TurnState
     turn_id: str
-    runtime: LLMRuntime
+    runtime: LLMRuntime | None
     kind: TurnKind
     delivery: TurnDelivery
     original_user_text: str | None = None
@@ -155,6 +159,7 @@ class TurnContext:
     on_progress: Callable[..., Awaitable[None]] | None = None
     on_stream: Callable[[str], Awaitable[None]] | None = None
     on_stream_end: Callable[..., Awaitable[None]] | None = None
+    on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None
     on_retry_wait: Callable[[str], Awaitable[None]] | None = None
 
     pending_queue: asyncio.Queue | None = None
@@ -282,6 +287,7 @@ class AgentLoop:
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
+        preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
@@ -331,6 +337,8 @@ class AgentLoop:
                 snapshot_signature=provider_signature,
             ),
             model_presets=configured_presets,
+            preset_catalog_loader=preset_catalog_loader,
+            configured_default_preset=model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
         )
@@ -503,6 +511,28 @@ class AgentLoop:
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
+
+    def invalidate_runtime_config(self) -> None:
+        """Invalidate runtime config and notify clients to refresh its catalog."""
+        self.runtime_resolver.invalidate()
+        self._publish_runtime_selection(self.runtime_resolver.runtime)
+
+    def runtime_for_session(self, session: Session) -> LLMRuntime:
+        """Resolve the immutable runtime selected by one session."""
+        name = model_preset_from_metadata(session.metadata)
+        return self.llm_runtime() if name is None else self.runtime_resolver.resolve_preset(name)
+
+    def set_session_model_preset(
+        self,
+        session_key: str,
+        name: str,
+    ) -> LLMRuntime:
+        """Validate and persist one session's preset selection."""
+        runtime = self.runtime_resolver.resolve_preset(name)
+        session = self.sessions.get_or_create(session_key)
+        session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
+        self.sessions.save(session)
+        return runtime
 
     def _publish_runtime_selection(
         self,
@@ -983,7 +1013,7 @@ class AgentLoop:
                 except asyncio.TimeoutError:
                     self.auto_compact.check_expired(
                         self._schedule_background,
-                        self.llm_runtime,
+                        self.runtime_for_session,
                         active_session_keys=self._pending_queues.keys(),
                     )
                     continue
@@ -1224,11 +1254,9 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         runtime: LLMRuntime | None = None,
         delivery: TurnDelivery | None = None,
+        on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        if runtime is None:
-            runtime = self.llm_runtime()
-
         kind = TurnKind.SYSTEM if msg.channel == "system" else TurnKind.USER
         if kind is TurnKind.SYSTEM:
             destination = (
@@ -1268,6 +1296,7 @@ class AgentLoop:
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            on_runtime_admitted=on_runtime_admitted,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
             run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
@@ -1452,13 +1481,19 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
+        runtime = ctx.runtime
+        if runtime is None:
+            runtime = self.runtime_for_session(ctx.session)
+            ctx.runtime = runtime
+        if ctx.on_runtime_admitted is not None:
+            await ctx.on_runtime_admitted(runtime)
         replay_max_messages = replay_max_messages_for_context(
-            ctx.runtime.context_window_tokens
+            runtime.context_window_tokens
         )
         if not ctx.ephemeral:
             await self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
-                runtime=ctx.runtime,
+                runtime=runtime,
                 replay_max_messages=replay_max_messages,
             )
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
@@ -1469,7 +1504,7 @@ class AgentLoop:
 
         _hist_kwargs: dict[str, Any] = {
             "max_messages": replay_max_messages,
-            "max_tokens": self._replay_token_budget(ctx.runtime),
+            "max_tokens": self._replay_token_budget(runtime),
             "extend_to_user": is_subagent,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
@@ -1864,6 +1899,7 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
         runtime: LLMRuntime | None = None,
+        on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process an external message directly and return the outbound payload."""
         if channel == "system":
@@ -1897,6 +1933,8 @@ class AgentLoop:
                     kwargs["tools"] = tools
                 if runtime is not None:
                     kwargs["runtime"] = runtime
+                if on_runtime_admitted is not None:
+                    kwargs["on_runtime_admitted"] = on_runtime_admitted
                 return await self._process_message(
                     msg,
                     **kwargs,

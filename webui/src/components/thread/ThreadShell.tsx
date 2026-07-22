@@ -170,8 +170,14 @@ interface ModelBadgeInfo {
   needsSetup: boolean;
 }
 
-function activeModelPreset(settings: SettingsPayload | null): SettingsPayload["model_presets"][number] | null {
+function modelPresetForBadge(
+  settings: SettingsPayload | null,
+  scopedPreset: string | null,
+): SettingsPayload["model_presets"][number] | null {
   if (!settings) return null;
+  if (scopedPreset) {
+    return settings.model_presets.find((preset) => preset.name === scopedPreset) ?? null;
+  }
   const configured = settings.agent.model_preset || "default";
   return (
     settings.model_presets.find((preset) => preset.name === configured)
@@ -180,19 +186,25 @@ function activeModelPreset(settings: SettingsPayload | null): SettingsPayload["m
   );
 }
 
-function resolvedModelProvider(settings: SettingsPayload | null, modelName: string | null): string | null {
-  const preset = activeModelPreset(settings);
-  const rawProvider = preset?.provider || settings?.agent.provider || null;
-  if (rawProvider === "auto") {
-    return settings?.agent.resolved_provider || inferProviderFromModelName(modelName) || null;
-  }
-  return rawProvider || inferProviderFromModelName(modelName);
-}
-
-function toModelBadgeInfo(modelName: string | null, settings: SettingsPayload | null): ModelBadgeInfo {
-  const model = modelName || settings?.agent.model || null;
+function toModelBadgeInfo(
+  modelName: string | null,
+  settings: SettingsPayload | null,
+  modelPreset: string | null = null,
+): ModelBadgeInfo {
+  const scopedPreset = modelPreset?.trim() || null;
+  const preset = modelPresetForBadge(settings, scopedPreset);
+  const model = scopedPreset
+    ? preset?.model || null
+    : modelName || settings?.agent.model || null;
   const label = toModelBadgeLabel(model);
-  const provider = resolvedModelProvider(settings, model);
+  const rawProvider = preset?.provider
+    || (!scopedPreset ? settings?.agent.provider : null)
+    || null;
+  const provider = rawProvider === "auto"
+    ? preset?.resolved_provider
+      || (!scopedPreset ? settings?.agent.resolved_provider : null)
+      || null
+    : rawProvider || inferProviderFromModelName(model);
   const providerRow = provider
     ? settings?.providers.find((item) => item.name === provider)
     : null;
@@ -459,9 +471,10 @@ export function ThreadShell({
 
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
+  const sessionModelPreset = session?.modelPreset?.trim() || null;
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(modelName, settings),
-    [modelName, settings],
+    () => toModelBadgeInfo(modelName, settings, sessionModelPreset),
+    [modelName, sessionModelPreset, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })

@@ -494,8 +494,10 @@ Run the agent once and return a `RunResult`.
 | `model` | `str \| None` | `None` | Override the model for this run only. |
 | `model_preset` | `str \| None` | `None` | Override the model preset for this run only. |
 
-`model` and `model_preset` are per-run overrides and do not change
-`bot.runtime.model` after the run completes. They are mutually exclusive.
+Without an override, a run uses the preset saved in its session, or the configured
+default when that session has no saved selection. `model` and `model_preset` are
+mutually exclusive per-run overrides; they do not change the saved session selection
+or `bot.runtime.model` after the run completes.
 
 ### `await bot.run_streamed(...)`
 
@@ -531,9 +533,9 @@ async for event in bot.stream("Generate a long answer"):
 | `await cancel()` | Cancel the run and release stream resources. |
 | `await aclose()` | Close the stream; equivalent cleanup primitive for `async with` / manual lifecycle code. |
 
-Normal SDK runs with different session keys may overlap. Runs that use per-run
-`model` or `model_preset` overrides are exclusive while the override is active,
-because the current `AgentLoop` provider/model state is mutable.
+SDK runs with different session keys may overlap, including runs with per-run
+`model` or `model_preset` overrides. Each run receives an immutable runtime without
+mutating the instance default. Runs sharing one session key remain serialized.
 
 ### `StreamEvent`
 

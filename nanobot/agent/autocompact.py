@@ -66,7 +66,7 @@ class AutoCompact:
     def check_expired(
         self,
         schedule_background: Callable[[Coroutine], None],
-        resolve_runtime: Callable[[], LLMRuntime],
+        resolve_runtime: Callable[[Session], LLMRuntime],
         active_session_keys: Collection[str] = (),
     ) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
@@ -79,7 +79,12 @@ class AutoCompact:
                 continue
             updated_at = info.get("updated_at")
             if self._is_expired(updated_at, now) and self._has_compactable_idle_tail(key):
-                runtime = resolve_runtime()
+                session = self.sessions.get_or_create(key)
+                try:
+                    runtime = resolve_runtime(session)
+                except (KeyError, ValueError):
+                    # Invalid session selections remain recoverable through /model.
+                    continue
                 self._archiving.add(key)
                 schedule_background(self._archive(key, runtime=runtime))
 

@@ -25,9 +25,11 @@ from nanobot.session.manager import (
     _message_preview_text,
     _metadata_title,
 )
+from nanobot.session.model_selection import model_preset_from_metadata
 
-_INDEX_VERSION = 2
+_INDEX_VERSION = 4
 _INDEX_FILENAME = ".webui_session_index.json"
+_MODEL_PRESET_FIELD = "model_preset"
 _WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
 _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
@@ -138,6 +140,7 @@ def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
         "updated_at": row.get("updated_at"),
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
+        _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
         "path": str(sessions_dir / str(row.get("file", ""))),
     }
 
@@ -256,6 +259,7 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
         ),
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
+        _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
         "file": path.name,
         "mtime_ns": signature["mtime_ns"],
         "size": signature["size"],
@@ -329,6 +333,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 ),
                 "title": _metadata_title(data.get("metadata", {})),
                 "preview": preview or fallback_preview,
+                _MODEL_PRESET_FIELD: model_preset_from_metadata(data.get("metadata", {})),
                 "file": path.name,
                 "mtime_ns": signature["mtime_ns"],
                 "size": signature["size"],

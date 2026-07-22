@@ -805,6 +805,10 @@ def settings_payload(
             "is_default": True,
             "model": defaults.model,
             "provider": defaults.provider,
+            "resolved_provider": config.get_provider_name(
+                defaults.model,
+                preset=config.resolve_default_preset(),
+            ),
             "max_tokens": defaults.max_tokens,
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
@@ -823,6 +827,10 @@ def settings_payload(
                 "is_default": False,
                 "model": preset.model,
                 "provider": preset.provider,
+                "resolved_provider": config.get_provider_name(
+                    preset.model,
+                    preset=preset,
+                ),
                 "max_tokens": preset.max_tokens,
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,

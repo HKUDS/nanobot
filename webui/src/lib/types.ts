@@ -245,6 +245,8 @@ export interface ChatSummary {
   updatedAt: string | null;
   title?: string;
   preview: string;
+  /** Model preset persisted for this session; null means it still follows the global default. */
+  modelPreset?: string | null;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -406,6 +408,7 @@ export interface SettingsPayload {
     is_default: boolean;
     model: string;
     provider: string;
+    resolved_provider?: string | null;
     max_tokens: number;
     context_window_tokens: number;
     temperature: number;

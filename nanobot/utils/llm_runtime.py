@@ -84,8 +84,6 @@ class LLMRuntime:
 
 def runtime_from_provider_snapshot(
     snapshot: ProviderSnapshot,
-    *,
-    model_preset: str | None = None,
 ) -> LLMRuntime:
     """Convert a provider factory snapshot into the canonical runtime value."""
     if snapshot.generation is not None:
@@ -94,13 +92,13 @@ def runtime_from_provider_snapshot(
             model=snapshot.model,
             generation=snapshot.generation,
             context_window_tokens=snapshot.context_window_tokens,
-            model_preset=model_preset,
+            model_preset=snapshot.model_preset,
             snapshot_signature=snapshot.signature,
         )
     return LLMRuntime.capture(
         snapshot.provider,
         snapshot.model,
         context_window_tokens=snapshot.context_window_tokens,
-        model_preset=model_preset,
+        model_preset=snapshot.model_preset,
         snapshot_signature=snapshot.signature,
     )

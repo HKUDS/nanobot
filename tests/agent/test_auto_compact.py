@@ -307,7 +307,7 @@ class TestAutoCompact:
         loop.sessions.save(s2)
 
         loop.consolidator.compact_idle_session = _make_fake_compact(loop)
-        loop.auto_compact.check_expired(loop._schedule_background, loop.llm_runtime)
+        loop.auto_compact.check_expired(loop._schedule_background, loop.runtime_for_session)
         await _drain_background_tasks(loop)
 
         active_after = loop.sessions.get_or_create("cli:active")
@@ -776,7 +776,7 @@ class TestProactiveAutoCompact:
         """Helper: run check_expired via callback and wait for background tasks."""
         loop.auto_compact.check_expired(
             loop._schedule_background,
-            loop.llm_runtime,
+            loop.runtime_for_session,
             active_session_keys=active_session_keys,
         )
         await _drain_background_tasks(loop)
@@ -878,12 +878,12 @@ class TestProactiveAutoCompact:
         loop.consolidator.compact_idle_session = _slow_compact
 
         # First call starts archiving via callback
-        loop.auto_compact.check_expired(loop._schedule_background, loop.llm_runtime)
+        loop.auto_compact.check_expired(loop._schedule_background, loop.runtime_for_session)
         await started.wait()
         assert archive_count == 1
 
         # Second call should skip (key is in _archiving)
-        loop.auto_compact.check_expired(loop._schedule_background, loop.llm_runtime)
+        loop.auto_compact.check_expired(loop._schedule_background, loop.runtime_for_session)
         assert archive_count == 1
 
         # Clean up

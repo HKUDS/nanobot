@@ -4,11 +4,14 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 import nanobot.webui.session_list_index as session_list_index
 from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 
 
 def test_webui_session_list_reuses_valid_index_without_scanning_files(
@@ -17,10 +20,12 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
 ) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:indexed")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
     session.add_message("user", "indexed preview")
     manager.save(session)
 
     assert list_webui_sessions(manager)[0]["preview"] == "indexed preview"
+    assert list_webui_sessions(manager)[0]["model_preset"] == "fast"
 
     def fail_scan(session_manager: SessionManager, path: Path) -> None:
         raise AssertionError(f"unexpected session file scan: {path}")
@@ -31,6 +36,23 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
 
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
+    assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(
+    tmp_path: Path,
+) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:custom-metadata")
+    session.metadata["model_preset"] = 7
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = {"invalid": True}
+    session.add_message("user", "custom metadata")
+    manager.save(session)
+
+    with pytest.raises(ValueError, match="session model preset must be a non-empty string"):
+        list_webui_sessions(manager)
+
+    assert manager.get_or_create(session.key).metadata["model_preset"] == 7
 
 
 def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatch) -> None:
