@@ -48,6 +48,7 @@ dependencies = [
     "dulwich>=0.22.0,<1.0.0",
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
+    "watchfiles>=1.1.1,<2.0.0",
     "packaging>=24.0",
     "tzdata>=2025.2; sys_platform == 'win32'",
     "defusedxml>=0.7.1,<1.0.0",

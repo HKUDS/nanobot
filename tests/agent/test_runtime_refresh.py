@@ -2,6 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import save_config
@@ -34,6 +36,7 @@ def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
             signature=("new-model",),
         ),
     )
+    loop.runtime_resolver.invalidate()
 
     runtime = loop.llm_runtime()
 
@@ -90,6 +93,7 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
             signature=("new-model",),
         ),
     )
+    loop.runtime_resolver.invalidate()
 
     runtime = loop.llm_runtime()
 
@@ -97,6 +101,24 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
     assert not hasattr(loop.runner, "provider")
+
+
+def test_llm_runtime_surfaces_invalidated_config_errors(tmp_path: Path) -> None:
+    def fail_refresh() -> ProviderSnapshot:
+        raise ValueError("invalid config")
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider("old-model"),
+        workspace=tmp_path,
+        model="old-model",
+        context_window_tokens=1000,
+        provider_snapshot_loader=fail_refresh,
+    )
+    loop.runtime_resolver.invalidate()
+
+    with pytest.raises(ValueError, match="invalid config"):
+        loop.llm_runtime()
 
 
 def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path) -> None:
@@ -122,6 +144,7 @@ def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path
         preset_snapshot_loader=lambda _name: fast_snapshot,
         runtime_model_publisher=lambda model, preset: published.append((model, preset)),
     )
+    loop.runtime_resolver.invalidate()
 
     runtime = loop.llm_runtime()
 
@@ -173,6 +196,7 @@ def test_settings_context_window_refreshes_runtime_state(
     loop = AgentLoop.from_config(config, provider_snapshot_loader=loader)
 
     payload = update_agent_settings({"context_window_tokens": ["262144"]})
+    loop.runtime_resolver.invalidate()
     loop.llm_runtime()
 
     assert payload["requires_restart"] is False

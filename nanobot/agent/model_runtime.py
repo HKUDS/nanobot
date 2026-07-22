@@ -31,6 +31,7 @@ class ModelRuntimeResolver:
         self._model_presets = dict(model_presets or {})
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
+        self._refresh_required = False
         self._tracks_provider_generation = initial_runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             initial_runtime.snapshot_signature
@@ -56,9 +57,14 @@ class ModelRuntimeResolver:
     def current(self, *, refresh: bool = False) -> LLMRuntime:
         """Return the selected runtime, optionally refreshing the default source."""
         if refresh:
-            self.refresh()
+            if self._refresh_required:
+                self.refresh()
             self._refresh_provider_generation()
         return self._runtime
+
+    def invalidate(self) -> None:
+        """Refresh configured runtime state on the next admission."""
+        self._refresh_required = True
 
     def resolve_snapshot(
         self,
@@ -146,6 +152,7 @@ class ModelRuntimeResolver:
     def refresh(self) -> LLMRuntime | None:
         """Refresh configured defaults and return the replacement when changed."""
         if self._provider_snapshot_loader is None:
+            self._refresh_required = False
             return None
 
         snapshot = self._provider_snapshot_loader()
@@ -161,6 +168,7 @@ class ModelRuntimeResolver:
             runtime.snapshot_signature == self._runtime.snapshot_signature
             and runtime.model_preset == self._runtime.model_preset
         )
+        self._refresh_required = False
         if unchanged:
             self._default_selection_signature = default_selection
             return None

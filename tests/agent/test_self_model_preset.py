@@ -175,6 +175,7 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
     )
 
     loop.set_model_preset("fast")
+    loop.runtime_resolver.invalidate()
     loop.llm_runtime()
 
     assert loop.model_preset == "fast"
@@ -211,6 +212,7 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
     )
 
     loop.set_model_preset("fast")
+    loop.runtime_resolver.invalidate()
     loop.llm_runtime()
 
     assert loop.model_preset is None

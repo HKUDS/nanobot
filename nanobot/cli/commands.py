@@ -1609,6 +1609,7 @@ def _run_gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.config.watcher import watch_config_file
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
@@ -2071,6 +2072,13 @@ def _run_gateway(
         try:
             await cron.start()
             tasks = [
+                asyncio.create_task(
+                    watch_config_file(
+                        Path(config_path),
+                        lambda: agent.runtime_resolver.invalidate(),
+                    ),
+                    name="nanobot-config-watcher",
+                ),
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
                 asyncio.create_task(

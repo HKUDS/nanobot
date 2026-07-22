@@ -98,6 +98,7 @@ class TestMaxMessagesInit:
 
         initial = loop.runtime_resolver.runtime
         assert replay_max_messages_for_context(initial.context_window_tokens) == 327
+        loop.runtime_resolver.invalidate()
         refreshed = loop.llm_runtime()
         assert replay_max_messages_for_context(refreshed.context_window_tokens) == FILE_MAX_MESSAGES
 

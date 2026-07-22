@@ -183,6 +183,35 @@ def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:
     assert refreshed.generation == GenerationSettings(0.8, 512, None)
 
 
+def test_resolver_reloads_config_only_after_invalidation() -> None:
+    initial = _runtime()
+    refreshed_provider = _provider()
+    load_count = 0
+
+    def load_snapshot() -> ProviderSnapshot:
+        nonlocal load_count
+        load_count += 1
+        return ProviderSnapshot(
+            provider=refreshed_provider,
+            model="refreshed-model",
+            context_window_tokens=20_000,
+            signature=("refreshed-model", "auto"),
+        )
+
+    resolver = ModelRuntimeResolver(initial, provider_snapshot_loader=load_snapshot)
+
+    assert resolver.current(refresh=True) is initial
+    assert load_count == 0
+
+    resolver.invalidate()
+    refreshed = resolver.current(refresh=True)
+
+    assert refreshed.provider is refreshed_provider
+    assert refreshed.model == "refreshed-model"
+    assert resolver.current(refresh=True) is refreshed
+    assert load_count == 1
+
+
 def test_selected_preset_generation_does_not_fall_back_to_provider_defaults() -> None:
     provider = _provider(temperature=0.1, max_tokens=1024)
     resolver = ModelRuntimeResolver(
