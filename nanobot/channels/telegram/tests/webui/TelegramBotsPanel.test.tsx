@@ -77,6 +77,65 @@ describe("TelegramBotsPanel", () => {
     expect(isVisibleTelegramInstance(customDefault)).toBe(true);
   });
 
+  it("connects with only the required token and keeps optional settings collapsed", async () => {
+    apiMocks.validateChannel.mockResolvedValue({
+      name: "telegram",
+      status: "connected",
+      checks: [],
+      identity: { name: "token_only_bot" },
+      missing_fields: [],
+      can_enable: true,
+      requires_restart: false,
+    } satisfies ChannelValidationPayload);
+    apiMocks.configureChannel.mockResolvedValue({
+      name: "telegram",
+      saved: true,
+      saved_keys: [],
+    });
+    const user = userEvent.setup();
+    render(
+      <TelegramCredentialsForm
+        token="api-token"
+        instanceId="default"
+        submitLabel="Check and connect"
+        tx={(_key, fallback) => fallback}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    const tokenInput = screen.getByLabelText("Bot token", { selector: "input" });
+    const advanced = screen.getByText("Advanced options").closest("details");
+    expect(tokenInput).toBeRequired();
+    expect(advanced).not.toHaveAttribute("open");
+    expect(screen.getByLabelText("Bot name", { selector: "input" })).not.toBeVisible();
+    expect(
+      screen.getByLabelText("Network proxy (optional)", { selector: "input" }),
+    ).not.toBeVisible();
+
+    const botToken = "123456:abcdefghijklmnopqrstuvwxyz";
+    await user.type(tokenInput, botToken);
+    await user.click(screen.getByRole("button", { name: "Check and connect" }));
+
+    await waitFor(() => {
+      expect(apiMocks.configureChannel).toHaveBeenCalled();
+    });
+    expect(apiMocks.validateChannel).toHaveBeenCalledWith(
+      "api-token",
+      "telegram",
+      { "channels.telegram.token": botToken },
+      { instanceId: "default" },
+    );
+    expect(apiMocks.configureChannel).toHaveBeenCalledWith(
+      "api-token",
+      "telegram",
+      {
+        "channels.telegram.name": "@token_only_bot",
+        "channels.telegram.token": botToken,
+      },
+      { enable: true, instanceId: "default" },
+    );
+  });
+
   it("does not save a new token when Telegram verification is unavailable", async () => {
     apiMocks.validateChannel.mockResolvedValue({
       name: "telegram",
@@ -138,6 +197,7 @@ describe("TelegramBotsPanel", () => {
     const botToken = "123456:abcdefghijklmnopqrstuvwxyz";
     const proxy = "socks5://127.0.0.1:1080";
     await user.type(screen.getByLabelText("Bot token", { selector: "input" }), botToken);
+    await user.click(screen.getByText("Advanced options"));
     await user.type(
       screen.getByLabelText("Network proxy (optional)", { selector: "input" }),
       proxy,
@@ -187,6 +247,7 @@ describe("TelegramBotsPanel", () => {
       />,
     );
 
+    await user.click(screen.getByText("Advanced options"));
     await user.click(screen.getByRole("button", { name: "Remove saved proxy" }));
 
     expect(apiMocks.configureChannel).toHaveBeenCalledWith(

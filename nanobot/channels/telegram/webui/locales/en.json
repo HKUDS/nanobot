@@ -55,6 +55,7 @@
     "addAnotherHint": "Use a separate Telegram bot for another role, audience, or workflow.",
     "addBot": "Add bot",
     "connectBot": "Check and connect",
+    "advancedOptions": "Advanced options",
     "tokenRequired": "Enter the BotFather token first.",
     "botName": "Bot name",
     "botNamePlaceholder": "Support bot",

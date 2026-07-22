@@ -55,6 +55,7 @@
     "addAnotherHint": "Dùng bot Telegram riêng cho vai trò, nhóm người dùng hoặc quy trình khác.",
     "addBot": "Thêm bot",
     "connectBot": "Kiểm tra và kết nối",
+    "advancedOptions": "Tùy chọn nâng cao",
     "tokenRequired": "Hãy nhập token BotFather trước.",
     "botName": "Tên bot",
     "botNamePlaceholder": "Bot hỗ trợ",

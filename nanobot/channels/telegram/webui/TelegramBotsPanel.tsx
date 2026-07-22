@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, X } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -332,112 +332,136 @@ export function TelegramCredentialsForm({
         void submit();
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)]">
-        <label className="block">
-          <span className="text-[11px] font-medium text-foreground/85">
-            {tx("custom.botName", "Bot name")}
-          </span>
-          <Input
-            aria-label={tx("custom.botName", "Bot name")}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={tx("custom.botNamePlaceholder", "Support bot")}
-            className="mt-1 h-9 rounded-[10px] border-border/60 bg-muted/35 text-[13px]"
-          />
-        </label>
-        <label className="block">
-          <span className="text-[11px] font-medium text-foreground/85">
-            {tx("custom.botToken", "Bot token")}
-          </span>
-          <span className="relative mt-1 block">
-            <Input
-              aria-label={tx("custom.botToken", "Bot token")}
-              type={showToken ? "text" : "password"}
-              autoComplete="off"
-              value={botToken}
-              onChange={(event) => setBotToken(event.target.value)}
-              placeholder="123456:ABC..."
-              className="h-9 rounded-[10px] border-border/60 bg-muted/35 pr-9 font-mono text-[12px]"
-            />
-            <button
-              type="button"
-              aria-label={showToken
-                ? tx("custom.hideToken", "Hide token")
-                : tx("custom.showToken", "Show token")}
-              onClick={() => setShowToken((current) => !current)}
-              className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
-            >
-              {showToken ? (
-                <EyeOff className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <Eye className="h-3.5 w-3.5" aria-hidden />
-              )}
-            </button>
-          </span>
-        </label>
-      </div>
-
-      <div className="block">
+      <label className="block">
         <span className="text-[11px] font-medium text-foreground/85">
-          {tx("custom.networkProxy", "Network proxy (optional)")}
+          {tx("custom.botToken", "Bot token")}
+          <span className="ml-0.5 text-destructive" aria-hidden>*</span>
         </span>
         <span className="relative mt-1 block">
           <Input
-            aria-label={tx("custom.networkProxy", "Network proxy (optional)")}
-            type={showProxy ? "text" : "password"}
+            aria-label={tx("custom.botToken", "Bot token")}
+            type={showToken ? "text" : "password"}
             autoComplete="off"
-            value={proxy}
-            onChange={(event) => setProxy(event.target.value)}
-            placeholder={proxyConfigured
-              ? tx("custom.savedProxyPlaceholder", "A proxy is already saved")
-              : "http://127.0.0.1:7890"}
+            required
+            value={botToken}
+            onChange={(event) => setBotToken(event.target.value)}
+            placeholder="123456:ABC..."
             className="h-9 rounded-[10px] border-border/60 bg-muted/35 pr-9 font-mono text-[12px]"
           />
           <button
             type="button"
-            aria-label={showProxy
-              ? tx("custom.hideProxy", "Hide proxy")
-              : tx("custom.showProxy", "Show proxy")}
-            onClick={() => setShowProxy((current) => !current)}
+            aria-label={showToken
+              ? tx("custom.hideToken", "Hide token")
+              : tx("custom.showToken", "Show token")}
+            onClick={() => setShowToken((current) => !current)}
             className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
           >
-            {showProxy ? (
+            {showToken ? (
               <EyeOff className="h-3.5 w-3.5" aria-hidden />
             ) : (
               <Eye className="h-3.5 w-3.5" aria-hidden />
             )}
           </button>
         </span>
-        <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
-          {proxyConfigured && !proxy
-            ? tx(
-              "custom.savedProxyHint",
-              "Leave this blank to keep the saved proxy. Enter a new URL to replace it.",
-            )
-            : tx(
-              "custom.proxyHint",
-              "Used for both connection checks and bot traffic. HTTP and SOCKS URLs are supported.",
-            )}
-        </span>
-        {proxyConfigured && !proxy ? (
-          <button
-            type="button"
-            className="mt-1.5 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            onClick={() => void removeProxy()}
-            disabled={busy}
-          >
-            {tx("custom.removeProxy", "Remove saved proxy")}
-          </button>
-        ) : null}
-        {message ? (
-          <span
-            role="status"
-            className="mt-1 block text-[11px] text-emerald-700 dark:text-emerald-200"
-          >
-            {message}
+      </label>
+
+      <details className="group rounded-[12px] border border-border/60 bg-muted/20 px-3 py-2.5">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium text-foreground [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex items-center gap-1.5">
+            {tx("custom.advancedOptions", "Advanced options")}
+            <ChevronDown
+              className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180"
+              aria-hidden
+            />
           </span>
-        ) : null}
-      </div>
+          <span className={cn(
+            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+            proxyConfigured
+              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+              : "bg-muted text-muted-foreground",
+          )}>
+            {proxyConfigured
+              ? tx("custom.proxyConfigured", "Configured")
+              : tx("custom.proxyOptional", "Optional")}
+          </span>
+        </summary>
+        <div className="mt-3 space-y-3 border-t border-border/50 pt-3">
+          <label className="block">
+            <span className="text-[11px] font-medium text-foreground/85">
+              {tx("custom.botName", "Bot name")}
+            </span>
+            <Input
+              aria-label={tx("custom.botName", "Bot name")}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={tx("custom.botNamePlaceholder", "Support bot")}
+              className="mt-1 h-9 rounded-[10px] border-border/60 bg-background text-[13px]"
+            />
+          </label>
+
+          <div className="block">
+            <span className="text-[11px] font-medium text-foreground/85">
+              {tx("custom.networkProxy", "Network proxy (optional)")}
+            </span>
+            <span className="relative mt-1 block">
+              <Input
+                aria-label={tx("custom.networkProxy", "Network proxy (optional)")}
+                type={showProxy ? "text" : "password"}
+                autoComplete="off"
+                value={proxy}
+                onChange={(event) => setProxy(event.target.value)}
+                placeholder={proxyConfigured
+                  ? tx("custom.savedProxyPlaceholder", "A proxy is already saved")
+                  : "http://127.0.0.1:7890"}
+                className="h-9 rounded-[10px] border-border/60 bg-background pr-9 font-mono text-[12px]"
+              />
+              <button
+                type="button"
+                aria-label={showProxy
+                  ? tx("custom.hideProxy", "Hide proxy")
+                  : tx("custom.showProxy", "Show proxy")}
+                onClick={() => setShowProxy((current) => !current)}
+                className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                {showProxy ? (
+                  <EyeOff className="h-3.5 w-3.5" aria-hidden />
+                ) : (
+                  <Eye className="h-3.5 w-3.5" aria-hidden />
+                )}
+              </button>
+            </span>
+            <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+              {proxyConfigured && !proxy
+                ? tx(
+                  "custom.savedProxyHint",
+                  "Leave this blank to keep the saved proxy. Enter a new URL to replace it.",
+                )
+                : tx(
+                  "custom.proxyHint",
+                  "Used for both connection checks and bot traffic. HTTP and SOCKS URLs are supported.",
+                )}
+            </span>
+            {proxyConfigured && !proxy ? (
+              <button
+                type="button"
+                className="mt-1.5 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => void removeProxy()}
+                disabled={busy}
+              >
+                {tx("custom.removeProxy", "Remove saved proxy")}
+              </button>
+            ) : null}
+            {message ? (
+              <span
+                role="status"
+                className="mt-1 block text-[11px] text-emerald-700 dark:text-emerald-200"
+              >
+                {message}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </details>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[11.5px] leading-5 text-muted-foreground">

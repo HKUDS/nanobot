@@ -55,6 +55,7 @@
     "addAnotherHint": "別の役割、利用者、ワークフローには個別の Telegram ボットを使用します。",
     "addBot": "ボットを追加",
     "connectBot": "確認して接続",
+    "advancedOptions": "詳細オプション",
     "tokenRequired": "先に BotFather トークンを入力してください。",
     "botName": "ボット名",
     "botNamePlaceholder": "サポートボット",

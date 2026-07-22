@@ -55,6 +55,7 @@
     "addAnotherHint": "为不同角色、用户群或工作流使用独立的 Telegram 机器人。",
     "addBot": "添加机器人",
     "connectBot": "检查并连接",
+    "advancedOptions": "高级选项",
     "tokenRequired": "请先填写 BotFather 令牌。",
     "botName": "机器人名称",
     "botNamePlaceholder": "客服机器人",

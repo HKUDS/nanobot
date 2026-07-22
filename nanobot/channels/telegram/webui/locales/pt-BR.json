@@ -55,6 +55,7 @@
     "addAnotherHint": "Use um bot do Telegram separado para outra função, público ou fluxo de trabalho.",
     "addBot": "Adicionar bot",
     "connectBot": "Verificar e conectar",
+    "advancedOptions": "Opções avançadas",
     "tokenRequired": "Insira primeiro o token do BotFather.",
     "botName": "Nome do bot",
     "botNamePlaceholder": "Bot de suporte",
