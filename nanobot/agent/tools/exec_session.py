@@ -341,10 +341,25 @@ class ExecSessionManager:
             for sid, s in list(self._sessions.items()):
                 if s.owner_session_key == owner_session_key:
                     victims.append(self._sessions.pop(sid))
-        await asyncio.gather(
+        results = await asyncio.gather(
             *(s.kill() for s in victims),
             return_exceptions=True,
         )
+        failures = [
+            (session, result)
+            for session, result in zip(victims, results, strict=True)
+            if isinstance(result, BaseException)
+        ]
+        if failures:
+            async with self._lock:
+                for session, _ in failures:
+                    self._sessions[session.session_id] = session
+            if len(failures) == 1:
+                raise failures[0][1]
+            raise BaseExceptionGroup(
+                "failed to terminate exec sessions by owner",
+                [result for _, result in failures],
+            )
         return len(victims)
 
     async def _cleanup_locked(self) -> None:

@@ -679,6 +679,29 @@ def test_terminate_by_owner_returns_zero_for_no_match(tmp_path):
     asyncio.run(run())
 
 
+def test_terminate_by_owner_retains_failed_sessions():
+    async def run() -> None:
+        manager = ExecSessionManager()
+        session = SimpleNamespace(
+            session_id="failed",
+            owner_session_key="cli:a",
+            kill=AsyncMock(side_effect=OSError("termination failed")),
+        )
+        manager._sessions[session.session_id] = session
+
+        with pytest.raises(OSError, match="termination failed"):
+            await manager.terminate_by_owner("cli:a")
+
+        assert manager._sessions == {session.session_id: session}
+        session.kill.assert_awaited_once()
+
+        session.kill.side_effect = None
+        assert await manager.terminate_by_owner("cli:a") == 1
+        assert manager._sessions == {}
+
+    asyncio.run(run())
+
+
 def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
     async def run() -> None:
         manager = ExecSessionManager()
