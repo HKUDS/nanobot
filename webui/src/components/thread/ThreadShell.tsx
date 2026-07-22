@@ -537,6 +537,7 @@ export function ThreadShell({
 
   useEffect(() => {
     return client.onRuntimeModelUpdate(() => {
+      setTurnModel(null);
       void refreshModelSettings();
     });
   }, [client, refreshModelSettings]);

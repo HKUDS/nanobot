@@ -14,13 +14,23 @@ const HERO_GREETING_PATTERN =
 function makeClient() {
   const errorHandlers = new Set<(err: { kind: string }) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
+  const runtimeModelHandlers = new Set<
+    (modelName: string | null, modelPreset?: string | null) => void
+  >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
   const goalStateByChatId = new Map<string, import("@/lib/types").GoalStateWsPayload>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
-    onRuntimeModelUpdate: () => () => {},
+    onRuntimeModelUpdate: (
+      handler: (modelName: string | null, modelPreset?: string | null) => void,
+    ) => {
+      runtimeModelHandlers.add(handler);
+      return () => {
+        runtimeModelHandlers.delete(handler);
+      };
+    },
     getRunStartedAt: () => null,
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
     getTurnModel: () => undefined,
@@ -55,6 +65,9 @@ function makeClient() {
         goalStateByChatId.set(chatId, ev.goal_state);
       }
       for (const h of chatHandlers.get(chatId) ?? []) h(ev);
+    },
+    _emitRuntimeModelUpdate(modelName: string | null, modelPreset?: string | null) {
+      for (const h of runtimeModelHandlers) h(modelName, modelPreset);
     },
     _emitSessionUpdate(chatId: string, scope?: string) {
       for (const h of sessionUpdateHandlers) h(chatId, scope);
@@ -457,6 +470,41 @@ describe("ThreadShell", () => {
 
     expect(await screen.findByText("gpt-5.5")).toBeInTheDocument();
     expect(screen.queryByTestId("composer-model-fallback-indicator")).not.toBeInTheDocument();
+  });
+
+  it("clears fallback state when a runtime refresh keeps the same model name", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("fallback-refresh")}
+        title="Fallback refresh"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={modelSettings("openai-codex/gpt-5.5", "openai_codex")}
+      />,
+      "openai-codex/gpt-5.5",
+    ));
+
+    act(() => {
+      client._emitChat("fallback-refresh", {
+        event: "turn_model_updated",
+        chat_id: "fallback-refresh",
+        model_name: "deepseek/deepseek-chat",
+        provider: "deepseek",
+        fallback_index: 1,
+      });
+    });
+
+    expect(await screen.findByTestId("composer-model-fallback-indicator")).toBeInTheDocument();
+
+    await act(async () => {
+      client._emitRuntimeModelUpdate("openai-codex/gpt-5.5", "default");
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("composer-model-fallback-indicator")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
   });
 
   it("opens model settings from the unconfigured model badge", async () => {

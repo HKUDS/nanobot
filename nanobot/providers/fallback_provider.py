@@ -93,6 +93,7 @@ class ModelAttempt:
 
 
 ModelAttemptObserver = Callable[[ModelAttempt], Awaitable[None]]
+ModelAttemptProviderResolver = Callable[[Any], str | None]
 
 
 class FallbackProvider(LLMProvider):
@@ -122,11 +123,13 @@ class FallbackProvider(LLMProvider):
         fallback_presets: list[Any],
         provider_factory: Callable[[Any], LLMProvider],
         model_attempt_observer: ModelAttemptObserver | None = None,
+        model_attempt_provider_resolver: ModelAttemptProviderResolver | None = None,
     ):
         self._primary = primary
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
         self._model_attempt_observer = model_attempt_observer
+        self._model_attempt_provider_resolver = model_attempt_provider_resolver
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
@@ -296,7 +299,7 @@ class FallbackProvider(LLMProvider):
 
             await self._notify_model_attempt(
                 model=fallback_model,
-                provider=fallback.provider,
+                provider=self._resolve_model_attempt_provider(fallback),
                 fallback_index=idx + 1,
             )
 
@@ -366,6 +369,17 @@ class FallbackProvider(LLMProvider):
             )
         except Exception:
             logger.exception("model attempt observer failed for '{}'", model)
+
+    def _resolve_model_attempt_provider(self, fallback: Any) -> str | None:
+        configured_provider = getattr(fallback, "provider", None)
+        fallback_provider = None if configured_provider == "auto" else configured_provider
+        if self._model_attempt_provider_resolver is None:
+            return fallback_provider
+        try:
+            return self._model_attempt_provider_resolver(fallback) or fallback_provider
+        except Exception:
+            logger.exception("model attempt provider resolver failed for '{}'", fallback.model)
+            return fallback_provider
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:
