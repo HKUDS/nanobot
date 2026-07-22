@@ -29,6 +29,7 @@ const VOICE_MIME_CANDIDATES = [
 export type VoiceRecorderState = "idle" | "recording" | "transcribing";
 export type VoiceRecorderErrorKey =
   | "failed"
+  | "noDevice"
   | "noInput"
   | "notConfigured"
   | "permission"
@@ -253,10 +254,10 @@ export function useVoiceRecorder({
         noInputHintVisibleRef.current = true;
         onError("noInput");
       }, VOICE_NO_INPUT_HINT_MS);
-    } catch {
+    } catch (error) {
       cleanupRecording();
       setState("idle");
-      onError("permission");
+      onError(recordingErrorKey(error));
     }
   }, [
     cleanupRecording,
@@ -520,4 +521,10 @@ function transcriptionErrorKey(error: unknown): VoiceRecorderErrorKey {
   if (detail === "not_configured") return "notConfigured";
   if (detail === "duration") return "tooLong";
   return "failed";
+}
+
+function recordingErrorKey(error: unknown): VoiceRecorderErrorKey {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "NotFoundError") return "noDevice";
+  return "permission";
 }

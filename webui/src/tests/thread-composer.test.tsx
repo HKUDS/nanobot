@@ -439,6 +439,26 @@ describe("ThreadComposer", () => {
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("one recording"));
   });
 
+  it("distinguishes a missing microphone from a blocked permission", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    getUserMedia.mockRejectedValue(Object.assign(new Error("no microphone"), {
+      name: "NotFoundError",
+    }));
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No microphone was found. Connect a microphone and try again.")).toBeInTheDocument();
+    });
+  });
+
   it("supports press-and-hold voice recording", async () => {
     mockVoiceRecorder();
     const onSend = vi.fn();

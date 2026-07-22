@@ -977,11 +977,12 @@
       },
       "voiceErrors": {
         "unsupported": "Voice input is not supported in this browser.",
-        "permission": "Microphone permission is required.",
+        "permission": "Chrome or your system blocked microphone access. Allow it from the address bar, then reload the page.",
         "notConfigured": "Configure a transcription provider first.",
         "tooLong": "Recording is too long.",
         "tooShort": "Hold a little longer to record voice.",
         "noInput": "No microphone input detected.",
+        "noDevice": "No microphone was found. Connect a microphone and try again.",
         "failed": "Could not transcribe audio."
       },
       "slash": {
