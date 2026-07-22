@@ -38,31 +38,31 @@
 
   .dark {
     color-scheme: dark;
-    --background: 0 0% 10%;
+    --background: 0 0% 12%;
     --foreground: 240 4% 96%;
-    --card: 0 0% 12%;
+    --card: 0 0% 14%;
     --card-foreground: 240 4% 96%;
-    --popover: 0 0% 12%;
+    --popover: 0 0% 14%;
     --popover-foreground: 240 4% 96%;
     --primary: 240 5% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 12%;
+    --secondary: 0 0% 14%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 13%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 15%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 18%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
     --ring: 0 0% 83.1%;
     --inline-token-highlight: 217 92% 72%;
-    --sidebar: 0 0% 11.5%;
+    --sidebar: 0 0% 10.5%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-accent: 0 0% 15.5%;
+    --sidebar-accent: 0 0% 15%;
     --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 0 0% 18%;
+    --sidebar-border: 0 0% 20%;
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
