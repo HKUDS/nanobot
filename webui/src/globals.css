@@ -125,8 +125,8 @@
 
 @layer utilities {
   @keyframes composer-model-fallback-flash {
-    0%, 100% { background-color: hsl(var(--background)); }
-    45%, 65% { background-color: rgb(249 115 22 / 0.9); }
+    0%, 100% { background-color: hsl(var(--card)); }
+    45%, 65% { background-color: rgb(249 115 22 / 0.28); }
   }
 
   .composer-model-fallback-flash {
@@ -136,7 +136,7 @@
   @media (prefers-reduced-motion: reduce) {
     .composer-model-fallback-flash {
       animation: none;
-      background-color: rgb(249 115 22 / 0.9);
+      background-color: rgb(249 115 22 / 0.28);
     }
   }
 

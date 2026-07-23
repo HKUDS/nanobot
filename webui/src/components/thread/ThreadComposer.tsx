@@ -2386,7 +2386,9 @@ function ComposerModelBadge({
 
   return (
     <Container
-      title={title}
+      key={fallbackModelName || "configured-model"}
+      data-fallback={fallbackModelName ? "true" : undefined}
+      title={fallbackModelName ? `${title} · ${fallbackModelName}` : title}
       type={interactive ? "button" : undefined}
       onClick={onClick}
       className={cn(
@@ -2394,22 +2396,19 @@ function ComposerModelBadge({
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
+        fallbackModelName && "composer-model-fallback-flash",
         isHero
           ? "h-8 max-w-[min(7.5rem,32vw)] gap-1.5 px-2 text-[11.5px] sm:max-w-[min(12.5rem,44vw)]"
           : "h-9 max-w-[min(7.5rem,32vw)] gap-2 px-2.5 text-[12px] sm:max-w-[min(12rem,44vw)]",
       )}
     >
       <span
-        key={fallbackModelName || "configured-model"}
         data-testid={needsSetup ? "composer-model-setup-icon" : inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
-        data-fallback={fallbackModelName ? "true" : undefined}
-        title={fallbackModelName || undefined}
         className={cn(
           "grid shrink-0 place-items-center overflow-hidden",
           needsSetup
             ? "text-amber-800 dark:text-amber-200"
             : "rounded-full border bg-background",
-          fallbackModelName && "composer-model-fallback-flash",
           isHero ? "h-[18px] w-[18px]" : "h-5 w-5",
         )}
         style={{

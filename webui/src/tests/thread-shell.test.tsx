@@ -424,7 +424,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
-  it("flashes the configured model icon without replacing the preset label", async () => {
+  it("flashes the configured model badge without replacing the preset label", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -451,11 +451,18 @@ describe("ThreadShell", () => {
     });
 
     const logo = screen.getByTestId("composer-model-logo-openai_codex");
+    const badge = logo.parentElement;
+    expect(badge).not.toBeNull();
     expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
     expect(screen.queryByText("deepseek-chat")).not.toBeInTheDocument();
-    expect(logo).toHaveAttribute("data-fallback", "true");
-    expect(logo).toHaveAttribute("title", "deepseek/deepseek-chat");
-    expect(logo).toHaveClass("composer-model-fallback-flash");
+    expect(badge).toHaveAttribute("data-fallback", "true");
+    expect(badge).toHaveAttribute(
+      "title",
+      "gpt-5.5 · OpenAI Codex · deepseek/deepseek-chat",
+    );
+    expect(badge).toHaveClass("composer-model-fallback-flash");
+    expect(logo).not.toHaveAttribute("data-fallback");
+    expect(logo).not.toHaveClass("composer-model-fallback-flash");
 
     act(() => {
       client._emitChat("fallback-model", {
@@ -465,11 +472,13 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("composer-model-logo-openai_codex")).not.toHaveAttribute(
-        "data-fallback",
-      );
+      expect(
+        screen.getByTestId("composer-model-logo-openai_codex").parentElement,
+      ).not.toHaveAttribute("data-fallback");
     });
-    expect(screen.getByTestId("composer-model-logo-openai_codex")).not.toHaveAttribute("title");
+    expect(
+      screen.getByTestId("composer-model-logo-openai_codex").parentElement,
+    ).toHaveAttribute("title", "gpt-5.5 · OpenAI Codex");
   });
 
   it("opens model settings from the unconfigured model badge", async () => {
