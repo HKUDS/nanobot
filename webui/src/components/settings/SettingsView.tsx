@@ -2034,11 +2034,7 @@ export function SettingsView({
   };
 
   return (
-    <div
-      className={cn(
-        "flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row",
-      )}
-    >
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row">
       {showSidebar ? (
         <SettingsSidebar
           activeSection={activeSection}
@@ -5586,7 +5582,6 @@ function automationStatusDotClass(job: SessionAutomationJob): string {
   const status = automationStatusKey(job);
   if (status === "active" || status === "running") return "bg-orange-500";
   if (status === "failed") return "bg-amber-500";
-  if (status === "system") return "bg-muted-foreground/45";
   return "bg-muted-foreground/45";
 }
 
@@ -6922,11 +6917,7 @@ function CliAppReadyPanel({
   };
 
   return (
-    <section
-      className={cn(
-        "rounded-[12px] bg-settings-surface px-4 py-3",
-      )}
-    >
+    <section className="rounded-[12px] bg-settings-surface px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
         <div className="min-w-0 flex-1">

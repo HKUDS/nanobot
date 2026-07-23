@@ -80,10 +80,8 @@ export function ChannelCatalogRow({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
-        selected
-          ? "border-transparent bg-background"
-          : "border-transparent hover:bg-muted",
+        "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border border-transparent px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
+        selected ? "bg-background" : "hover:bg-muted",
       )}
     >
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />

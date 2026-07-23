@@ -177,10 +177,10 @@ export function ChannelInstancesPanel({
             <article
               key={instance.id}
               className={cn(
-                "overflow-hidden rounded-[18px] border transition-colors",
+                "overflow-hidden rounded-[18px] border border-transparent transition-colors",
                 expanded
-                  ? "border-transparent bg-background"
-                  : "border-transparent bg-background/70 hover:bg-muted",
+                  ? "bg-background"
+                  : "bg-background/70 hover:bg-muted",
               )}
             >
               <div className="flex items-center gap-3 px-3 py-3">

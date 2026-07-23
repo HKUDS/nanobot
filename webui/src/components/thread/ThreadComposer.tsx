@@ -2115,7 +2115,7 @@ export function ThreadComposer({
                   <TooltipContent
                     side="top"
                     align="center"
-                    className="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1.5 text-[13px] font-medium text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-popover dark:text-white"
+                    className="flex items-center gap-2 rounded-full border border-border/70 bg-popover px-3 py-1.5 text-[13px] font-medium text-popover-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10"
                   >
                     <span>{voiceButtonTooltip}</span>
                     {voiceRecorder.state === "idle" ? (
