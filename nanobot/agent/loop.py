@@ -149,6 +149,7 @@ class TurnContext:
     all_messages: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = ""
     had_injections: bool = False
+    streamed_content: bool = False
 
     input_persisted_early: bool = False
     save_skip: int = 0
@@ -1304,6 +1305,29 @@ class AgentLoop:
             hook_factories=list(hook_factories or []),
             tools=tools,
         )
+        # A streaming callback may be present even when the final text comes from a
+        # non-streaming recovery. Only the last completed segment can suppress the
+        # regular outbound message.
+        if ctx.on_stream is not None:
+            stream_callback = ctx.on_stream
+            stream_end_callback = ctx.on_stream_end
+            segment_streamed_content = False
+
+            async def _tracked_stream(delta: str) -> None:
+                nonlocal segment_streamed_content
+                if delta:
+                    segment_streamed_content = True
+                await stream_callback(delta)
+
+            async def _tracked_stream_end(*, resuming: bool = False) -> None:
+                nonlocal segment_streamed_content
+                ctx.streamed_content = segment_streamed_content
+                segment_streamed_content = False
+                if stream_end_callback is not None:
+                    await stream_end_callback(resuming=resuming)
+
+            ctx.on_stream = _tracked_stream
+            ctx.on_stream_end = _tracked_stream_end
 
         while ctx.state is not TurnState.DONE:
             handler_name = f"_state_{ctx.state.name.lower()}"
@@ -1366,7 +1390,7 @@ class AgentLoop:
         all_msgs: list[dict[str, Any]],
         stop_reason: str,
         had_injections: bool,
-        on_stream: Callable[[str], Awaitable[None]] | None,
+        streamed_content: bool,
         *,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
@@ -1381,7 +1405,7 @@ class AgentLoop:
 
         event = None
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason not in {"error", "tool_error"}:
+        if streamed_content and stop_reason not in {"error", "tool_error"}:
             event = StreamedResponseEvent()
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
@@ -1626,7 +1650,7 @@ class AgentLoop:
             ctx.outbound = ctx.delivery.background_response(
                 ctx.final_content,
                 stop_reason=ctx.stop_reason,
-                streamed=ctx.on_stream is not None,
+                streamed=ctx.streamed_content,
                 latency_ms=ctx.turn_latency_ms,
             )
             return "ok"
@@ -1636,7 +1660,7 @@ class AgentLoop:
             ctx.all_messages,
             ctx.stop_reason,
             ctx.had_injections,
-            ctx.on_stream,
+            ctx.streamed_content,
             turn_latency_ms=ctx.turn_latency_ms,
         )
         if ctx.ephemeral and ctx.outbound is not None:

@@ -535,6 +535,55 @@ class TestToolEventProgress:
         provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_non_streamed_finalization_is_delivered_as_regular_message(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A no-tools finalization must not be dropped after empty stream retries."""
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "openai-codex/gpt-5.5"
+        provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content=None, tool_calls=[]),
+            LLMResponse(content=None, tool_calls=[]),
+        ])
+        provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(content="final answer", tool_calls=[]),
+        )
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            model="openai-codex/gpt-5.5",
+        )
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata={"_wants_stream": True},
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        assert not any(isinstance(message.event, StreamDeltaEvent) for message in outbound)
+        assert len([
+            message for message in outbound if isinstance(message.event, StreamEndEvent)
+        ]) == 3
+        final = [message for message in outbound if message.content == "final answer"]
+        assert len(final) == 1
+        assert final[0].event is None
+        provider.chat_stream_with_retry.assert_awaited()
+        provider.chat_with_retry.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_independent_late_subagent_result_gets_complete_webui_turn(
         self,
         tmp_path: Path,

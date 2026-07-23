@@ -512,7 +512,7 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
         )],
         usage={},
     )
-    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+    responses = iter([
         tool_call_resp,
         LLMResponse(
             content="I cannot access private URLs. Please share the local file.",
@@ -520,6 +520,13 @@ async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
             usage={},
         ),
     ])
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        response = next(responses)
+        await on_content_delta(response.content)
+        return response
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
 
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
