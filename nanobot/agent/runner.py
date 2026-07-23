@@ -346,7 +346,6 @@ class AgentRunner:
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
-        length_recovery_count = 0
         # Segments from one uninterrupted length-recovery chain. Tool work or
         # injected user input starts a new logical answer and clears the chain.
         length_recovery_parts: list[str] = []
@@ -474,7 +473,6 @@ class AgentRunner:
                     )
                     if should_continue:
                         had_injections = True
-                        length_recovery_count = 0
                         length_recovery_parts.clear()
                         continue
                     break
@@ -490,7 +488,6 @@ class AgentRunner:
                     },
                 )
                 empty_content_retries = 0
-                length_recovery_count = 0
                 length_recovery_parts.clear()
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
@@ -544,8 +541,7 @@ class AgentRunner:
                 clean = hook.finalize_content(context, response.content)
 
             if response.finish_reason == "length" and not is_blank_text(clean):
-                length_recovery_count += 1
-                if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
+                if len(length_recovery_parts) < _MAX_LENGTH_RECOVERIES:
                     length_recovery_parts.append(
                         _restore_outer_whitespace(clean, original_content)
                     )
@@ -553,7 +549,7 @@ class AgentRunner:
                         "Output truncated on turn {} for {} ({}/{}); continuing",
                         iteration,
                         spec.session_key or "default",
-                        length_recovery_count,
+                        len(length_recovery_parts),
                         _MAX_LENGTH_RECOVERIES,
                     )
                     if hook.wants_streaming():
@@ -591,7 +587,6 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=should_continue)
 
             if should_continue:
-                length_recovery_count = 0
                 length_recovery_parts.clear()
                 await hook.after_iteration(context)
                 continue
@@ -614,7 +609,6 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
-                    length_recovery_count = 0
                     length_recovery_parts.clear()
                     continue
                 break
@@ -633,7 +627,6 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
-                    length_recovery_count = 0
                     length_recovery_parts.clear()
                     continue
                 break
