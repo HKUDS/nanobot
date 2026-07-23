@@ -93,6 +93,10 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
         },
+        settings: {
+          canvas: "hsl(var(--settings-canvas))",
+          surface: "hsl(var(--settings-surface))",
+        },
       },
       keyframes: {
         "accordion-down": {

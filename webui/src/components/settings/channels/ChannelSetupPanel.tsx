@@ -82,8 +82,8 @@ export function ChannelCatalogRow({
       className={cn(
         "group flex w-full min-w-0 items-center gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
         selected
-          ? "border-border/55 bg-muted/35"
-          : "border-transparent hover:border-border/45 hover:bg-muted/25",
+          ? "border-transparent bg-background"
+          : "border-transparent hover:bg-muted",
       )}
     >
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -181,7 +181,7 @@ export function ChannelSetupPanel({
   });
 
   return (
-    <aside className="min-h-full rounded-[20px] border border-border/80 bg-background p-5 shadow-none">
+    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -398,7 +398,7 @@ function ChannelSetupSurface({
 
   return (
     <form
-      className="mt-5 overflow-hidden rounded-[16px] border border-border/70 bg-background shadow-none"
+      className="mt-5 overflow-hidden rounded-[16px] bg-background/55"
       onSubmit={(event) => {
         event.preventDefault();
         if (mode === "credentials") void saveCredentialSettings();

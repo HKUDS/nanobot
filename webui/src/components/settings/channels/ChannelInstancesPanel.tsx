@@ -144,7 +144,7 @@ export function ChannelInstancesPanel({
   };
 
   return (
-    <aside className="min-h-full rounded-[20px] border border-border/80 bg-background p-5 shadow-none">
+    <aside className="min-h-full rounded-[20px] bg-settings-surface p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -179,8 +179,8 @@ export function ChannelInstancesPanel({
               className={cn(
                 "overflow-hidden rounded-[18px] border transition-colors",
                 expanded
-                  ? "border-border/75 bg-card/95 shadow-sm"
-                  : "border-border/55 bg-background hover:border-border/75 hover:bg-muted/15",
+                  ? "border-transparent bg-background"
+                  : "border-transparent bg-background/70 hover:bg-muted",
               )}
             >
               <div className="flex items-center gap-3 px-3 py-3">
@@ -398,7 +398,7 @@ function ChannelInstanceAvatar({
   return (
     <span
       className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-border/45 bg-background text-[10px] font-bold"
-      style={{ color, boxShadow: `inset 0 0 0 1px ${color}18` }}
+      style={{ color }}
       aria-hidden
     >
       {remoteAvatarUrl ? (

@@ -121,7 +121,7 @@ export function SessionSearchDialog({
         className={cn(
           "flex max-h-[min(40rem,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0",
           "rounded-[22px] border border-border bg-background text-foreground shadow-[0_22px_70px_rgba(0,0,0,0.22)]",
-          "dark:border-white/14 dark:bg-[#2b2b2b] dark:shadow-[0_26px_90px_rgba(0,0,0,0.44)] sm:rounded-[22px]",
+          "dark:border-white/14 dark:bg-popover dark:shadow-[0_26px_90px_rgba(0,0,0,0.44)] sm:rounded-[22px]",
         )}
       >
         <DialogTitle className="sr-only">{t("sidebar.searchAria")}</DialogTitle>

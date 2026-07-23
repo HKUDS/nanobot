@@ -2036,7 +2036,7 @@ export function SettingsView({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row",
+        "flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row",
       )}
     >
       {showSidebar ? (
@@ -2104,7 +2104,7 @@ export function SettingsView({
 
       <main
         className={cn(
-          "min-w-0 flex-1 [scrollbar-gutter:stable]",
+          "min-w-0 flex-1 bg-settings-canvas [scrollbar-gutter:stable]",
           activeSection === "channels" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
         )}
       >
@@ -2138,7 +2138,7 @@ export function SettingsView({
           </div>
 
           {loading ? (
-            <div className="flex h-48 items-center justify-center rounded-[24px] border border-border/50 bg-card/75 text-sm text-muted-foreground shadow-[0_20px_70px_rgba(15,23,42,0.07)]">
+            <div className="flex h-48 items-center justify-center rounded-[22px] bg-settings-surface text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               {t("settings.status.loading")}
             </div>
@@ -2225,7 +2225,7 @@ function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col bg-sidebar px-3 pb-2 lg:w-[17rem] lg:px-3 lg:pb-4",
+        "flex w-full shrink-0 flex-col bg-settings-surface px-3 pb-2 lg:w-[17rem] lg:px-3 lg:pb-4",
         hostChromeInset ? "pt-[4.25rem] lg:pt-[4.25rem]" : "pt-4 lg:pt-4",
       )}
     >
@@ -2370,7 +2370,7 @@ function OverviewSettings({
       : tx("settings.values.ready", "Ready");
   return (
     <div className="space-y-7">
-      <section>
+      <section className="rounded-[22px] bg-settings-surface px-4 py-4 sm:px-5">
         <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
@@ -2576,7 +2576,8 @@ function AppearanceSettings({
               <span
                 className={cn(
                   "rounded-full px-3 py-1 transition-colors",
-                  theme === "light" && "bg-background text-foreground shadow-sm",
+                  theme === "light" &&
+                    "bg-background text-foreground ring-1 ring-inset ring-border/45",
                 )}
               >
                 {t("settings.values.light")}
@@ -2584,7 +2585,8 @@ function AppearanceSettings({
               <span
                 className={cn(
                   "rounded-full px-3 py-1 transition-colors",
-                  theme === "dark" && "bg-background text-foreground shadow-sm",
+                  theme === "dark" &&
+                    "bg-background text-foreground ring-1 ring-inset ring-border/45",
                 )}
               >
                 {t("settings.values.dark")}
@@ -3513,7 +3515,7 @@ function ProvidersSettings({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={tx("settings.providers.searchPlaceholder", "Search providers")}
-          className="h-10 rounded-full pl-9 text-[13px]"
+          className="h-10 rounded-full border-border/45 bg-settings-surface pl-9 text-[13px]"
         />
       </div>
       <ProviderSection
@@ -4186,7 +4188,7 @@ function AutomationsSettings({
       <section className="shrink-0">
         <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted/42 p-1 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)] dark:bg-background/30">
+            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted p-1">
               {summaryOptions.map((option) => (
                 <button
                   key={option.value}
@@ -4194,8 +4196,7 @@ function AutomationsSettings({
                   onClick={() => onFilterChange(option.value)}
                   className={cn(
                     "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
-                    filter === option.value &&
-                      "bg-background text-foreground shadow-[0_8px_20px_rgba(15,23,42,0.07)] dark:bg-background/80",
+                    filter === option.value && "bg-background text-foreground",
                     automationFilterToneClass(option.value, option.count, filter === option.value),
                   )}
                 >
@@ -4223,14 +4224,14 @@ function AutomationsSettings({
                   "settings.automations.search",
                   "Search task, message, linked chat, or schedule",
                 )}
-                className="h-9 w-full rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-[0_8px_22px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-background/40"
+                className="h-9 w-full rounded-[13px] border-border/45 bg-settings-surface pl-9 text-[13px]"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-[0_8px_22px_rgba(15,23,42,0.04)] transition-colors hover:bg-muted/70 hover:text-foreground dark:border-white/10 dark:bg-background/40 sm:w-auto"
+                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
                 >
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                   <span>{sortLabel[sort]}</span>
@@ -4258,13 +4259,13 @@ function AutomationsSettings({
       ) : null}
 
       {loading && !payload ? (
-        <div className="flex h-44 items-center justify-center rounded-[24px] border border-border/45 bg-card/80 text-[13px] text-muted-foreground shadow-[0_22px_70px_rgba(15,23,42,0.055)]">
+        <div className="flex h-44 items-center justify-center rounded-[22px] bg-settings-surface text-[13px] text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 overflow-hidden rounded-[22px] border border-border/45 bg-transparent shadow-none dark:border-white/10 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
-          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-background/36 dark:border-white/10 dark:bg-background/18 xl:border-b-0 xl:border-r">
+        <section className="grid min-h-0 overflow-hidden rounded-[22px] bg-settings-surface xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
+          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-settings-surface xl:border-b-0 xl:border-r">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
                 {tx("settings.automations.queue", "Queue")}
@@ -4299,7 +4300,7 @@ function AutomationsSettings({
           />
         </section>
       ) : (
-        <div className="rounded-[24px] border border-border/45 bg-card/80 px-5 py-12 text-center text-[13px] text-muted-foreground shadow-[0_22px_70px_rgba(15,23,42,0.055)]">
+        <div className="rounded-[22px] bg-settings-surface px-5 py-12 text-center text-[13px] text-muted-foreground">
           <div>
             {jobs.length
               ? tx("settings.automations.noMatches", "No automations match this view.")
@@ -4347,8 +4348,8 @@ function AutomationListItem({
         className={cn(
           "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-[18px] px-3 py-3.5 text-left transition-colors",
           selected
-            ? "bg-background text-foreground shadow-[0_10px_28px_rgba(15,23,42,0.055)] ring-1 ring-border/45 dark:bg-background/45 dark:ring-white/10"
-            : "text-muted-foreground hover:bg-white/48 hover:text-foreground dark:hover:bg-background/24",
+            ? "bg-background/80 text-foreground"
+            : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
         )}
       >
         <span className="min-w-0">
@@ -4373,7 +4374,7 @@ function AutomationListItem({
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-2 pt-0.5">
-          <span className="rounded-full bg-white/65 px-2 py-0.5 text-[11px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(120,72,25,0.055)] dark:bg-background/35">
+          <span className="rounded-full bg-background/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
             {status.label}
           </span>
           {job.delete_after_run ? (
@@ -4436,7 +4437,7 @@ function AutomationDetailPanel({
   }, [job.id]);
 
   return (
-    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background/42 dark:bg-background/18">
+    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-settings-surface">
       <div className="shrink-0 border-b border-border/35 px-4 py-3.5 dark:border-white/10 sm:px-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -4465,7 +4466,7 @@ function AutomationDetailPanel({
 
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
-          <section className="rounded-[20px] border border-border/35 bg-background/62 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/10 dark:bg-background/24">
+          <section className="rounded-[20px] bg-background/55 px-4 py-3.5">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
                 {messageLabel}
@@ -4544,7 +4545,7 @@ function AutomationDetailPanel({
           ) : null}
         </div>
 
-        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground dark:border-white/10 dark:bg-background/16 lg:border-l lg:border-t-0">
+        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-settings-surface p-4 text-[12px] text-muted-foreground lg:border-l lg:border-t-0">
           <div className="grid gap-3">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}
@@ -4618,7 +4619,7 @@ function AutomationActionGroup({
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/35 bg-background/70 p-1 shadow-[0_10px_26px_rgba(15,23,42,0.055)] dark:border-white/10 dark:bg-background/35">
+    <div className="flex shrink-0 items-center gap-1 rounded-full bg-background/65 p-1">
       <AppsActionButton
         ariaLabel={tx("settings.automations.edit", "Edit")}
         disabled={Boolean(actionKey)}
@@ -4674,7 +4675,7 @@ function AutomationStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex h-6 items-center rounded-full px-2.5 text-[11.5px] font-medium shadow-[inset_0_0_0_1px_rgba(120,72,25,0.055)]",
+        "inline-flex h-6 items-center rounded-full px-2.5 text-[11.5px] font-medium",
         tone === "success" &&
           "bg-orange-100/72 text-orange-800 dark:bg-orange-300/12 dark:text-orange-200",
         tone === "warning" &&
@@ -4704,7 +4705,7 @@ function AutomationDetail({
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0 rounded-[17px] bg-background/52 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)] dark:bg-background/22">
+    <div className="min-w-0 rounded-[17px] bg-background/55 px-3 py-3">
       <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
         {label}
       </div>
@@ -4868,7 +4869,7 @@ function AutomationEditDialog({
                           everyUnit: event.target.value as AutomationEveryUnit,
                         }))
                       }
-                      className="h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                      className="h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {AUTOMATION_EVERY_UNITS.map((unit) => (
                         <option key={unit.value} value={unit.value}>
@@ -5583,8 +5584,8 @@ function formatAutomationNextTitle(
 
 function automationStatusDotClass(job: SessionAutomationJob): string {
   const status = automationStatusKey(job);
-  if (status === "active" || status === "running") return "bg-orange-500 shadow-[0_0_0_3px_rgba(249,115,22,0.12)]";
-  if (status === "failed") return "bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.13)]";
+  if (status === "active" || status === "running") return "bg-orange-500";
+  if (status === "failed") return "bg-amber-500";
   if (status === "system") return "bg-muted-foreground/45";
   return "bg-muted-foreground/45";
 }
@@ -5834,7 +5835,7 @@ function ChannelsSettings({
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder={tx("settings.channels.searchPlaceholder", "Search channels")}
-                className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
+                className="h-12 rounded-[14px] border-border/45 bg-settings-surface pl-11 text-[15px]"
               />
             </div>
             <div className="flex shrink-0 flex-wrap gap-1.5 rounded-[14px] bg-muted/55 p-1">
@@ -5846,7 +5847,7 @@ function ChannelsSettings({
                   className={cn(
                     "rounded-[11px] px-3 py-1.5 text-[12px] font-medium transition-colors",
                     filter === option.value
-                      ? "bg-background text-foreground shadow-sm"
+                      ? "bg-background text-foreground"
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
@@ -6073,7 +6074,7 @@ function AppsCatalogSettings({
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
-              className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
+              className="h-12 rounded-[14px] border-border/45 bg-settings-surface pl-11 text-[15px]"
             />
           </div>
           <SegmentedControl
@@ -6104,7 +6105,7 @@ function AppsCatalogSettings({
         />
       ) : null}
 
-      <section>
+      <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
           <SettingsSectionTitle>{tx("settings.apps.featured", "Tools")}</SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
@@ -6396,7 +6397,7 @@ function McpAppsCatalogRow({
       </div>
 
       {setupOpen && preset.install_supported && hasFields ? (
-        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm">
+        <div className="mx-3 mb-3 rounded-[14px] bg-background/55 p-3">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-[12.5px] font-semibold text-foreground">
@@ -6467,7 +6468,7 @@ function McpAppsCatalogRow({
       ) : null}
 
       {toolsOpen && readyInstalled && toolNames.length ? (
-        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm">
+        <div className="mx-3 mb-3 rounded-[14px] bg-background/55 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[11.5px] font-medium text-muted-foreground">
               {tx("settings.mcp.toolScope", "Tools")}
@@ -6640,7 +6641,7 @@ function McpCustomServerPanel({
   ];
 
   return (
-    <section className="overflow-hidden rounded-[16px] border border-border/45 bg-card/72 shadow-[0_10px_30px_rgba(15,23,42,0.045)]">
+    <section className="overflow-hidden rounded-[16px] bg-settings-surface">
       <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-muted text-muted-foreground">
@@ -6874,7 +6875,6 @@ function McpPresetLogo({ preset, showBrandLogos }: { preset: McpPresetInfo; show
     return (
       <span
         className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-border/45 bg-background"
-        style={{ boxShadow: `inset 0 0 0 1px ${preset.brand_color ?? "transparent"}22` }}
       >
         <img
           src={logoUrl}
@@ -6924,8 +6924,7 @@ function CliAppReadyPanel({
   return (
     <section
       className={cn(
-        "rounded-[12px] border border-border/55 bg-card/88 px-4 py-3",
-        "shadow-[0_8px_26px_rgba(15,23,42,0.055)]",
+        "rounded-[12px] bg-settings-surface px-4 py-3",
       )}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -6994,10 +6993,7 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
   return (
     <span
       className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[8px] border border-border/45 bg-muted text-[13px] font-semibold"
-      style={{
-        color: app.brand_color || "hsl(var(--muted-foreground))",
-        boxShadow: `inset 0 0 0 1px ${app.brand_color ?? "transparent"}18`,
-      }}
+      style={{ color: app.brand_color || "hsl(var(--muted-foreground))" }}
     >
       <span
         aria-hidden
@@ -7152,7 +7148,7 @@ function RuntimeSettings({
     <div className="space-y-7">
       <section>
         <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
-        <SettingsGroup>
+          <SettingsGroup>
           <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever nanobot uses a display name.")}>
             <Input
               value={form.botName}
@@ -8057,8 +8053,7 @@ function ProviderPickerIcon({
     return (
       <span
         data-testid={`provider-picker-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${(brand?.color ?? "#6B7280")}22` }}
+        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
         aria-hidden
       >
         <img
@@ -8078,7 +8073,7 @@ function ProviderPickerIcon({
     return (
       <span
         data-testid={`provider-picker-logo-fallback-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[7.5px] font-semibold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]"
+        className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[7.5px] font-semibold text-white"
         style={{ backgroundColor: brand.color }}
         aria-hidden
       >
@@ -8111,7 +8106,7 @@ function ProviderSection({
   return (
     <section className="space-y-3">
       <ByokSectionHeader title={title} count={count} />
-      <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
+      <div className="overflow-hidden rounded-[22px] bg-settings-surface">
         {count > 0 ? (
           <div className="divide-y divide-border/45">{children}</div>
         ) : (
@@ -8333,8 +8328,7 @@ function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${(brand?.color ?? "#6B7280")}22` }}
+        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-border/45 bg-background"
       >
         <img
           src={logoUrl}
@@ -8352,7 +8346,7 @@ function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-fallback-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] text-[11px] font-semibold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] text-[11px] font-semibold text-white"
         style={{ backgroundColor: brand.color }}
         aria-hidden
       >
@@ -8361,7 +8355,7 @@ function ProviderIcon({
     );
   }
   return (
-    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)] dark:bg-muted/70">
+    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 dark:bg-muted/70">
       <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
     </span>
   );
@@ -8395,8 +8389,7 @@ function OverviewValueLogo({
     return (
       <span
         data-testid={`overview-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]"
-        style={{ boxShadow: `inset 0 0 0 1px ${brand.color}22` }}
+        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
         aria-hidden
       >
         <img
@@ -8415,7 +8408,7 @@ function OverviewValueLogo({
   return (
     <span
       data-testid={`overview-logo-fallback-${provider}`}
-      className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[7.5px] font-semibold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]"
+      className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[7.5px] font-semibold text-white"
       style={{ backgroundColor: brand.color }}
       aria-hidden
     >
@@ -8476,7 +8469,7 @@ function SettingsSectionTitle({ children }: { children: ReactNode }) {
 
 function SettingsGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
+    <div className="overflow-hidden rounded-[22px] bg-settings-surface">
       <div className="divide-y divide-border/45">{children}</div>
     </div>
   );
@@ -8844,7 +8837,7 @@ function SettingsStatusMessage({
           className={cn(
             "h-1.5 w-1.5 shrink-0 rounded-full",
             tone === "accent" &&
-              "bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.14)] dark:bg-blue-400 dark:shadow-[0_0_0_3px_rgba(96,165,250,0.18)]",
+              "bg-blue-500 dark:bg-blue-400",
             tone === "danger" && "bg-destructive/70",
           )}
           aria-hidden
@@ -8895,7 +8888,8 @@ function SegmentedControl({
           onClick={() => onChange(option.value)}
           className={cn(
             "rounded-full px-3 py-1 transition-colors",
-            value === option.value && "bg-background text-foreground shadow-sm",
+            value === option.value &&
+              "bg-background text-foreground ring-1 ring-inset ring-border/45",
           )}
         >
           {option.label}
