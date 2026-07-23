@@ -598,6 +598,7 @@ class MatrixChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         relates_to = self._build_thread_relates_to(metadata)
 

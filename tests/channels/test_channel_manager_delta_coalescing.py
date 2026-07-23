@@ -49,6 +49,7 @@ class MockChannel(BaseChannel):
         stream_id=None,
         stream_end=False,
         resuming=False,
+        merge_next=False,
     ):
         return await self._send_delta_mock(
             chat_id,
@@ -57,6 +58,7 @@ class MockChannel(BaseChannel):
             stream_id=stream_id,
             stream_end=stream_end,
             resuming=resuming,
+            merge_next=merge_next,
         )
 
 
@@ -92,11 +94,17 @@ def _end(
     chat_id: str = "chat1",
     stream_id: str | None = None,
     resuming: bool = False,
+    merge_next: bool = False,
 ):
     return outbound_message_for_event(
         channel="mock",
         chat_id=chat_id,
-        event=StreamEndEvent(content=content, stream_id=stream_id, resuming=resuming),
+        event=StreamEndEvent(
+            content=content,
+            stream_id=stream_id,
+            resuming=resuming,
+            merge_next=merge_next,
+        ),
     )
 
 
@@ -137,6 +145,7 @@ class TestDeltaCoalescing:
             stream_id=None,
             stream_end=False,
             resuming=False,
+            merge_next=False,
         )
 
     @pytest.mark.asyncio
@@ -184,13 +193,19 @@ class TestDeltaCoalescing:
     @pytest.mark.asyncio
     async def test_stream_end_terminates_coalescing(self, manager, bus):
         await bus.publish_outbound(_delta("Hello"))
-        await bus.publish_outbound(_end(" world"))
+        await bus.publish_outbound(_end(
+            " world",
+            resuming=True,
+            merge_next=True,
+        ))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
         assert merged.content == "Hello world"
         assert isinstance(merged.event, StreamEndEvent)
+        assert merged.event.resuming is True
+        assert merged.event.merge_next is True
         assert len(pending) == 0
 
     @pytest.mark.asyncio

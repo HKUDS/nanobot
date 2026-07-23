@@ -535,6 +535,52 @@ class TestToolEventProgress:
         provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_length_recovery_keeps_one_user_visible_stream(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "test-model"
+        responses = iter([
+            LLMResponse(content="first-", finish_reason="length"),
+            LLMResponse(content="second", finish_reason="stop"),
+        ])
+
+        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+            response = next(responses)
+            await on_content_delta(response.content or "")
+            return response
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock()
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="give a long answer",
+            metadata={"_wants_stream": True},
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        deltas = [m.event for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+        endings = [m.event for m in outbound if isinstance(m.event, StreamEndEvent)]
+
+        assert [event.content for event in deltas] == ["first-", "second"]
+        assert [event.resuming for event in endings] == [True, False]
+        assert [event.merge_next for event in endings] == [True, False]
+        assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
+
+    @pytest.mark.asyncio
     async def test_non_streamed_finalization_is_delivered_as_regular_message(
         self,
         tmp_path: Path,

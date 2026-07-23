@@ -25,6 +25,7 @@ class AgentHookContext:
     tool_events: list[dict[str, str]] = field(default_factory=list)
     streamed_content: bool = False
     streamed_reasoning: bool = False
+    stream_continues_current_message: bool = False
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None

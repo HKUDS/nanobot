@@ -1121,6 +1121,26 @@ def test_replay_keeps_interrupted_pre_tool_text_in_activity() -> None:
     assert msgs[2]["content"] == "Done. Open index.html to play."
 
 
+def test_replay_merges_length_recovery_segments_into_one_assistant_message() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {"event": "delta", "chat_id": "t-stream", "text": "first "},
+        {
+            "event": "stream_end",
+            "chat_id": "t-stream",
+            "text": "first ",
+            "resuming": True,
+            "merge_next": True,
+        },
+        {"event": "delta", "chat_id": "t-stream", "text": "second"},
+        {"event": "stream_end", "chat_id": "t-stream"},
+        {"event": "turn_end", "chat_id": "t-stream"},
+    ])
+
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "assistant"
+    assert msgs[0]["content"] == "first second"
+
+
 def test_replay_tool_events_dedupes_finish_after_start() -> None:
     msgs = replay_transcript_to_ui_messages([
         {
