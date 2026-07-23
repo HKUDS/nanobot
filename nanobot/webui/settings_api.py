@@ -238,6 +238,90 @@ def _provider_json_setting(
     return value or None
 
 
+_REDACTED_PROVIDER_SECRET = "••••••••"
+_PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
+_PROVIDER_SECRET_KEYS = frozenset({
+    "auth",
+    "authentication",
+    "authorization",
+    "bearer",
+    "cookie",
+    "credential",
+    "credentials",
+    "hmac",
+    "key",
+    "passphrase",
+    "passwd",
+    "proxyauthorization",
+    "setcookie",
+    "sig",
+    "signature",
+})
+_PROVIDER_SECRET_KEY_SUFFIXES = (
+    "accesskey",
+    "apikey",
+    "encryptionkey",
+    "password",
+    "privatekey",
+    "secret",
+    "secretkey",
+    "signingkey",
+    "subscriptionkey",
+    "token",
+)
+
+
+def _provider_setting_key_is_secret(key: str) -> bool:
+    compact = re.sub(r"[^a-z0-9]", "", key.lower())
+    return compact in _PROVIDER_SECRET_KEYS or compact.endswith(_PROVIDER_SECRET_KEY_SUFFIXES)
+
+
+def _redact_provider_secret_values(value: Any, *, secret: bool = False) -> Any:
+    if secret and value not in (None, ""):
+        return _REDACTED_PROVIDER_SECRET
+    if isinstance(value, dict):
+        return {
+            key: _redact_provider_secret_values(
+                item,
+                secret=_provider_setting_key_is_secret(key),
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_provider_secret_values(item) for item in value]
+    return value
+
+
+def _restore_redacted_provider_secret_values(
+    submitted: Any,
+    current: Any,
+    *,
+    secret: bool = False,
+) -> Any:
+    if secret and submitted == _REDACTED_PROVIDER_SECRET:
+        return current
+    if isinstance(submitted, dict):
+        current_mapping = current if isinstance(current, dict) else {}
+        return {
+            key: _restore_redacted_provider_secret_values(
+                item,
+                current_mapping.get(key),
+                secret=_provider_setting_key_is_secret(key),
+            )
+            for key, item in submitted.items()
+        }
+    if isinstance(submitted, list):
+        current_items = current if isinstance(current, list) else []
+        return [
+            _restore_redacted_provider_secret_values(
+                item,
+                current_items[index] if index < len(current_items) else None,
+            )
+            for index, item in enumerate(submitted)
+        ]
+    return submitted
+
+
 def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     updates: dict[str, Any] = {}
     string_fields = (
@@ -271,6 +355,13 @@ def _validated_provider_config(
 ) -> ProviderConfig:
     config_type = type(provider_config) if provider_config is not None else ProviderConfig
     values = provider_config.model_dump(mode="python") if provider_config is not None else {}
+    if provider_config is not None:
+        for field in _PROVIDER_STRUCTURED_FIELDS:
+            if field in updates:
+                updates[field] = _restore_redacted_provider_secret_values(
+                    updates[field],
+                    getattr(provider_config, field),
+                )
     values.update(updates)
     try:
         return config_type.model_validate(values)
@@ -502,9 +593,9 @@ def _provider_settings_row(
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": _model_catalog_kind(spec),
         "advanced_fields": _provider_advanced_field_names(name, spec),
-        "extra_headers": provider_config.extra_headers,
-        "extra_body": provider_config.extra_body,
-        "extra_query": provider_config.extra_query,
+        "extra_headers": _redact_provider_secret_values(provider_config.extra_headers),
+        "extra_body": _redact_provider_secret_values(provider_config.extra_body),
+        "extra_query": _redact_provider_secret_values(provider_config.extra_query),
         "thinking_style": provider_config.thinking_style,
         "region": getattr(provider_config, "region", None),
         "profile": getattr(provider_config, "profile", None),

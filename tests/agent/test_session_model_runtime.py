@@ -107,6 +107,32 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_path) -> None:
+    base = RecordingProvider("base-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=base,
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=8_000,
+    )
+    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    session_key = "sdk:removed-preset"
+    session = loop.sessions.get_or_create(session_key)
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "removed"
+    loop.sessions.save(session)
+
+    reply = await loop.process_direct("hello", session_key=session_key)
+
+    assert reply is not None
+    assert reply.content == "reply from base-model"
+    assert base.calls == ["base-model"]
+    loop.sessions.invalidate(session_key)
+    restored = loop.sessions.get_or_create(session_key)
+    assert model_preset_from_metadata(restored.metadata) is None
+
+
+@pytest.mark.asyncio
 async def test_streamed_sdk_resolves_session_runtime_after_lock_admission(tmp_path) -> None:
     base = RecordingProvider("base-model")
     fast = RecordingProvider("fast-model")

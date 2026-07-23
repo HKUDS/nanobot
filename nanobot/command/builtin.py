@@ -323,7 +323,7 @@ def _command_error_message(exc: Exception) -> str:
 def _model_command_status(loop, session) -> str:
     names = _model_preset_names(loop)
     try:
-        runtime = loop.runtime_for_session(session)
+        runtime = loop.runtime_for_session(session, recover_removed=False)
     except (KeyError, ValueError) as exc:
         return "\n".join([
             "## Model",

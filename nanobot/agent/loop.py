@@ -518,10 +518,29 @@ class AgentLoop:
         self.runtime_resolver.invalidate()
         self._publish_runtime_selection(self.runtime_resolver.runtime)
 
-    def runtime_for_session(self, session: Session) -> LLMRuntime:
+    def runtime_for_session(
+        self,
+        session: Session,
+        *,
+        recover_removed: bool = True,
+    ) -> LLMRuntime:
         """Resolve the immutable runtime selected by one session."""
         name = model_preset_from_metadata(session.metadata)
-        return self.llm_runtime() if name is None else self.runtime_resolver.resolve_preset(name)
+        if name is None:
+            return self.llm_runtime()
+        try:
+            return self.runtime_resolver.resolve_preset(name)
+        except KeyError:
+            if not recover_removed or name in self.runtime_resolver.model_presets:
+                raise
+            logger.warning(
+                "Session '{}' references removed model preset '{}'; falling back to default",
+                session.key,
+                name,
+            )
+            session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
+            self.sessions.save(session)
+            return self.llm_runtime()
 
     def set_session_model_preset(
         self,

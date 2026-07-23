@@ -576,6 +576,74 @@ def test_create_provider_settings_persists_custom_advanced_options(
     assert saved.thinking_style == "enable_thinking"
 
 
+def test_provider_settings_redacts_and_preserves_structured_secrets(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-openai"
+    config.providers.openai.extra_headers = {
+        "Authorization": "Bearer header-secret",
+        "X-Trace": "visible",
+    }
+    config.providers.openai.extra_body = {
+        "access_token": "body-secret",
+        "metadata": {
+            "client_secret": "nested-secret",
+            "label": "visible",
+        },
+    }
+    config.providers.openai.extra_query = {
+        "api_key": "query-secret",
+        "api-version": "2026-01-01",
+    }
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    row = next(provider for provider in payload["providers"] if provider["name"] == "openai")
+    serialized_row = json.dumps(row, ensure_ascii=False)
+
+    assert "header-secret" not in serialized_row
+    assert "body-secret" not in serialized_row
+    assert "nested-secret" not in serialized_row
+    assert "query-secret" not in serialized_row
+    assert row["extra_headers"]["X-Trace"] == "visible"
+    assert row["extra_body"]["metadata"]["label"] == "visible"
+    assert row["extra_query"]["api-version"] == "2026-01-01"
+
+    row["extra_headers"]["X-Trace"] = "updated"
+    row["extra_body"]["access_token"] = "replacement-secret"
+    row["extra_body"]["metadata"]["label"] = "updated"
+    row["extra_query"]["api-version"] = "2026-07-24"
+    update_provider_settings(
+        {
+            "provider": ["openai"],
+            "extraHeaders": [json.dumps(row["extra_headers"], ensure_ascii=False)],
+            "extraBody": [json.dumps(row["extra_body"], ensure_ascii=False)],
+            "extraQuery": [json.dumps(row["extra_query"], ensure_ascii=False)],
+        }
+    )
+
+    saved = load_config(config_path).providers.openai
+    assert saved.extra_headers == {
+        "Authorization": "Bearer header-secret",
+        "X-Trace": "updated",
+    }
+    assert saved.extra_body == {
+        "access_token": "replacement-secret",
+        "metadata": {
+            "client_secret": "nested-secret",
+            "label": "updated",
+        },
+    }
+    assert saved.extra_query == {
+        "api_key": "query-secret",
+        "api-version": "2026-07-24",
+    }
+
+
 def test_update_provider_settings_persists_provider_specific_advanced_options(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

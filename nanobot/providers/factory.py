@@ -243,6 +243,7 @@ def provider_signature(
             fallback.reasoning_effort,
             fallback.context_window_tokens,
             getattr(fp, "proxy", None) if fp else None,
+            fp.thinking_style if fp else None,
         )
 
     provider_name = config.get_provider_name(resolved.model, preset=resolved)
@@ -263,6 +264,7 @@ def provider_signature(
         resolved.reasoning_effort,
         resolved.context_window_tokens,
         getattr(p, "proxy", None) if p else None,
+        p.thinking_style if p else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 
