@@ -74,6 +74,11 @@ describe("provider brand logos", () => {
     expect(providerBrand("openrouter")?.initials).toBe("OR");
   });
 
+  it("maps both xAI Grok spellings to the xAI brand", () => {
+    expect(providerBrand("xai_grok")?.logoUrls).toContain("https://x.ai/favicon.ico");
+    expect(providerBrand("xai-grok")?.initials).toBe("xAI");
+  });
+
   it("keeps AssemblyAI voice settings on the first-party brand domain", () => {
     expect(providerBrand("assemblyai")?.logoUrls).toContain("https://assemblyai.com/favicon.ico");
     expect(providerBrand("assemblyai")?.initials).toBe("AA");

@@ -706,10 +706,18 @@
       "signOut": "Cerrar sesión",
       "signedInAs": "Sesión iniciada como {{account}}",
       "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "remoteSignInHelp": "Selecciona Iniciar sesión para abrir xAI en tu computadora y luego pega el código de autorización que se muestra tras iniciar sesión.",
       "signInRequired": "Inicio de sesión requerido",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sesión iniciada",
-      "notSignedIn": "Sin sesión"
+      "notSignedIn": "Sin sesión",
+      "proxyLabel": "Proxy de red",
+      "proxySaveBeforeSignIn": "Guarda los cambios del proxy antes de iniciar sesión.",
+      "saveProxy": "Guardar proxy",
+      "localCodeHelp": "Completa el inicio de sesión en el navegador. nanobot suele finalizar automáticamente; si no lo hace, pega el código de autorización abajo.",
+      "remoteCodeHelp": "Selecciona Iniciar sesión para abrir xAI en tu computadora. Después de iniciar sesión, pega abajo el código de autorización que muestra xAI.",
+      "authorizationCode": "Código de autorización",
+      "finishSignIn": "Completar inicio de sesión"
     },
     "skills": {
       "description": "Revisa las habilidades de instrucciones que este agente puede cargar durante una conversación.",

@@ -98,6 +98,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { isLoopbackHost } from "@/lib/network";
 import {
   checkVersion,
+  completeProviderOAuth,
   createModelConfiguration,
   disableNanobotFeature,
   enableNanobotFeature,
@@ -166,6 +167,10 @@ import type {
   NanobotFeaturesPayload,
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
+  ProviderOAuthAuthorizationRequired,
+  ProviderOAuthCompletionResult,
+  ProviderOAuthLoginResult,
+  ProviderOAuthPending,
   SessionAutomationJob,
   SettingsPayload,
   SkillSummary,
@@ -187,6 +192,18 @@ export type SettingsSectionKey =
   | "skills"
   | "runtime"
   | "advanced";
+
+function isProviderOAuthAuthorizationRequired(
+  payload: ProviderOAuthLoginResult,
+): payload is ProviderOAuthAuthorizationRequired {
+  return (payload as ProviderOAuthAuthorizationRequired).status === "authorization_required";
+}
+
+function isProviderOAuthPending(
+  payload: ProviderOAuthCompletionResult,
+): payload is ProviderOAuthPending {
+  return (payload as ProviderOAuthPending).status === "pending";
+}
 
 type AppsKindFilter = "ready" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
@@ -223,10 +240,16 @@ type RestartAwarePayload = {
   runtime_capabilities?: SettingsPayload["runtime_capabilities"];
 };
 type ProviderApiType = "auto" | "chat_completions" | "responses";
-type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
+type ProviderForm = {
+  apiKey: string;
+  apiBase: string;
+  apiType: ProviderApiType;
+  proxy: string;
+};
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 1_048_576] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
+const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
   "atomic_chat",
@@ -541,6 +564,8 @@ export function SettingsView({
   const { t } = useTranslation();
   const { token } = useClient();
   const pageVisible = usePageVisibility();
+  const remoteBrowserAccess =
+    typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
@@ -565,6 +590,11 @@ export function SettingsView({
   const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
+  const [xaiOAuthFlow, setXaiOAuthFlow] =
+    useState<ProviderOAuthAuthorizationRequired | null>(null);
+  const xaiOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
+  const [xaiOAuthCode, setXaiOAuthCode] = useState("");
+  const [xaiOAuthCompleting, setXaiOAuthCompleting] = useState(false);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
@@ -657,6 +687,46 @@ export function SettingsView({
     }
     onSettingsChange?.(payload);
   }, [onSettingsChange]);
+
+  const closeXaiOAuthFlow = useCallback(() => {
+    xaiOAuthFlowRef.current = null;
+    setXaiOAuthFlow(null);
+    setXaiOAuthCode("");
+    setXaiOAuthCompleting(false);
+  }, []);
+
+  useEffect(() => {
+    if (!xaiOAuthFlow) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    const poll = async () => {
+      try {
+        const payload = await completeProviderOAuth(
+          token,
+          xaiOAuthFlow.provider,
+          xaiOAuthFlow.flow_id,
+        );
+        if (cancelled || xaiOAuthFlowRef.current?.flow_id !== xaiOAuthFlow.flow_id) return;
+        if (isProviderOAuthPending(payload)) {
+          timer = window.setTimeout(() => void poll(), 1000);
+          return;
+        }
+        applyPayload(payload);
+        setExpandedProvider(xaiOAuthFlow.provider);
+        setError(null);
+        closeXaiOAuthFlow();
+      } catch (err) {
+        if (cancelled || xaiOAuthFlowRef.current?.flow_id !== xaiOAuthFlow.flow_id) return;
+        setError((err as Error).message);
+        closeXaiOAuthFlow();
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [applyPayload, closeXaiOAuthFlow, token, xaiOAuthFlow]);
 
   useEffect(() => {
     if (!initialSettings || settings !== null) return;
@@ -882,6 +952,7 @@ export function SettingsView({
           apiKey: next[provider.name]?.apiKey ?? "",
           apiBase: next[provider.name]?.apiBase ?? provider.api_base ?? provider.default_api_base ?? "",
           apiType: next[provider.name]?.apiType ?? provider.api_type ?? "auto",
+          proxy: next[provider.name]?.proxy ?? provider.proxy ?? "",
         };
       }
       return next;
@@ -1229,11 +1300,16 @@ export function SettingsView({
     if (providerSaving) return;
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
-    if (provider.auth_type === "oauth") return;
-    const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "", apiType: "auto" };
+    const isOauthProvider = provider.auth_type === "oauth";
+    const providerForm = providerForms[providerName] ?? {
+      apiKey: "",
+      apiBase: "",
+      apiType: "auto",
+      proxy: provider.proxy ?? "",
+    };
     const apiKey = providerForm.apiKey.trim();
     const apiKeyRequired = provider.api_key_required ?? true;
-    if (!provider.configured && apiKeyRequired && !apiKey) {
+    if (!isOauthProvider && !provider.configured && apiKeyRequired && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
@@ -1245,12 +1321,20 @@ export function SettingsView({
           ? "azure"
           : null;
       if (supportName && !(await installCapabilities([supportName]))) return;
-      const payload = await updateProviderSettings(token, {
-        provider: providerName,
-        apiKey: apiKey || undefined,
-        apiBase: providerForm.apiBase.trim(),
-        apiType: providerForm.apiType,
-      });
+      const payload = await updateProviderSettings(
+        token,
+        isOauthProvider
+          ? {
+              provider: providerName,
+              proxy: providerForm.proxy.trim(),
+            }
+          : {
+              provider: providerName,
+              apiKey: apiKey || undefined,
+              apiBase: providerForm.apiBase.trim(),
+              apiType: providerForm.apiType,
+            },
+      );
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
@@ -1262,6 +1346,7 @@ export function SettingsView({
           apiKey: "",
           apiBase: providerForm.apiBase.trim(),
           apiType: providerForm.apiType,
+          proxy: providerForm.proxy.trim(),
         },
       }));
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -1276,19 +1361,72 @@ export function SettingsView({
 
   const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
     if (providerSaving) return;
+    let popup: Window | null = null;
+    if (action === "login" && providerName === "xai_grok" && !remoteBrowserAccess) {
+      try {
+        popup = window.open("about:blank", "_blank");
+        if (popup) popup.opener = null;
+      } catch {
+        popup = null;
+      }
+    }
     setProviderSaving(providerName);
     try {
       const payload =
         action === "login"
           ? await loginProviderOAuth(token, providerName)
           : await logoutProviderOAuth(token, providerName);
+      if (isProviderOAuthAuthorizationRequired(payload)) {
+        try {
+          if (popup && !popup.closed) popup.location.href = payload.authorization_url;
+        } catch {
+          // The dialog keeps the authorization link available when the popup was closed.
+        }
+        xaiOAuthFlowRef.current = payload;
+        setXaiOAuthFlow(payload);
+        setXaiOAuthCode("");
+        setExpandedProvider(providerName);
+        setError(null);
+        return;
+      }
+      popup?.close();
+      closeXaiOAuthFlow();
       applyPayload(payload);
       setExpandedProvider(providerName);
       setError(null);
     } catch (err) {
+      popup?.close();
       setError((err as Error).message);
     } finally {
       setProviderSaving(null);
+    }
+  };
+
+  const completeXaiOAuth = async () => {
+    const flow = xaiOAuthFlowRef.current;
+    const authorizationCode = xaiOAuthCode.trim();
+    if (!flow || !authorizationCode || xaiOAuthCompleting) return;
+    setXaiOAuthCompleting(true);
+    try {
+      const payload = await completeProviderOAuth(
+        token,
+        flow.provider,
+        flow.flow_id,
+        authorizationCode,
+      );
+      if (xaiOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
+      if (isProviderOAuthPending(payload)) return;
+      applyPayload(payload);
+      setExpandedProvider(flow.provider);
+      setError(null);
+      closeXaiOAuthFlow();
+    } catch (err) {
+      if (xaiOAuthFlowRef.current?.flow_id === flow.flow_id) {
+        setError((err as Error).message);
+        closeXaiOAuthFlow();
+      }
+    } finally {
+      setXaiOAuthCompleting(false);
     }
   };
 
@@ -1364,6 +1502,7 @@ export function SettingsView({
         apiKey: "",
         apiBase: provider.api_base ?? provider.default_api_base ?? "",
         apiType: provider.api_type ?? "auto",
+        proxy: provider.proxy ?? "",
       },
     }));
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -1418,6 +1557,7 @@ export function SettingsView({
             apiKey: "",
             apiBase: forms[providerName]?.apiBase ?? "",
             apiType: forms[providerName]?.apiType ?? "auto",
+            proxy: forms[providerName]?.proxy ?? "",
           },
         }));
         setVisibleProviderKeys((visible) => ({ ...visible, [providerName]: false }));
@@ -1671,6 +1811,7 @@ export function SettingsView({
               providerSaving={providerSaving}
               query={providerQuery}
               showBrandLogos={localPrefs.brandLogos}
+              remoteBrowserAccess={remoteBrowserAccess}
               onQueryChange={setProviderQuery}
               onToggleProvider={handleToggleProvider}
               onToggleProviderKey={toggleProviderKeyVisibility}
@@ -1682,6 +1823,7 @@ export function SettingsView({
                     apiKey: prev[provider]?.apiKey ?? "",
                     apiBase: prev[provider]?.apiBase ?? "",
                     apiType: prev[provider]?.apiType ?? "auto",
+                    proxy: prev[provider]?.proxy ?? "",
                     ...value,
                   },
                 }))
@@ -1915,6 +2057,21 @@ export function SettingsView({
         onOpenChange={setModelConfigurationOpen}
         onChangeDraft={setModelConfigurationForm}
         onSave={handleCreateModelConfiguration}
+      />
+
+      <XaiOAuthLoginDialog
+        flow={xaiOAuthFlow}
+        authorizationCode={xaiOAuthCode}
+        completing={xaiOAuthCompleting}
+        remoteBrowserAccess={remoteBrowserAccess}
+        onAuthorizationCodeChange={setXaiOAuthCode}
+        onOpenAuthorization={() => {
+          if (!xaiOAuthFlow) return;
+          const opened = window.open(xaiOAuthFlow.authorization_url, "_blank", "noopener,noreferrer");
+          if (opened) opened.opener = null;
+        }}
+        onComplete={() => void completeXaiOAuth()}
+        onClose={closeXaiOAuthFlow}
       />
 
       <NanobotFeatureInstallDialog
@@ -2523,6 +2680,82 @@ function AppearanceSettings({
   );
 }
 
+function XaiOAuthLoginDialog({
+  flow,
+  authorizationCode,
+  completing,
+  remoteBrowserAccess,
+  onAuthorizationCodeChange,
+  onOpenAuthorization,
+  onComplete,
+  onClose,
+}: {
+  flow: ProviderOAuthAuthorizationRequired | null;
+  authorizationCode: string;
+  completing: boolean;
+  remoteBrowserAccess: boolean;
+  onAuthorizationCodeChange: (value: string) => void;
+  onOpenAuthorization: () => void;
+  onComplete: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <Dialog
+      open={Boolean(flow)}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="w-[min(calc(100vw-2rem),28rem)] rounded-[24px]">
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onComplete();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>xAI Grok</DialogTitle>
+            <DialogDescription>
+              {remoteBrowserAccess
+                ? t("settings.oauth.remoteCodeHelp")
+                : t("settings.oauth.localCodeHelp")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label
+              htmlFor="xai-oauth-code"
+              className="block text-xs font-medium text-foreground"
+            >
+              {t("settings.oauth.authorizationCode")}
+            </label>
+            <Input
+              id="xai-oauth-code"
+              value={authorizationCode}
+              onChange={(event) => onAuthorizationCodeChange(event.target.value)}
+              placeholder={t("settings.oauth.authorizationCode")}
+              aria-label={t("settings.oauth.authorizationCode")}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" onClick={onOpenAuthorization}>
+              <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
+              {t("settings.oauth.signIn")}
+            </Button>
+            <Button type="submit" disabled={!authorizationCode.trim() || completing}>
+              {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function NewModelConfigurationDialog({
   open,
   draft,
@@ -2827,11 +3060,13 @@ function ModelsSettings({
                 label:
                   tokens === 1_048_576
                     ? "1M"
-                    : tokens === 262_144
-                      ? "256K"
-                      : tokens === 200_000
-                        ? "200K"
-                        : "64K",
+                    : tokens === 500_000
+                      ? "500K"
+                      : tokens === 262_144
+                        ? "256K"
+                        : tokens === 200_000
+                          ? "200K"
+                          : "64K",
               }))}
               onChange={(value) =>
                 setForm((prev) => ({
@@ -2871,6 +3106,7 @@ function ProvidersSettings({
   providerSaving,
   query,
   showBrandLogos,
+  remoteBrowserAccess,
   onQueryChange,
   onToggleProvider,
   onToggleProviderKey,
@@ -2895,6 +3131,7 @@ function ProvidersSettings({
   providerSaving: string | null;
   query: string;
   showBrandLogos: boolean;
+  remoteBrowserAccess: boolean;
   onQueryChange: (query: string) => void;
   onToggleProvider: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
@@ -2923,14 +3160,20 @@ function ProvidersSettings({
       apiKey: "",
       apiBase: provider.api_base ?? provider.default_api_base ?? "",
       apiType: provider.api_type ?? "auto",
+      proxy: provider.proxy ?? "",
     };
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
+    const supportsOauthProxy = isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
+    const proxy = form.proxy.trim();
+    const oauthProxyDirty = supportsOauthProxy && proxy !== (provider.proxy ?? "").trim();
+    const oauthProxySaving = saving && oauthProxyDirty;
+    const oauthActionBusy = saving && !oauthProxySaving;
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const missingOptionalCredential =
       !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
@@ -2990,48 +3233,120 @@ function ProvidersSettings({
               <p className="text-[12px] text-destructive">{capabilityError}</p>
             ) : null}
             {isOauthProvider ? (
-              <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[13px] font-semibold text-foreground">
-                    {tx("settings.oauth.authentication", "OAuth authentication")}
-                  </p>
-                  <p className="mt-1 truncate text-[12px] text-muted-foreground">
-                    {provider.configured
-                      ? t("settings.oauth.signedInAs", {
-                          account: provider.oauth_account || provider.label,
-                          defaultValue: "Signed in as {{account}}",
-                        })
-                      : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
-                  </p>
-                </div>
-                <div className="flex shrink-0 justify-end gap-2">
-                  {provider.configured ? (
+              <>
+                <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-foreground">
+                      {tx("settings.oauth.authentication", "OAuth authentication")}
+                    </p>
+                    <p className="mt-1 text-[12px] text-muted-foreground">
+                      {provider.configured
+                        ? t("settings.oauth.signedInAs", {
+                            account: provider.oauth_account || provider.label,
+                            defaultValue: "Signed in as {{account}}",
+                          })
+                        : provider.name === "xai_grok" && remoteBrowserAccess
+                          ? tx(
+                              "settings.oauth.remoteSignInHelp",
+                              "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
+                            )
+                          : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 justify-end gap-2">
+                    {provider.configured ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onProviderOAuthLogout(provider.name)}
+                        disabled={saving}
+                        className="rounded-full"
+                      >
+                        {tx("settings.oauth.signOut", "Sign out")}
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
-                      variant="ghost"
-                      onClick={() => onProviderOAuthLogout(provider.name)}
-                      disabled={saving}
+                      variant="outline"
+                      onClick={() => onProviderOAuthLogin(provider.name)}
+                      disabled={saving || oauthProxyDirty || !provider.oauth_login_supported}
+                      title={
+                        oauthProxyDirty
+                          ? tx(
+                              "settings.oauth.proxySaveBeforeSignIn",
+                              "Save proxy changes before signing in.",
+                            )
+                          : undefined
+                      }
                       className="rounded-full"
                     >
-                      {tx("settings.oauth.signOut", "Sign out")}
+                      {oauthActionBusy ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                      ) : null}
+                      {oauthActionBusy
+                        ? tx("settings.oauth.signingIn", "Signing in...")
+                        : provider.configured
+                          ? tx("settings.oauth.signInAgain", "Sign in again")
+                          : tx("settings.oauth.signIn", "Sign in")}
                     </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onProviderOAuthLogin(provider.name)}
-                    disabled={saving || !provider.oauth_login_supported}
-                    className="rounded-full"
-                  >
-                    {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                    {saving
-                      ? tx("settings.oauth.signingIn", "Signing in...")
-                      : provider.configured
-                        ? tx("settings.oauth.signInAgain", "Sign in again")
-                        : tx("settings.oauth.signIn", "Sign in")}
-                  </Button>
+                  </div>
                 </div>
-              </div>
+                {supportsOauthProxy ? (
+                  <div className="rounded-[18px] border border-border/45 bg-background/75 px-4 py-3.5">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <Globe2 className="h-4 w-4" aria-hidden />
+                      </span>
+                      <label
+                        htmlFor={`provider-${provider.name}-proxy`}
+                        className="text-[13px] font-semibold text-foreground"
+                      >
+                        {tx("settings.oauth.proxyLabel", "Network proxy")}
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Input
+                        id={`provider-${provider.name}-proxy`}
+                        value={form.proxy}
+                        onChange={(event) =>
+                          onChangeProviderForm(provider.name, { proxy: event.target.value })
+                        }
+                        placeholder="http://127.0.0.1:7890"
+                        autoCapitalize="none"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="h-9 min-w-0 flex-1 rounded-full font-mono text-[12px]"
+                      />
+                      <div className="flex shrink-0 justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onResetProviderDraft(provider.name)}
+                          disabled={saving || !oauthProxyDirty}
+                          className="rounded-full"
+                        >
+                          {t("settings.actions.cancel")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSaveProvider(provider.name)}
+                          disabled={saving || !oauthProxyDirty}
+                          className="rounded-full"
+                        >
+                          {oauthProxySaving ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                          ) : null}
+                          {oauthProxySaving
+                            ? t("settings.actions.saving")
+                            : tx("settings.oauth.saveProxy", "Save proxy")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <>
             <label className="block space-y-1.5">

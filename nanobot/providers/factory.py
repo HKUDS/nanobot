@@ -60,10 +60,10 @@ def _make_provider_core(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
-    if p and p.proxy and backend not in {"openai_compat", "openai_codex"}:
+    if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok"}:
         raise ValueError(
             f"providers.{provider_name}.proxy is only supported for "
-            "OpenAI-compatible providers and OpenAI Codex."
+            "OpenAI-compatible providers, OpenAI Codex, and xAI Grok."
         )
 
     if backend == "azure_openai":
@@ -87,6 +87,14 @@ def _make_provider_core(
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(
+            default_model=model,
+            proxy=getattr(p, "proxy", None) if p else None,
+            extra_body=p.extra_body if p else None,
+        )
+    elif backend == "xai_grok":
+        from nanobot.providers.xai_grok_provider import XAIGrokProvider
+
+        provider = XAIGrokProvider(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,

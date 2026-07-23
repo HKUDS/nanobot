@@ -705,10 +705,18 @@
       "signOut": "Đăng xuất",
       "signedInAs": "Đã đăng nhập bằng {{account}}",
       "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "remoteSignInHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn, sau đó dán mã ủy quyền được hiển thị sau khi đăng nhập.",
       "signInRequired": "Cần đăng nhập",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Đã đăng nhập",
-      "notSignedIn": "Chưa đăng nhập"
+      "notSignedIn": "Chưa đăng nhập",
+      "proxyLabel": "Proxy mạng",
+      "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
+      "saveProxy": "Lưu proxy",
+      "localCodeHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy dán mã ủy quyền bên dưới.",
+      "remoteCodeHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn. Sau khi đăng nhập, hãy dán mã ủy quyền do xAI hiển thị bên dưới.",
+      "authorizationCode": "Mã ủy quyền",
+      "finishSignIn": "Hoàn tất đăng nhập"
     },
     "skills": {
       "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",

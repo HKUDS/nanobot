@@ -705,10 +705,18 @@
       "signOut": "登出",
       "signedInAs": "已使用 {{account}} 登入",
       "signInHelp": "請從這臺裝置登入；系統不會將 API 金鑰儲存在設定中。",
+      "remoteSignInHelp": "點擊「登入」在你的電腦上開啟 xAI，完成登入後貼上頁面顯示的授權碼。",
       "signInRequired": "需要登入",
       "signInBeforeSaving": "將此 OAuth 供應商設為目前模型供應商前，請先登入。",
       "signedIn": "已登入",
-      "notSignedIn": "未登入"
+      "notSignedIn": "未登入",
+      "proxyLabel": "網路代理",
+      "proxySaveBeforeSignIn": "請先儲存代理變更再登入。",
+      "saveProxy": "儲存代理",
+      "localCodeHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請將授權碼貼到下方。",
+      "remoteCodeHelp": "點擊「登入」在你的電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
+      "authorizationCode": "授權碼",
+      "finishSignIn": "完成登入"
     },
     "skills": {
       "description": "檢閱此 Agent 可在對話期間載入的指令技能。",

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   configureChannel,
+  completeProviderOAuth,
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -431,6 +432,20 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("serializes OAuth provider proxy updates", async () => {
+    await updateProviderSettings("tok", {
+      provider: "xai_grok",
+      proxy: "http://127.0.0.1:7890",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=xai_grok&proxy=http%3A%2F%2F127.0.0.1%3A7890",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("fetches provider model lists", async () => {
     await fetchProviderModels("tok", "deepseek");
 
@@ -448,6 +463,30 @@ describe("webui API helpers", () => {
       "/api/settings/provider/oauth-login?provider=openai_codex",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await completeProviderOAuth("tok", "xai_grok", "flow-123");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await completeProviderOAuth(
+      "tok",
+      "xai_grok",
+      "flow-123",
+      "secret",
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-OAuth-Code": "secret",
+        },
       }),
     );
 

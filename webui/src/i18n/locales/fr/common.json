@@ -705,10 +705,18 @@
       "signOut": "Se déconnecter",
       "signedInAs": "Connecté en tant que {{account}}",
       "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "remoteSignInHelp": "Sélectionnez Se connecter pour ouvrir xAI sur votre ordinateur, puis collez le code d’autorisation affiché après la connexion.",
       "signInRequired": "Connexion requise",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Connecté",
-      "notSignedIn": "Non connecté"
+      "notSignedIn": "Non connecté",
+      "proxyLabel": "Proxy réseau",
+      "proxySaveBeforeSignIn": "Enregistrez les modifications du proxy avant de vous connecter.",
+      "saveProxy": "Enregistrer le proxy",
+      "localCodeHelp": "Terminez la connexion dans votre navigateur. nanobot termine généralement automatiquement ; sinon, collez le code d’autorisation ci-dessous.",
+      "remoteCodeHelp": "Sélectionnez Se connecter pour ouvrir xAI sur votre ordinateur. Après la connexion, collez ci-dessous le code d’autorisation affiché par xAI.",
+      "authorizationCode": "Code d’autorisation",
+      "finishSignIn": "Terminer la connexion"
     },
     "skills": {
       "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",

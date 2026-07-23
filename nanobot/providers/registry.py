@@ -47,7 +47,8 @@ class ProviderSpec:
     settings_alias_for: str = ""  # compatibility alias grouped under this provider in Settings
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "xai_grok"
+    # | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars / request headers supplied by the provider integration.
@@ -418,6 +419,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_codex",
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
+        is_oauth=True,
+    ),
+    # xAI subscription: OAuth-based, with capability-gated server-hosted X Search.
+    ProviderSpec(
+        name="xai_grok",
+        keywords=("xai-grok", "xai_grok"),
+        env_key="",
+        display_name="xAI Grok",
+        model_catalog="builtin",
+        builtin_models=(
+            ProviderModelSpec(
+                id="xai-grok/grok-4.5",
+                label="Grok 4.5",
+                description="Grok via xAI subscription; X Search is enabled when supported.",
+                context_window=500000,
+            ),
+        ),
+        backend="xai_grok",
+        default_api_base="https://cli-chat-proxy.grok.com/v1",
         is_oauth=True,
     ),
     # GitHub Copilot: OAuth-based

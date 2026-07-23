@@ -719,10 +719,18 @@
       "signOut": "Sign out",
       "signedInAs": "Signed in as {{account}}",
       "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "remoteSignInHelp": "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
       "signInRequired": "Sign in required",
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
-      "notSignedIn": "Not signed in"
+      "notSignedIn": "Not signed in",
+      "proxyLabel": "Network proxy",
+      "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
+      "saveProxy": "Save proxy",
+      "localCodeHelp": "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, paste the authorization code below.",
+      "remoteCodeHelp": "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
+      "authorizationCode": "Authorization code",
+      "finishSignIn": "Finish sign-in"
     },
     "skills": {
       "description": "Review the instruction skills this agent can load during a conversation.",

@@ -705,10 +705,18 @@
       "signOut": "サインアウト",
       "signedInAs": "{{account}} としてサインイン済み",
       "signInHelp": "このデバイスからサインインします。API key は config に保存されません。",
+      "remoteSignInHelp": "「サインイン」を選択して自分のコンピューターで xAI を開き、サインイン後に表示される認証コードを貼り付けてください。",
       "signInRequired": "サインインが必要です",
       "signInBeforeSaving": "この OAuth プロバイダーをアクティブなモデルプロバイダーとして保存する前にサインインしてください。",
       "signedIn": "サインイン済み",
-      "notSignedIn": "未サインイン"
+      "notSignedIn": "未サインイン",
+      "proxyLabel": "ネットワークプロキシ",
+      "proxySaveBeforeSignIn": "サインイン前にプロキシの変更を保存してください。",
+      "saveProxy": "プロキシを保存",
+      "localCodeHelp": "ブラウザーでサインインを完了してください。通常は nanobot が自動で完了します。完了しない場合は、認証コードを下に貼り付けてください。",
+      "remoteCodeHelp": "「サインイン」を選択して自分のコンピューターで xAI を開いてください。サインイン後、xAI に表示された認証コードを下に貼り付けてください。",
+      "authorizationCode": "認証コード",
+      "finishSignIn": "サインインを完了"
     },
     "skills": {
       "description": "このエージェントが会話中に読み込める指示スキルを確認します。",

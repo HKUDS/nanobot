@@ -16,8 +16,10 @@ from nanobot.webui.settings_api import (
     _model_catalog_kind,
     _oauth_provider_status,
     _reasoning_effort_values_for,
+    complete_oauth_provider,
     create_model_configuration,
     login_oauth_provider,
+    logout_oauth_provider,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -344,6 +346,63 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     assert dynamic_provider.api_key == "sk-test"
 
 
+@pytest.mark.parametrize(
+    ("provider_name", "config_attr"),
+    [
+        ("openai_codex", "openai_codex"),
+        ("xai_grok", "xai_grok"),
+    ],
+)
+def test_update_provider_settings_updates_and_clears_oauth_proxy(
+    provider_name: str,
+    config_attr: str,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    getattr(config.providers, config_attr).proxy = "http://127.0.0.1:7000"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_api._oauth_provider_status",
+        lambda _spec: {
+            "configured": False,
+            "account": None,
+            "expires_at": None,
+            "login_supported": True,
+        },
+    )
+
+    payload = update_provider_settings(
+        {"provider": [provider_name], "proxy": [" http://127.0.0.1:7890 "]}
+    )
+
+    providers = {row["name"]: row for row in payload["providers"]}
+    assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
+    assert getattr(load_config(config_path).providers, config_attr).proxy == (
+        "http://127.0.0.1:7890"
+    )
+
+    cleared = update_provider_settings({"provider": [provider_name], "proxy": ["  "]})
+
+    providers = {row["name"]: row for row in cleared["providers"]}
+    assert providers[provider_name]["proxy"] is None
+    assert getattr(load_config(config_path).providers, config_attr).proxy is None
+
+
+def test_update_provider_settings_keeps_oauth_credentials_read_only(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="only supports proxy settings"):
+        update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
+
+
 def test_update_agent_settings_accepts_context_window_options(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -396,7 +455,7 @@ def test_update_context_window_rejects_unknown_values(
 
     with pytest.raises(
         WebUISettingsError,
-        match="context_window_tokens must be 65536, 200000, 262144, or 1048576",
+        match="context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576",
     ):
         update_agent_settings({"context_window_tokens": ["128000"]})
 
@@ -1020,6 +1079,30 @@ def test_openai_codex_oauth_status_rejects_unavailable_token(
     assert status["account"] is None
 
 
+def test_xai_grok_status_accepts_refreshable_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = SimpleNamespace(
+        access="access-token",
+        refresh="refresh-token",
+        expires=1,
+        account_id="user@example.com",
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.get_xai_oauth_login_status",
+        lambda: token,
+    )
+
+    status = _oauth_provider_status(find_by_name("xai_grok"))
+
+    assert status == {
+        "configured": True,
+        "account": "user@example.com",
+        "expires_at": 1,
+        "login_supported": True,
+    }
+
+
 def test_openai_codex_oauth_login_passes_configured_proxy(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1089,6 +1172,118 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     assert "oauth_cli_kit not installed. Run: pip install oauth-cli-kit" in str(exc.value)
 
 
+def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = "http://127.0.0.1:23458"
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    captured: dict[str, object] = {}
+
+    class FakeFlow:
+        authorization_url = "https://auth.x.ai/oauth2/authorize?state=test"
+        remaining_seconds = 600
+        expired = False
+
+        def cancel(self) -> None:
+            captured["cancelled"] = True
+
+    def fake_start(*, proxy=None, timeout_s=None):
+        captured.update(proxy=proxy, timeout_s=timeout_s)
+        return FakeFlow()
+
+    monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
+
+    payload = login_oauth_provider({"provider": ["xai-grok"]})
+
+    assert captured["proxy"] == proxy
+    assert captured["timeout_s"] == 600
+    assert payload["status"] == "authorization_required"
+    assert payload["provider"] == "xai_grok"
+    assert payload["authorization_url"] == FakeFlow.authorization_url
+    assert payload["flow_id"]
+
+    callbacks: list[str | None] = []
+
+    def fake_complete(_flow, callback):
+        callbacks.append(callback)
+        if callback is None:
+            return None
+        return SimpleNamespace(access="access-token")
+
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.complete_xai_oauth_login",
+        fake_complete,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_api.settings_payload",
+        lambda: {"settings": "ready"},
+    )
+
+    pending = complete_oauth_provider(
+        {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
+    )
+    completed = complete_oauth_provider(
+        {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
+        "secret",
+    )
+
+    assert pending == {
+        "status": "pending",
+        "provider": "xai_grok",
+        "flow_id": payload["flow_id"],
+    }
+    assert completed == {"settings": "ready"}
+    assert callbacks == [None, "secret"]
+
+
+def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    failure = RuntimeError("Could not reach xAI sign-in: ConnectError.")
+
+    def fake_start(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
+
+    with pytest.raises(WebUISettingsError) as exc:
+        login_oauth_provider({"provider": ["xai-grok"]})
+
+    assert exc.value.status == 502
+    assert str(exc.value) == (
+        "xAI OAuth login failed: Could not reach xAI sign-in: ConnectError."
+    )
+    assert exc.value.__cause__ is failure
+
+
+def test_xai_grok_logout_removes_token_through_shared_lock(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    token_path = tmp_path / "auth" / "xai.json"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("{}", encoding="utf-8")
+    token_path.with_suffix(".lock").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.get_xai_oauth_storage_path",
+        lambda: token_path,
+    )
+
+    logout_oauth_provider({"provider": ["xai-grok"]})
+
+    assert not token_path.exists()
+
+
 def test_provider_models_payload_fetches_openai_compatible_models(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1141,6 +1336,22 @@ def test_provider_models_payload_returns_curated_openai_codex_models() -> None:
         "openai-codex/gpt-5.6-sol",
         "openai-codex/gpt-5.6-terra",
         "openai-codex/gpt-5.6-luna",
+    ]
+
+
+def test_provider_models_payload_returns_xai_grok_model() -> None:
+    payload = provider_models_payload({"provider": ["xai_grok"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "builtin"
+    assert payload["models"] == [
+        {
+            "id": "xai-grok/grok-4.5",
+            "label": "Grok 4.5",
+            "description": "Grok via xAI subscription; X Search is enabled when supported.",
+            "owned_by": "xAI Grok",
+            "context_window": 500000,
+        }
     ]
 
 

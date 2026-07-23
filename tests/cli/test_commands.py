@@ -478,6 +478,7 @@ def test_config_dump_excludes_oauth_provider_blocks():
     providers = config.model_dump(by_alias=True)["providers"]
 
     assert "openaiCodex" not in providers
+    assert "xaiGrok" not in providers
     assert "githubCopilot" not in providers
 
 
@@ -541,6 +542,47 @@ def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypa
     assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
 
 
+def test_provider_logout_xai_grok_removes_instance_credentials(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "xai.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.get_xai_oauth_storage_path",
+        lambda: token_path,
+    )
+
+    result = runner.invoke(app, ["provider", "logout", "xai-grok"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert "Logged out from xAI Grok" in result.stdout
+
+
+def test_provider_logout_xai_grok_uses_explicit_config_path(tmp_path, monkeypatch):
+    from nanobot.config import loader
+
+    default_config = tmp_path / "default" / "config.json"
+    selected_config = tmp_path / "selected" / "config.json"
+    default_token = default_config.parent / "auth" / "xai.json"
+    selected_token = selected_config.parent / "auth" / "xai.json"
+    for token_path in (default_token, selected_token):
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(loader, "_current_config_path", default_config)
+
+    result = runner.invoke(
+        app,
+        ["provider", "logout", "xai-grok", "--config", str(selected_config)],
+    )
+
+    assert result.exit_code == 0
+    assert default_token.exists()
+    assert not selected_token.exists()
+    assert "Using config:" in result.stdout
+
+
 def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):
     token_path = tmp_path / "auth" / "github-copilot.json"
     lock_path = token_path.with_suffix(".lock")
@@ -579,11 +621,16 @@ def test_provider_logout_paths_resolve_to_expected_files():
     from oauth_cli_kit.storage import FileTokenStorage
 
     from nanobot.providers.github_copilot_provider import get_storage
+    from nanobot.providers.xai_oauth import get_xai_oauth_storage_path
 
     codex_storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
     codex_path = codex_storage.get_token_path()
     assert codex_path.name == "codex.json"
     assert codex_path.parent.name == "auth"
+
+    xai_path = get_xai_oauth_storage_path()
+    assert xai_path.name == "xai.json"
+    assert xai_path.parent.name == "auth"
 
     gh_storage = get_storage()
     gh_path = gh_storage.get_token_path()
@@ -661,6 +708,36 @@ def test_provider_login_can_set_github_copilot_as_main_provider(tmp_path):
     assert saved.agents.defaults.model == "github-copilot/gpt-5.4-mini"
     assert saved.agents.defaults.model_preset is None
     assert make_provider(saved).__class__.__name__ == "GitHubCopilotProvider"
+
+
+def test_provider_login_can_set_xai_grok_as_main_provider(tmp_path):
+    config_path = tmp_path / "config.json"
+    original = cli_commands._LOGIN_HANDLERS["xai_grok"]
+    cli_commands._LOGIN_HANDLERS["xai_grok"] = lambda: None
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "provider",
+                "login",
+                "xai-grok",
+                "--set-main",
+                "--config",
+                str(config_path),
+            ],
+        )
+    finally:
+        cli_commands._LOGIN_HANDLERS["xai_grok"] = original
+
+    assert result.exit_code == 0
+    assert "Set xai-grok as the main provider" in result.stdout
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.agents.defaults.provider == "xai_grok"
+    assert saved.agents.defaults.model == "xai-grok/grok-4.5"
+    assert saved.agents.defaults.context_window_tokens == 500_000
+    assert saved.agents.defaults.model_preset is None
+    assert make_provider(saved).__class__.__name__ == "XAIGrokProvider"
 
 
 def test_provider_login_model_implies_set_main_provider(tmp_path):
@@ -790,6 +867,33 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["proxy"] == proxy
+
+
+def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeypatch):
+    proxy = "http://127.0.0.1:23458"
+    monkeypatch.setattr(
+        "nanobot.config.loader.load_config",
+        lambda: Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}),
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.xai_oauth.get_xai_oauth_token",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("not signed in")),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_login(*, print_fn, prompt_fn, proxy=None):
+        captured.update(print_fn=print_fn, prompt_fn=prompt_fn, proxy=proxy)
+        return SimpleNamespace(access="access-token", account_id="user@example.com")
+
+    monkeypatch.setattr("nanobot.providers.xai_oauth.login_xai_oauth", fake_login)
+
+    result = runner.invoke(app, ["provider", "login", "xai-grok"])
+
+    assert result.exit_code == 0
+    assert captured["proxy"] == proxy
+    assert callable(captured["print_fn"])
+    assert callable(captured["prompt_fn"])
+    assert "Hosted X Search is enabled automatically when the selected model supports it" in result.stdout
 
 
 def test_config_matches_explicit_ollama_prefix_without_api_key():

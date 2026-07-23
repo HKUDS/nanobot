@@ -1973,7 +1973,308 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+  });
+
+  it("signs in to the xAI Grok provider", async () => {
+    const base = settingsPayload();
+    const xaiProvider = {
+      name: "xai_grok",
+      label: "xAI Grok",
+      configured: false,
+      auth_type: "oauth" as const,
+      api_key_required: false,
+      api_key_hint: null,
+      api_base: null,
+      default_api_base: "https://cli-chat-proxy.grok.com/v1",
+      model_catalog: "builtin",
+      oauth_account: null,
+      oauth_expires_at: null,
+      oauth_login_supported: true,
+    };
+    const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
+    const signedIn: SettingsPayload = {
+      ...payload,
+      providers: [{ ...xaiProvider, configured: true, oauth_account: "user@example.com" }],
+    };
+    const authorization = {
+      status: "authorization_required",
+      provider: "xai_grok",
+      flow_id: "flow-123",
+      authorization_url: "https://auth.x.ai/oauth2/authorize?state=test",
+      expires_in: 600,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/provider/oauth-login?provider=xai_grok") {
+        return jsonResponse(authorization);
+      }
+      if (
+        url ===
+        "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123"
+      ) {
+        expect(init?.headers).toMatchObject({
+          "X-Nanobot-OAuth-Code": "secret",
+        });
+        return jsonResponse(signedIn);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const popup = {
+      opener: window,
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    };
+    vi.stubGlobal("open", vi.fn(() => popup));
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const providerLabel = await screen.findByText("xAI Grok");
+    fireEvent.click(providerLabel.closest("button")!);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/oauth-login?provider=xai_grok",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    expect(popup.opener).toBeNull();
+    expect(popup.location.href).toBe(authorization.authorization_url);
+
+    expect(
+      screen.getByText(
+        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, paste the authorization code below.",
+      ),
+    ).toBeInTheDocument();
+    const callbackInput = await screen.findByRole("textbox", {
+      name: "Authorization code",
+    });
+    fireEvent.change(callbackInput, {
+      target: { value: "secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "X-Nanobot-OAuth-Code": "secret",
+          }),
+        }),
+      ),
+    );
+    expect(await screen.findByText("Signed in as user@example.com")).toBeInTheDocument();
+  });
+
+  it("recognizes remote access before starting xAI Grok sign-in", async () => {
+    const happyWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void };
+    };
+    const originalUrl = window.location.href;
+    happyWindow.happyDOM.setURL("http://203.0.113.10:18887/#/settings?section=models");
+
+    try {
+      const base = settingsPayload();
+      const xaiProvider = {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: false,
+        auth_type: "oauth" as const,
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://cli-chat-proxy.grok.com/v1",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+      };
+      const payload: SettingsPayload = { ...base, providers: [xaiProvider] };
+      const authorization = {
+        status: "authorization_required",
+        provider: "xai_grok",
+        flow_id: "flow-remote",
+        authorization_url: "https://auth.x.ai/oauth2/authorize?state=remote",
+        expires_in: 600,
+      };
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/provider/oauth-login?provider=xai_grok") {
+          return jsonResponse(authorization);
+        }
+        if (
+          url ===
+          "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-remote"
+        ) {
+          return jsonResponse({
+            status: "pending",
+            provider: "xai_grok",
+            flow_id: "flow-remote",
+          });
+        }
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return jsonResponse({});
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const popup = {
+        opener: window,
+        location: { href: "about:blank" },
+        close: vi.fn(),
+      };
+      const openMock = vi.fn(() => popup);
+      vi.stubGlobal("open", openMock);
+
+      renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+      fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
+      expect(
+        screen.getByText(
+          "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
+        ),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      const dialog = await screen.findByRole("dialog");
+
+      expect(openMock).not.toHaveBeenCalled();
+      expect(
+        within(dialog).getByText(
+          "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).queryByRole("textbox", { name: "xAI sign-in URL" }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).queryByRole("button", { name: "Copy" }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("textbox", { name: "Authorization code" }),
+      ).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
+      expect(openMock).toHaveBeenCalledWith(
+        authorization.authorization_url,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(popup.opener).toBeNull();
+    } finally {
+      happyWindow.happyDOM.setURL(originalUrl);
+    }
+  });
+
+  it("saves scoped proxies for xAI and OpenAI Codex OAuth providers", async () => {
+    const base = settingsPayload();
+    const providers: SettingsPayload["providers"] = [
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://cli-chat-proxy.grok.com/v1",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+        proxy: "http://127.0.0.1:7000",
+      },
+      {
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: false,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        default_api_base: "https://chatgpt.com/backend-api",
+        model_catalog: "builtin",
+        oauth_account: null,
+        oauth_expires_at: null,
+        oauth_login_supported: true,
+        proxy: null,
+      },
+    ];
+    let payload: SettingsPayload = { ...base, providers };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url.startsWith("/api/settings/provider/update?")) {
+        const query = new URLSearchParams(url.split("?")[1]);
+        const providerName = query.get("provider");
+        const proxy = query.get("proxy");
+        payload = {
+          ...payload,
+          providers: payload.providers.map((provider) =>
+            provider.name === providerName ? { ...provider, proxy } : provider,
+          ),
+        };
+        return jsonResponse(payload);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
+    const xaiProxy = screen.getByLabelText("Network proxy");
+    expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
+    fireEvent.change(xaiProxy, { target: { value: "http://127.0.0.1:7890" } });
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sign in" })).toHaveAttribute(
+      "title",
+      "Save proxy changes before signing in.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save proxy" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/update?provider=xai_grok&proxy=http%3A%2F%2F127.0.0.1%3A7890",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
+
+    fireEvent.click(screen.getByText("OpenAI Codex").closest("button")!);
+    const codexProxy = screen.getByLabelText("Network proxy");
+    expect(codexProxy).toHaveValue("");
+    fireEvent.change(codexProxy, { target: { value: "http://proxy.example:8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save proxy" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider/update?provider=openai_codex&proxy=http%3A%2F%2Fproxy.example%3A8080",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      ),
+    );
   });
 
   it("keeps the default model distinct from the active named configuration", async () => {
