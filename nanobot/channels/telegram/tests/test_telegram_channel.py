@@ -293,6 +293,19 @@ def test_split_telegram_markdown_tiny_limit_with_early_body_newline() -> None:
     assert plain.count("a") >= 100
 
 
+def test_split_telegram_markdown_leading_space_in_fence_body() -> None:
+    body = "a" * 4500
+    content = f"```\n {body}"
+
+    chunks = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
+
+    assert chunks
+    assert all(len(chunk) <= TELEGRAM_MAX_MESSAGE_LEN for chunk in chunks)
+    plain = "".join(chunks).replace("```", "").replace("\n", "")
+    assert plain.count("a") == 4500
+
+
+
 
 @pytest.mark.asyncio
 async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:

@@ -102,7 +102,7 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
                     adjusted = recut.rfind("\n", min_code_pos)
                     if adjusted < min_code_pos:
                         adjusted = recut.rfind(" ", min_code_pos)
-                    pos = adjusted if adjusted >= min_code_pos else budget
+                    pos = adjusted if adjusted > min_code_pos else budget
                 elif pos + len(closing) > max_len:
                     budget = max_len - len(closing)
                     if budget <= min_code_pos:
@@ -113,7 +113,11 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
                     adjusted = recut.rfind("\n", min_code_pos)
                     if adjusted < min_code_pos:
                         adjusted = recut.rfind(" ", min_code_pos)
-                    pos = adjusted if adjusted >= min_code_pos else budget
+                    pos = adjusted if adjusted > min_code_pos else budget
+                if pos <= min_code_pos:
+                    chunks.append(content[:max_len])
+                    content = content[max_len:].lstrip()
+                    continue
                 chunks.append(content[:pos] + closing)
                 remainder = content[pos:]
                 if remainder.startswith("\n"):
