@@ -6,12 +6,6 @@ export type MessageKind = "message" | "trace";
 
 export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
 
-export interface TurnModelState {
-  modelName: string;
-  provider: string | null;
-  fallbackIndex: number;
-}
-
 /** One image attached to a UIMessage.
  *
  * ``url`` can arrive in three different shapes, which the bubble renders
@@ -1097,8 +1091,6 @@ export type InboundEvent =
       event: "turn_model_updated";
       chat_id: string;
       model_name: string;
-      provider?: string | null;
-      fallback_index: number;
     }
   | ({
       event: "turn_end";

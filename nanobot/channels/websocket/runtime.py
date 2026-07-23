@@ -270,7 +270,6 @@ class WebSocketChannel(BaseChannel):
         self._workspaces = gateway.workspaces
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
-        self._turn_models: dict[str, TurnModelUpdatedEvent] = {}
 
     # -- Subscription bookkeeping -------------------------------------------
 
@@ -320,23 +319,10 @@ class WebSocketChannel(BaseChannel):
             return
         await self.send_goal_status(chat_id, "running", started_at=t0)
 
-    async def _maybe_push_turn_model(self, chat_id: str) -> None:
-        """Replay the latest actual model after refresh or reconnect."""
-        event = self._turn_models.get(chat_id)
-        if event is None:
-            return
-        await self.send_turn_model_updated(
-            chat_id,
-            model_name=event.model,
-            provider=event.provider,
-            fallback_index=event.fallback_index,
-        )
-
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
-        """Replay live per-chat state after subscribe (same-process refresh)."""
+        """Replay persisted or actively running per-chat state after subscribe."""
         await self._maybe_push_active_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
-        await self._maybe_push_turn_model(chat_id)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
@@ -554,7 +540,6 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
-                self._turn_models.pop(default_chat_id, None)
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=default_chat_id,
@@ -687,8 +672,6 @@ class WebSocketChannel(BaseChannel):
             if not content.strip() and not media_paths:
                 await self._send_event(connection, "error", detail="missing content")
                 return
-            # A newly accepted request supersedes the previous turn's actual model.
-            self._turn_models.pop(cid, None)
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
             await self._hydrate_after_subscribe(cid)
@@ -787,7 +770,6 @@ class WebSocketChannel(BaseChannel):
         self._conn_default.clear()
         self._webui_connections.clear()
         self._tokens.clear()
-        self._turn_models.clear()
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
         """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
@@ -804,7 +786,6 @@ class WebSocketChannel(BaseChannel):
         event = outbound_event_from_message(msg)
         progress_event = event if isinstance(event, ProgressEvent) else None
         if isinstance(event, RuntimeModelUpdatedEvent):
-            self._turn_models.clear()
             await self.send_runtime_model_updated(
                 model_name=event.model,
                 model_preset=event.model_preset,
@@ -826,13 +807,10 @@ class WebSocketChannel(BaseChannel):
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
         if isinstance(event, TurnModelUpdatedEvent):
-            self._turn_models[msg.chat_id] = event
             if conns:
                 await self.send_turn_model_updated(
                     msg.chat_id,
                     model_name=event.model,
-                    provider=event.provider,
-                    fallback_index=event.fallback_index,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -1149,8 +1127,6 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         *,
         model_name: Any,
-        provider: Any = None,
-        fallback_index: Any = 0,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1164,14 +1140,7 @@ class WebSocketChannel(BaseChannel):
             "event": "turn_model_updated",
             "chat_id": chat_id,
             "model_name": model_name.strip(),
-            "fallback_index": (
-                fallback_index
-                if isinstance(fallback_index, int) and not isinstance(fallback_index, bool)
-                else 0
-            ),
         }
-        if isinstance(provider, str) and provider.strip():
-            body["provider"] = provider.strip()
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")

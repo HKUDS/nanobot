@@ -10,7 +10,7 @@ from loguru import logger
 
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
-from nanobot.providers.fallback_provider import FallbackProvider, ModelAttempt
+from nanobot.providers.fallback_provider import FallbackProvider
 
 
 def _make_response(
@@ -213,56 +213,6 @@ def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
     assert snapshot.context_window_tokens == 64000
 
 
-@pytest.mark.asyncio
-async def test_factory_reports_resolved_custom_provider_for_auto_fallback() -> None:
-    from nanobot.config.schema import Config
-    from nanobot.providers.factory import make_provider
-
-    config = Config.model_validate({
-        "agents": {
-            "defaults": {
-                "modelPreset": "primary",
-                "fallbackModels": ["backup"],
-            }
-        },
-        "modelPresets": {
-            "primary": {"model": "openai/gpt-4.1", "provider": "openai"},
-            "backup": {"model": "companyproxy/gpt-4", "provider": "auto"},
-        },
-        "providers": {
-            "openai": {"apiKey": "primary-key"},
-            "companyproxy": {
-                "apiKey": "fallback-key",
-                "apiBase": "https://models.example.com/v1",
-            },
-        },
-    })
-    primary = _FakeProvider("primary", _error_response())
-    fallback = _FakeProvider("fallback", _make_response("fallback ok"))
-    attempts: list[ModelAttempt] = []
-
-    async def _observe(attempt: ModelAttempt) -> None:
-        attempts.append(attempt)
-
-    with patch(
-        "nanobot.providers.factory._make_provider_core",
-        side_effect=[primary, fallback],
-    ):
-        provider = make_provider(config)
-        assert isinstance(provider, FallbackProvider)
-        provider.set_model_attempt_observer(_observe)
-        result = await provider.chat(
-            messages=[{"role": "user", "content": "hi"}],
-            model="openai/gpt-4.1",
-        )
-
-    assert result.content == "fallback ok"
-    assert attempts == [
-        ModelAttempt("openai/gpt-4.1", None, 0),
-        ModelAttempt("companyproxy/gpt-4", "companyproxy", 1),
-    ]
-
-
 def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     from nanobot.config.schema import Config
     from nanobot.providers.factory import provider_signature
@@ -336,19 +286,19 @@ class TestFallbackOnPrimaryError:
         assert fallback.chat_calls[0]["model"] == "fallback-a"
 
     @pytest.mark.asyncio
-    async def test_reports_primary_and_fallback_attempts_before_each_request(self) -> None:
+    async def test_reports_the_fallback_model_before_its_request(self) -> None:
         primary = _FakeProvider("primary", _error_response())
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
-        attempts: list[ModelAttempt] = []
+        fallback_models: list[str] = []
 
-        async def _observe(attempt: ModelAttempt) -> None:
-            attempts.append(attempt)
+        async def _observe(model: str) -> None:
+            fallback_models.append(model)
 
         fb = FallbackProvider(
             primary=primary,
             fallback_presets=[_fallback("fallback-a", provider="backup")],
             provider_factory=MagicMock(return_value=fallback),
-            model_attempt_observer=_observe,
+            fallback_model_observer=_observe,
         )
 
         result = await fb.chat_with_retry(
@@ -357,38 +307,7 @@ class TestFallbackOnPrimaryError:
         )
 
         assert result.content == "fallback ok"
-        assert attempts == [
-            ModelAttempt("primary-model", None, 0),
-            ModelAttempt("fallback-a", "backup", 1),
-        ]
-
-    @pytest.mark.asyncio
-    async def test_reports_resolved_provider_for_auto_fallback(self) -> None:
-        primary = _FakeProvider("primary", _error_response())
-        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
-        attempts: list[ModelAttempt] = []
-
-        async def _observe(attempt: ModelAttempt) -> None:
-            attempts.append(attempt)
-
-        fb = FallbackProvider(
-            primary=primary,
-            fallback_presets=[_fallback("companyproxy/gpt-4", provider="auto")],
-            provider_factory=MagicMock(return_value=fallback),
-            model_attempt_observer=_observe,
-            model_attempt_provider_resolver=lambda _preset: "companyproxy",
-        )
-
-        result = await fb.chat_with_retry(
-            messages=[{"role": "user", "content": "hi"}],
-            model="primary-model",
-        )
-
-        assert result.content == "fallback ok"
-        assert attempts == [
-            ModelAttempt("primary-model", None, 0),
-            ModelAttempt("companyproxy/gpt-4", "companyproxy", 1),
-        ]
+        assert fallback_models == ["fallback-a"]
 
     @pytest.mark.asyncio
     async def test_logs_primary_error_before_fallback(self) -> None:

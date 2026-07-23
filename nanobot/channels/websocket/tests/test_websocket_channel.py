@@ -1076,11 +1076,7 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
             channel="websocket",
             chat_id="chat-1",
             content="",
-            event=TurnModelUpdatedEvent(
-                model="deepseek/deepseek-chat",
-                provider="deepseek",
-                fallback_index=1,
-            ),
+            event=TurnModelUpdatedEvent(model="deepseek/deepseek-chat"),
         )
     )
 
@@ -1089,61 +1085,8 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "event": "turn_model_updated",
         "chat_id": "chat-1",
         "model_name": "deepseek/deepseek-chat",
-        "fallback_index": 1,
-        "provider": "deepseek",
     }
-    assert channel._turn_models["chat-1"].model == "deepseek/deepseek-chat"
     chat_two.send.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_hydrate_replays_the_latest_turn_model_after_refresh() -> None:
-    bus = MessageBus()
-    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
-    channel._turn_models["chat-1"] = TurnModelUpdatedEvent(
-        model="deepseek/deepseek-chat",
-        provider="deepseek",
-        fallback_index=1,
-    )
-    refreshed = AsyncMock()
-    channel._attach(refreshed, "chat-1")
-
-    await channel._hydrate_after_subscribe("chat-1")
-
-    payload = json.loads(refreshed.send.call_args.args[0])
-    assert payload["event"] == "turn_model_updated"
-    assert payload["model_name"] == "deepseek/deepseek-chat"
-    assert payload["fallback_index"] == 1
-
-
-@pytest.mark.asyncio
-async def test_new_message_discards_the_previous_turn_model_before_hydration(
-    bus: MagicMock,
-) -> None:
-    channel = _ch(bus)
-    channel._turn_models["chat-1"] = TurnModelUpdatedEvent(
-        model="deepseek/deepseek-chat",
-        provider="deepseek",
-        fallback_index=1,
-    )
-    connection = AsyncMock()
-    connection.remote_address = ("127.0.0.1", 50123)
-
-    await channel._dispatch_envelope(
-        connection,
-        "webui-client",
-        {
-            "type": "message",
-            "chat_id": "chat-1",
-            "content": "/model other",
-            "webui": True,
-            "turn_id": "turn-2",
-        },
-    )
-
-    assert "chat-1" not in channel._turn_models
-    connection.send.assert_not_awaited()
-    assert bus.publish_inbound.await_args.args[0].content == "/model other"
 
 
 @pytest.mark.asyncio

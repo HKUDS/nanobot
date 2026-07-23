@@ -36,7 +36,6 @@ import type {
   SettingsPayload,
   SlashCommand,
   SkillSummary,
-  TurnModelState,
   UIMessage,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -191,37 +190,25 @@ function toModelBadgeInfo(
   modelName: string | null,
   settings: SettingsPayload | null,
   modelPreset: string | null = null,
-  providerOverride?: string | null,
-  isRuntimeAttempt = false,
 ): ModelBadgeInfo {
   const scopedPreset = modelPreset?.trim() || null;
   const preset = modelPresetForBadge(settings, scopedPreset);
-  const configuredModel = scopedPreset
+  const model = scopedPreset
     ? preset?.model || null
-    : settings?.agent.model || null;
-  const model = isRuntimeAttempt
-    ? modelName || configuredModel
-    : scopedPreset
-      ? configuredModel
-      : modelName || configuredModel;
+    : modelName || settings?.agent.model || null;
   const label = toModelBadgeLabel(model);
   const rawProvider = preset?.provider
     || (!scopedPreset ? settings?.agent.provider : null)
     || null;
-  const configuredProvider = rawProvider === "auto"
+  const provider = rawProvider === "auto"
     ? preset?.resolved_provider
       || (!scopedPreset ? settings?.agent.resolved_provider : null)
       || null
     : rawProvider || inferProviderFromModelName(model);
-  const provider = providerOverride && providerOverride !== "auto"
-    ? providerOverride
-    : isRuntimeAttempt && model !== configuredModel
-      ? inferProviderFromModelName(model) || configuredProvider
-      : configuredProvider;
   const providerRow = provider
     ? settings?.providers.find((item) => item.name === provider)
     : null;
-  const needsSetup = !isRuntimeAttempt && Boolean(
+  const needsSetup = Boolean(
     settings && (!model || !provider || !providerRow || !providerRow.configured),
   );
   return {
@@ -346,7 +333,7 @@ export function ThreadShell({
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
   const { client, ingressLimits, modelName, token } = useClient();
-  const [turnModel, setTurnModel] = useState<TurnModelState | null>(null);
+  const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const cliApps = useInstalledSettingItems({
@@ -387,16 +374,13 @@ export function ThreadShell({
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const bottomScrolledChatIdRef = useRef<string | null>(null);
-  const turnModelSelectionRef = useRef<{
-    chatId: string | null;
-    modelPreset: string | null;
-  } | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
   const handleTurnEnd = useCallback(() => {
+    setFallbackModelName(null);
     onTurnEnd?.();
   }, [onTurnEnd]);
   const {
@@ -490,37 +474,13 @@ export function ThreadShell({
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
-  useEffect(() => {
-    const previous = turnModelSelectionRef.current;
-    turnModelSelectionRef.current = {
-      chatId,
-      modelPreset: sessionModelPreset,
-    };
-    if (
-      !previous
-      || !chatId
-      || previous.chatId !== chatId
-      || previous.modelPreset === sessionModelPreset
-    ) {
-      return;
-    }
-    setTurnModel(null);
-  }, [chatId, sessionModelPreset]);
-  const displayModelName = turnModel?.modelName ?? modelName;
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(
-      displayModelName,
-      settings,
-      sessionModelPreset,
-      turnModel?.provider,
-      turnModel !== null,
-    ),
-    [displayModelName, sessionModelPreset, settings, turnModel],
+    () => toModelBadgeInfo(modelName, settings, sessionModelPreset),
+    [modelName, sessionModelPreset, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })
     : modelBadge.label;
-  const modelIsFallback = Boolean(turnModel && turnModel.fallbackIndex > 0);
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -557,26 +517,21 @@ export function ThreadShell({
 
   useEffect(() => {
     return client.onRuntimeModelUpdate(() => {
-      setTurnModel(null);
       void refreshModelSettings();
     });
   }, [client, refreshModelSettings]);
 
   useEffect(() => {
     if (!chatId) {
-      setTurnModel(null);
+      setFallbackModelName(null);
       return;
     }
-    setTurnModel(client.getTurnModel(chatId) ?? null);
+    setFallbackModelName(null);
     return client.onChat(chatId, (event) => {
       if (event.event !== "turn_model_updated") return;
-      setTurnModel({
-        modelName: event.model_name,
-        provider: event.provider ?? null,
-        fallbackIndex: Math.max(0, event.fallback_index),
-      });
+      setFallbackModelName(event.model_name);
     });
-  }, [chatId, client, modelName]);
+  }, [chatId, client]);
 
   useEffect(() => {
     if (!chatId || loading) return;
@@ -739,6 +694,7 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      setFallbackModelName(null);
       setScrollToLatestUserPromptSignal((value) => value + 1);
       send(content, images, withWorkspaceScope(options));
     },
@@ -867,7 +823,7 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          modelIsFallback={modelIsFallback}
+          fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
@@ -905,7 +861,7 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          modelIsFallback={modelIsFallback}
+          fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant="hero"
           slashCommands={slashCommands}

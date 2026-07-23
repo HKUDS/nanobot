@@ -7,7 +7,6 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import GoalStatusEvent, TurnModelUpdatedEvent
-from nanobot.providers.fallback_provider import ModelAttempt
 from nanobot.session import webui_turns as wth
 
 
@@ -74,10 +73,10 @@ async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_model_attempt_is_scoped_to_its_websocket_chat() -> None:
+async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
-    observer = wth.build_webui_model_attempt_observer(bus)
+    observer = wth.build_webui_fallback_model_observer(bus)
 
     with request_context(
         RequestContext(
@@ -86,13 +85,7 @@ async def test_turn_model_attempt_is_scoped_to_its_websocket_chat() -> None:
             metadata={"webui": True},
         )
     ):
-        await observer(
-            ModelAttempt(
-                model="deepseek/deepseek-chat",
-                provider="deepseek",
-                fallback_index=1,
-            )
-        )
+        await observer("deepseek/deepseek-chat")
 
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
@@ -100,22 +93,15 @@ async def test_turn_model_attempt_is_scoped_to_its_websocket_chat() -> None:
     assert outbound.metadata == {"webui": True}
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
-    assert outbound.event.fallback_index == 1
 
 
 @pytest.mark.asyncio
-async def test_turn_model_attempt_ignores_non_websocket_requests() -> None:
+async def test_fallback_model_ignores_non_websocket_requests() -> None:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
-    observer = wth.build_webui_model_attempt_observer(bus)
+    observer = wth.build_webui_fallback_model_observer(bus)
 
     with request_context(RequestContext(channel="telegram", chat_id="chat-model")):
-        await observer(
-            ModelAttempt(
-                model="fallback",
-                provider=None,
-                fallback_index=1,
-            )
-        )
+        await observer("fallback")
 
     bus.publish_outbound.assert_not_awaited()

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -83,17 +82,7 @@ _FALLBACK_ERROR_TOKENS = (
 )
 
 
-@dataclass(frozen=True)
-class ModelAttempt:
-    """One concrete model request selected by the fallback router."""
-
-    model: str
-    provider: str | None
-    fallback_index: int
-
-
-ModelAttemptObserver = Callable[[ModelAttempt], Awaitable[None]]
-ModelAttemptProviderResolver = Callable[[Any], str | None]
+FallbackModelObserver = Callable[[str], Awaitable[None]]
 
 
 class FallbackProvider(LLMProvider):
@@ -122,14 +111,12 @@ class FallbackProvider(LLMProvider):
         primary: LLMProvider,
         fallback_presets: list[Any],
         provider_factory: Callable[[Any], LLMProvider],
-        model_attempt_observer: ModelAttemptObserver | None = None,
-        model_attempt_provider_resolver: ModelAttemptProviderResolver | None = None,
+        fallback_model_observer: FallbackModelObserver | None = None,
     ):
         self._primary = primary
         self._fallback_presets = list(fallback_presets)
         self._provider_factory = provider_factory
-        self._model_attempt_observer = model_attempt_observer
-        self._model_attempt_provider_resolver = model_attempt_provider_resolver
+        self._fallback_model_observer = fallback_model_observer
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
@@ -145,9 +132,9 @@ class FallbackProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self._primary.get_default_model()
 
-    def set_model_attempt_observer(self, observer: ModelAttemptObserver | None) -> None:
+    def set_fallback_model_observer(self, observer: FallbackModelObserver | None) -> None:
         """Attach a process-level observer without changing request call signatures."""
-        self._model_attempt_observer = observer
+        self._fallback_model_observer = observer
 
     @property
     def supports_progress_deltas(self) -> bool:
@@ -166,9 +153,7 @@ class FallbackProvider(LLMProvider):
         if not self._has_fallbacks:
             return await self._primary.chat(**kwargs)
         return await self._try_with_fallback(
-            lambda p, kw: p.chat(**kw),
-            kwargs,
-            has_streamed=None,
+            lambda p, kw: p.chat(**kw), kwargs, has_streamed=None
         )
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
@@ -206,11 +191,6 @@ class FallbackProvider(LLMProvider):
 
         if self._primary_available():
             primary_was_attempted = True
-            await self._notify_model_attempt(
-                model=primary_model,
-                provider=None,
-                fallback_index=0,
-            )
             response = await call(self._primary, kwargs)
             if response.finish_reason != "error":
                 self._primary_failures = 0
@@ -297,11 +277,7 @@ class FallbackProvider(LLMProvider):
                 )
                 continue
 
-            await self._notify_model_attempt(
-                model=fallback_model,
-                provider=self._resolve_model_attempt_provider(fallback),
-                fallback_index=idx + 1,
-            )
+            await self._notify_fallback_model(fallback_model)
 
             original_values = {
                 name: kwargs.get(name, _MISSING)
@@ -350,36 +326,13 @@ class FallbackProvider(LLMProvider):
             finish_reason="error",
         )
 
-    async def _notify_model_attempt(
-        self,
-        *,
-        model: str,
-        provider: str | None,
-        fallback_index: int,
-    ) -> None:
-        if self._model_attempt_observer is None:
+    async def _notify_fallback_model(self, model: str) -> None:
+        if self._fallback_model_observer is None:
             return
         try:
-            await self._model_attempt_observer(
-                ModelAttempt(
-                    model=model,
-                    provider=provider,
-                    fallback_index=fallback_index,
-                )
-            )
+            await self._fallback_model_observer(model)
         except Exception:
-            logger.exception("model attempt observer failed for '{}'", model)
-
-    def _resolve_model_attempt_provider(self, fallback: Any) -> str | None:
-        configured_provider = getattr(fallback, "provider", None)
-        fallback_provider = None if configured_provider == "auto" else configured_provider
-        if self._model_attempt_provider_resolver is None:
-            return fallback_provider
-        try:
-            return self._model_attempt_provider_resolver(fallback) or fallback_provider
-        except Exception:
-            logger.exception("model attempt provider resolver failed for '{}'", fallback.model)
-            return fallback_provider
+            logger.exception("fallback model observer failed for '{}'", model)
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:

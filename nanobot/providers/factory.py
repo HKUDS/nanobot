@@ -203,9 +203,6 @@ def make_provider(
             provider_factory=lambda fb: _make_provider_core(
                 config, preset_name=preset_name, preset=fb
             ),
-            model_attempt_provider_resolver=lambda fb: config.get_provider_name(
-                fb.model, preset=fb
-            ),
         )
 
     return provider

@@ -357,7 +357,7 @@ describe("NanobotClient", () => {
     expect(handler).toHaveBeenCalledWith("openai/gpt-4.1", "fast");
   });
 
-  it("caches actual turn models per chat and clears them on a configured model change", () => {
+  it("dispatches turn model updates to the active chat", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -372,47 +372,13 @@ describe("NanobotClient", () => {
       event: "turn_model_updated",
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
-      provider: "deepseek",
-      fallback_index: 1,
     });
 
-    expect(client.getTurnModel("chat-a")).toEqual({
-      modelName: "deepseek/deepseek-chat",
-      provider: "deepseek",
-      fallbackIndex: 1,
-    });
-    expect(client.getTurnModel("chat-b")).toBeUndefined();
-    expect(chatHandler).toHaveBeenCalledWith(expect.objectContaining({
-      event: "turn_model_updated",
-      chat_id: "chat-a",
-    }));
-
-    lastSocket().fakeMessage({
-      event: "session_updated",
-      chat_id: "chat-b",
-      scope: "thread",
-    });
-    expect(client.getTurnModel("chat-a")).toBeDefined();
-
-    lastSocket().fakeMessage({
-      event: "session_updated",
-      chat_id: "chat-a",
-      scope: "thread",
-    });
-    expect(client.getTurnModel("chat-a")).toBeUndefined();
-
-    lastSocket().fakeMessage({
+    expect(chatHandler).toHaveBeenCalledWith({
       event: "turn_model_updated",
       chat_id: "chat-a",
       model_name: "deepseek/deepseek-chat",
-      provider: "deepseek",
-      fallback_index: 1,
     });
-    lastSocket().fakeMessage({
-      event: "runtime_model_updated",
-      model_name: "anthropic/claude-sonnet-4-5",
-    });
-    expect(client.getTurnModel("chat-a")).toBeUndefined();
   });
 
   it("dispatches session updates globally", () => {

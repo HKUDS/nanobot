@@ -35,7 +35,7 @@ from nanobot.bus.runtime_events import (
     TurnRunStatusChanged,
 )
 from nanobot.providers.base import LLMProvider
-from nanobot.providers.fallback_provider import ModelAttempt, ModelAttemptObserver
+from nanobot.providers.fallback_provider import FallbackModelObserver
 from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -275,10 +275,10 @@ class WebuiTurnRoutePolicy:
         return replace(route, metadata=metadata, publish_lifecycle=True)
 
 
-def build_webui_model_attempt_observer(bus: MessageBus) -> ModelAttemptObserver:
+def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
     """Translate provider fallback choices into chat-scoped WebUI events."""
 
-    async def _publish(attempt: ModelAttempt) -> None:
+    async def _publish(model: str) -> None:
         context = current_request_context()
         if context is None or context.channel != "websocket":
             return
@@ -289,11 +289,7 @@ def build_webui_model_attempt_observer(bus: MessageBus) -> ModelAttemptObserver:
             outbound_message_for_event(
                 channel=context.channel,
                 chat_id=chat_id,
-                event=TurnModelUpdatedEvent(
-                    model=attempt.model,
-                    provider=attempt.provider,
-                    fallback_index=attempt.fallback_index,
-                ),
+                event=TurnModelUpdatedEvent(model=model),
                 metadata=context.metadata,
             )
         )

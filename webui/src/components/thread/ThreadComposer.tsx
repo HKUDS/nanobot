@@ -170,7 +170,7 @@ interface ThreadComposerProps {
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
-  modelIsFallback?: boolean;
+  fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
@@ -816,7 +816,7 @@ export function ThreadComposer({
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
-  modelIsFallback = false,
+  fallbackModelName = null,
   onModelBadgeClick,
   variant = "thread",
   slashCommands = [],
@@ -2075,7 +2075,7 @@ export function ThreadComposer({
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
-                isFallback={modelIsFallback}
+                fallbackModelName={fallbackModelName}
                 isHero={isHero}
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
@@ -2364,7 +2364,7 @@ function ComposerModelBadge({
   provider,
   providerLabel,
   needsSetup,
-  isFallback,
+  fallbackModelName,
   isHero,
   onClick,
 }: {
@@ -2372,7 +2372,7 @@ function ComposerModelBadge({
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
-  isFallback?: boolean;
+  fallbackModelName?: string | null;
   isHero: boolean;
   onClick?: () => void;
 }) {
@@ -2389,25 +2389,27 @@ function ComposerModelBadge({
       title={title}
       type={interactive ? "button" : undefined}
       onClick={onClick}
-      data-fallback={isFallback ? "true" : undefined}
       className={cn(
         "inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
-        isFallback && "composer-model-fallback border-amber-400/55 bg-amber-50/55 dark:border-amber-300/30 dark:bg-amber-400/[0.08]",
         isHero
           ? "h-8 max-w-[min(7.5rem,32vw)] gap-1.5 px-2 text-[11.5px] sm:max-w-[min(12.5rem,44vw)]"
           : "h-9 max-w-[min(7.5rem,32vw)] gap-2 px-2.5 text-[12px] sm:max-w-[min(12rem,44vw)]",
       )}
     >
       <span
+        key={fallbackModelName || "configured-model"}
         data-testid={needsSetup ? "composer-model-setup-icon" : inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
+        data-fallback={fallbackModelName ? "true" : undefined}
+        title={fallbackModelName || undefined}
         className={cn(
           "grid shrink-0 place-items-center overflow-hidden",
           needsSetup
             ? "text-amber-800 dark:text-amber-200"
             : "rounded-full border bg-background",
+          fallbackModelName && "composer-model-fallback-flash",
           isHero ? "h-[18px] w-[18px]" : "h-5 w-5",
         )}
         style={{
@@ -2442,20 +2444,7 @@ function ComposerModelBadge({
           <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3 w-3" : "h-3 w-3")} />
         )}
       </span>
-      <span className="relative min-w-0 overflow-hidden">
-        <span className={cn("block truncate", isFallback && "composer-model-fallback-current")}>
-          {label}
-        </span>
-      </span>
-      {isFallback ? (
-        <span
-          data-testid="composer-model-fallback-indicator"
-          className="composer-model-fallback-indicator grid h-4 w-4 shrink-0 place-items-center rounded-full bg-amber-400/15 text-amber-700 dark:bg-amber-300/10 dark:text-amber-300"
-          aria-hidden
-        >
-          <CornerDownRight className="h-2.5 w-2.5" strokeWidth={2.2} />
-        </span>
-      ) : null}
+      <span className="truncate">{label}</span>
     </Container>
   );
 }

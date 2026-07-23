@@ -1623,7 +1623,7 @@ def _run_gateway(
     from nanobot.session.webui_turns import (
         WebuiTurnCoordinator,
         WebuiTurnRoutePolicy,
-        build_webui_model_attempt_observer,
+        build_webui_fallback_model_observer,
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -1656,18 +1656,18 @@ def _run_gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
-    model_attempt_observer = build_webui_model_attempt_observer(bus)
+    fallback_model_observer = build_webui_fallback_model_observer(bus)
 
-    def _observe_model_attempts(snapshot):
+    def _observe_fallback_models(snapshot):
         if isinstance(snapshot.provider, FallbackProvider):
-            snapshot.provider.set_model_attempt_observer(model_attempt_observer)
+            snapshot.provider.set_fallback_model_observer(fallback_model_observer)
         return snapshot
 
     def _load_gateway_provider_snapshot(*args: Any, **kwargs: Any):
-        return _observe_model_attempts(load_provider_snapshot(*args, **kwargs))
+        return _observe_fallback_models(load_provider_snapshot(*args, **kwargs))
 
     try:
-        provider_snapshot = _observe_model_attempts(build_provider_snapshot(config))
+        provider_snapshot = _observe_fallback_models(build_provider_snapshot(config))
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
