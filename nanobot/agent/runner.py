@@ -722,10 +722,20 @@ class AgentRunner:
         )
 
         progress_state: dict[str, bool] | None = None
+        active_hosted_tools: dict[str, dict[str, Any]] = {}
 
         async def _provider_tool_event(event: dict[str, Any]) -> None:
-            if event.get("kind") == "hosted_tool":
-                await hook.on_provider_tool_event(context, event)
+            if event.get("kind") != "hosted_tool":
+                return
+            await hook.on_provider_tool_event(context, event)
+            call_id = event.get("call_id")
+            if not call_id:
+                return
+            call_id = str(call_id)
+            if event.get("phase") == "start":
+                active_hosted_tools[call_id] = dict(event)
+            elif event.get("phase") in {"end", "error"}:
+                active_hosted_tools.pop(call_id, None)
 
         if wants_streaming:
             thinking_buf = ""
@@ -819,6 +829,17 @@ class AgentRunner:
                     finish_reason="error",
                     error_kind="timeout",
                 )
+        # chat_stream_with_retry may recover internally, so only fail unfinished
+        # hosted calls after the provider returns its final error response.
+        if response.finish_reason == "error":
+            for event in list(active_hosted_tools.values()):
+                await _provider_tool_event({
+                    **event,
+                    "phase": "error",
+                    "result": None,
+                    "error": response.content
+                    or "Model request failed before the provider-hosted tool completed.",
+                })
         if progress_state and progress_state.get("reasoning_open"):
             await hook.emit_reasoning_end()
         dropped, all_dropped, original_finish_reason = (

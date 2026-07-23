@@ -171,6 +171,66 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
 
 
 @pytest.mark.asyncio
+async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
+    provider = MagicMock()
+    provider.supports_progress_deltas = True
+
+    async def chat_stream_with_retry(*, on_tool_call_delta, **kwargs):
+        await on_tool_call_delta({
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": "x-search-failed",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": None,
+        })
+        return LLMResponse(
+            content="hosted search backend failed",
+            finish_reason="error",
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    progress_events: list[dict] = []
+
+    async def progress_cb(content, *, tool_events=None, **kwargs):
+        if tool_events:
+            progress_events.extend(tool_events)
+
+    hook = CompositeHook([AgentProgressHook(on_progress=progress_cb)])
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "search X"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        progress_callback=progress_cb,
+        hook=hook,
+    ))
+
+    assert result.stop_reason == "error"
+    assert [(event["phase"], event["call_id"]) for event in progress_events] == [
+        ("start", "x-search-failed"),
+        ("error", "x-search-failed"),
+    ]
+    assert progress_events[-1] == {
+        "version": 1,
+        "phase": "error",
+        "call_id": "x-search-failed",
+        "name": "x_search",
+        "arguments": {"query": "nanobot oauth"},
+        "result": None,
+        "error": "hosted search backend failed",
+        "files": [],
+        "embeds": [],
+    }
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_path):
     provider = MagicMock()
     provider.supports_progress_deltas = True
