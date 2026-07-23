@@ -677,3 +677,98 @@
     min-height: 2.75rem;
   }
 }
+
+/*
+ * Composer controls compress against their actual container, not the viewport.
+ * Permission state has priority over the model label; both retain their full
+ * accessible names and title text when their visible labels are shortened.
+ */
+.thread-composer-surface {
+  container-name: thread-composer;
+  container-type: inline-size;
+}
+
+.thread-composer-footer-actions {
+  flex: 0 1 auto;
+  max-width: 58%;
+}
+
+.thread-composer-model-badge {
+  flex-shrink: 1;
+}
+
+@container thread-composer (max-width: 21rem) {
+  .thread-composer-footer {
+    column-gap: 0.25rem;
+    padding-inline: 0.5rem;
+  }
+
+  .thread-composer-footer-primary,
+  .thread-composer-footer-actions {
+    gap: 0.25rem;
+  }
+
+  .thread-composer-access {
+    max-width: 6.5rem;
+    padding-inline: 0.5rem;
+    font-size: 0.71875rem;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0.25rem;
+  }
+
+  .thread-composer-access-chevron {
+    margin-left: 0.25rem;
+  }
+
+  .thread-composer-access-label-full {
+    display: none;
+  }
+
+  .thread-composer-access-label-short {
+    display: inline;
+  }
+}
+
+@container thread-composer (max-width: 19rem) {
+  .thread-composer-model-badge {
+    width: 2rem;
+    flex: none;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .thread-composer-model-label {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 16rem) {
+  .thread-composer-access {
+    width: 2rem;
+    flex: none;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .thread-composer-access-icon {
+    margin-right: 0;
+  }
+
+  .thread-composer-access-label-short,
+  .thread-composer-access-chevron {
+    display: none;
+  }
+}
+
+@container thread-composer (max-width: 15rem) {
+  .thread-composer-action.touch-target,
+  .thread-composer-access.touch-target {
+    width: 2rem;
+    min-width: 2rem;
+    height: 2rem;
+    min-height: 2rem;
+  }
+}

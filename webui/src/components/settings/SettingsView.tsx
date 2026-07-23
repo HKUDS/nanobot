@@ -270,6 +270,11 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
 const DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH = 2;
 const CLI_APPS_REFRESH_RETRY_MS = 2_000;
 const CLI_APPS_REFRESH_MAX_RETRIES = 30;
+const SETTINGS_SEARCH_INPUT_CLASS = cn(
+  "border-border/45 bg-settings-surface transition-colors hover:border-border/70",
+  "focus-visible:border-border/70 focus-visible:bg-background",
+  "focus-visible:ring-0 focus-visible:ring-offset-0",
+);
 
 const FALLBACK_TIMEZONES = [
   "UTC",
@@ -2200,23 +2205,12 @@ function SettingsSidebar({
   hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
-  const navRef = useRef<HTMLElement>(null);
-  const activeItemRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const nav = navRef.current;
-    const activeItem = activeItemRef.current;
-    if (!nav || !activeItem || nav.scrollWidth <= nav.clientWidth) return;
-    const navRect = nav.getBoundingClientRect();
-    const itemRect = activeItem.getBoundingClientRect();
-    const itemCenter = itemRect.left - navRect.left + nav.scrollLeft + itemRect.width / 2;
-    const targetLeft = Math.max(
-      0,
-      Math.min(nav.scrollWidth - nav.clientWidth, itemCenter - nav.clientWidth / 2),
-    );
-    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    nav.scrollTo({ left: targetLeft, behavior: reducedMotion ? "auto" : "smooth" });
-  }, [activeSection]);
+  const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
+    ?? SETTINGS_NAV_ITEMS[0];
+  const ActiveIcon = activeItem.icon;
+  const activeLabel = t(`settings.nav.${activeItem.key}`, {
+    defaultValue: activeItem.fallback,
+  });
 
   return (
     <aside
@@ -2240,31 +2234,73 @@ function SettingsSidebar({
       </div>
 
       <nav
-        ref={navRef}
         aria-label={t("settings.sidebar.ariaLabel")}
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:block lg:space-y-1 lg:overflow-visible lg:px-0 lg:pb-0"
+        className="w-full"
       >
-        {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
-          const active = key === activeSection;
-          return (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <button
-              ref={active ? activeItemRef : undefined}
-              key={key}
               type="button"
-              aria-current={active ? "page" : undefined}
-              onClick={() => onSelectSection(key)}
-              className={cn(
-                "touch-target flex h-9 w-auto shrink-0 items-center gap-2 rounded-full px-3 text-left text-[13px] font-medium transition-colors lg:w-full lg:rounded-[10px] lg:px-2.5",
-                active
-                  ? "bg-sidebar-accent text-foreground"
-                  : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
-              )}
+              aria-label={`${t("settings.sidebar.title")}: ${activeLabel}`}
+              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-[14px] bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-accent/80 lg:hidden"
             >
-              <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-              <span className="truncate">{t(`settings.nav.${key}`, { defaultValue: fallback })}</span>
+              <ActiveIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+              <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             </button>
-          );
-        })}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            sideOffset={6}
+            className="w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-1.5rem)] rounded-[16px] p-1.5"
+          >
+            {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
+              const active = key === activeSection;
+              return (
+                <DropdownMenuItem
+                  key={key}
+                  aria-current={active ? "page" : undefined}
+                  onSelect={() => onSelectSection(key)}
+                  className={cn(
+                    "flex h-10 cursor-default items-center gap-2.5 rounded-[11px] px-2.5 text-[13px] font-medium",
+                    active && "bg-sidebar-accent text-foreground focus:bg-sidebar-accent",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">
+                    {t(`settings.nav.${key}`, { defaultValue: fallback })}
+                  </span>
+                  {active ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : null}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <div className="hidden space-y-1 lg:block">
+          {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
+            const active = key === activeSection;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                onClick={() => onSelectSection(key)}
+                className={cn(
+                  "touch-target flex h-9 w-full items-center gap-2 rounded-[10px] px-2.5 text-left text-[13px] font-medium transition-colors",
+                  active
+                    ? "bg-sidebar-accent text-foreground"
+                    : "text-muted-foreground/78 hover:bg-muted/45 hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                <span className="truncate">
+                  {t(`settings.nav.${key}`, { defaultValue: fallback })}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </nav>
 
       <div className="hidden lg:mt-auto lg:block lg:pt-4">
@@ -3511,7 +3547,10 @@ function ProvidersSettings({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={tx("settings.providers.searchPlaceholder", "Search providers")}
-          className="h-10 rounded-full border-border/45 bg-settings-surface pl-9 text-[13px]"
+          className={cn(
+            "h-10 rounded-full pl-9 text-[13px]",
+            SETTINGS_SEARCH_INPUT_CLASS,
+          )}
         />
       </div>
       <ProviderSection
@@ -4220,7 +4259,10 @@ function AutomationsSettings({
                   "settings.automations.search",
                   "Search task, message, linked chat, or schedule",
                 )}
-                className="h-9 w-full rounded-[13px] border-border/45 bg-settings-surface pl-9 text-[13px]"
+                className={cn(
+                  "h-9 w-full rounded-[13px] pl-9 text-[13px]",
+                  SETTINGS_SEARCH_INPUT_CLASS,
+                )}
               />
             </div>
             <DropdownMenu>
@@ -5830,7 +5872,10 @@ function ChannelsSettings({
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder={tx("settings.channels.searchPlaceholder", "Search channels")}
-                className="h-12 rounded-[14px] border-border/45 bg-settings-surface pl-11 text-[15px]"
+                className={cn(
+                  "h-12 rounded-[14px] pl-11 text-[15px]",
+                  SETTINGS_SEARCH_INPUT_CLASS,
+                )}
               />
             </div>
             <div className="flex shrink-0 flex-wrap gap-1.5 rounded-[14px] bg-muted/55 p-1">
@@ -6069,7 +6114,10 @@ function AppsCatalogSettings({
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
-              className="h-12 rounded-[14px] border-border/45 bg-settings-surface pl-11 text-[15px]"
+              className={cn(
+                "h-12 rounded-[14px] pl-11 text-[15px]",
+                SETTINGS_SEARCH_INPUT_CLASS,
+              )}
             />
           </div>
           <SegmentedControl

@@ -1101,7 +1101,9 @@
         "projectAria": "Choose project",
         "projectPlaceholder": "Select project",
         "default": "Default Permission",
-        "full": "Full Access"
+        "defaultShort": "Default",
+        "full": "Full Access",
+        "fullShort": "Full"
       }
     },
     "scrollToBottom": "Scroll to bottom",

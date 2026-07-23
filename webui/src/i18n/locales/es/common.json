@@ -1088,7 +1088,9 @@
         "projectAria": "Elegir proyecto",
         "projectPlaceholder": "Seleccionar proyecto",
         "default": "Permiso predeterminado",
-        "full": "Acceso completo"
+        "defaultShort": "Predeterm.",
+        "full": "Acceso completo",
+        "fullShort": "Completo"
       }
     },
     "scrollToBottom": "Desplazarse al final",

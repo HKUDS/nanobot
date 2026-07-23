@@ -1608,8 +1608,8 @@ describe("App layout", () => {
     expect(screen.queryByTestId("overview-logo-nanobot-workspace")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(settingsNav.className).toContain("overflow-x-auto");
-    expect(settingsNav.className).not.toContain("grid-cols-2");
+    expect(settingsNav.className).not.toContain("overflow-x-auto");
+    expect(within(settingsNav).getByRole("button", { name: "Settings: Overview" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -1622,10 +1622,13 @@ describe("App layout", () => {
     expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));
+    fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Overview" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Appearance" }));
     expect(screen.getByText("Brand logos")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
+    expect(within(settingsNav).getByRole("button", { name: "Settings: Appearance" })).toBeInTheDocument();
+    fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Appearance" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.getByText("Current configuration")).toBeInTheDocument();
     expect(screen.queryByText("Presets")).not.toBeInTheDocument();

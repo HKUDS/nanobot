@@ -1087,7 +1087,9 @@
         "projectAria": "選擇專案",
         "projectPlaceholder": "選擇專案",
         "default": "預設權限",
-        "full": "完整存取權"
+        "defaultShort": "預設",
+        "full": "完整存取權",
+        "fullShort": "完整"
       }
     },
     "scrollToBottom": "捲動到底部",

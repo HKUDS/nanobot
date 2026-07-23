@@ -226,6 +226,76 @@ const HERO_GREETING_KEYS = [
   "thread.empty.greetings.tackle",
 ] as const;
 
+function HeroGreeting({ text }: { text: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const heading = headingRef.current;
+    if (!container || !heading) return;
+
+    const fitToWidth = () => {
+      heading.style.removeProperty("font-size");
+      const availableWidth = container.clientWidth;
+      if (availableWidth <= 0) return;
+
+      const naturalWidth = heading.scrollWidth;
+      const maximumFontSize = Number.parseFloat(window.getComputedStyle(heading).fontSize);
+      if (
+        naturalWidth <= availableWidth
+        || !Number.isFinite(maximumFontSize)
+        || maximumFontSize <= 0
+      ) {
+        return;
+      }
+
+      const fittedFontSize = Math.max(
+        12,
+        Math.floor(maximumFontSize * ((availableWidth - 2) / naturalWidth) * 100) / 100,
+      );
+      heading.style.fontSize = `${fittedFontSize}px`;
+    };
+
+    fitToWidth();
+
+    let lastObservedWidth = container.clientWidth;
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(([entry]) => {
+          const nextWidth = entry?.contentRect.width ?? container.clientWidth;
+          if (nextWidth === lastObservedWidth) return;
+          lastObservedWidth = nextWidth;
+          fitToWidth();
+        });
+    resizeObserver?.observe(container);
+    window.addEventListener("resize", fitToWidth);
+
+    let cancelled = false;
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) fitToWidth();
+    });
+
+    return () => {
+      cancelled = true;
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", fitToWidth);
+    };
+  }, [text]);
+
+  return (
+    <div ref={containerRef} className="min-w-0 w-full max-w-[44rem]">
+      <h1
+        ref={headingRef}
+        data-testid="hero-greeting"
+        className="whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
+      >
+        {text}
+      </h1>
+    </div>
+  );
+}
+
 function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
   const index = Math.floor(Math.random() * HERO_GREETING_KEYS.length);
   return HERO_GREETING_KEYS[index] ?? HERO_GREETING_KEYS[0];
@@ -890,9 +960,7 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-      <h1 className="max-w-[44rem] text-balance text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight">
-        {t(heroGreetingKey)}
-      </h1>
+      <HeroGreeting text={t(heroGreetingKey)} />
     </div>
   );
   const sessionInfoAction = historyKey ? (

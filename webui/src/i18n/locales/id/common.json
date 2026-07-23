@@ -1087,7 +1087,9 @@
         "projectAria": "Pilih proyek",
         "projectPlaceholder": "Pilih proyek",
         "default": "Izin default",
-        "full": "Akses penuh"
+        "defaultShort": "Default",
+        "full": "Akses penuh",
+        "fullShort": "Penuh"
       }
     },
     "scrollToBottom": "Gulir ke bawah",

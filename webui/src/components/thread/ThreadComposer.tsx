@@ -1879,7 +1879,7 @@ export function ThreadComposer({
       ) : null}
       <div
         className={cn(
-          "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
+          "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
             ? "max-w-[58rem] rounded-[28px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
             : "max-w-[49.5rem] rounded-[22px] bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
@@ -2019,13 +2019,21 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "flex flex-nowrap items-center",
+            "thread-composer-footer flex flex-nowrap items-center",
             isHero
-              ? cn("gap-x-1.5 px-3 sm:px-4", showProjectPicker ? "pb-1.5" : "pb-3.5")
+              ? cn(
+                  "gap-x-1.5 px-3 sm:px-4",
+                  showProjectPicker ? "pb-1.5" : "pb-3.5",
+                )
               : "gap-x-2 px-2.5 pb-2 sm:px-3",
           )}
         >
-          <div className={cn("flex min-w-0 flex-1 basis-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
+          <div
+            className={cn(
+              "thread-composer-footer-primary flex min-w-0 flex-1 basis-0 items-center",
+              isHero ? "gap-1.5" : "gap-2",
+            )}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -2042,7 +2050,7 @@ export function ThreadComposer({
               aria-label={t("thread.composer.attachImage")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "touch-target rounded-full text-muted-foreground hover:text-foreground",
+                "thread-composer-action touch-target rounded-full text-muted-foreground hover:text-foreground",
                 isHero
                   ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
                   : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
@@ -2068,7 +2076,12 @@ export function ThreadComposer({
               />
             ) : null}
           </div>
-          <div className={cn("ml-auto flex min-w-0 shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
+          <div
+            className={cn(
+              "thread-composer-footer-actions ml-auto flex min-w-0 items-center justify-end",
+              isHero ? "gap-1.5" : "gap-2",
+            )}
+          >
             {modelLabel && !voiceRecorder.isRecording ? (
               <ComposerModelBadge
                 label={modelLabel}
@@ -2097,7 +2110,7 @@ export function ThreadComposer({
                       onPointerCancel={voiceRecorder.endPress}
                       onClick={voiceRecorder.handleClick}
                       className={cn(
-                        "touch-target rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                        "thread-composer-action touch-target rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
                         isHero ? "h-8 w-8" : "h-9 w-9",
                         voiceRecorder.isRecording &&
                           "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
@@ -2140,7 +2153,7 @@ export function ThreadComposer({
               }
               onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
-                "touch-target rounded-full transition-transform",
+                "thread-composer-action touch-target rounded-full transition-transform",
                 showStopButton
                   ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
                   : isHero
@@ -2388,16 +2401,17 @@ function ComposerModelBadge({
     <Container
       data-fallback={fallbackModelName ? "true" : undefined}
       title={fallbackModelName || title}
+      aria-label={label}
       type={interactive ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "composer-model-badge inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
+        "composer-model-badge thread-composer-model-badge inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
         isHero
-          ? "h-8 max-w-[min(7.5rem,32vw)] gap-1.5 px-2 text-[11.5px] sm:max-w-[min(12.5rem,44vw)]"
-          : "h-9 max-w-[min(7.5rem,32vw)] gap-2 px-2.5 text-[12px] sm:max-w-[min(12rem,44vw)]",
+          ? "h-8 max-w-[min(12.5rem,44vw)] gap-1.5 px-2 text-[11.5px]"
+          : "h-9 max-w-[min(12rem,44vw)] gap-2 px-2.5 text-[12px]",
       )}
     >
       <span
@@ -2441,7 +2455,7 @@ function ComposerModelBadge({
           <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3 w-3" : "h-3 w-3")} />
         )}
       </span>
-      <span className="truncate">{label}</span>
+      <span className="thread-composer-model-label truncate">{label}</span>
     </Container>
   );
 }

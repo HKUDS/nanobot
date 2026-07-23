@@ -1101,7 +1101,9 @@
         "projectAria": "Escolher projeto",
         "projectPlaceholder": "Selecionar projeto",
         "default": "Permissão padrão",
-        "full": "Acesso total"
+        "defaultShort": "Padrão",
+        "full": "Acesso total",
+        "fullShort": "Total"
       }
     },
     "scrollToBottom": "Rolar para o final",

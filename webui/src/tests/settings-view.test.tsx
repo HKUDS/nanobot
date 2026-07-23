@@ -1365,7 +1365,10 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "channels" });
 
     const emailRow = await screen.findByRole("button", { name: "View Email settings" });
-    expect(screen.getByPlaceholderText("Search channels")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search channels")).toHaveClass(
+      "focus-visible:ring-0",
+      "focus-visible:ring-offset-0",
+    );
     expect(screen.queryByRole("switch", { name: "Email channel" })).not.toBeInTheDocument();
 
     fireEvent.click(emailRow);

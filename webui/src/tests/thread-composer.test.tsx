@@ -726,7 +726,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace access mode" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: /Workspace access mode/ }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Full Access/ }));
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(
@@ -736,6 +736,34 @@ describe("ThreadComposer", () => {
         restrict_to_workspace: false,
       }),
     );
+  });
+
+  it("exposes full and compact workspace labels for container-driven compression", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        variant="hero"
+        workspaceScope={{
+          project_path: "/tmp/project",
+          project_name: "project",
+          access_mode: "full",
+          restrict_to_workspace: false,
+        }}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    const accessButton = screen.getByRole("button", {
+      name: "Workspace access mode: Full Access",
+    });
+    const fullLabel = within(accessButton).getByText("Full Access");
+    const shortLabel = within(accessButton).getByText("Full");
+    expect(accessButton).toHaveAttribute("title", "Full Access");
+    expect(fullLabel).toHaveClass("thread-composer-access-label-full");
+    expect(shortLabel).toHaveClass("thread-composer-access-label-short");
+    expect(shortLabel).toHaveClass("hidden");
   });
 
   it("keeps project selection as a compact composer dropdown", async () => {

@@ -1087,7 +1087,9 @@
         "projectAria": "Choisir un projet",
         "projectPlaceholder": "Sélectionner un projet",
         "default": "Autorisation par défaut",
-        "full": "Accès complet"
+        "defaultShort": "Par défaut",
+        "full": "Accès complet",
+        "fullShort": "Complet"
       }
     },
     "scrollToBottom": "Faire défiler vers le bas",

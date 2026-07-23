@@ -1087,7 +1087,9 @@
         "projectAria": "プロジェクトを選択",
         "projectPlaceholder": "プロジェクトを選択",
         "default": "既定の権限",
-        "full": "フルアクセス"
+        "defaultShort": "既定",
+        "full": "フルアクセス",
+        "fullShort": "フル"
       }
     },
     "scrollToBottom": "一番下へスクロール",

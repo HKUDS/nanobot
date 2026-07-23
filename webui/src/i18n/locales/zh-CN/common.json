@@ -1101,7 +1101,9 @@
         "projectAria": "选择项目",
         "projectPlaceholder": "选择项目",
         "default": "默认权限",
-        "full": "完全访问权限"
+        "defaultShort": "默认",
+        "full": "完全访问权限",
+        "fullShort": "完全"
       }
     },
     "scrollToBottom": "滚动到底部",

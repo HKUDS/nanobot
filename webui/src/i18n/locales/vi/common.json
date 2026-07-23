@@ -1087,7 +1087,9 @@
         "projectAria": "Chọn dự án",
         "projectPlaceholder": "Chọn dự án",
         "default": "Quyền mặc định",
-        "full": "Toàn quyền truy cập"
+        "defaultShort": "Mặc định",
+        "full": "Toàn quyền truy cập",
+        "fullShort": "Toàn quyền"
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
