@@ -451,6 +451,70 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
 
 
 @pytest.mark.asyncio
+async def test_runner_length_recovery_returns_all_segments():
+    """Recovered output segments are returned together instead of only the tail."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first ", finish_reason="length"),
+        LLMResponse(content="second ", finish_reason="length"),
+        LLMResponse(content="third", finish_reason="stop"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "give a long answer"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "first second third"
+    assert [
+        message["content"]
+        for message in result.messages
+        if message.get("role") == "assistant"
+    ] == ["first", "second", "third"]
+    assert provider.chat_with_retry.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_runner_length_recovery_does_not_leak_across_tool_calls():
+    """A recovered prefix belongs only to its contiguous response chain."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="working", finish_reason="length"),
+        LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
+            finish_reason="tool_calls",
+        ),
+        LLMResponse(content="final answer", finish_reason="stop"),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "inspect a file"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "final answer"
+    assert result.tools_used == ["read_file"]
+
+
+@pytest.mark.asyncio
 async def test_runner_empty_response_does_not_break_tool_chain():
     """An empty intermediate response must not kill an ongoing tool chain.
 
