@@ -197,6 +197,86 @@ class TestExtractText:
         assert result.index("Applicant details") < result.index("Name\tAda Lovelace")
         assert result.index("Analytical Engine") < result.index("End of form")
 
+    def test_extract_text_docx_preserves_nested_table_text(self, tmp_path: Path):
+        """Nested layout tables must not silently drop form fields."""
+        from docx import Document
+
+        docx_file = tmp_path / "nested-form.docx"
+        doc = Document()
+        outer_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        outer_cell.add_paragraph("Contact")
+        nested = outer_cell.add_table(rows=1, cols=2)
+        nested.cell(0, 0).text = "Email"
+        nested.cell(0, 1).text = "ada@example.com"
+        doc.save(docx_file)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert "Contact" in result
+        assert "Email" in result
+        assert "ada@example.com" in result
+        assert result.index("Contact") < result.index("Email") < result.index("ada@example.com")
+
+    def test_extract_text_docx_does_not_expand_grid_spans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Physical cells avoid python-docx's eager gridSpan expansion."""
+        from docx import Document
+        from docx.table import _Row
+
+        docx_file = tmp_path / "merged.docx"
+        doc = Document()
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).merge(table.cell(0, 1)).text = "Only once"
+        doc.save(docx_file)
+
+        def fail_on_expansion(_row: _Row):
+            pytest.fail("row.cells expands gridSpan before extraction can apply a bound")
+
+        monkeypatch.setattr(_Row, "cells", property(fail_on_expansion))
+
+        assert extract_text(docx_file) == "Only once"
+
+    def test_extract_text_docx_bounds_physical_table_cells(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Large tables fail safely even when their text output would be empty."""
+        from docx import Document
+
+        from nanobot.utils import document as document_utils
+
+        docx_file = tmp_path / "too-many-cells.docx"
+        doc = Document()
+        doc.add_table(rows=1, cols=2)
+        doc.save(docx_file)
+        monkeypatch.setattr(document_utils, "_MAX_DOCX_TABLE_CELLS", 1)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert result.startswith("[error: unsafe DOCX:")
+
+    def test_extract_text_docx_bounds_table_nesting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Deeply nested tables fail safely instead of recursing without a bound."""
+        from docx import Document
+
+        from nanobot.utils import document as document_utils
+
+        docx_file = tmp_path / "nested-too-deep.docx"
+        doc = Document()
+        outer_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        outer_cell.add_table(rows=1, cols=1).cell(0, 0).text = "Nested"
+        doc.save(docx_file)
+        monkeypatch.setattr(document_utils, "_MAX_DOCX_TABLE_DEPTH", 1)
+
+        result = extract_text(docx_file)
+
+        assert result is not None
+        assert result.startswith("[error: unsafe DOCX:")
+
     def test_extract_text_docx_empty(self, tmp_path: Path):
         """Test extracting text from an empty .docx file."""
         from docx import Document

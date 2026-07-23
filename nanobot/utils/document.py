@@ -1,6 +1,7 @@
 """Document text extraction utilities for nanobot."""
 
 import mimetypes
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
@@ -43,6 +44,8 @@ _MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 _MAX_OFFICE_ARCHIVE_MEMBERS = 10_000
 _MAX_OFFICE_UNCOMPRESSED_SIZE = 256 * 1024 * 1024  # 256 MB
 _MAX_OFFICE_MEMBER_SIZE = 128 * 1024 * 1024  # 128 MB
+_MAX_DOCX_TABLE_CELLS = 100_000
+_MAX_DOCX_TABLE_DEPTH = 8
 _MAX_PDF_CONTENT_STREAM_SIZE = 32 * 1024 * 1024  # 32 MB per page
 _MAX_PDF_ATTACHMENT_PAGES = 100
 
@@ -85,6 +88,10 @@ class PdfSafetyError(Exception):
 
 class PdfPageRangeError(Exception):
     """Raised when a requested PDF page range is invalid."""
+
+
+class DocxSafetyError(Exception):
+    """Raised when a DOCX table exceeds a parser safety boundary."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +217,7 @@ def _extract_docx(path: Path) -> str:
     """Extract text from DOCX using python-docx."""
     try:
         from docx import Document as DocxDocument
-        from docx.table import Table
+        from docx.table import Table, _Cell
         from docx.text.paragraph import Paragraph
     except ImportError:
         return "[error: python-docx not installed]"
@@ -219,6 +226,39 @@ def _extract_docx(path: Path) -> str:
             return error
         doc = DocxDocument(path)
         collector = _TextCollector(_MAX_TEXT_LENGTH)
+        table_cell_count = 0
+
+        def cell_text(cell: _Cell, depth: int) -> str:
+            parts: list[str] = []
+            for block in cell.iter_inner_content():
+                if isinstance(block, Paragraph):
+                    text = " ".join(block.text.split())
+                    if text:
+                        parts.append(text)
+                elif isinstance(block, Table):
+                    parts.extend(row.replace("\t", " | ") for row in table_rows(block, depth + 1))
+            return " ".join(parts)
+
+        def table_rows(table: Table, depth: int) -> Iterator[str]:
+            nonlocal table_cell_count
+            if depth > _MAX_DOCX_TABLE_DEPTH:
+                raise DocxSafetyError(
+                    f"table nesting exceeds {_MAX_DOCX_TABLE_DEPTH} levels"
+                )
+            for row in table.rows:
+                cells: list[str] = []
+                # row.cells expands w:gridSpan before callers can apply a bound.
+                # Physical w:tc elements keep malformed documents proportional to XML size.
+                for tc in row._tr.tc_lst:
+                    table_cell_count += 1
+                    if table_cell_count > _MAX_DOCX_TABLE_CELLS:
+                        raise DocxSafetyError(
+                            f"document contains more than {_MAX_DOCX_TABLE_CELLS} table cells"
+                        )
+                    cells.append(cell_text(_Cell(tc, table), depth))
+                if any(cells):
+                    yield "\t".join(cells)
+
         for block in doc.iter_inner_content():
             if isinstance(block, Paragraph):
                 text = block.text.strip()
@@ -228,22 +268,14 @@ def _extract_docx(path: Path) -> str:
             if not isinstance(block, Table):
                 continue
             first_row = True
-            for row in block.rows:
-                cells: list[str] = []
-                seen_cells: set[int] = set()
-                for cell in row.cells:
-                    cell_id = id(cell._tc)
-                    if cell_id in seen_cells:
-                        continue
-                    seen_cells.add(cell_id)
-                    cells.append(" ".join(cell.text.split()))
-                if not any(cells):
-                    continue
+            for row_text in table_rows(block, 1):
                 separator = "\n\n" if first_row else "\n"
                 first_row = False
-                if not collector.add("\t".join(cells), separator=separator):
+                if not collector.add(row_text, separator=separator):
                     return collector.render()
         return collector.render()
+    except DocxSafetyError as e:
+        return f"[error: unsafe DOCX: {e!s}]"
     except Exception as e:
         logger.exception("Failed to extract DOCX {}", path)
         return f"[error: failed to extract DOCX: {e!s}]"
