@@ -90,18 +90,27 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
                 min_code_pos = len(fence)
                 if content.startswith(fence + "\n"):
                     min_code_pos += 1
-                if pos < min_code_pos and min_code_pos + len(closing) > max_len:
-                    chunks.append(content[:max_len])
-                    content = content[max_len:].lstrip()
-                    continue
-                if pos + len(closing) > max_len:
+                # When the only break in range is the opening fence newline,
+                # cutting there re-emits the same fence and never advances.
+                if pos < min_code_pos:
+                    if min_code_pos + len(closing) > max_len:
+                        chunks.append(content[:max_len])
+                        content = content[max_len:].lstrip()
+                        continue
+                    budget = max_len - len(closing)
+                    recut = content[:budget]
+                    adjusted = recut.rfind("\n", min_code_pos)
+                    if adjusted < min_code_pos:
+                        adjusted = recut.rfind(" ", min_code_pos)
+                    pos = adjusted if adjusted >= min_code_pos else budget
+                elif pos + len(closing) > max_len:
                     budget = max_len - len(closing)
                     if budget > 0:
                         recut = content[:budget]
-                        adjusted = recut.rfind("\n")
-                        if adjusted <= 0:
-                            adjusted = recut.rfind(" ")
-                        pos = adjusted if adjusted > 0 else budget
+                        adjusted = recut.rfind("\n", min_code_pos)
+                        if adjusted < min_code_pos:
+                            adjusted = recut.rfind(" ", min_code_pos)
+                        pos = adjusted if adjusted >= min_code_pos else budget
                     else:
                         closing = "```"
                         pos = max_len - len(closing)
