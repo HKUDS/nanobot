@@ -372,7 +372,10 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect((await screen.findAllByRole("heading", { name: "Channels" })).length).toBeGreaterThan(0);
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Channels" })).not.toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=channels");
   });
 

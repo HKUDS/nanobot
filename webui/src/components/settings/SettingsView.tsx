@@ -2355,14 +2355,21 @@ export function SettingsView({
           )}
         >
           {!showSidebar ? (
-            <button
-              type="button"
-              onClick={onBackToChat}
-              className="touch-target mb-5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
-              {t("settings.backToChat")}
-            </button>
+            <div className="mb-7">
+              <button
+                type="button"
+                onClick={onBackToChat}
+                className="touch-target mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                {t("settings.backToChat")}
+              </button>
+              <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
+                {t(`settings.nav.${activeSection}`, {
+                  defaultValue: standaloneSectionTitle(activeSection),
+                })}
+              </h1>
+            </div>
           ) : null}
 
           {loading ? (
@@ -2412,6 +2419,13 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
 
 function visibleWebuiDefaultAccessMode(mode: string | null | undefined): WebuiDefaultAccessMode {
   return mode === "full" ? "full" : "default";
+}
+
+function standaloneSectionTitle(section: SettingsSectionKey): string {
+  if (section === "apps") return "Apps";
+  if (section === "automations") return "Automations";
+  if (section === "skills") return "Skills";
+  return SETTINGS_NAV_ITEMS.find((item) => item.key === section)?.fallback ?? "Settings";
 }
 
 function SettingsSidebar({

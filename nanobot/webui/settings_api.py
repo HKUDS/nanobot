@@ -1625,6 +1625,10 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
     updates = _provider_config_updates(query)
+    if not spec.is_oauth and spec.name != "openai":
+        # Preserve the legacy settings API contract: api_type only applies to
+        # OpenAI, and is ignored when older clients send it for another provider.
+        updates.pop("api_type", None)
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")

@@ -512,7 +512,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView();
 
-    expect(await screen.findByRole("heading", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Apps" })).not.toBeInTheDocument();
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     const uninstall = screen.getByRole("button", { name: "Uninstall app" });
 
@@ -2838,7 +2838,7 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.change(screen.getByLabelText("Network proxy"), {
       target: { value: "http://127.0.0.1:7890" },
     });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Default" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking style" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
