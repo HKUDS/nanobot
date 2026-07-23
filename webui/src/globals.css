@@ -124,19 +124,35 @@
 }
 
 @layer utilities {
-  @keyframes composer-model-fallback-flash {
-    0%, 100% { background-color: hsl(var(--card)); }
-    45%, 65% { background-color: rgb(236 141 49); }
+  .composer-model-badge {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
   }
 
-  .composer-model-fallback-flash {
-    animation: composer-model-fallback-flash 560ms ease-out both;
+  .composer-model-badge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: rgb(236 141 49);
+    opacity: 0;
+    transition: opacity 600ms ease-in-out;
+  }
+
+  .composer-model-badge[data-fallback="true"]::before {
+    opacity: 1;
+  }
+
+  .composer-model-badge > * {
+    position: relative;
+    z-index: 1;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .composer-model-fallback-flash {
-      animation: none;
-      background-color: rgb(236 141 49);
+    .composer-model-badge::before {
+      transition-duration: 150ms;
     }
   }
 

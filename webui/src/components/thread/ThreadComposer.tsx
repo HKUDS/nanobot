@@ -2386,17 +2386,15 @@ function ComposerModelBadge({
 
   return (
     <Container
-      key={fallbackModelName || "configured-model"}
       data-fallback={fallbackModelName ? "true" : undefined}
-      title={fallbackModelName ? `${title} · ${fallbackModelName}` : title}
+      title={fallbackModelName || title}
       type={interactive ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
+        "composer-model-badge inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
-        fallbackModelName && "composer-model-fallback-flash",
         isHero
           ? "h-8 max-w-[min(7.5rem,32vw)] gap-1.5 px-2 text-[11.5px] sm:max-w-[min(12.5rem,44vw)]"
           : "h-9 max-w-[min(7.5rem,32vw)] gap-2 px-2.5 text-[12px] sm:max-w-[min(12rem,44vw)]",

@@ -424,7 +424,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
-  it("flashes the configured model badge without replacing the preset label", async () => {
+  it("highlights the configured model badge without replacing the preset label", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -438,9 +438,10 @@ describe("ThreadShell", () => {
     ));
 
     expect(await screen.findByText("gpt-5.5")).toBeInTheDocument();
-    expect(screen.getByTestId("composer-model-logo-openai_codex")).not.toHaveAttribute(
-      "data-fallback",
-    );
+    const configuredBadge = screen.getByTestId("composer-model-logo-openai_codex").parentElement;
+    expect(configuredBadge).not.toBeNull();
+    expect(configuredBadge).toHaveClass("composer-model-badge");
+    expect(configuredBadge).not.toHaveAttribute("data-fallback");
 
     act(() => {
       client._emitChat("fallback-model", {
@@ -453,16 +454,15 @@ describe("ThreadShell", () => {
     const logo = screen.getByTestId("composer-model-logo-openai_codex");
     const badge = logo.parentElement;
     expect(badge).not.toBeNull();
+    expect(badge).toBe(configuredBadge);
     expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
     expect(screen.queryByText("deepseek-chat")).not.toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
     expect(badge).toHaveAttribute(
       "title",
-      "gpt-5.5 · OpenAI Codex · deepseek/deepseek-chat",
+      "deepseek/deepseek-chat",
     );
-    expect(badge).toHaveClass("composer-model-fallback-flash");
     expect(logo).not.toHaveAttribute("data-fallback");
-    expect(logo).not.toHaveClass("composer-model-fallback-flash");
 
     act(() => {
       client._emitChat("fallback-model", {
@@ -479,6 +479,9 @@ describe("ThreadShell", () => {
     expect(
       screen.getByTestId("composer-model-logo-openai_codex").parentElement,
     ).toHaveAttribute("title", "gpt-5.5 · OpenAI Codex");
+    expect(
+      screen.getByTestId("composer-model-logo-openai_codex").parentElement,
+    ).toBe(badge);
   });
 
   it("opens model settings from the unconfigured model badge", async () => {
