@@ -178,8 +178,49 @@ nanobot gateway --verbose
 | Port already in use | Change `gateway.port`, `channels.websocket.port`, or the `--port` CLI flag for the relevant command. |
 | WebUI opened on `18790` but shows nothing useful | Open `8765`; `18790` is the health endpoint. |
 | Config changes ignored | Restart the gateway. |
+| Startup pauses at `Installing optional feature` | An enabled channel is missing its Python dependencies. See [Slow Optional Channel Dependency Installation](#slow-optional-channel-dependency-installation). |
 | Heartbeat never runs | Keep the gateway running, add tasks under `<workspace>/HEARTBEAT.md` -> `## Active Tasks`, and make sure `gateway.heartbeat.enabled` is true. |
 | Cron jobs disappeared after switching workspaces | Cron jobs are workspace-scoped at `<workspace>/cron/jobs.json`; check you are using the intended workspace. |
+
+### Slow Optional Channel Dependency Installation
+
+Before loading enabled channels, the gateway checks the dependencies declared by their
+channel manifests. The CLI and WebUI normally install these dependencies when a channel is
+enabled. Installation during startup is a recovery path for an enabled config whose Python
+environment no longer has the required packages, for example after manually editing the
+config, upgrading nanobot, or recreating an isolated `uv tool`/`pipx` environment. The
+gateway waits for the install so an enabled channel is not silently skipped; later starts
+skip the installation once the dependencies are present.
+
+If access to PyPI is slow in your region, configure pip to use a trusted package index. The
+installer honors the standard `PIP_INDEX_URL` environment variable, including when nanobot
+itself was installed with `uv tool`:
+
+```bash
+PIP_INDEX_URL=https://your-trusted-mirror.example/simple nanobot gateway
+```
+
+For the systemd user service created by `nanobot gateway install-service`, add a drop-in:
+
+```bash
+systemctl --user edit nanobot-gateway.service
+```
+
+```ini
+[Service]
+Environment="PIP_INDEX_URL=https://your-trusted-mirror.example/simple"
+```
+
+Then reload and restart the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart nanobot-gateway.service
+```
+
+For a system-level or custom service, use `sudo systemctl edit <unit>` instead. Prefer an
+HTTPS index operated by an organization you trust, and do not put index credentials in
+commands or logs.
 
 ## WebUI Problems
 
