@@ -705,6 +705,7 @@
       "signOut": "Đăng xuất",
       "signedInAs": "Đã đăng nhập bằng {{account}}",
       "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "remoteSignInHelp": "nanobot sẽ cung cấp URL đăng nhập xAI. Hãy mở URL đó trên máy tính của bạn, hoàn tất đăng nhập rồi dán URL localhost cuối cùng vào đây.",
       "signInRequired": "Cần đăng nhập",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Đã đăng nhập",
@@ -713,6 +714,9 @@
       "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
       "saveProxy": "Lưu proxy",
       "callbackHelp": "Hoàn tất đăng nhập trong trình duyệt. Nếu không tự động hoàn tất, hãy dán URL cuối cùng bên dưới.",
+      "remoteCallbackHelp": "Hãy mở URL đăng nhập xAI bên dưới trên máy tính của bạn. Sau khi đăng nhập, hãy sao chép toàn bộ URL localhost trên thanh địa chỉ—ngay cả khi trang không tải được—rồi dán lại vào nanobot.",
+      "authorizationUrlLabel": "URL đăng nhập xAI",
+      "remoteCallbackLabel": "URL localhost cuối cùng",
       "callbackPlaceholder": "URL cuối cùng hoặc mã ủy quyền",
       "finishSignIn": "Hoàn tất đăng nhập"
     },

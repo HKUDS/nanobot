@@ -2700,6 +2700,12 @@ function XaiOAuthLoginDialog({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [authorizationCopied, setAuthorizationCopied] = useState(false);
+
+  useEffect(() => {
+    setAuthorizationCopied(false);
+  }, [flow?.flow_id]);
+
   return (
     <Dialog
       open={Boolean(flow)}
@@ -2723,19 +2729,77 @@ function XaiOAuthLoginDialog({
                 : t("settings.oauth.callbackHelp")}
             </DialogDescription>
           </DialogHeader>
-          <Input
-            value={callbackValue}
-            onChange={(event) => onCallbackChange(event.target.value)}
-            placeholder={t("settings.oauth.callbackPlaceholder")}
-            aria-label={t("settings.oauth.callbackPlaceholder")}
-            autoComplete="off"
-            spellCheck={false}
-          />
+          {remoteBrowserAccess && flow ? (
+            <div className="space-y-2.5 rounded-xl border border-border/70 bg-muted/35 p-3">
+              <label
+                htmlFor="xai-authorization-url"
+                className="block text-xs font-medium text-foreground"
+              >
+                {t("settings.oauth.authorizationUrlLabel")}
+              </label>
+              <Input
+                id="xai-authorization-url"
+                value={flow.authorization_url}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+                className="font-mono text-xs"
+                aria-label={t("settings.oauth.authorizationUrlLabel")}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void copyTextToClipboard(flow.authorization_url).then((ok) => {
+                      if (ok) setAuthorizationCopied(true);
+                    });
+                  }}
+                >
+                  {authorizationCopied ? (
+                    <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {authorizationCopied ? t("code.copied") : t("code.copy")}
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={onOpenAuthorization}>
+                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  {t("settings.oauth.signIn")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <div className="space-y-2">
+            <label
+              htmlFor="xai-oauth-callback"
+              className="block text-xs font-medium text-foreground"
+            >
+              {remoteBrowserAccess
+                ? t("settings.oauth.remoteCallbackLabel")
+                : t("settings.oauth.callbackPlaceholder")}
+            </label>
+            <Input
+              id="xai-oauth-callback"
+              value={callbackValue}
+              onChange={(event) => onCallbackChange(event.target.value)}
+              placeholder={t("settings.oauth.callbackPlaceholder")}
+              aria-label={
+                remoteBrowserAccess
+                  ? t("settings.oauth.remoteCallbackLabel")
+                  : t("settings.oauth.callbackPlaceholder")
+              }
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
           <DialogFooter className="gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" onClick={onOpenAuthorization}>
-              <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
-              {t("settings.oauth.signIn")}
-            </Button>
+            {!remoteBrowserAccess ? (
+              <Button type="button" variant="outline" onClick={onOpenAuthorization}>
+                <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
+                {t("settings.oauth.signIn")}
+              </Button>
+            ) : null}
             <Button type="submit" disabled={!callbackValue.trim() || completing}>
               {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
             </Button>
@@ -3238,7 +3302,7 @@ function ProvidersSettings({
                         : provider.name === "xai_grok" && remoteBrowserAccess
                           ? tx(
                               "settings.oauth.remoteSignInHelp",
-                              "Remote WebUI detected. After xAI redirects to localhost, copy the final URL and paste it back into nanobot.",
+                              "Nanobot will provide an xAI sign-in URL. Open it on your computer, finish signing in, then paste the final localhost URL back here.",
                             )
                           : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
                     </p>

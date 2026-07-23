@@ -705,6 +705,7 @@
       "signOut": "Keluar",
       "signedInAs": "Masuk sebagai {{account}}",
       "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "remoteSignInHelp": "nanobot akan memberikan URL masuk xAI. Buka URL tersebut di komputer Anda, selesaikan proses masuk, lalu tempel URL localhost terakhir kembali di sini.",
       "signInRequired": "Perlu masuk",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sudah masuk",
@@ -713,6 +714,9 @@
       "proxySaveBeforeSignIn": "Simpan perubahan proksi sebelum login.",
       "saveProxy": "Simpan proksi",
       "callbackHelp": "Selesaikan proses masuk di browser. Jika tidak selesai otomatis, tempel URL terakhir di bawah.",
+      "remoteCallbackHelp": "Buka URL masuk xAI di bawah ini pada komputer Anda. Setelah selesai masuk, salin URL localhost lengkap dari bilah alamat—meskipun halaman tidak dapat dimuat—lalu tempelkan kembali ke nanobot.",
+      "authorizationUrlLabel": "URL masuk xAI",
+      "remoteCallbackLabel": "URL localhost terakhir",
       "callbackPlaceholder": "URL terakhir atau kode otorisasi",
       "finishSignIn": "Selesaikan masuk"
     },

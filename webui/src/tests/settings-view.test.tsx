@@ -2144,7 +2144,7 @@ describe("SettingsView Apps catalog", () => {
       fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
       expect(
         screen.getByText(
-          "Remote WebUI detected. After xAI redirects to localhost, copy the final URL and paste it back into nanobot.",
+          "Nanobot will provide an xAI sign-in URL. Open it on your computer, finish signing in, then paste the final localhost URL back here.",
         ),
       ).toBeInTheDocument();
 
@@ -2154,8 +2154,20 @@ describe("SettingsView Apps catalog", () => {
       expect(openMock).not.toHaveBeenCalled();
       expect(
         within(dialog).getByText(
-          "This WebUI is running on another machine. After xAI redirects to localhost, copy the full URL from the address bar and paste it below.",
+          "Open the xAI sign-in URL below on your computer. After signing in, copy the full localhost URL from your browser's address bar—even if the page does not load—and paste it back into nanobot.",
         ),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("textbox", { name: "xAI sign-in URL" }),
+      ).toHaveValue(authorization.authorization_url);
+      expect(
+        within(dialog).getByRole("textbox", { name: "xAI sign-in URL" }),
+      ).toHaveAttribute("readonly");
+      expect(
+        within(dialog).getByRole("button", { name: "Copy" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("textbox", { name: "Final localhost URL" }),
       ).toBeInTheDocument();
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
