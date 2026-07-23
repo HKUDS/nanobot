@@ -18,8 +18,39 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      python_required: ${{ steps.paths.outputs.python_required }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Python-relevant changes
+        id: paths
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          python_required=true
+
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null &&
+            changed_files="$(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA")" &&
+            [[ -n "$changed_files" ]] &&
+            ! grep -qvE '^(webui/|nanobot/channels/[^/]+/webui/|docs/)' <<< "$changed_files"; then
+            python_required=false
+          fi
+
+          echo "python_required=$python_required" >> "$GITHUB_OUTPUT"
+
   test:
     name: Python (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.python_required == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
