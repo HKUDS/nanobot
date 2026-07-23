@@ -20,6 +20,7 @@ from nanobot.providers.xai_grok_provider import (
     _build_headers,
     _build_model_headers,
     _build_reasoning_options,
+    _build_xai_http_error,
     _fetch_xai_model_capabilities,
     _parse_xai_model_capabilities,
     _request_xai,
@@ -477,6 +478,28 @@ def test_plain_error_body_is_single_line_and_bounded() -> None:
     assert detail.startswith("Bearer [REDACTED] ")
     assert detail.endswith("…")
     assert len(detail) == 1001
+
+
+def test_client_version_rejection_explains_update_and_preserves_body() -> None:
+    raw = json.dumps(
+        {
+            "code": "upgrade-required",
+            "message": "Client version 0.2.109 is no longer supported",
+        }
+    )
+
+    error = _build_xai_http_error(426, httpx.Headers(), raw)
+    response = _xai_error_response(error)
+
+    assert error.status_code == 426
+    assert error.should_retry is False
+    assert error.response_body == (
+        '{"code":"upgrade-required","message":"Client version 0.2.109 is no longer supported"}'
+    )
+    assert "xAI requires a newer Grok client version. Update nanobot and try again." in str(error)
+    assert error.response_body in str(error)
+    assert response.error_status_code == 426
+    assert error.response_body in (response.content or "")
 
 
 def test_large_json_error_body_redacts_camel_case_credentials_before_bounding() -> None:
