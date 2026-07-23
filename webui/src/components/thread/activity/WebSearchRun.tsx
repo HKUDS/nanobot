@@ -10,7 +10,7 @@ import {
 export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turnActive: boolean }) {
   const active = run.status === "running" && turnActive;
   const status = run.status === "running" && !turnActive ? "done" : run.status;
-  const label = presentWebSearchAction(run.query, status);
+  const label = presentWebSearchAction(run.query, status, run.target);
 
   return (
     <>

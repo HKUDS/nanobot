@@ -117,6 +117,7 @@ async def consume_sse_with_reasoning(
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
     content = ""
@@ -129,6 +130,8 @@ async def consume_sse_with_reasoning(
     streamed_reasoning = False
 
     async for event in iter_sse(response):
+        if on_response_event:
+            await on_response_event(event)
         event_type = event.get("type")
         if event_type == "response.output_item.added":
             item = event.get("item") or {}

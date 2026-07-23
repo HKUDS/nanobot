@@ -723,6 +723,10 @@ class AgentRunner:
 
         progress_state: dict[str, bool] | None = None
 
+        async def _provider_tool_event(event: dict[str, Any]) -> None:
+            if event.get("kind") == "hosted_tool":
+                await hook.on_provider_tool_event(context, event)
+
         if wants_streaming:
             thinking_buf = ""
 
@@ -750,6 +754,7 @@ class AgentRunner:
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
+                on_tool_call_delta=_provider_tool_event,
                 on_stream_recover=_stream_recover,
             )
         elif wants_progress_streaming:
@@ -780,6 +785,7 @@ class AgentRunner:
             coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
+                on_tool_call_delta=_provider_tool_event,
             )
         else:
             coro = spec.runtime.provider.chat_with_retry(**kwargs)

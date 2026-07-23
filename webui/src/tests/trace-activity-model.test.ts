@@ -32,6 +32,14 @@ describe("trace activity semantics", () => {
     expect(describeTrace('web_search({"query":"status test"})', status).label).toBe(label);
   });
 
+  it.each([
+    ["running", "Searching X · status test"],
+    ["done", "Searched X · status test"],
+    ["error", "Could not search X · status test"],
+  ] as const)("identifies hosted X search activity for %s", (status, label) => {
+    expect(describeTrace('x_search({"query":"status test"})', status).label).toBe(label);
+  });
+
   it("never exposes URL credentials, query secrets, or private-network links", () => {
     const publicResult = describeTrace(
       'web_fetch({"url":"https://user:password@example.com/docs?api_key=secret#section"})',

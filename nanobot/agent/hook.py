@@ -90,6 +90,14 @@ class AgentHook:
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         pass
 
+    async def on_provider_tool_event(
+        self,
+        context: AgentHookContext,
+        event: dict[str, Any],
+    ) -> None:
+        """Observe a provider-hosted tool lifecycle event."""
+        pass
+
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         pass
 
@@ -191,6 +199,13 @@ class CompositeHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)
+
+    async def on_provider_tool_event(
+        self,
+        context: AgentHookContext,
+        event: dict[str, Any],
+    ) -> None:
+        await self._for_each_hook_safe("on_provider_tool_event", context, event)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_execute_tools", context)

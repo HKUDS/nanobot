@@ -961,6 +961,35 @@ describe("AgentActivityCluster", () => {
     expect(screen.getAllByTestId("activity-step")).toHaveLength(3);
   });
 
+  it("renders hosted X search as an explicit search activity", () => {
+    const line = 'x_search({"query":"nanobot oauth"})';
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-x-search",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          toolEvents: [{
+            phase: "end",
+            call_id: "x-search-1",
+            name: "x_search",
+            arguments: { query: "nanobot oauth" },
+            result: { name: "x_semantic_search" },
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("Searched X · nanobot oauth")).toBeInTheDocument();
+    expect(screen.queryByText(/Completed X search/i)).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(1);
+  });
+
   it("redacts credentials from web search queries, titles, and links", () => {
     const query = "release notes access_token=signed-secret";
     const line = `web_search(${JSON.stringify({ query })})`;

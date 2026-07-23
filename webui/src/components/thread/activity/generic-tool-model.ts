@@ -77,6 +77,7 @@ const EXCLUDED_TOOLS = new Set([
   "terminal",
   "web_fetch",
   "web_search",
+  "x_search",
   "write_file",
 ]);
 

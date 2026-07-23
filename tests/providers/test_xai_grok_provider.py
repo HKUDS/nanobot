@@ -354,6 +354,73 @@ async def test_raw_response_request_streams_text_usage_and_inline_citations(monk
     assert captured["json"]["tools"] == [{"type": "x_search"}]
 
 
+@pytest.mark.asyncio
+async def test_raw_response_request_streams_hosted_x_search_lifecycle(monkeypatch) -> None:
+    original_client = httpx.AsyncClient
+    events = [
+        {
+            "type": "response.custom_tool_call_input.done",
+            "item_id": "x-search-1",
+            "input": '{"query":"nanobot oauth"}',
+        },
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "x-search-1",
+                "name": "x_semantic_search",
+                "input": '{"query":"nanobot oauth"}',
+                "output": [{"text": "large hosted result must not enter activity events"}],
+            },
+        },
+        {
+            "type": "response.completed",
+            "response": {"status": "completed", "usage": {}},
+        },
+    ]
+    content = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content, request=request)
+
+    def fake_client(**kwargs) -> httpx.AsyncClient:
+        return original_client(
+            transport=httpx.MockTransport(handler),
+            timeout=kwargs["timeout"],
+        )
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider.httpx.AsyncClient", fake_client)
+    tool_events: list[dict[str, Any]] = []
+
+    result = await _request_xai(
+        "https://cli-chat-proxy.grok.com/v1/responses",
+        _build_headers("secret", "grok-4.5"),
+        {"model": "grok-4.5", "tools": [{"type": "x_search"}]},
+        on_tool_call_delta=lambda event: _append(tool_events, event),
+    )
+
+    assert result[0] == ""
+    assert tool_events == [
+        {
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": "x-search-1",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": None,
+        },
+        {
+            "kind": "hosted_tool",
+            "phase": "end",
+            "call_id": "x-search-1",
+            "name": "x_search",
+            "arguments": {"query": "nanobot oauth"},
+            "result": {"name": "x_semantic_search"},
+        },
+    ]
+    assert "large hosted result" not in json.dumps(tool_events)
+
+
 def test_model_capabilities_follow_upstream_aliases_and_default_to_disabled() -> None:
     capabilities = _parse_xai_model_capabilities(
         {
@@ -522,5 +589,5 @@ def test_large_json_error_body_redacts_camel_case_credentials_before_bounding() 
     assert len(detail) == 1001
 
 
-async def _append(target: list[str], value: str) -> None:
+async def _append(target: list[Any], value: Any) -> None:
     target.append(value)

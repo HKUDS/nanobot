@@ -401,6 +401,11 @@ async def _request_xai(
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+    async def _on_response_event(event: dict[str, Any]) -> None:
+        hosted_event = _xai_hosted_tool_event(event)
+        if hosted_event is not None and on_tool_call_delta is not None:
+            await on_tool_call_delta(hosted_event)
+
     client_kwargs: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
     if proxy:
         client_kwargs.update(proxy=proxy, trust_env=False)
@@ -415,7 +420,62 @@ async def _request_xai(
                 on_content_delta=on_content_delta,
                 on_tool_call_delta=on_tool_call_delta,
                 on_reasoning_delta=on_thinking_delta,
+                on_response_event=_on_response_event if on_tool_call_delta else None,
             )
+
+
+def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    event_type = event.get("type")
+    if event_type == "response.custom_tool_call_input.done":
+        call_id = event.get("item_id") or event.get("call_id") or event.get("id")
+        if not call_id:
+            return None
+        return {
+            "kind": "hosted_tool",
+            "phase": "start",
+            "call_id": str(call_id),
+            "name": "x_search",
+            "arguments": _xai_hosted_tool_arguments(
+                event.get("input", event.get("arguments"))
+            ),
+            "result": None,
+        }
+
+    if event_type != "response.output_item.done":
+        return None
+    item = event.get("item")
+    if not isinstance(item, dict) or item.get("type") != "custom_tool_call":
+        return None
+    tool_name = item.get("name")
+    if not isinstance(tool_name, str) or not tool_name.startswith("x_"):
+        return None
+    call_id = item.get("id") or item.get("call_id") or event.get("item_id")
+    if not call_id:
+        return None
+    return {
+        "kind": "hosted_tool",
+        "phase": "end",
+        "call_id": str(call_id),
+        "name": "x_search",
+        "arguments": _xai_hosted_tool_arguments(
+            item.get("input", item.get("arguments"))
+        ),
+        # Keep the useful search subtype, but do not persist large hosted results
+        # in WebUI activity messages. The model answer already carries citations.
+        "result": {"name": tool_name},
+    }
+
+
+def _xai_hosted_tool_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _build_xai_http_error(

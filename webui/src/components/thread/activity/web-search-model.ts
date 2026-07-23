@@ -5,6 +5,7 @@ import { redactActivityText, safeActivityDetail } from "./activity-text";
 import { displayWebHost, formatCompactWebUrl, parseSafeActivityHttpUrl } from "./web-url";
 
 export type WebSearchStatus = "running" | "done" | "error";
+export type WebSearchTarget = "web" | "x";
 
 export interface WebSearchSource {
   title: string;
@@ -16,6 +17,7 @@ export interface WebSearchSource {
 export interface WebSearchRunModel {
   key: string;
   query: string;
+  target: WebSearchTarget;
   status: WebSearchStatus;
   sources: WebSearchSource[];
   error?: string;
@@ -49,10 +51,11 @@ export function webSearchRunsByTraceLine(
 
 function webSearchRunFromEvent(event: ToolProgressEvent): WebSearchRunModel | null {
   const name = compactToolName(toolEventName(event));
-  if (name !== "web_search") return null;
+  if (name !== "web_search" && name !== "x_search") return null;
 
   const args = toolEventArguments(event);
   const query = stringField(args, ["query", "q", "text"]);
+  const target: WebSearchTarget = name === "x_search" ? "x" : "web";
   const status: WebSearchStatus = event.phase === "error"
     ? "error"
     : event.phase === "end"
@@ -60,10 +63,11 @@ function webSearchRunFromEvent(event: ToolProgressEvent): WebSearchRunModel | nu
       : "running";
 
   return {
-    key: event.call_id ? `call:${event.call_id}` : formatToolCallTrace(event) ?? `web_search:${query}`,
+    key: event.call_id ? `call:${event.call_id}` : formatToolCallTrace(event) ?? `${name}:${query}`,
     query,
+    target,
     status,
-    sources: status === "done" ? webSearchSources(event.result) : [],
+    sources: status === "done" && target === "web" ? webSearchSources(event.result) : [],
     error: status === "error" ? readableError(event.error) : undefined,
   };
 }
@@ -89,6 +93,7 @@ function presentWebSearchQuery(query: string): WebSearchQueryPresentation {
 export function presentWebSearchAction(
   query: string,
   status: WebSearchStatus,
+  target: WebSearchTarget = "web",
 ): string {
   const presentation = presentWebSearchQuery(query);
   const verb = status === "error"
@@ -96,8 +101,11 @@ export function presentWebSearchAction(
     : status === "running"
       ? "Searching"
       : "Searched";
-  const target = [presentation.scope, presentation.query].filter(Boolean).join(" · ");
-  return target ? `${verb} ${target}` : verb;
+  const queryTarget = [presentation.scope, presentation.query].filter(Boolean).join(" · ");
+  if (target === "x") {
+    return queryTarget ? `${verb} X · ${queryTarget}` : `${verb} X`;
+  }
+  return queryTarget ? `${verb} ${queryTarget}` : verb;
 }
 
 function mergeWebSearchRun(

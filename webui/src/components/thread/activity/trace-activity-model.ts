@@ -30,7 +30,7 @@ export function describeTraceLine(
     const query = traceFieldFromArgs(args, ["query", "q", "text"]) || args || trimmed;
     return {
       kind: "search",
-      label: presentWebSearchAction(query, status),
+      label: presentWebSearchAction(query, status, name === "x_search" ? "x" : "web"),
       detail: "",
     };
   }
