@@ -170,6 +170,8 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       temperature: 0.7,
       reasoning_effort: null,
     }],
+    model_call_order: [],
+    model_call_order_editable: false,
     providers: [
       { name: "deepseek", label: "DeepSeek", configured: true },
       { name: "openai_codex", label: "OpenAI Codex", configured: true },

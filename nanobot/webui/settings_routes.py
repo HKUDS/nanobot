@@ -52,14 +52,17 @@ from nanobot.webui.settings_api import (
     complete_oauth_provider,
     create_model_configuration,
     decorate_settings_payload,
+    delete_model_configuration,
     login_oauth_provider,
     logout_oauth_provider,
+    migrate_model_configurations,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
     update_api_settings,
     update_image_generation_settings,
+    update_model_call_order,
     update_model_configuration,
     update_network_safety_settings,
     update_provider_settings,
@@ -145,6 +148,12 @@ class WebUISettingsRouter:
             return self._handle_settings_model_configuration_create(request)
         if path == "/api/settings/model-configurations/update":
             return self._handle_settings_model_configuration_update(request)
+        if path == "/api/settings/model-configurations/delete":
+            return self._handle_settings_model_configuration_delete(request)
+        if path == "/api/settings/model-configurations/migrate":
+            return self._handle_settings_model_configurations_migrate(request)
+        if path == "/api/settings/model-call-order/update":
+            return self._handle_settings_model_call_order_update(request)
         if path == "/api/settings/provider/update":
             return await self._handle_settings_provider_update(request)
         if path == "/api/settings/provider-models":
@@ -349,6 +358,33 @@ class WebUISettingsRouter:
             return self._unauthorized()
         try:
             payload = update_model_configuration(self._query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload))
+
+    def _handle_settings_model_configuration_delete(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = delete_model_configuration(self._query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload))
+
+    def _handle_settings_model_configurations_migrate(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = migrate_model_configurations(self._query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload))
+
+    def _handle_settings_model_call_order_update(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = update_model_call_order(self._query(request))
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload))

@@ -74,6 +74,8 @@ function baseSettingsPayload() {
       temperature: 0.1,
       reasoning_effort: null,
     }],
+    model_call_order: [],
+    model_call_order_editable: false,
     providers: [],
     web_search: {
       provider: "duckduckgo",
@@ -1403,7 +1405,7 @@ describe("App layout", () => {
                 provider: "auto",
                 resolved_provider: "openai",
                 has_api_key: true,
-                model_preset: "default",
+                model_preset: "primary",
                 max_tokens: 8192,
                 context_window_tokens: 65536,
                 temperature: 0.1,
@@ -1415,12 +1417,13 @@ describe("App layout", () => {
               },
               model_presets: [
                 {
-                  name: "default",
-                  label: "Default",
+                  name: "primary",
+                  label: "Primary",
                   active: true,
-                  is_default: true,
+                  is_default: false,
                   model: "openai/gpt-4o",
                   provider: "auto",
+                  resolved_provider: "openai",
                   max_tokens: 8192,
                   context_window_tokens: 65536,
                   temperature: 0.1,
@@ -1439,6 +1442,8 @@ describe("App layout", () => {
                   reasoning_effort: "high",
                 },
               ],
+              model_call_order: ["primary", "deep"],
+              model_call_order_editable: true,
               providers: [
                 {
                   name: "openai",
@@ -1630,19 +1635,21 @@ describe("App layout", () => {
     fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Appearance" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Current configuration")).toBeInTheDocument();
-    expect(screen.queryByText("Presets")).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Current configuration" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add configuration" }));
-    const modelDialog = await screen.findByRole("dialog", { name: "New model configuration" });
-    expect(within(modelDialog).getByText("Save a provider and model as a one-click option.")).toBeInTheDocument();
+    expect(screen.getByText("Model call order")).toBeInTheDocument();
+    expect(screen.getByText("Model presets")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    const modelDialog = await screen.findByRole("dialog", { name: "New model preset" });
+    expect(
+      within(modelDialog).getByText("Save a reusable model and its generation settings."),
+    ).toBeInTheDocument();
     fireEvent.change(within(modelDialog).getByPlaceholderText("Fast writing"), {
       target: { value: "Fast writing" },
     });
-    fireEvent.change(within(modelDialog).getByPlaceholderText("openai/gpt-4.1"), {
-      target: { value: "openai/gpt-4.1-mini" },
-    });
     expect(within(modelDialog).getByRole("button", { name: /OpenAI/ })).toBeInTheDocument();
+    fireEvent.pointerDown(
+      within(modelDialog).getByRole("button", { name: "Select model" }),
+    );
+    fireEvent.click(await screen.findByText("openai/gpt-4o-mini"));
     expect(within(modelDialog).getByRole("button", { name: "Save" })).toBeEnabled();
     fireEvent.click(within(modelDialog).getByRole("button", { name: "Cancel" }));
     fireEvent.pointerDown(screen.getByRole("button", { name: /Auto/ }));
@@ -1658,10 +1665,6 @@ describe("App layout", () => {
     expect(screen.getByText("Unsaved changes.").parentElement?.className).toContain(
       "text-blue-600",
     );
-    const updatedModelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o-mini/ });
-    fireEvent.pointerDown(updatedModelButtons[updatedModelButtons.length - 1]);
-    await screen.findByText("openai/gpt-4o");
-    fireEvent.click(screen.getAllByText("openai/gpt-4o")[0]);
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
     expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();

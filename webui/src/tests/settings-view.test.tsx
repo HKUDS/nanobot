@@ -24,7 +24,7 @@ function settingsPayload(): SettingsPayload {
       provider: "auto",
       resolved_provider: "openai",
       has_api_key: true,
-      model_preset: "default",
+      model_preset: "primary",
       max_tokens: 8192,
       context_window_tokens: 200000,
       temperature: 0.1,
@@ -35,17 +35,20 @@ function settingsPayload(): SettingsPayload {
       tool_hint_max_length: 40,
     },
     model_presets: [{
-      name: "default",
-      label: "Default",
+      name: "primary",
+      label: "Primary",
       active: true,
-      is_default: true,
+      is_default: false,
       model: "openai/gpt-4o",
       provider: "auto",
+      resolved_provider: "openai",
       max_tokens: 8192,
       context_window_tokens: 200000,
       temperature: 0.1,
       reasoning_effort: null,
     }],
+    model_call_order: ["primary"],
+    model_call_order_editable: true,
     providers: [],
     web_search: {
       provider: "duckduckgo",
@@ -259,6 +262,7 @@ function autoDynamicProviderPayload(
         ...base.model_presets[0],
         model: "companyProxy/gpt-4o",
         provider: "auto",
+        resolved_provider: "companyProxy",
       },
     ],
     providers: [
@@ -1955,7 +1959,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByLabelText("2026-06-03: 1.5K tokens, 2 requests")).toBeInTheDocument();
   });
 
-  it("shows context window options in model settings", async () => {
+  it("keeps generation parameters collapsed until advanced options are opened", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -1973,12 +1977,160 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
+    const advanced = await screen.findByRole("button", { name: /Advanced options/ });
+    expect(screen.queryByText("Context window")).not.toBeInTheDocument();
+    expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
+
+    fireEvent.click(advanced);
+
     expect(await screen.findByText("Context window")).toBeInTheDocument();
+    expect(screen.getByText("Temperature")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+  });
+
+  it("reorders model presets and saves the model call order", async () => {
+    const base = settingsPayload();
+    const backupPreset = {
+      ...base.model_presets[0],
+      name: "backup",
+      label: "Backup",
+      active: false,
+      model: "anthropic/claude-sonnet-4",
+      provider: "anthropic",
+      resolved_provider: "anthropic",
+    };
+    const payload: SettingsPayload = {
+      ...base,
+      model_presets: [base.model_presets[0], backupPreset],
+      model_call_order: ["primary", "backup"],
+      providers: [
+        {
+          name: "openai",
+          label: "OpenAI",
+          configured: true,
+        },
+        {
+          name: "anthropic",
+          label: "Anthropic",
+          configured: true,
+        },
+      ],
+    };
+    const updatedPayload: SettingsPayload = {
+      ...payload,
+      agent: {
+        ...payload.agent,
+        model: backupPreset.model,
+        provider: backupPreset.provider,
+        resolved_provider: backupPreset.resolved_provider,
+        model_preset: backupPreset.name,
+      },
+      model_presets: payload.model_presets.map((preset) => ({
+        ...preset,
+        active: preset.name === backupPreset.name,
+      })),
+      model_call_order: ["backup", "primary"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url.startsWith("/api/settings/model-call-order/update?")) {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const moveUpButtons = await screen.findAllByRole("button", { name: "Move up" });
+    expect(moveUpButtons[0]).toBeDisabled();
+    fireEvent.click(moveUpButtons[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Save order" }));
+
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([input]) =>
+        String(input).startsWith("/api/settings/model-call-order/update?"),
+      );
+      expect(saveCall).toBeDefined();
+      const url = new URL(String(saveCall?.[0]), "http://nanobot.test");
+      expect(JSON.parse(url.searchParams.get("order") ?? "[]")).toEqual([
+        "backup",
+        "primary",
+      ]);
+      expect(saveCall?.[1]).toEqual(
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      );
+    });
+
+    expect(screen.getByRole("button", { name: "Save order" })).toBeDisabled();
+  });
+
+  it("converts legacy model settings into presets before editing call order", async () => {
+    const migratedPayload = settingsPayload();
+    const defaultPreset = {
+      ...migratedPayload.model_presets[0],
+      name: "default",
+      label: "Default",
+      is_default: true,
+    };
+    const legacyPayload: SettingsPayload = {
+      ...migratedPayload,
+      agent: {
+        ...migratedPayload.agent,
+        model_preset: "default",
+      },
+      model_presets: [defaultPreset],
+      model_call_order: [],
+      model_call_order_editable: false,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(legacyPayload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/model-configurations/migrate") {
+        return jsonResponse(migratedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: legacyPayload });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Convert to presets" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/model-configurations/migrate",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Convert to presets" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save order" })).toBeDisabled();
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
   });
 
   it("signs in to the xAI Grok provider", async () => {
@@ -2345,7 +2497,7 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByRole("button", { name: "private/image-v2" })).toBeInTheDocument();
   });
 
-  it("keeps the default model distinct from the active named configuration", async () => {
+  it("does not expose the synthetic default configuration as a WebUI preset", async () => {
     const base = settingsPayload();
     const payload: SettingsPayload = {
       ...base,
@@ -2359,9 +2511,13 @@ describe("SettingsView Apps catalog", () => {
       model_presets: [
         {
           ...base.model_presets[0],
+          name: "default",
+          label: "Default",
           active: false,
+          is_default: true,
           model: "openai-codex/gpt-5.5",
           provider: "openai_codex",
+          resolved_provider: "openai_codex",
         },
         {
           ...base.model_presets[0],
@@ -2371,8 +2527,10 @@ describe("SettingsView Apps catalog", () => {
           is_default: false,
           model: "MiniMax-M3",
           provider: "minimax_anthropic",
+          resolved_provider: "minimax_anthropic",
         },
       ],
+      model_call_order: ["fast"],
       providers: [
         {
           name: "openai_codex",
@@ -2403,18 +2561,38 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    const picker = await screen.findByRole("button", { name: "Current configuration" });
-    expect(picker).toHaveTextContent("MiniMax-M3");
-    expect(picker).toHaveTextContent("fast");
-    fireEvent.pointerDown(picker);
+    expect((await screen.findAllByText("MiniMax-M3")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("fast").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
+    expect(screen.queryByText("openai-codex/gpt-5.5")).not.toBeInTheDocument();
+  });
 
-    const defaultOption = (await screen.findAllByRole("menuitem")).find((item) =>
-      item.textContent?.includes("Default"),
-    );
-    if (!defaultOption) throw new Error("default configuration was not found");
-    expect(defaultOption).toHaveTextContent("openai-codex/gpt-5.5");
-    expect(defaultOption).toHaveTextContent("OpenAI Codex · Default");
-    expect(defaultOption).not.toHaveTextContent("MiniMax-M3");
+  it("does not expose the synthetic default preset in the overview summary", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model_preset: "default",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          name: "default",
+          label: "Default",
+          is_default: true,
+        },
+      ],
+      model_call_order: [],
+      model_call_order_editable: false,
+    };
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({ initialSection: "overview", initialSettings: payload });
+
+    expect(await screen.findByText("openai/gpt-4o")).toBeInTheDocument();
+    expect(screen.queryByText("openai · default")).not.toBeInTheDocument();
+    expect(screen.getByText("openai")).toBeInTheDocument();
   });
 
   it("uses the resolved provider row for auto dynamic providers without api keys", async () => {
@@ -2430,12 +2608,9 @@ describe("SettingsView Apps catalog", () => {
       }),
     });
 
-    const configurationButton = await screen.findByRole("button", {
-      name: "Current configuration",
-    });
-    expect(configurationButton).toHaveTextContent("companyProxy/gpt-4o");
-    expect(configurationButton).toHaveTextContent("Company Proxy");
-    expect(configurationButton).not.toHaveTextContent("Not configured");
+    expect((await screen.findAllByText("companyProxy/gpt-4o")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Company Proxy").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Provider setup required")).not.toBeInTheDocument();
   });
 
   it("does not treat auto dynamic provider api keys as configured without apiBase", async () => {
@@ -2451,11 +2626,11 @@ describe("SettingsView Apps catalog", () => {
       }),
     });
 
-    const configurationButton = await screen.findByRole("button", {
-      name: "Current configuration",
-    });
-    expect(configurationButton).toHaveTextContent("Not configured");
-    expect(configurationButton).toHaveTextContent("Company Proxy · companyProxy/gpt-4o");
+    expect((await screen.findAllByText("companyProxy/gpt-4o")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Provider setup required")).toBeInTheDocument();
+    expect(
+      screen.getByText("Configure this provider before saving the preset."),
+    ).toBeInTheDocument();
   });
 
   it("marks the current model as unconfigured when its provider needs setup", async () => {
@@ -2508,11 +2683,8 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const configurationButton = await screen.findByRole("button", {
-      name: "Current configuration",
-    });
-    expect(configurationButton).toHaveTextContent("Not configured");
-    expect(configurationButton).toHaveTextContent("OpenAI Codex · openai-codex/gpt-5.1-codex");
+    expect(await screen.findByText("Provider setup required")).toBeInTheDocument();
+    expect(screen.getAllByText(/Sign in before saving/).length).toBeGreaterThan(0);
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
   });
 
@@ -2824,20 +2996,25 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const configurationButton = await screen.findByRole("button", { name: "Current configuration" });
-    fireEvent.pointerDown(configurationButton!);
-    fireEvent.click(await screen.findByText("Add configuration"));
+    const newPresetButton = await screen.findByRole("button", { name: "New model preset" });
+    fireEvent.click(newPresetButton);
 
-    expect(await screen.findByRole("heading", { name: "New model configuration" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "New model preset" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByText("Temperature")).not.toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /Advanced options/ }),
+    );
+    expect(within(dialog).getByText("Temperature")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "New model configuration" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("heading", { name: "New model preset" })).not.toBeInTheDocument(),
     );
     expect(document.body.style.pointerEvents).not.toBe("none");
 
-    fireEvent.pointerDown(configurationButton!);
-    expect(await screen.findByText("Add configuration")).toBeInTheDocument();
+    fireEvent.click(newPresetButton);
+    expect(await screen.findByRole("heading", { name: "New model preset" })).toBeInTheDocument();
   });
 
   it("loads provider models and lets users choose one without typing the id manually", async () => {
@@ -2874,11 +3051,13 @@ describe("SettingsView Apps catalog", () => {
       agent: {
         ...payload.agent,
         model: "deepseek-reasoner",
+        temperature: 0.4,
       },
       model_presets: [
         {
           ...payload.model_presets[0],
           model: "deepseek-reasoner",
+          temperature: 0.4,
         },
       ],
     };
@@ -2905,7 +3084,7 @@ describe("SettingsView Apps catalog", () => {
           fetched_at: 1,
         });
       }
-      if (url === "/api/settings/update?model_preset=default&model=deepseek-reasoner") {
+      if (url.startsWith("/api/settings/model-configurations/update?")) {
         return jsonResponse(updatedPayload);
       }
       return { ok: false, status: 404, json: async () => ({}) } as Response;
@@ -2918,7 +3097,11 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
     await screen.findByText("deepseek-reasoner");
     fireEvent.click(screen.getAllByText("deepseek-reasoner")[0]);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), {
+      target: { value: "0.4" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2928,14 +3111,23 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/update?model_preset=default&model=deepseek-reasoner",
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([input]) =>
+        String(input).startsWith("/api/settings/model-configurations/update?"),
+      );
+      expect(saveCall).toBeDefined();
+      const url = new URL(String(saveCall?.[0]), "http://nanobot.test");
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        name: "primary",
+        model: "deepseek-reasoner",
+        temperature: "0.4",
+      });
+      expect(saveCall?.[1]).toEqual(
         expect.objectContaining({
           headers: { Authorization: "Bearer tok" },
         }),
-      ),
-    );
+      );
+    });
   });
 
   it("saves network safety without exposing technical SSRF copy", async () => {

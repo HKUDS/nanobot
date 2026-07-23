@@ -2160,8 +2160,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         )
         assert created_preset.status_code == 200
         created_body = created_preset.json()
-        assert created_body["agent"]["model_preset"] == "fast-writing"
-        assert created_body["agent"]["model"] == "openai/gpt-4.1-mini"
+        assert created_body["created_model_preset"] == "fast-writing"
+        assert created_body["agent"]["model_preset"] == "deep"
+        assert created_body["agent"]["model"] == "anthropic/claude-opus-4-5"
+        assert created_body["model_call_order"] == ["deep"]
         created_presets = {
             preset["name"]: preset for preset in created_body["model_presets"]
         }
@@ -2176,12 +2178,24 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         )
         assert updated_preset.status_code == 200
         updated_preset_body = updated_preset.json()
-        assert updated_preset_body["agent"]["model_preset"] == "fast-writing"
-        assert updated_preset_body["agent"]["model"] == "openai/gpt-5.5"
+        assert updated_preset_body["agent"]["model_preset"] == "deep"
+        assert updated_preset_body["agent"]["model"] == "anthropic/claude-opus-4-5"
         updated_presets = {
             preset["name"]: preset for preset in updated_preset_body["model_presets"]
         }
         assert updated_presets["fast-writing"]["label"] == "Codex"
+
+        call_order_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/model-call-order/update"
+            "?order=%5B%22fast-writing%22%2C%22deep%22%5D",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert call_order_updated.status_code == 200
+        call_order_body = call_order_updated.json()
+        assert call_order_body["agent"]["model_preset"] == "fast-writing"
+        assert call_order_body["agent"]["model"] == "openai/gpt-5.5"
+        assert call_order_body["model_call_order"] == ["fast-writing", "deep"]
 
         duplicate_preset = await _http_get(
             "http://127.0.0.1:"
@@ -2269,6 +2283,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.agents.defaults.model == "atomic_chat/test"
         assert saved.agents.defaults.provider == "atomic_chat"
         assert saved.agents.defaults.model_preset == "fast-writing"
+        assert saved.agents.defaults.fallback_models == ["deep"]
         assert saved.model_presets["fast-writing"].label == "Codex"
         assert saved.model_presets["fast-writing"].model == "openai/gpt-5.5"
         assert saved.model_presets["fast-writing"].provider == "openai"
