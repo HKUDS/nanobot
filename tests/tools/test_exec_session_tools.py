@@ -702,6 +702,30 @@ def test_terminate_by_owner_retains_failed_sessions():
     asyncio.run(run())
 
 
+def test_stale_cleanup_retains_session_when_kill_fails():
+    async def run() -> None:
+        manager = ExecSessionManager(idle_timeout=1)
+        session = SimpleNamespace(
+            session_id="stale-failed",
+            owner_session_key="cli:a",
+            last_access=time.monotonic() - 10,
+            kill=AsyncMock(side_effect=OSError("termination failed")),
+        )
+        manager._sessions[session.session_id] = session
+
+        with pytest.raises(OSError, match="termination failed"):
+            await manager.list(owner_session_key="cli:a")
+
+        assert manager._sessions == {session.session_id: session}
+        session.kill.assert_awaited_once()
+
+        session.kill.side_effect = None
+        assert await manager.list(owner_session_key="cli:a") == []
+        assert manager._sessions == {}
+
+    asyncio.run(run())
+
+
 def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
     async def run() -> None:
         manager = ExecSessionManager()

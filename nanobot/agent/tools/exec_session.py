@@ -370,8 +370,9 @@ class ExecSessionManager:
             if now - session.last_access > self.idle_timeout
         ]
         for session_id in stale:
-            session = self._sessions.pop(session_id)
+            session = self._sessions[session_id]
             await session.kill()
+            self._sessions.pop(session_id, None)
 
     async def _spawn(
         self,
