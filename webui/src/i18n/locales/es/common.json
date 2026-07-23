@@ -339,8 +339,10 @@
       }
     },
     "providers": {
+      "title": "Proveedores de modelos",
       "searchPlaceholder": "Buscar proveedores",
       "noMatches": "Ningún proveedor coincide con esta búsqueda.",
+      "addOwnProvider": "Añadir tu propio proveedor de modelos",
       "saveProvider": "Guardar proveedor"
     },
     "image": {
@@ -361,7 +363,7 @@
       "callOrder": "Orden de llamada de modelos",
       "primary": "Principal",
       "fallbackNumber": "Alternativa {{number}}",
-      "addToOrder": "Añadir preajuste",
+      "addToOrder": "Activar preajuste",
       "newPreset": "Nuevo preajuste de modelo",
       "newPresetHelp": "Guarda un modelo reutilizable y sus ajustes de generación.",
       "presets": "Preajustes de modelo",
@@ -381,12 +383,12 @@
       "dragToReorder": "Arrastrar para reordenar",
       "moveUp": "Subir",
       "moveDown": "Bajar",
-      "removeFromOrder": "Quitar del orden de llamada",
+      "removeFromOrder": "Desactivar preajuste",
       "inCallOrder": "En el orden de llamada",
+      "disabled": "Desactivado",
       "noPresets": "Aún no hay preajustes de modelo",
       "noPresetsHelp": "Crea un preajuste y añádelo al orden de llamada.",
       "removeBeforeDelete": "Quita este preajuste del orden de llamada antes de eliminarlo.",
-      "completePreset": "Completa el preajuste antes de guardarlo.",
       "providerSetupRequired": "El proveedor requiere configuración",
       "configureProviderBeforeSaving": "Configura este proveedor antes de guardar el preajuste.",
       "deletePresetTitle": "¿Eliminar el preajuste de modelo?",

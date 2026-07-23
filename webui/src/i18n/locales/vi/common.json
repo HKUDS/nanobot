@@ -339,8 +339,10 @@
       }
     },
     "providers": {
+      "title": "Nhà cung cấp mô hình",
       "searchPlaceholder": "Tìm nhà cung cấp",
       "noMatches": "Không có nhà cung cấp phù hợp.",
+      "addOwnProvider": "Thêm nhà cung cấp mô hình của bạn",
       "saveProvider": "Lưu nhà cung cấp"
     },
     "image": {
@@ -361,7 +363,7 @@
       "callOrder": "Thứ tự gọi mô hình",
       "primary": "Chính",
       "fallbackNumber": "Dự phòng {{number}}",
-      "addToOrder": "Thêm cấu hình đặt trước",
+      "addToOrder": "Bật cấu hình đặt trước",
       "newPreset": "Cấu hình mô hình đặt trước mới",
       "newPresetHelp": "Lưu mô hình có thể tái sử dụng cùng các thiết lập sinh nội dung.",
       "presets": "Cấu hình mô hình đặt trước",
@@ -381,12 +383,12 @@
       "dragToReorder": "Kéo để sắp xếp lại",
       "moveUp": "Di chuyển lên",
       "moveDown": "Di chuyển xuống",
-      "removeFromOrder": "Xóa khỏi thứ tự gọi",
+      "removeFromOrder": "Tắt cấu hình đặt trước",
       "inCallOrder": "Trong thứ tự gọi",
+      "disabled": "Đã tắt",
       "noPresets": "Chưa có cấu hình mô hình đặt trước",
       "noPresetsHelp": "Tạo cấu hình đặt trước rồi thêm vào thứ tự gọi.",
       "removeBeforeDelete": "Hãy xóa cấu hình này khỏi thứ tự gọi trước khi xóa.",
-      "completePreset": "Hoàn tất cấu hình đặt trước trước khi lưu.",
       "providerSetupRequired": "Cần cấu hình nhà cung cấp",
       "configureProviderBeforeSaving": "Hãy cấu hình nhà cung cấp này trước khi lưu cấu hình đặt trước.",
       "deletePresetTitle": "Xóa cấu hình mô hình đặt trước?",

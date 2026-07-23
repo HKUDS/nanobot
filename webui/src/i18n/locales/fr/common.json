@@ -339,8 +339,10 @@
       }
     },
     "providers": {
+      "title": "Fournisseurs de modèles",
       "searchPlaceholder": "Rechercher des fournisseurs",
       "noMatches": "Aucun fournisseur ne correspond.",
+      "addOwnProvider": "Ajouter votre propre fournisseur de modèles",
       "saveProvider": "Enregistrer le fournisseur"
     },
     "image": {
@@ -361,7 +363,7 @@
       "callOrder": "Ordre d’appel des modèles",
       "primary": "Principal",
       "fallbackNumber": "Secours {{number}}",
-      "addToOrder": "Ajouter un préréglage",
+      "addToOrder": "Activer le préréglage",
       "newPreset": "Nouveau préréglage de modèle",
       "newPresetHelp": "Enregistrez un modèle réutilisable et ses paramètres de génération.",
       "presets": "Préréglages de modèle",
@@ -381,12 +383,12 @@
       "dragToReorder": "Faire glisser pour réorganiser",
       "moveUp": "Monter",
       "moveDown": "Descendre",
-      "removeFromOrder": "Retirer de l’ordre d’appel",
+      "removeFromOrder": "Désactiver le préréglage",
       "inCallOrder": "Dans l’ordre d’appel",
+      "disabled": "Désactivé",
       "noPresets": "Aucun préréglage de modèle",
       "noPresetsHelp": "Créez un préréglage, puis ajoutez-le à l’ordre d’appel.",
       "removeBeforeDelete": "Retirez ce préréglage de l’ordre d’appel avant de le supprimer.",
-      "completePreset": "Complétez le préréglage avant de l’enregistrer.",
       "providerSetupRequired": "Configuration du fournisseur requise",
       "configureProviderBeforeSaving": "Configurez ce fournisseur avant d’enregistrer le préréglage.",
       "deletePresetTitle": "Supprimer le préréglage de modèle ?",

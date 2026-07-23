@@ -118,7 +118,7 @@
       "callOrder": "模型调用顺序",
       "primary": "主模型",
       "fallbackNumber": "备用模型 {{number}}",
-      "addToOrder": "添加预设",
+      "addToOrder": "启用预设",
       "newPreset": "新建模型预设",
       "newPresetHelp": "保存可复用的模型及其生成参数。",
       "presets": "模型预设",
@@ -138,12 +138,12 @@
       "dragToReorder": "拖动调整顺序",
       "moveUp": "上移",
       "moveDown": "下移",
-      "removeFromOrder": "从调用顺序中移除",
+      "removeFromOrder": "停用预设",
       "inCallOrder": "已加入调用顺序",
+      "disabled": "未启用",
       "noPresets": "还没有模型预设",
       "noPresetsHelp": "先创建预设，再将它加入调用顺序。",
       "removeBeforeDelete": "删除前请先将此预设从调用顺序中移除。",
-      "completePreset": "请补全预设后再保存。",
       "providerSetupRequired": "提供商需要配置",
       "configureProviderBeforeSaving": "请先配置此提供商，再保存预设。",
       "deletePresetTitle": "删除模型预设？",
@@ -487,8 +487,10 @@
       }
     },
     "providers": {
+      "title": "模型供应商",
       "searchPlaceholder": "搜索提供商",
       "noMatches": "没有匹配的提供商。",
+      "addOwnProvider": "添加自己的模型供应商",
       "saveProvider": "保存提供商"
     },
     "legal": {

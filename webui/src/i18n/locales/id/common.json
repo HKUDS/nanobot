@@ -339,8 +339,10 @@
       }
     },
     "providers": {
+      "title": "Penyedia model",
       "searchPlaceholder": "Cari penyedia",
       "noMatches": "Tidak ada penyedia yang cocok.",
+      "addOwnProvider": "Tambahkan penyedia model Anda sendiri",
       "saveProvider": "Simpan penyedia"
     },
     "image": {
@@ -361,7 +363,7 @@
       "callOrder": "Urutan pemanggilan model",
       "primary": "Utama",
       "fallbackNumber": "Cadangan {{number}}",
-      "addToOrder": "Tambah preset",
+      "addToOrder": "Aktifkan preset",
       "newPreset": "Preset model baru",
       "newPresetHelp": "Simpan model yang dapat digunakan kembali beserta pengaturan generasinya.",
       "presets": "Preset model",
@@ -381,12 +383,12 @@
       "dragToReorder": "Seret untuk mengurutkan ulang",
       "moveUp": "Naikkan",
       "moveDown": "Turunkan",
-      "removeFromOrder": "Hapus dari urutan pemanggilan",
+      "removeFromOrder": "Nonaktifkan preset",
       "inCallOrder": "Dalam urutan pemanggilan",
+      "disabled": "Nonaktif",
       "noPresets": "Belum ada preset model",
       "noPresetsHelp": "Buat preset, lalu tambahkan ke urutan pemanggilan.",
       "removeBeforeDelete": "Hapus preset ini dari urutan pemanggilan sebelum menghapusnya.",
-      "completePreset": "Lengkapi preset sebelum menyimpan.",
       "providerSetupRequired": "Penyedia perlu dikonfigurasi",
       "configureProviderBeforeSaving": "Konfigurasikan penyedia ini sebelum menyimpan preset.",
       "deletePresetTitle": "Hapus preset model?",

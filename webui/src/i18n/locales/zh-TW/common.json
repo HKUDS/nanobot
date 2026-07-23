@@ -339,8 +339,10 @@
       }
     },
     "providers": {
+      "title": "模型供應商",
       "searchPlaceholder": "搜尋供應商",
       "noMatches": "沒有符合的供應商。",
+      "addOwnProvider": "新增自己的模型供應商",
       "saveProvider": "儲存供應商"
     },
     "image": {
@@ -361,7 +363,7 @@
       "callOrder": "模型呼叫順序",
       "primary": "主要模型",
       "fallbackNumber": "備用模型 {{number}}",
-      "addToOrder": "加入預設",
+      "addToOrder": "啟用預設",
       "newPreset": "新增模型預設",
       "newPresetHelp": "儲存可重複使用的模型與生成參數。",
       "presets": "模型預設",
@@ -381,12 +383,12 @@
       "dragToReorder": "拖曳調整順序",
       "moveUp": "上移",
       "moveDown": "下移",
-      "removeFromOrder": "從呼叫順序中移除",
+      "removeFromOrder": "停用預設",
       "inCallOrder": "已加入呼叫順序",
+      "disabled": "未啟用",
       "noPresets": "尚無模型預設",
       "noPresetsHelp": "先建立預設，再將它加入呼叫順序。",
       "removeBeforeDelete": "刪除前請先將此預設從呼叫順序中移除。",
-      "completePreset": "請補齊預設後再儲存。",
       "providerSetupRequired": "供應商需要設定",
       "configureProviderBeforeSaving": "請先設定此供應商，再儲存預設。",
       "deletePresetTitle": "刪除模型預設？",

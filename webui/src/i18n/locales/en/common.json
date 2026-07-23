@@ -118,7 +118,7 @@
       "callOrder": "Model call order",
       "primary": "Primary",
       "fallbackNumber": "Fallback {{number}}",
-      "addToOrder": "Add preset",
+      "addToOrder": "Enable preset",
       "newPreset": "New model preset",
       "newPresetHelp": "Save a reusable model and its generation settings.",
       "presets": "Model presets",
@@ -138,12 +138,12 @@
       "dragToReorder": "Drag to reorder",
       "moveUp": "Move up",
       "moveDown": "Move down",
-      "removeFromOrder": "Remove from call order",
+      "removeFromOrder": "Disable preset",
       "inCallOrder": "In call order",
+      "disabled": "Disabled",
       "noPresets": "No model presets yet",
       "noPresetsHelp": "Create a preset, then add it to the call order.",
       "removeBeforeDelete": "Remove this preset from the call order before deleting it.",
-      "completePreset": "Complete the preset before saving.",
       "providerSetupRequired": "Provider setup required",
       "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
@@ -487,8 +487,10 @@
       }
     },
     "providers": {
+      "title": "Model providers",
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
+      "addOwnProvider": "Add your own model provider",
       "saveProvider": "Save provider"
     },
     "legal": {

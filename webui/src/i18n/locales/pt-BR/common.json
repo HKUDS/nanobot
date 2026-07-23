@@ -118,7 +118,7 @@
       "callOrder": "Ordem de chamada dos modelos",
       "primary": "Principal",
       "fallbackNumber": "Alternativo {{number}}",
-      "addToOrder": "Adicionar predefinição",
+      "addToOrder": "Ativar predefinição",
       "newPreset": "Nova predefinição de modelo",
       "newPresetHelp": "Salve um modelo reutilizável e suas configurações de geração.",
       "presets": "Predefinições de modelo",
@@ -138,12 +138,12 @@
       "dragToReorder": "Arraste para reordenar",
       "moveUp": "Mover para cima",
       "moveDown": "Mover para baixo",
-      "removeFromOrder": "Remover da ordem de chamada",
+      "removeFromOrder": "Desativar predefinição",
       "inCallOrder": "Na ordem de chamada",
+      "disabled": "Desabilitado",
       "noPresets": "Ainda não há predefinições de modelo",
       "noPresetsHelp": "Crie uma predefinição e adicione-a à ordem de chamada.",
       "removeBeforeDelete": "Remova esta predefinição da ordem de chamada antes de excluí-la.",
-      "completePreset": "Complete a predefinição antes de salvar.",
       "providerSetupRequired": "Configuração do provedor necessária",
       "configureProviderBeforeSaving": "Configure este provedor antes de salvar a predefinição.",
       "deletePresetTitle": "Excluir predefinição de modelo?",
@@ -487,8 +487,10 @@
       }
     },
     "providers": {
+      "title": "Provedores de modelos",
       "searchPlaceholder": "Buscar provedores",
       "noMatches": "Nenhum provedor corresponde a esta busca.",
+      "addOwnProvider": "Adicionar seu próprio provedor de modelos",
       "saveProvider": "Salvar provedor"
     },
     "legal": {

@@ -369,6 +369,18 @@ function renderSettingsView(
   );
 }
 
+async function togglePresetEditor(name = "primary") {
+  const row = await screen.findByTestId(`model-call-order-row-${name}`);
+  fireEvent.click(within(row).getAllByRole("button")[0]);
+}
+
+async function chooseProviderToConfigure(label: string) {
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "Add your own model provider" }),
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+}
+
 describe("SettingsView Apps catalog", () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -2013,6 +2025,9 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
+    expect(screen.queryByText("Edit preset")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Advanced options/ })).not.toBeInTheDocument();
+    await togglePresetEditor();
     const advanced = await screen.findByRole("button", { name: /Advanced options/ });
     expect(screen.queryByText("Context window")).not.toBeInTheDocument();
     expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
@@ -2026,6 +2041,10 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+    const reasoningEffort = screen.getByLabelText("Reasoning effort");
+    expect(reasoningEffort).toHaveProperty("type", "text");
+    fireEvent.change(reasoningEffort, { target: { value: "provider-native-mode" } });
+    expect(reasoningEffort).toHaveValue("provider-native-mode");
   });
 
   it("drags model presets to reorder and saves the model call order immediately", async () => {
@@ -2071,24 +2090,23 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
+    await togglePresetEditor();
     fireEvent.change(screen.getByDisplayValue("Primary"), {
       target: { value: "Primary draft" },
     });
-    const moveUpButtons = await screen.findAllByRole("button", { name: "Move up" });
-    expect(moveUpButtons[0]).toBeDisabled();
-    const dragHandles = screen.getAllByRole("button", { name: "Drag to reorder" });
+    const primaryRow = screen.getByTestId("model-call-order-row-primary");
+    const backupRow = screen.getByTestId("model-call-order-row-backup");
+    expect(backupRow).toHaveAttribute("draggable", "true");
+    expect(screen.queryByRole("button", { name: "Move up" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move down" })).not.toBeInTheDocument();
     const dataTransfer = {
       dropEffect: "move",
       effectAllowed: "move",
       setData: vi.fn(),
     };
-    fireEvent.dragStart(dragHandles[1], { dataTransfer });
-    fireEvent.dragEnter(screen.getByTestId("model-call-order-row-primary"), {
-      dataTransfer,
-    });
-    fireEvent.drop(screen.getByTestId("model-call-order-row-primary"), {
-      dataTransfer,
-    });
+    fireEvent.dragStart(backupRow, { dataTransfer });
+    fireEvent.dragEnter(primaryRow, { dataTransfer });
+    fireEvent.drop(primaryRow, { dataTransfer });
 
     await waitFor(() => {
       const saveCall = fetchMock.mock.calls.find(([input]) =>
@@ -2144,8 +2162,9 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
-    const moveUpButtons = await screen.findAllByRole("button", { name: "Move up" });
-    fireEvent.click(moveUpButtons[1]);
+    fireEvent.keyDown(screen.getByTestId("model-call-order-row-backup"), {
+      key: "ArrowUp",
+    });
 
     expect(await screen.findByText("Order update failed")).toBeInTheDocument();
     expect(
@@ -2156,6 +2175,76 @@ describe("SettingsView Apps catalog", () => {
       "model-call-order-row-primary",
       "model-call-order-row-backup",
     ]);
+  });
+
+  it("shows presets outside the call order in the unified list and adds them directly", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    const codexPreset = {
+      ...payload.model_presets[0],
+      name: "codex",
+      label: "Codex",
+      active: false,
+      model: "openai-codex/gpt-5.5",
+      provider: "openai",
+      resolved_provider: "openai",
+    };
+    const payloadWithCodex: SettingsPayload = {
+      ...payload,
+      model_presets: [...payload.model_presets, codexPreset],
+    };
+    const orderedPayload: SettingsPayload = {
+      ...payloadWithCodex,
+      model_call_order: ["primary", "backup", "codex"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payloadWithCodex);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url.startsWith("/api/settings/model-call-order/update?")) {
+        return jsonResponse(orderedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payloadWithCodex });
+
+    const codexRow = await screen.findByTestId("model-call-order-row-codex");
+    expect(codexRow).toHaveTextContent("Codex");
+    expect(codexRow).toHaveTextContent("openai-codex/gpt-5.5");
+    expect(codexRow).toHaveTextContent("Disabled");
+    expect(codexRow).toHaveAttribute("draggable", "false");
+    expect(screen.queryByRole("button", { name: "Add preset" })).not.toBeInTheDocument();
+
+    const enableSwitch = within(codexRow).getByRole("switch", { name: "Enable preset" });
+    expect(enableSwitch).not.toBeChecked();
+    fireEvent.click(enableSwitch);
+
+    await waitFor(() => {
+      const orderCall = fetchMock.mock.calls.find(([input]) =>
+        String(input).startsWith("/api/settings/model-call-order/update?"),
+      );
+      expect(orderCall).toBeDefined();
+      const url = new URL(String(orderCall?.[0]), "http://nanobot.test");
+      expect(JSON.parse(url.searchParams.get("order") ?? "[]")).toEqual([
+        "primary",
+        "backup",
+        "codex",
+      ]);
+    });
+    const enabledCodexRow = await screen.findByTestId("model-call-order-row-codex");
+    expect(enabledCodexRow).not.toHaveTextContent("Disabled");
+    expect(enabledCodexRow).not.toHaveTextContent(/Fallback/);
+    expect(enabledCodexRow).toHaveAttribute("draggable", "true");
+    expect(
+      within(enabledCodexRow).getByRole("switch", { name: "Disable preset" }),
+    ).toBeChecked();
+    expect(screen.queryByText("Up to date.")).not.toBeInTheDocument();
   });
 
   it("appends a new model preset to the call order immediately", async () => {
@@ -2208,13 +2297,16 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Add preset" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "New model preset" }));
-    const dialog = await screen.findByRole("dialog", { name: "New model preset" });
-    fireEvent.change(within(dialog).getByPlaceholderText("Fast writing"), {
+    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save preset" })).toBeDisabled();
+    expect(
+      screen.queryByText("Complete the preset before saving."),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Fast writing"), {
       target: { value: "Writer" },
     });
-    fireEvent.pointerDown(within(dialog).getByRole("button", { name: "Select model" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Select model" }));
     const modelSearch = await screen.findByRole("textbox", {
       name: "Search or type model ID",
     });
@@ -2222,7 +2314,7 @@ describe("SettingsView Apps catalog", () => {
       target: { value: "openai/gpt-4o-mini" },
     });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
-    const saveButton = within(dialog).getByRole("button", { name: "Save" });
+    const saveButton = screen.getByRole("button", { name: "Save preset" });
     expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
 
@@ -2238,9 +2330,10 @@ describe("SettingsView Apps catalog", () => {
         "writer",
       ]);
     });
-    expect(await screen.findByTestId("model-call-order-row-writer")).toHaveTextContent(
-      "Fallback 2",
-    );
+    const writerRow = await screen.findByTestId("model-call-order-row-writer");
+    expect(writerRow).not.toHaveTextContent("Disabled");
+    expect(writerRow).not.toHaveTextContent(/Fallback/);
+    expect(within(writerRow).getByRole("switch", { name: "Disable preset" })).toBeChecked();
     expect(screen.getByDisplayValue("Writer")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
   });
@@ -2361,8 +2454,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    const providerLabel = await screen.findByText("xAI Grok");
-    fireEvent.click(providerLabel.closest("button")!);
+    await chooseProviderToConfigure("xAI Grok");
 
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -2467,7 +2559,7 @@ describe("SettingsView Apps catalog", () => {
 
       renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-      fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
+      await chooseProviderToConfigure("xAI Grok");
       expect(
         screen.getByText(
           "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
@@ -2567,7 +2659,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
+    await chooseProviderToConfigure("xAI Grok");
     const xaiProxy = screen.getByLabelText("Network proxy");
     expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
     fireEvent.change(xaiProxy, { target: { value: "http://127.0.0.1:7890" } });
@@ -2586,7 +2678,7 @@ describe("SettingsView Apps catalog", () => {
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
 
-    fireEvent.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await chooseProviderToConfigure("OpenAI Codex");
     const codexProxy = screen.getByLabelText("Network proxy");
     expect(codexProxy).toHaveValue("");
     fireEvent.change(codexProxy, { target: { value: "http://proxy.example:8080" } });
@@ -2796,8 +2888,8 @@ describe("SettingsView Apps catalog", () => {
     expect((await screen.findAllByText("companyProxy/gpt-4o")).length).toBeGreaterThan(0);
     expect(screen.getByText("Provider setup required")).toBeInTheDocument();
     expect(
-      screen.getByText("Configure this provider before saving the preset."),
-    ).toBeInTheDocument();
+      screen.queryByText("Configure this provider before saving the preset."),
+    ).not.toBeInTheDocument();
   });
 
   it("marks the current model as unconfigured when its provider needs setup", async () => {
@@ -2851,6 +2943,7 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "models" });
 
     expect(await screen.findByText("Provider setup required")).toBeInTheDocument();
+    await togglePresetEditor();
     expect(screen.getAllByText(/Sign in before saving/).length).toBeGreaterThan(0);
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
   });
@@ -2927,6 +3020,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
+    await togglePresetEditor();
     const deepseekButtons = await screen.findAllByRole("button", { name: /DeepSeek/ });
     const providerPicker = deepseekButtons.find(
       (button) => button.getAttribute("aria-haspopup") === "menu",
@@ -2999,6 +3093,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
+    await togglePresetEditor();
     fireEvent.pointerDown(await screen.findByRole("button", { name: /Select model/i }));
     expect(
       await screen.findByText("Configure this provider before loading models."),
@@ -3057,6 +3152,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
+    await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
     fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
     const input = (await screen.findByPlaceholderText("Search or type model ID")) as HTMLInputElement;
@@ -3132,6 +3228,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
+    await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", {
       name: /openai-codex\/gpt-5\.5/i,
     });
@@ -3145,7 +3242,7 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
-  it("can close the new configuration dialog without trapping the settings page", async () => {
+  it("creates presets in the inline editor and can cancel without opening a dialog", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -3163,28 +3260,21 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const openNewPresetDialog = async () => {
-      fireEvent.pointerDown(await screen.findByRole("button", { name: "Add preset" }));
-      fireEvent.click(await screen.findByRole("menuitem", { name: "New model preset" }));
-    };
-    await openNewPresetDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "New model preset" }));
 
-    expect(await screen.findByRole("heading", { name: "New model preset" })).toBeInTheDocument();
-    const dialog = screen.getByRole("dialog");
-    expect(within(dialog).queryByText("Temperature")).not.toBeInTheDocument();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: /Advanced options/ }),
-    );
-    expect(within(dialog).getByText("Temperature")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Fast writing")).toHaveValue("");
+    expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    expect(screen.getByText("Temperature")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "New model preset" })).not.toBeInTheDocument(),
-    );
+    expect(screen.queryByDisplayValue("Primary")).not.toBeInTheDocument();
+    expect(screen.queryByText("Edit preset")).not.toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
 
-    await openNewPresetDialog();
-    expect(await screen.findByRole("heading", { name: "New model preset" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    expect(await screen.findByPlaceholderText("Fast writing")).toHaveValue("");
   });
 
   it("loads provider models and lets users choose one without typing the id manually", async () => {
@@ -3225,10 +3315,11 @@ describe("SettingsView Apps catalog", () => {
       },
       model_presets: [
         {
-          ...payload.model_presets[0],
-          model: "deepseek-reasoner",
-          temperature: 0.4,
-        },
+        ...payload.model_presets[0],
+        model: "deepseek-reasoner",
+        temperature: 0.4,
+        reasoning_effort: "provider-native-mode",
+      },
       ],
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -3263,6 +3354,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
+    await togglePresetEditor();
     const modelButtons = await screen.findAllByRole("button", { name: /deepseek-chat/i });
     fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
     await screen.findByText("deepseek-reasoner");
@@ -3270,6 +3362,9 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     fireEvent.change(screen.getByLabelText("Temperature"), {
       target: { value: "0.4" },
+    });
+    fireEvent.change(screen.getByLabelText("Reasoning effort"), {
+      target: { value: "provider-native-mode" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save preset" }));
 
@@ -3290,6 +3385,7 @@ describe("SettingsView Apps catalog", () => {
       expect(Object.fromEntries(url.searchParams)).toEqual({
         name: "primary",
         model: "deepseek-reasoner",
+        reasoning_effort: "provider-native-mode",
         temperature: "0.4",
       });
       expect(saveCall?.[1]).toEqual(
