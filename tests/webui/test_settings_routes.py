@@ -12,11 +12,11 @@ from nanobot.webui.settings_routes import WebUISettingsRouter
 
 
 @pytest.mark.asyncio
-async def test_xai_oauth_completion_reads_callback_from_private_header(monkeypatch) -> None:
+async def test_xai_oauth_completion_reads_code_from_private_header(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def complete(query, callback_value=None):
-        captured.update(query=query, callback_value=callback_value)
+    def complete(query, authorization_code=None):
+        captured.update(query=query, authorization_code=authorization_code)
         return {
             "status": "pending",
             "provider": "xai_grok",
@@ -45,8 +45,8 @@ async def test_xai_oauth_completion_reads_callback_from_private_header(monkeypat
         headers=Headers(
             [
                 (
-                    "X-Nanobot-OAuth-Callback",
-                    "http://127.0.0.1/callback?code=secret&state=test",
+                    "X-Nanobot-OAuth-Code",
+                    "secret",
                 )
             ]
         ),
@@ -67,6 +67,6 @@ async def test_xai_oauth_completion_reads_callback_from_private_header(monkeypat
     }
     assert captured == {
         "query": {"provider": ["xai_grok"], "flow_id": ["flow-123"]},
-        "callback_value": "http://127.0.0.1/callback?code=secret&state=test",
+        "authorization_code": "secret",
     }
     assert "secret" not in request.path

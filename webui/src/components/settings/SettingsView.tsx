@@ -593,7 +593,7 @@ export function SettingsView({
   const [xaiOAuthFlow, setXaiOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
   const xaiOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
-  const [xaiOAuthCallback, setXaiOAuthCallback] = useState("");
+  const [xaiOAuthCode, setXaiOAuthCode] = useState("");
   const [xaiOAuthCompleting, setXaiOAuthCompleting] = useState(false);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
@@ -691,7 +691,7 @@ export function SettingsView({
   const closeXaiOAuthFlow = useCallback(() => {
     xaiOAuthFlowRef.current = null;
     setXaiOAuthFlow(null);
-    setXaiOAuthCallback("");
+    setXaiOAuthCode("");
     setXaiOAuthCompleting(false);
   }, []);
 
@@ -1384,7 +1384,7 @@ export function SettingsView({
         }
         xaiOAuthFlowRef.current = payload;
         setXaiOAuthFlow(payload);
-        setXaiOAuthCallback("");
+        setXaiOAuthCode("");
         setExpandedProvider(providerName);
         setError(null);
         return;
@@ -1404,15 +1404,15 @@ export function SettingsView({
 
   const completeXaiOAuth = async () => {
     const flow = xaiOAuthFlowRef.current;
-    const callbackValue = xaiOAuthCallback.trim();
-    if (!flow || !callbackValue || xaiOAuthCompleting) return;
+    const authorizationCode = xaiOAuthCode.trim();
+    if (!flow || !authorizationCode || xaiOAuthCompleting) return;
     setXaiOAuthCompleting(true);
     try {
       const payload = await completeProviderOAuth(
         token,
         flow.provider,
         flow.flow_id,
-        callbackValue,
+        authorizationCode,
       );
       if (xaiOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
@@ -2061,10 +2061,10 @@ export function SettingsView({
 
       <XaiOAuthLoginDialog
         flow={xaiOAuthFlow}
-        callbackValue={xaiOAuthCallback}
+        authorizationCode={xaiOAuthCode}
         completing={xaiOAuthCompleting}
         remoteBrowserAccess={remoteBrowserAccess}
-        onCallbackChange={setXaiOAuthCallback}
+        onAuthorizationCodeChange={setXaiOAuthCode}
         onOpenAuthorization={() => {
           if (!xaiOAuthFlow) return;
           const opened = window.open(xaiOAuthFlow.authorization_url, "_blank", "noopener,noreferrer");
@@ -2682,29 +2682,24 @@ function AppearanceSettings({
 
 function XaiOAuthLoginDialog({
   flow,
-  callbackValue,
+  authorizationCode,
   completing,
   remoteBrowserAccess,
-  onCallbackChange,
+  onAuthorizationCodeChange,
   onOpenAuthorization,
   onComplete,
   onClose,
 }: {
   flow: ProviderOAuthAuthorizationRequired | null;
-  callbackValue: string;
+  authorizationCode: string;
   completing: boolean;
   remoteBrowserAccess: boolean;
-  onCallbackChange: (value: string) => void;
+  onAuthorizationCodeChange: (value: string) => void;
   onOpenAuthorization: () => void;
   onComplete: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [authorizationCopied, setAuthorizationCopied] = useState(false);
-
-  useEffect(() => {
-    setAuthorizationCopied(false);
-  }, [flow?.flow_id]);
 
   return (
     <Dialog
@@ -2725,82 +2720,33 @@ function XaiOAuthLoginDialog({
             <DialogTitle>xAI Grok</DialogTitle>
             <DialogDescription>
               {remoteBrowserAccess
-                ? t("settings.oauth.remoteCallbackHelp")
-                : t("settings.oauth.callbackHelp")}
+                ? t("settings.oauth.remoteCodeHelp")
+                : t("settings.oauth.localCodeHelp")}
             </DialogDescription>
           </DialogHeader>
-          {remoteBrowserAccess && flow ? (
-            <div className="space-y-2.5 rounded-xl border border-border/70 bg-muted/35 p-3">
-              <label
-                htmlFor="xai-authorization-url"
-                className="block text-xs font-medium text-foreground"
-              >
-                {t("settings.oauth.authorizationUrlLabel")}
-              </label>
-              <Input
-                id="xai-authorization-url"
-                value={flow.authorization_url}
-                readOnly
-                onFocus={(event) => event.currentTarget.select()}
-                className="font-mono text-xs"
-                aria-label={t("settings.oauth.authorizationUrlLabel")}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    void copyTextToClipboard(flow.authorization_url).then((ok) => {
-                      if (ok) setAuthorizationCopied(true);
-                    });
-                  }}
-                >
-                  {authorizationCopied ? (
-                    <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  ) : (
-                    <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  )}
-                  {authorizationCopied ? t("code.copied") : t("code.copy")}
-                </Button>
-                <Button type="button" size="sm" variant="outline" onClick={onOpenAuthorization}>
-                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  {t("settings.oauth.signIn")}
-                </Button>
-              </div>
-            </div>
-          ) : null}
           <div className="space-y-2">
             <label
-              htmlFor="xai-oauth-callback"
+              htmlFor="xai-oauth-code"
               className="block text-xs font-medium text-foreground"
             >
-              {remoteBrowserAccess
-                ? t("settings.oauth.remoteCallbackLabel")
-                : t("settings.oauth.callbackPlaceholder")}
+              {t("settings.oauth.authorizationCode")}
             </label>
             <Input
-              id="xai-oauth-callback"
-              value={callbackValue}
-              onChange={(event) => onCallbackChange(event.target.value)}
-              placeholder={t("settings.oauth.callbackPlaceholder")}
-              aria-label={
-                remoteBrowserAccess
-                  ? t("settings.oauth.remoteCallbackLabel")
-                  : t("settings.oauth.callbackPlaceholder")
-              }
+              id="xai-oauth-code"
+              value={authorizationCode}
+              onChange={(event) => onAuthorizationCodeChange(event.target.value)}
+              placeholder={t("settings.oauth.authorizationCode")}
+              aria-label={t("settings.oauth.authorizationCode")}
               autoComplete="off"
               spellCheck={false}
             />
           </div>
           <DialogFooter className="gap-2 sm:space-x-0">
-            {!remoteBrowserAccess ? (
-              <Button type="button" variant="outline" onClick={onOpenAuthorization}>
-                <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
-                {t("settings.oauth.signIn")}
-              </Button>
-            ) : null}
-            <Button type="submit" disabled={!callbackValue.trim() || completing}>
+            <Button type="button" variant="outline" onClick={onOpenAuthorization}>
+              <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
+              {t("settings.oauth.signIn")}
+            </Button>
+            <Button type="submit" disabled={!authorizationCode.trim() || completing}>
               {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
             </Button>
           </DialogFooter>
@@ -3302,7 +3248,7 @@ function ProvidersSettings({
                         : provider.name === "xai_grok" && remoteBrowserAccess
                           ? tx(
                               "settings.oauth.remoteSignInHelp",
-                              "Nanobot will provide an xAI sign-in URL. Open it on your computer, finish signing in, then paste the final localhost URL back here.",
+                              "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
                             )
                           : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
                     </p>

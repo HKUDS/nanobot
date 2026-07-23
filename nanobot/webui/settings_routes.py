@@ -75,8 +75,8 @@ _CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values"
 _CHANNEL_VALUES_HEADER_MAX_BYTES = 64 * 1024
 _API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values"
 _API_SERVICE_VALUES_HEADER_MAX_BYTES = 8 * 1024
-_OAUTH_CALLBACK_HEADER = "X-Nanobot-OAuth-Callback"
-_OAUTH_CALLBACK_HEADER_MAX_BYTES = 8 * 1024
+_OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code"
+_OAUTH_CODE_HEADER_MAX_BYTES = 8 * 1024
 
 _SKIP_FIELD = object()
 _CHANNEL_CONNECT_ACTIONS = frozenset({"start", "poll", "cancel"})
@@ -385,13 +385,16 @@ class WebUISettingsRouter:
             if action == "login":
                 payload = await asyncio.to_thread(login_oauth_provider, query)
             elif action == "complete":
-                callback_value = case_insensitive_header(request.headers, _OAUTH_CALLBACK_HEADER)
-                if len(callback_value.encode("utf-8")) > _OAUTH_CALLBACK_HEADER_MAX_BYTES:
-                    raise WebUISettingsError("OAuth callback is too large")
+                authorization_code = case_insensitive_header(
+                    request.headers,
+                    _OAUTH_CODE_HEADER,
+                )
+                if len(authorization_code.encode("utf-8")) > _OAUTH_CODE_HEADER_MAX_BYTES:
+                    raise WebUISettingsError("OAuth authorization code is too large")
                 payload = await asyncio.to_thread(
                     complete_oauth_provider,
                     query,
-                    callback_value or None,
+                    authorization_code or None,
                 )
             else:
                 payload = await asyncio.to_thread(logout_oauth_provider, query)

@@ -156,7 +156,7 @@ def test_login_uses_random_loopback_callback_and_saves_separate_credentials(
     assert get_xai_oauth_login_status() == token
 
 
-def test_pending_login_accepts_callback_url_from_remote_browser(
+def test_pending_login_accepts_authorization_code_from_remote_browser(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -179,9 +179,8 @@ def test_pending_login_accepts_callback_url_from_remote_browser(
     try:
         params = parse_qs(urlsplit(flow.authorization_url).query)
         callback_url = params["redirect_uri"][0]
-        callback_query = urlencode({"code": "remote-code", "state": params["state"][0]})
 
-        token = complete_xai_oauth_login(flow, f"{callback_url}?{callback_query}")
+        token = complete_xai_oauth_login(flow, "remote-code")
     finally:
         flow.cancel()
 

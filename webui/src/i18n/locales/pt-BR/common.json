@@ -719,7 +719,7 @@
       "signOut": "Sair",
       "signedInAs": "Conectado como {{account}}",
       "signInHelp": "Entre por este dispositivo; nenhuma chave de API é armazenada em config.",
-      "remoteSignInHelp": "O nanobot fornecerá uma URL de login da xAI. Abra-a no seu computador, conclua o login e cole aqui a URL final de localhost.",
+      "remoteSignInHelp": "Selecione Entrar para abrir a xAI no seu computador e depois cole o código de autorização exibido após o login.",
       "signInRequired": "Login necessário",
       "signInBeforeSaving": "Entre antes de salvar este provedor OAuth como provedor de modelo ativo.",
       "signedIn": "Conectado",
@@ -727,11 +727,9 @@
       "proxyLabel": "Proxy de rede",
       "proxySaveBeforeSignIn": "Salve as alterações do proxy antes de entrar.",
       "saveProxy": "Salvar proxy",
-      "callbackHelp": "Conclua o login no navegador. Se ele não terminar automaticamente, cole a URL final abaixo.",
-      "remoteCallbackHelp": "Abra no seu computador a URL de login da xAI abaixo. Após entrar, copie a URL completa de localhost da barra de endereços — mesmo que a página não carregue — e cole-a de volta no nanobot.",
-      "authorizationUrlLabel": "URL de login da xAI",
-      "remoteCallbackLabel": "URL final de localhost",
-      "callbackPlaceholder": "URL final ou código de autorização",
+      "localCodeHelp": "Conclua o login no navegador. O nanobot geralmente termina automaticamente; caso contrário, cole o código de autorização abaixo.",
+      "remoteCodeHelp": "Selecione Entrar para abrir a xAI no seu computador. Após o login, cole abaixo o código de autorização exibido pela xAI.",
+      "authorizationCode": "Código de autorização",
       "finishSignIn": "Concluir login"
     },
     "skills": {

@@ -705,7 +705,7 @@
       "signOut": "Đăng xuất",
       "signedInAs": "Đã đăng nhập bằng {{account}}",
       "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
-      "remoteSignInHelp": "nanobot sẽ cung cấp URL đăng nhập xAI. Hãy mở URL đó trên máy tính của bạn, hoàn tất đăng nhập rồi dán URL localhost cuối cùng vào đây.",
+      "remoteSignInHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn, sau đó dán mã ủy quyền được hiển thị sau khi đăng nhập.",
       "signInRequired": "Cần đăng nhập",
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Đã đăng nhập",
@@ -713,11 +713,9 @@
       "proxyLabel": "Proxy mạng",
       "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
       "saveProxy": "Lưu proxy",
-      "callbackHelp": "Hoàn tất đăng nhập trong trình duyệt. Nếu không tự động hoàn tất, hãy dán URL cuối cùng bên dưới.",
-      "remoteCallbackHelp": "Hãy mở URL đăng nhập xAI bên dưới trên máy tính của bạn. Sau khi đăng nhập, hãy sao chép toàn bộ URL localhost trên thanh địa chỉ—ngay cả khi trang không tải được—rồi dán lại vào nanobot.",
-      "authorizationUrlLabel": "URL đăng nhập xAI",
-      "remoteCallbackLabel": "URL localhost cuối cùng",
-      "callbackPlaceholder": "URL cuối cùng hoặc mã ủy quyền",
+      "localCodeHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy dán mã ủy quyền bên dưới.",
+      "remoteCodeHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn. Sau khi đăng nhập, hãy dán mã ủy quyền do xAI hiển thị bên dưới.",
+      "authorizationCode": "Mã ủy quyền",
       "finishSignIn": "Hoàn tất đăng nhập"
     },
     "skills": {

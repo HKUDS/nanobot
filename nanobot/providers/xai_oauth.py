@@ -104,7 +104,7 @@ class _CallbackResult:
 
 
 class XAIOAuthLoginFlow:
-    """Pending xAI OAuth login that can finish through loopback or pasted callback."""
+    """Pending xAI OAuth login that can finish through loopback or an authorization code."""
 
     def __init__(
         self,
@@ -152,7 +152,7 @@ class XAIOAuthLoginFlow:
     def remaining_seconds(self) -> int:
         return max(0, int(self._expires_at - time.monotonic()))
 
-    def complete(self, callback_value: str | None = None) -> XAIToken | None:
+    def complete(self, authorization_code: str | None = None) -> XAIToken | None:
         """Complete this flow, or return ``None`` while loopback is still pending."""
         with self._lock:
             if self._token is not None:
@@ -160,8 +160,8 @@ class XAIOAuthLoginFlow:
             self._raise_if_finished()
 
         callback: _CallbackResult | None
-        if callback_value is not None:
-            callback = _parse_pasted_callback(callback_value)
+        if authorization_code is not None:
+            callback = _CallbackResult(code=authorization_code.strip())
         else:
             try:
                 callback = self._result_queue.get_nowait()
@@ -341,10 +341,10 @@ def start_xai_oauth_login(
 
 def complete_xai_oauth_login(
     flow: XAIOAuthLoginFlow,
-    callback_value: str | None = None,
+    authorization_code: str | None = None,
 ) -> XAIToken | None:
-    """Complete a pending login from loopback state or a pasted callback value."""
-    return flow.complete(callback_value)
+    """Complete a pending login from loopback state or a pasted authorization code."""
+    return flow.complete(authorization_code)
 
 
 def get_xai_oauth_token(
@@ -553,21 +553,6 @@ body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7
 font:16px/1.5 system-ui,sans-serif}}main{{max-width:30rem;margin:1.5rem;padding:2rem;border:1px solid #dfe4ee;
 border-radius:18px;background:white;box-shadow:0 16px 50px #17203318}}h1{{margin:0 0 .65rem;font-size:1.5rem}}
 p{{margin:0;color:#526078}}</style></head><body><main><h1>{title}</h1><p>{message}</p></main></body></html>"""
-
-
-def _parse_pasted_callback(value: str) -> _CallbackResult:
-    value = value.strip()
-    if not value:
-        return _CallbackResult(error="no authorization code was provided")
-    if "://" not in value:
-        return _CallbackResult(code=value)
-    parsed = urlsplit(value)
-    params = parse_qs(parsed.query)
-    return _CallbackResult(
-        code=_first(params, "code"),
-        state=_first(params, "state"),
-        error=_first(params, "error_description") or _first(params, "error"),
-    )
 
 
 def _exchange_callback(

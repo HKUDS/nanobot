@@ -478,15 +478,14 @@ describe("webui API helpers", () => {
       "tok",
       "xai_grok",
       "flow-123",
-      "http://127.0.0.1/callback?code=secret&state=state",
+      "secret",
     );
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",
-          "X-Nanobot-OAuth-Callback":
-            "http://127.0.0.1/callback?code=secret&state=state",
+          "X-Nanobot-OAuth-Code": "secret",
         },
       }),
     );

@@ -2016,8 +2016,7 @@ describe("SettingsView Apps catalog", () => {
         "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123"
       ) {
         expect(init?.headers).toMatchObject({
-          "X-Nanobot-OAuth-Callback":
-            "http://127.0.0.1/callback?code=secret&state=test",
+          "X-Nanobot-OAuth-Code": "secret",
         });
         return jsonResponse(signedIn);
       }
@@ -2053,11 +2052,16 @@ describe("SettingsView Apps catalog", () => {
     expect(popup.opener).toBeNull();
     expect(popup.location.href).toBe(authorization.authorization_url);
 
+    expect(
+      screen.getByText(
+        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, paste the authorization code below.",
+      ),
+    ).toBeInTheDocument();
     const callbackInput = await screen.findByRole("textbox", {
-      name: "Final URL or authorization code",
+      name: "Authorization code",
     });
     fireEvent.change(callbackInput, {
-      target: { value: "http://127.0.0.1/callback?code=secret&state=test" },
+      target: { value: "secret" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
 
@@ -2066,8 +2070,7 @@ describe("SettingsView Apps catalog", () => {
         "/api/settings/provider/oauth-login/complete?provider=xai_grok&flow_id=flow-123",
         expect.objectContaining({
           headers: expect.objectContaining({
-            "X-Nanobot-OAuth-Callback":
-              "http://127.0.0.1/callback?code=secret&state=test",
+            "X-Nanobot-OAuth-Code": "secret",
           }),
         }),
       ),
@@ -2144,7 +2147,7 @@ describe("SettingsView Apps catalog", () => {
       fireEvent.click((await screen.findByText("xAI Grok")).closest("button")!);
       expect(
         screen.getByText(
-          "Nanobot will provide an xAI sign-in URL. Open it on your computer, finish signing in, then paste the final localhost URL back here.",
+          "Select Sign in to open xAI on your computer, then paste the authorization code shown after login.",
         ),
       ).toBeInTheDocument();
 
@@ -2154,20 +2157,17 @@ describe("SettingsView Apps catalog", () => {
       expect(openMock).not.toHaveBeenCalled();
       expect(
         within(dialog).getByText(
-          "Open the xAI sign-in URL below on your computer. After signing in, copy the full localhost URL from your browser's address bar—even if the page does not load—and paste it back into nanobot.",
+          "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
         ),
       ).toBeInTheDocument();
       expect(
-        within(dialog).getByRole("textbox", { name: "xAI sign-in URL" }),
-      ).toHaveValue(authorization.authorization_url);
+        within(dialog).queryByRole("textbox", { name: "xAI sign-in URL" }),
+      ).not.toBeInTheDocument();
       expect(
-        within(dialog).getByRole("textbox", { name: "xAI sign-in URL" }),
-      ).toHaveAttribute("readonly");
+        within(dialog).queryByRole("button", { name: "Copy" }),
+      ).not.toBeInTheDocument();
       expect(
-        within(dialog).getByRole("button", { name: "Copy" }),
-      ).toBeInTheDocument();
-      expect(
-        within(dialog).getByRole("textbox", { name: "Final localhost URL" }),
+        within(dialog).getByRole("textbox", { name: "Authorization code" }),
       ).toBeInTheDocument();
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));

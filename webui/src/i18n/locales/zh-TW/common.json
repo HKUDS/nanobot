@@ -705,7 +705,7 @@
       "signOut": "登出",
       "signedInAs": "已使用 {{account}} 登入",
       "signInHelp": "請從這臺裝置登入；系統不會將 API 金鑰儲存在設定中。",
-      "remoteSignInHelp": "nanobot 會提供 xAI 登入網址。請在你的電腦上開啟並完成登入，再將最終的 localhost 網址貼回此處。",
+      "remoteSignInHelp": "點擊「登入」在你的電腦上開啟 xAI，完成登入後貼上頁面顯示的授權碼。",
       "signInRequired": "需要登入",
       "signInBeforeSaving": "將此 OAuth 供應商設為目前模型供應商前，請先登入。",
       "signedIn": "已登入",
@@ -713,11 +713,9 @@
       "proxyLabel": "網路代理",
       "proxySaveBeforeSignIn": "請先儲存代理變更再登入。",
       "saveProxy": "儲存代理",
-      "callbackHelp": "請在瀏覽器中完成登入。若未自動完成，請將最終網址貼到下方。",
-      "remoteCallbackHelp": "請在你的電腦上開啟下方的 xAI 登入網址。完成登入後，瀏覽器會重新導向至 localhost；即使頁面無法開啟，也請複製網址列中的完整網址並貼回 nanobot。",
-      "authorizationUrlLabel": "xAI 登入網址",
-      "remoteCallbackLabel": "最終 localhost 網址",
-      "callbackPlaceholder": "最終網址或授權碼",
+      "localCodeHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請將授權碼貼到下方。",
+      "remoteCodeHelp": "點擊「登入」在你的電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
+      "authorizationCode": "授權碼",
       "finishSignIn": "完成登入"
     },
     "skills": {

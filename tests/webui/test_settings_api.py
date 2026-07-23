@@ -1227,7 +1227,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
     )
     completed = complete_oauth_provider(
         {"provider": ["xai-grok"], "flow_id": [payload["flow_id"]]},
-        "http://127.0.0.1/callback?code=secret&state=test",
+        "secret",
     )
 
     assert pending == {
@@ -1236,7 +1236,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
         "flow_id": payload["flow_id"],
     }
     assert completed == {"settings": "ready"}
-    assert callbacks == [None, "http://127.0.0.1/callback?code=secret&state=test"]
+    assert callbacks == [None, "secret"]
 
 
 def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(

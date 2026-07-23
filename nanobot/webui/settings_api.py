@@ -1343,7 +1343,7 @@ def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
 
 def complete_oauth_provider(
     query: QueryParams,
-    callback_value: str | None = None,
+    authorization_code: str | None = None,
 ) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     flow_id = (_query_first(query, "flow_id") or "").strip()
@@ -1360,7 +1360,7 @@ def complete_oauth_provider(
     from nanobot.providers.xai_oauth import complete_xai_oauth_login
 
     try:
-        token = complete_xai_oauth_login(flow, callback_value)
+        token = complete_xai_oauth_login(flow, authorization_code)
     except Exception as e:
         _remove_xai_webui_oauth_flow(flow_id, flow)
         raise WebUISettingsError(f"xAI OAuth login failed: {e}", status=502) from e

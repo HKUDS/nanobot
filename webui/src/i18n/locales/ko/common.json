@@ -705,7 +705,7 @@
       "signOut": "로그아웃",
       "signedInAs": "{{account}}로 로그인됨",
       "signInHelp": "이 기기에서 로그인합니다. API key는 config에 저장되지 않습니다.",
-      "remoteSignInHelp": "nanobot이 xAI 로그인 URL을 제공합니다. 사용자 컴퓨터에서 열어 로그인을 완료한 다음, 최종 localhost URL을 여기에 붙여 넣으세요.",
+      "remoteSignInHelp": "로그인을 선택하여 사용자 컴퓨터에서 xAI를 연 다음, 로그인 후 표시되는 인증 코드를 붙여 넣으세요.",
       "signInRequired": "로그인이 필요합니다",
       "signInBeforeSaving": "이 OAuth 제공자를 활성 모델 제공자로 저장하기 전에 로그인하세요.",
       "signedIn": "로그인됨",
@@ -713,11 +713,9 @@
       "proxyLabel": "네트워크 프록시",
       "proxySaveBeforeSignIn": "로그인하기 전에 프록시 변경 사항을 저장하세요.",
       "saveProxy": "프록시 저장",
-      "callbackHelp": "브라우저에서 로그인을 완료하세요. 자동으로 완료되지 않으면 최종 URL을 아래에 붙여 넣으세요.",
-      "remoteCallbackHelp": "아래 xAI 로그인 URL을 사용자 컴퓨터에서 여세요. 로그인 후 페이지가 열리지 않더라도 주소 표시줄의 전체 localhost URL을 복사해 nanobot에 붙여 넣으세요.",
-      "authorizationUrlLabel": "xAI 로그인 URL",
-      "remoteCallbackLabel": "최종 localhost URL",
-      "callbackPlaceholder": "최종 URL 또는 인증 코드",
+      "localCodeHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 인증 코드를 아래에 붙여 넣으세요.",
+      "remoteCodeHelp": "로그인을 선택하여 사용자 컴퓨터에서 xAI를 여세요. 로그인 후 xAI에 표시된 인증 코드를 아래에 붙여 넣으세요.",
+      "authorizationCode": "인증 코드",
       "finishSignIn": "로그인 완료"
     },
     "skills": {
