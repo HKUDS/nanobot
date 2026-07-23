@@ -369,6 +369,26 @@ describe("ThreadShell", () => {
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
   });
 
+  it("keeps the composer model name and provider on the same settings snapshot", async () => {
+    const client = makeClient();
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("model-settings-sync")}
+          title="Model settings sync"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={modelSettings("openai-codex/gpt-5.5", "openai_codex")}
+        />,
+        "ling/ling-3.0-flash",
+      ),
+    );
+
+    expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
+    expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
+    expect(screen.queryByText("ling-3.0-flash")).not.toBeInTheDocument();
+  });
+
   it("resolves the composer model from the active session preset", async () => {
     const client = makeClient();
     render(

@@ -195,7 +195,7 @@ function toModelBadgeInfo(
   const preset = modelPresetForBadge(settings, scopedPreset);
   const model = scopedPreset
     ? preset?.model || null
-    : modelName || settings?.agent.model || null;
+    : settings?.agent.model || modelName || null;
   const label = toModelBadgeLabel(model);
   const rawProvider = preset?.provider
     || (!scopedPreset ? settings?.agent.provider : null)
