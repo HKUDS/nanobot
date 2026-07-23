@@ -1963,6 +1963,79 @@ describe("useNanobotStream", () => {
     expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
   });
 
+  it("keeps length-recovery segments in one assistant message", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-length", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      result.current.send("give a long answer");
+    });
+    const activeTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+
+    act(() => {
+      fake.emit("chat-length", {
+        event: "delta",
+        chat_id: "chat-length",
+        text: "first ",
+        turn_id: activeTurnId,
+      });
+    });
+    await flushStreamFrame();
+    const assistantId = result.current.messages[1].id;
+
+    act(() => {
+      fake.emit("chat-length", {
+        event: "stream_end",
+        chat_id: "chat-length",
+        text: "first ",
+        resuming: true,
+        merge_next: true,
+        turn_id: activeTurnId,
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1]).toMatchObject({
+      id: assistantId,
+      content: "first ",
+      isStreaming: true,
+    });
+
+    act(() => {
+      fake.emit("chat-length", {
+        event: "delta",
+        chat_id: "chat-length",
+        text: "second",
+        turn_id: activeTurnId,
+      });
+    });
+    await flushStreamFrame();
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1]).toMatchObject({
+      id: assistantId,
+      content: "first second",
+      isStreaming: true,
+    });
+
+    act(() => {
+      fake.emit("chat-length", {
+        event: "turn_end",
+        chat_id: "chat-length",
+        turn_id: activeTurnId,
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1]).toMatchObject({
+      id: assistantId,
+      content: "first second",
+      isStreaming: false,
+    });
+  });
+
   it("keeps streaming alive across stream_end when tool activity follows", async () => {
     const fake = fakeClient();
     const onTurnEnd = vi.fn();

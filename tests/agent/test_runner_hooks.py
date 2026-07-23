@@ -151,6 +151,7 @@ async def test_runner_length_recovery_streams_segments_once_and_returns_all_cont
     provider = MagicMock(spec=LLMProvider)
     streamed: list[str] = []
     endings: list[bool] = []
+    merge_next: list[bool] = []
     responses = iter([
         LLMResponse(content="first ", finish_reason="length"),
         LLMResponse(content="second", finish_reason="stop"),
@@ -175,6 +176,7 @@ async def test_runner_length_recovery_streams_segments_once_and_returns_all_cont
 
         async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
             endings.append(resuming)
+            merge_next.append(context.stream_continues_current_message)
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
@@ -189,6 +191,7 @@ async def test_runner_length_recovery_streams_segments_once_and_returns_all_cont
     assert result.final_content == "first second"
     assert streamed == ["first ", "second"]
     assert endings == [True, False]
+    assert merge_next == [True, False]
     provider.chat_with_retry.assert_not_awaited()
 
 

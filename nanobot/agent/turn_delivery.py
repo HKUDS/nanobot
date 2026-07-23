@@ -285,7 +285,12 @@ class TurnDelivery:
             )
         )
 
-    async def _publish_stream_end(self, *, resuming: bool = False) -> None:
+    async def _publish_stream_end(
+        self,
+        *,
+        resuming: bool = False,
+        merge_next: bool = False,
+    ) -> None:
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=self.delivery_message.channel,
@@ -293,8 +298,10 @@ class TurnDelivery:
                 event=StreamEndEvent(
                     stream_id=self._stream_id(),
                     resuming=resuming,
+                    merge_next=merge_next,
                 ),
                 metadata=self.delivery_message.metadata,
             )
         )
-        self._stream_segment += 1
+        if not merge_next:
+            self._stream_segment += 1

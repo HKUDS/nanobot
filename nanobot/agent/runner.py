@@ -553,6 +553,7 @@ class AgentRunner:
                         _MAX_LENGTH_RECOVERIES,
                     )
                     if hook.wants_streaming():
+                        context.stream_continues_current_message = True
                         await hook.on_stream_end(context, resuming=True)
                     messages.append(build_assistant_message(
                         clean,

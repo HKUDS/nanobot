@@ -1243,6 +1243,7 @@ class WeixinChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Deliver a streamed reply to WeChat.
 

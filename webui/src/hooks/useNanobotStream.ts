@@ -25,7 +25,7 @@ import type {
 } from "@/lib/types";
 
 interface StreamBuffer {
-  /** ID of the assistant message currently receiving deltas (cleared on ``stream_end``). */
+  /** ID of the assistant message currently receiving deltas (cleared when its segment closes). */
   messageId: string;
 }
 
@@ -763,15 +763,20 @@ export function useNanobotStream(
           ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current, turn);
         if (targetIndex !== null) {
           const target = next[targetIndex];
-          next = replaceMessageAt(next, targetIndex, {
+          const merged = {
             ...target,
             content: finalAnswerText,
             isStreaming: true,
             ...turn,
-          });
+          };
+          next = replaceMessageAt(next, targetIndex, merged);
+          if (!options?.closeAnswerSegment) {
+            closedAssistantStreamIdsRef.current.delete(merged.id);
+            activeAssistantRef.current = { id: merged.id, index: targetIndex };
+            buffer.current = { messageId: merged.id };
+          }
         } else {
           const id = crypto.randomUUID();
-          closedAssistantStreamIdsRef.current.add(id);
           next = [
             ...next,
             {
@@ -783,6 +788,12 @@ export function useNanobotStream(
               createdAt: Date.now(),
             },
           ];
+          if (options?.closeAnswerSegment) {
+            closedAssistantStreamIdsRef.current.add(id);
+          } else {
+            activeAssistantRef.current = { id, index: next.length - 1 };
+            buffer.current = { messageId: id };
+          }
         }
       }
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
@@ -890,8 +901,9 @@ export function useNanobotStream(
 
       if (ev.event === "stream_end") {
         const turn = turnFieldsFromEvent(ev, "answer");
+        const mergeNext = ev.resuming === true && ev.merge_next === true;
         flushPendingStreamEvents({
-          closeAnswerSegment: true,
+          closeAnswerSegment: !mergeNext,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
           turn,
         });
@@ -899,7 +911,9 @@ export function useNanobotStream(
         if (ev.resuming) {
           cancelStreamEndTimer();
           setIsStreaming(true);
-          setMessages((prev) => finalizeStreamedTurn(prev, turn));
+          if (!mergeNext) {
+            setMessages((prev) => finalizeStreamedTurn(prev, turn));
+          }
           return;
         }
         scheduleStreamEndTimer(turn);

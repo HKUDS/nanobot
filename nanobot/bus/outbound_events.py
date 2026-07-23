@@ -46,6 +46,7 @@ class StreamEndEvent(OutboundEvent):
     content: str = ""
     stream_id: str | None = None
     resuming: bool = False
+    merge_next: bool = False
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,7 @@ def _legacy_event_from_metadata(msg: OutboundMessage) -> OutboundEvent | None:
             content=msg.content,
             stream_id=_metadata_str(meta, "_stream_id"),
             resuming=bool(meta.get("_resuming")),
+            merge_next=bool(meta.get("_merge_next")),
         )
     if meta.get("_stream_delta"):
         return StreamDeltaEvent(

@@ -2815,7 +2815,7 @@ async def test_send_with_retry_no_retry_when_max_is_zero():
 @pytest.mark.asyncio
 async def test_send_with_retry_calls_send_delta():
     """_send_with_retry should call send_delta for stream delta events."""
-    calls: list[tuple[str, str, str | None, bool, bool]] = []
+    calls: list[tuple[str, str, str | None, bool, bool, bool]] = []
 
     class _StreamingChannel(BaseChannel):
         name = "streaming"
@@ -2839,8 +2839,9 @@ async def test_send_with_retry_calls_send_delta():
             stream_id: str | None = None,
             stream_end: bool = False,
             resuming: bool = False,
+            merge_next: bool = False,
         ) -> None:
-            calls.append((chat_id, delta, stream_id, stream_end, resuming))
+            calls.append((chat_id, delta, stream_id, stream_end, resuming, merge_next))
 
     fake_config = SimpleNamespace(
         channels=ChannelsConfig(send_max_retries=3),
@@ -2862,13 +2863,18 @@ async def test_send_with_retry_calls_send_delta():
     end = outbound_message_for_event(
         channel="streaming",
         chat_id="123",
-        event=StreamEndEvent(content="", stream_id="s1", resuming=True),
+        event=StreamEndEvent(
+            content="",
+            stream_id="s1",
+            resuming=True,
+            merge_next=True,
+        ),
     )
     await mgr._send_with_retry(mgr.channels["streaming"], end)
 
     assert calls == [
-        ("123", "test delta", "s1", False, False),
-        ("123", "", "s1", True, True),
+        ("123", "test delta", "s1", False, False, False),
+        ("123", "", "s1", True, True, True),
     ]
 
 

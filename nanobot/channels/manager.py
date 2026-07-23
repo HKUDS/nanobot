@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 from collections.abc import Callable, Iterable
 from contextlib import suppress
 from pathlib import Path
@@ -763,13 +764,29 @@ class ChannelManager:
         msg: OutboundMessage,
         event: StreamDeltaEvent | StreamEndEvent,
     ) -> None:
+        kwargs: dict[str, Any] = {
+            "stream_id": event.stream_id,
+            "stream_end": isinstance(event, StreamEndEvent),
+            "resuming": event.resuming if isinstance(event, StreamEndEvent) else False,
+        }
+        if isinstance(event, StreamEndEvent) and event.merge_next:
+            try:
+                signature = inspect.signature(channel.send_delta)
+                if (
+                    "merge_next" in signature.parameters
+                    or any(
+                        parameter.kind is inspect.Parameter.VAR_KEYWORD
+                        for parameter in signature.parameters.values()
+                    )
+                ):
+                    kwargs["merge_next"] = True
+            except (TypeError, ValueError):
+                pass
         await channel.send_delta(
             msg.chat_id,
             msg.content,
             msg.metadata,
-            stream_id=event.stream_id,
-            stream_end=isinstance(event, StreamEndEvent),
-            resuming=event.resuming if isinstance(event, StreamEndEvent) else False,
+            **kwargs,
         )
 
     @staticmethod
@@ -850,6 +867,7 @@ class ChannelManager:
                     final_event = StreamEndEvent(
                         stream_id=next_stream_id,
                         resuming=next_event.resuming,
+                        merge_next=next_event.merge_next,
                     )
                     # Stream ended - stop coalescing this stream
                     break
