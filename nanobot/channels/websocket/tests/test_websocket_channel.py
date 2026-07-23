@@ -1117,6 +1117,36 @@ async def test_hydrate_replays_the_latest_turn_model_after_refresh() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_message_discards_the_previous_turn_model_before_hydration(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    channel._turn_models["chat-1"] = TurnModelUpdatedEvent(
+        model="deepseek/deepseek-chat",
+        provider="deepseek",
+        fallback_index=1,
+    )
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        connection,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "chat-1",
+            "content": "/model other",
+            "webui": True,
+            "turn_id": "turn-2",
+        },
+    )
+
+    assert "chat-1" not in channel._turn_models
+    connection.send.assert_not_awaited()
+    assert bus.publish_inbound.await_args.args[0].content == "/model other"
+
+
+@pytest.mark.asyncio
 async def test_runtime_model_update_publisher_uses_websocket_outbound_event() -> None:
     bus = MessageBus()
 

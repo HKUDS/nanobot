@@ -554,6 +554,7 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
+                self._turn_models.pop(default_chat_id, None)
                 await self._handle_message(
                     sender_id=client_id,
                     chat_id=default_chat_id,
@@ -686,6 +687,8 @@ class WebSocketChannel(BaseChannel):
             if not content.strip() and not media_paths:
                 await self._send_event(connection, "error", detail="missing content")
                 return
+            # A newly accepted request supersedes the previous turn's actual model.
+            self._turn_models.pop(cid, None)
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
             await self._hydrate_after_subscribe(cid)

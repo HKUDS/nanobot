@@ -388,6 +388,27 @@ describe("NanobotClient", () => {
     }));
 
     lastSocket().fakeMessage({
+      event: "session_updated",
+      chat_id: "chat-b",
+      scope: "thread",
+    });
+    expect(client.getTurnModel("chat-a")).toBeDefined();
+
+    lastSocket().fakeMessage({
+      event: "session_updated",
+      chat_id: "chat-a",
+      scope: "thread",
+    });
+    expect(client.getTurnModel("chat-a")).toBeUndefined();
+
+    lastSocket().fakeMessage({
+      event: "turn_model_updated",
+      chat_id: "chat-a",
+      model_name: "deepseek/deepseek-chat",
+      provider: "deepseek",
+      fallback_index: 1,
+    });
+    lastSocket().fakeMessage({
       event: "runtime_model_updated",
       model_name: "anthropic/claude-sonnet-4-5",
     });

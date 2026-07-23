@@ -507,6 +507,56 @@ describe("ThreadShell", () => {
     expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
   });
 
+  it("clears fallback state when the session model preset changes", async () => {
+    const client = makeClient();
+    const settings = modelSettings("openai-codex/gpt-5.5", "openai_codex");
+    settings.model_presets.push({
+      ...settings.model_presets[0]!,
+      name: "other",
+      label: "Other",
+      active: false,
+      is_default: false,
+      model: "openai-codex/gpt-5.4",
+    });
+    const { rerender } = render(wrap(
+      client,
+      <ThreadShell
+        session={session("fallback-preset", "default")}
+        title="Fallback preset"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+      "openai-codex/gpt-5.5",
+    ));
+
+    act(() => {
+      client._emitChat("fallback-preset", {
+        event: "turn_model_updated",
+        chat_id: "fallback-preset",
+        model_name: "deepseek/deepseek-chat",
+        provider: "deepseek",
+        fallback_index: 1,
+      });
+    });
+    expect(await screen.findByTestId("composer-model-fallback-indicator")).toBeInTheDocument();
+
+    rerender(wrap(
+      client,
+      <ThreadShell
+        session={session("fallback-preset", "other")}
+        title="Fallback preset"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />,
+      "openai-codex/gpt-5.5",
+    ));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("composer-model-fallback-indicator")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("gpt-5.4")).toBeInTheDocument();
+  });
+
   it("opens model settings from the unconfigured model badge", async () => {
     const client = makeClient();
     const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");

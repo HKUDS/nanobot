@@ -504,6 +504,7 @@ export class NanobotClient {
     }
 
     if (parsed.event === "session_updated") {
+      this.turnModelByChatId.delete(parsed.chat_id);
       this.emitSessionUpdate(parsed.chat_id, parsed.scope, parsed.workspace_scope);
       return;
     }

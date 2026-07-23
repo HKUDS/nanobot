@@ -387,6 +387,10 @@ export function ThreadShell({
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const bottomScrolledChatIdRef = useRef<string | null>(null);
+  const turnModelSelectionRef = useRef<{
+    chatId: string | null;
+    modelPreset: string | null;
+  } | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -486,6 +490,22 @@ export function ThreadShell({
   const showHeroComposer = messages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
+  useEffect(() => {
+    const previous = turnModelSelectionRef.current;
+    turnModelSelectionRef.current = {
+      chatId,
+      modelPreset: sessionModelPreset,
+    };
+    if (
+      !previous
+      || !chatId
+      || previous.chatId !== chatId
+      || previous.modelPreset === sessionModelPreset
+    ) {
+      return;
+    }
+    setTurnModel(null);
+  }, [chatId, sessionModelPreset]);
   const displayModelName = turnModel?.modelName ?? modelName;
   const modelBadge = useMemo(
     () => toModelBadgeInfo(
