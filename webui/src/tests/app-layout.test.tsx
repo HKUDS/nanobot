@@ -1636,8 +1636,9 @@ describe("App layout", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.getByText("Model call order")).toBeInTheDocument();
-    expect(screen.getByText("Model presets")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
+    expect(screen.queryByText("Model presets")).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Add preset" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New model preset" }));
     const modelDialog = await screen.findByRole("dialog", { name: "New model preset" });
     expect(
       within(modelDialog).getByText("Save a reusable model and its generation settings."),

@@ -127,6 +127,42 @@ function settingsPayload(): SettingsPayload {
   };
 }
 
+function settingsPayloadWithBackup(): {
+  payload: SettingsPayload;
+  backupPreset: SettingsPayload["model_presets"][number];
+} {
+  const base = settingsPayload();
+  const backupPreset = {
+    ...base.model_presets[0],
+    name: "backup",
+    label: "Backup",
+    active: false,
+    model: "anthropic/claude-sonnet-4",
+    provider: "anthropic",
+    resolved_provider: "anthropic",
+  };
+  return {
+    backupPreset,
+    payload: {
+      ...base,
+      model_presets: [base.model_presets[0], backupPreset],
+      model_call_order: ["primary", "backup"],
+      providers: [
+        {
+          name: "openai",
+          label: "OpenAI",
+          configured: true,
+        },
+        {
+          name: "anthropic",
+          label: "Anthropic",
+          configured: true,
+        },
+      ],
+    },
+  };
+}
+
 function channelSetupField(
   channel: string,
   field: string,
@@ -1992,34 +2028,8 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
   });
 
-  it("reorders model presets and saves the model call order", async () => {
-    const base = settingsPayload();
-    const backupPreset = {
-      ...base.model_presets[0],
-      name: "backup",
-      label: "Backup",
-      active: false,
-      model: "anthropic/claude-sonnet-4",
-      provider: "anthropic",
-      resolved_provider: "anthropic",
-    };
-    const payload: SettingsPayload = {
-      ...base,
-      model_presets: [base.model_presets[0], backupPreset],
-      model_call_order: ["primary", "backup"],
-      providers: [
-        {
-          name: "openai",
-          label: "OpenAI",
-          configured: true,
-        },
-        {
-          name: "anthropic",
-          label: "Anthropic",
-          configured: true,
-        },
-      ],
-    };
+  it("drags model presets to reorder and saves the model call order immediately", async () => {
+    const { payload, backupPreset } = settingsPayloadWithBackup();
     const updatedPayload: SettingsPayload = {
       ...payload,
       agent: {
@@ -2053,10 +2063,32 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    fireEvent.change(screen.getByDisplayValue("Primary"), {
+      target: { value: "Primary draft" },
+    });
     const moveUpButtons = await screen.findAllByRole("button", { name: "Move up" });
     expect(moveUpButtons[0]).toBeDisabled();
-    fireEvent.click(moveUpButtons[1]);
-    fireEvent.click(screen.getByRole("button", { name: "Save order" }));
+    const dragHandles = screen.getAllByRole("button", { name: "Drag to reorder" });
+    const dataTransfer = {
+      dropEffect: "move",
+      effectAllowed: "move",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(dragHandles[1], { dataTransfer });
+    fireEvent.dragEnter(screen.getByTestId("model-call-order-row-primary"), {
+      dataTransfer,
+    });
+    fireEvent.drop(screen.getByTestId("model-call-order-row-primary"), {
+      dataTransfer,
+    });
 
     await waitFor(() => {
       const saveCall = fetchMock.mock.calls.find(([input]) =>
@@ -2075,7 +2107,142 @@ describe("SettingsView Apps catalog", () => {
       );
     });
 
-    expect(screen.getByRole("button", { name: "Save order" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Primary draft")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save preset" })).toBeEnabled();
+  });
+
+  it("restores the model call order when immediate persistence fails", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url.startsWith("/api/settings/model-call-order/update?")) {
+        return {
+          ok: false,
+          status: 500,
+          text: async () => "Order update failed",
+        } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    const moveUpButtons = await screen.findAllByRole("button", { name: "Move up" });
+    fireEvent.click(moveUpButtons[1]);
+
+    expect(await screen.findByText("Order update failed")).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByTestId(/^model-call-order-row-/)
+        .map((row) => row.getAttribute("data-testid")),
+    ).toEqual([
+      "model-call-order-row-primary",
+      "model-call-order-row-backup",
+    ]);
+  });
+
+  it("appends a new model preset to the call order immediately", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    const writerPreset = {
+      ...payload.model_presets[0],
+      name: "writer",
+      label: "Writer",
+      active: false,
+      model: "openai/gpt-4o-mini",
+      provider: "openai",
+      resolved_provider: "openai",
+    };
+    const createdPayload: SettingsPayload = {
+      ...payload,
+      model_presets: [...payload.model_presets, writerPreset],
+      created_model_preset: writerPreset.name,
+    };
+    const orderedPayload: SettingsPayload = {
+      ...createdPayload,
+      model_call_order: ["primary", "backup", "writer"],
+      created_model_preset: undefined,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url.startsWith("/api/settings/model-configurations/create?")) {
+        return jsonResponse(createdPayload);
+      }
+      if (url.startsWith("/api/settings/model-call-order/update?")) {
+        return jsonResponse(orderedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Add preset" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New model preset" }));
+    const dialog = await screen.findByRole("dialog", { name: "New model preset" });
+    fireEvent.change(within(dialog).getByPlaceholderText("Fast writing"), {
+      target: { value: "Writer" },
+    });
+    fireEvent.pointerDown(within(dialog).getByRole("button", { name: "Select model" }));
+    const modelSearch = await screen.findByRole("textbox", {
+      name: "Search or type model ID",
+    });
+    fireEvent.change(modelSearch, {
+      target: { value: "openai/gpt-4o-mini" },
+    });
+    fireEvent.keyDown(modelSearch, { key: "Enter" });
+    const saveButton = within(dialog).getByRole("button", { name: "Save" });
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      const orderCall = fetchMock.mock.calls.find(([input]) =>
+        String(input).startsWith("/api/settings/model-call-order/update?"),
+      );
+      expect(orderCall).toBeDefined();
+      const url = new URL(String(orderCall?.[0]), "http://nanobot.test");
+      expect(JSON.parse(url.searchParams.get("order") ?? "[]")).toEqual([
+        "primary",
+        "backup",
+        "writer",
+      ]);
+    });
+    expect(await screen.findByTestId("model-call-order-row-writer")).toHaveTextContent(
+      "Fallback 2",
+    );
+    expect(screen.getByDisplayValue("Writer")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
   });
 
   it("converts legacy model settings into presets before editing call order", async () => {
@@ -2129,7 +2296,7 @@ describe("SettingsView Apps catalog", () => {
     expect(
       screen.queryByRole("button", { name: "Convert to presets" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save order" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save order" })).not.toBeInTheDocument();
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
   });
 
@@ -2996,8 +3163,11 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "models" });
 
-    const newPresetButton = await screen.findByRole("button", { name: "New model preset" });
-    fireEvent.click(newPresetButton);
+    const openNewPresetDialog = async () => {
+      fireEvent.pointerDown(await screen.findByRole("button", { name: "Add preset" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "New model preset" }));
+    };
+    await openNewPresetDialog();
 
     expect(await screen.findByRole("heading", { name: "New model preset" })).toBeInTheDocument();
     const dialog = screen.getByRole("dialog");
@@ -3013,7 +3183,7 @@ describe("SettingsView Apps catalog", () => {
     );
     expect(document.body.style.pointerEvents).not.toBe("none");
 
-    fireEvent.click(newPresetButton);
+    await openNewPresetDialog();
     expect(await screen.findByRole("heading", { name: "New model preset" })).toBeInTheDocument();
   });
 

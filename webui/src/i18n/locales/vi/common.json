@@ -378,6 +378,7 @@
       "convertHelp": "Chuyển mô hình chính và các mô hình dự phòng hiện có thành cấu hình đặt trước để quản lý thứ tự tại đây.",
       "converting": "Đang chuyển đổi...",
       "convertAction": "Chuyển thành cấu hình đặt trước",
+      "dragToReorder": "Kéo để sắp xếp lại",
       "moveUp": "Di chuyển lên",
       "moveDown": "Di chuyển xuống",
       "removeFromOrder": "Xóa khỏi thứ tự gọi",

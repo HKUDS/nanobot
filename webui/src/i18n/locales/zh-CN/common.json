@@ -135,6 +135,7 @@
       "convertHelp": "把现有主模型和备用模型转换成预设，之后即可在这里管理调用顺序。",
       "converting": "正在转换...",
       "convertAction": "转换为预设",
+      "dragToReorder": "拖动调整顺序",
       "moveUp": "上移",
       "moveDown": "下移",
       "removeFromOrder": "从调用顺序中移除",

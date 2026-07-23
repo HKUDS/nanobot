@@ -32,6 +32,7 @@ import {
   ExternalLink,
   Gem,
   Globe2,
+  GripVertical,
   Grid3X3,
   HardDrive,
   Hexagon,
@@ -243,8 +244,6 @@ interface ModelConfigurationDraft {
   temperature: number;
   reasoningEffort: string;
 }
-
-type ModelConfigurationTarget = "presets" | "call-order";
 
 type PendingRestartSection = "runtime" | "browser" | "image";
 type PendingRestartSections = Record<PendingRestartSection, boolean>;
@@ -603,9 +602,8 @@ export function SettingsView({
   const [automationsLoading, setAutomationsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modelConfigurationOpen, setModelConfigurationOpen] = useState(false);
-  const [modelConfigurationTarget, setModelConfigurationTarget] =
-    useState<ModelConfigurationTarget>("presets");
   const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
+  const [modelCallOrderSaving, setModelCallOrderSaving] = useState(false);
   const [modelMigrationSaving, setModelMigrationSaving] = useState(false);
   const [modelPresetPendingDelete, setModelPresetPendingDelete] =
     useState<SettingsPayload["model_presets"][number] | null>(null);
@@ -711,19 +709,27 @@ export function SettingsView({
     [t],
   );
 
-  const applyPayload = useCallback((payload: SettingsPayload) => {
-    setSettings(payload);
-    setForm(agentDraftFromPayload(payload));
-    setModelCallOrder(payload.model_call_order ?? []);
-    setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
-    setImageGenerationForm(imageGenerationFormFromPayload(payload));
-    setTranscriptionForm(transcriptionFormFromPayload(payload));
-    setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
-    if (payload.restart_required_sections) {
-      setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
-    }
-    onSettingsChange?.(payload);
-  }, [onSettingsChange]);
+  const applyPayload = useCallback(
+    (
+      payload: SettingsPayload,
+      options: { preserveAgentForm?: boolean } = {},
+    ) => {
+      setSettings(payload);
+      if (!options.preserveAgentForm) {
+        setForm(agentDraftFromPayload(payload));
+      }
+      setModelCallOrder(payload.model_call_order ?? []);
+      setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
+      setImageGenerationForm(imageGenerationFormFromPayload(payload));
+      setTranscriptionForm(transcriptionFormFromPayload(payload));
+      setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      if (payload.restart_required_sections) {
+        setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
+      }
+      onSettingsChange?.(payload);
+    },
+    [onSettingsChange],
+  );
 
   const closeXaiOAuthFlow = useCallback(() => {
     xaiOAuthFlowRef.current = null;
@@ -1013,15 +1019,6 @@ export function SettingsView({
     );
   }, [form, settings]);
 
-  const modelCallOrderDirty = useMemo(() => {
-    if (!settings) return false;
-    const savedOrder = settings.model_call_order ?? [];
-    return (
-      savedOrder.length !== modelCallOrder.length ||
-      savedOrder.some((name, index) => name !== modelCallOrder[index])
-    );
-  }, [modelCallOrder, settings]);
-
   const runtimeDirty = useMemo(() => {
     if (!settings) return false;
     return (
@@ -1138,7 +1135,15 @@ export function SettingsView({
   );
 
   const saveModelSettings = async () => {
-    if (!settings || !modelDirty || saving) return;
+    if (
+      !settings ||
+      !modelDirty ||
+      saving ||
+      modelCallOrderSaving ||
+      modelConfigurationSaving
+    ) {
+      return;
+    }
     const selectedPreset = settings.model_presets.find(
       (preset) => !preset.is_default && preset.name === form.modelPreset,
     );
@@ -1177,10 +1182,8 @@ export function SettingsView({
     }
   };
 
-  const openModelConfigurationDialog = (
-    target: ModelConfigurationTarget = "presets",
-  ) => {
-    if (!settings) return;
+  const openModelConfigurationDialog = () => {
+    if (!settings || saving || modelCallOrderSaving || modelConfigurationSaving) return;
     const primaryPreset = settings.model_presets.find(
       (preset) => !preset.is_default && preset.name === settings.model_call_order?.[0],
     );
@@ -1191,7 +1194,6 @@ export function SettingsView({
       configuredModelProviderOptions.find((option) => option.name === currentProvider)?.name ??
       configuredModelProviderOptions[0]?.name ??
       "";
-    setModelConfigurationTarget(target);
     setModelConfigurationForm({
       label: "",
       provider,
@@ -1224,12 +1226,9 @@ export function SettingsView({
         reasoningEffort: modelConfigurationForm.reasoningEffort || null,
       });
       const createdPreset = payload.created_model_preset;
-      const nextOrder =
-        modelConfigurationTarget === "call-order" && createdPreset
-          ? [...modelCallOrder, createdPreset]
-          : null;
+      const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
       applyPayload(payload);
-      if (modelConfigurationTarget === "presets" && createdPreset) {
+      if (createdPreset) {
         setForm(agentDraftFromPayload(payload, createdPreset));
       }
       setModelConfigurationOpen(false);
@@ -1240,6 +1239,9 @@ export function SettingsView({
         applyPayload(orderedPayload);
         finalPayload = orderedPayload;
       }
+      if (createdPreset) {
+        setForm(agentDraftFromPayload(finalPayload, createdPreset));
+      }
       onModelNameChange(finalPayload.agent.model || null);
       setError(null);
     } catch (err) {
@@ -1249,18 +1251,33 @@ export function SettingsView({
     }
   };
 
-  const saveModelCallOrder = async () => {
-    if (!settings || !modelCallOrderDirty || saving || modelCallOrder.length === 0) return;
-    setSaving(true);
+  const changeModelCallOrder = async (nextOrder: string[]) => {
+    const unchanged =
+      nextOrder.length === modelCallOrder.length &&
+      nextOrder.every((name, index) => name === modelCallOrder[index]);
+    if (
+      !settings ||
+      saving ||
+      modelCallOrderSaving ||
+      modelConfigurationSaving ||
+      nextOrder.length === 0 ||
+      unchanged
+    ) {
+      return;
+    }
+    const previousOrder = [...modelCallOrder];
+    setModelCallOrder(nextOrder);
+    setModelCallOrderSaving(true);
     try {
-      const payload = await updateModelCallOrder(token, modelCallOrder);
-      applyPayload(payload);
+      const payload = await updateModelCallOrder(token, nextOrder);
+      applyPayload(payload, { preserveAgentForm: true });
       onModelNameChange(payload.agent.model || null);
       setError(null);
     } catch (err) {
+      setModelCallOrder(previousOrder);
       setError((err as Error).message);
     } finally {
-      setSaving(false);
+      setModelCallOrderSaving(false);
     }
   };
 
@@ -1280,7 +1297,14 @@ export function SettingsView({
   };
 
   const handleDeleteModelConfiguration = async () => {
-    if (!modelPresetPendingDelete || saving) return;
+    if (
+      !modelPresetPendingDelete ||
+      saving ||
+      modelCallOrderSaving ||
+      modelConfigurationSaving
+    ) {
+      return;
+    }
     setSaving(true);
     try {
       const payload = await deleteModelConfiguration(token, modelPresetPendingDelete.name);
@@ -1916,15 +1940,14 @@ export function SettingsView({
               settings={settings}
               dirty={modelDirty}
               callOrder={modelCallOrder}
-              callOrderDirty={modelCallOrderDirty}
               saving={saving}
+              orderSaving={modelCallOrderSaving || modelConfigurationSaving}
               migrationSaving={modelMigrationSaving}
               showBrandLogos={localPrefs.brandLogos}
               providerSaving={providerSaving}
-              onChangeCallOrder={setModelCallOrder}
+              onChangeCallOrder={changeModelCallOrder}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onSave={saveModelSettings}
-              onSaveCallOrder={saveModelCallOrder}
               onMigrate={handleMigrateModelConfigurations}
               onCreateConfiguration={openModelConfigurationDialog}
               onDeleteConfiguration={setModelPresetPendingDelete}
@@ -3208,15 +3231,14 @@ function ModelsSettings({
   settings,
   dirty,
   callOrder,
-  callOrderDirty,
   saving,
+  orderSaving,
   migrationSaving,
   showBrandLogos,
   providerSaving,
   onChangeCallOrder,
   onProviderOAuthLogin,
   onSave,
-  onSaveCallOrder,
   onMigrate,
   onCreateConfiguration,
   onDeleteConfiguration,
@@ -3227,26 +3249,29 @@ function ModelsSettings({
   settings: SettingsPayload;
   dirty: boolean;
   callOrder: string[];
-  callOrderDirty: boolean;
   saving: boolean;
+  orderSaving: boolean;
   migrationSaving: boolean;
   showBrandLogos: boolean;
   providerSaving: string | null;
-  onChangeCallOrder: Dispatch<SetStateAction<string[]>>;
+  onChangeCallOrder: (order: string[]) => void;
   onProviderOAuthLogin: (provider: string) => void;
   onSave: () => void;
-  onSaveCallOrder: () => void;
   onMigrate: () => void;
-  onCreateConfiguration: (target?: ModelConfigurationTarget) => void;
+  onCreateConfiguration: () => void;
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
+  const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
+  const availablePresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
   const selectedPreset = namedPresetsByName.get(form.modelPreset) ?? null;
+  const selectedOrderIndex = selectedPreset ? callOrder.indexOf(selectedPreset.name) : -1;
   useEffect(() => {
     setAdvancedOpen(false);
   }, [selectedPreset?.name]);
@@ -3282,6 +3307,7 @@ function ModelsSettings({
   const selectedPresetReferenced = Boolean(
     selectedPreset && (settings.model_call_order ?? []).includes(selectedPreset.name),
   );
+  const callOrderBusy = orderSaving || saving;
   const reasoningEffortValues = Array.from(
     new Set([
       ...(selectedPreset?.reasoning_effort_values ?? ["", "low", "medium", "high"]),
@@ -3304,6 +3330,7 @@ function ModelsSettings({
   };
 
   const moveCallOrderItem = (index: number, offset: -1 | 1) => {
+    if (callOrderBusy) return;
     const nextIndex = index + offset;
     if (nextIndex < 0 || nextIndex >= callOrder.length) return;
     const next = [...callOrder];
@@ -3312,8 +3339,31 @@ function ModelsSettings({
   };
 
   const removeCallOrderItem = (index: number) => {
-    if (callOrder.length <= 1) return;
+    if (callOrderBusy || callOrder.length <= 1) return;
     onChangeCallOrder(callOrder.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const dropCallOrderItem = (targetIndex: number) => {
+    if (
+      callOrderBusy ||
+      draggedCallOrderIndex === null ||
+      draggedCallOrderIndex === targetIndex
+    ) {
+      setDraggedCallOrderIndex(null);
+      setDragOverCallOrderIndex(null);
+      return;
+    }
+    const next = [...callOrder];
+    const moved = next.splice(draggedCallOrderIndex, 1)[0];
+    if (!moved) {
+      setDraggedCallOrderIndex(null);
+      setDragOverCallOrderIndex(null);
+      return;
+    }
+    next.splice(targetIndex, 0, moved);
+    setDraggedCallOrderIndex(null);
+    setDragOverCallOrderIndex(null);
+    onChangeCallOrder(next);
   };
 
   return (
@@ -3364,46 +3414,123 @@ function ModelsSettings({
                   const provider = preset
                     ? modelPresetProviderKey(preset, settings)
                     : settings.agent.resolved_provider ?? settings.agent.provider;
+                  const presetConfigured = preset
+                    ? settingsProviderConfigured(
+                        settings,
+                        preset.provider,
+                        preset.resolved_provider,
+                      )
+                    : true;
                   return (
                     <div
                       key={`${name}-${index}`}
-                      className="flex min-h-[72px] items-center gap-3 px-4 py-3 sm:px-5"
-                    >
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
-                        {index + 1}
-                      </span>
-                      <ProviderPickerIcon
-                        provider={provider}
-                        showBrandLogos={showBrandLogos}
-                        unconfigured={
-                          preset
-                            ? !settingsProviderConfigured(
-                                settings,
-                                preset.provider,
-                                preset.resolved_provider,
-                              )
-                            : false
+                      data-testid={`model-call-order-row-${name}`}
+                      onDragEnter={(event) => {
+                        event.preventDefault();
+                        if (draggedCallOrderIndex !== null) {
+                          setDragOverCallOrderIndex(index);
                         }
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="truncate text-[14px] font-medium text-foreground">
-                            {preset?.label ?? name}
-                          </span>
-                          <StatusPill tone={index === 0 ? "success" : "neutral"}>
-                            {index === 0
-                              ? tx("settings.models.primary", "Primary")
-                              : tx(
-                                  "settings.models.fallbackNumber",
-                                  "Fallback {{number}}",
-                                  { number: index },
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        dropCallOrderItem(index);
+                      }}
+                      className={cn(
+                        "flex min-h-[72px] items-center gap-1.5 px-2 py-2 transition-colors sm:px-3",
+                        selectedPreset?.name === name ? "bg-muted/55" : "hover:bg-muted/25",
+                        dragOverCallOrderIndex === index &&
+                          draggedCallOrderIndex !== index &&
+                          "bg-primary/5 ring-1 ring-inset ring-primary/25",
+                        draggedCallOrderIndex === index && "opacity-55",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        draggable={!callOrderBusy}
+                        disabled={callOrderBusy}
+                        aria-label={tx("settings.models.dragToReorder", "Drag to reorder")}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", name);
+                          setDraggedCallOrderIndex(index);
+                          setDragOverCallOrderIndex(index);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedCallOrderIndex(null);
+                          setDragOverCallOrderIndex(null);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveCallOrderItem(index, -1);
+                          } else if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveCallOrderItem(index, 1);
+                          }
+                        }}
+                        className={cn(
+                          "inline-flex h-9 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground/45",
+                          callOrderBusy
+                            ? "cursor-not-allowed"
+                            : "cursor-grab hover:bg-background/80 hover:text-muted-foreground active:cursor-grabbing",
+                        )}
+                      >
+                        <GripVertical className="pointer-events-none h-3.5 w-3.5" aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={selectedPreset?.name === name}
+                        disabled={!preset}
+                        onClick={() => preset && selectPreset(preset)}
+                        className="flex min-w-0 flex-1 items-center gap-3 rounded-[14px] px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
+                          {index + 1}
+                        </span>
+                        <ProviderPickerIcon
+                          provider={provider}
+                          showBrandLogos={showBrandLogos}
+                          unconfigured={!presetConfigured}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="truncate text-[14px] font-medium text-foreground">
+                              {preset?.label ?? name}
+                            </span>
+                            <StatusPill tone={index === 0 ? "success" : "neutral"}>
+                              {index === 0
+                                ? tx("settings.models.primary", "Primary")
+                                : tx(
+                                    "settings.models.fallbackNumber",
+                                    "Fallback {{number}}",
+                                    { number: index },
+                                  )}
+                            </StatusPill>
+                            {!presetConfigured ? (
+                              <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                                {tx(
+                                  "settings.models.providerSetupRequired",
+                                  "Provider setup required",
                                 )}
-                          </StatusPill>
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                            {preset?.model ?? name}
+                          </span>
                         </span>
-                        <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                          {preset?.model ?? name}
-                        </span>
-                      </span>
+                        <ChevronRight
+                          className={cn(
+                            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                            selectedPreset?.name === name && "rotate-90",
+                          )}
+                          aria-hidden
+                        />
+                      </button>
                       <span className="flex shrink-0 items-center gap-0.5">
                         <Button
                           type="button"
@@ -3411,7 +3538,7 @@ function ModelsSettings({
                           variant="ghost"
                           className="h-8 w-8 rounded-full"
                           aria-label={tx("settings.models.moveUp", "Move up")}
-                          disabled={index === 0}
+                          disabled={callOrderBusy || index === 0}
                           onClick={() => moveCallOrderItem(index, -1)}
                         >
                           <ArrowUp className="h-3.5 w-3.5" aria-hidden />
@@ -3422,7 +3549,7 @@ function ModelsSettings({
                           variant="ghost"
                           className="h-8 w-8 rounded-full"
                           aria-label={tx("settings.models.moveDown", "Move down")}
-                          disabled={index === callOrder.length - 1}
+                          disabled={callOrderBusy || index === callOrder.length - 1}
                           onClick={() => moveCallOrderItem(index, 1)}
                         >
                           <ArrowDown className="h-3.5 w-3.5" aria-hidden />
@@ -3433,7 +3560,7 @@ function ModelsSettings({
                           variant="ghost"
                           className="h-8 w-8 rounded-full text-muted-foreground hover:text-destructive"
                           aria-label={tx("settings.models.removeFromOrder", "Remove from call order")}
-                          disabled={callOrder.length <= 1}
+                          disabled={callOrderBusy || callOrder.length <= 1}
                           onClick={() => removeCallOrderItem(index)}
                         >
                           <X className="h-3.5 w-3.5" aria-hidden />
@@ -3446,7 +3573,12 @@ function ModelsSettings({
               <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="ghost" className="rounded-full">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="rounded-full"
+                      disabled={callOrderBusy}
+                    >
                       <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                       {tx("settings.models.addToOrder", "Add preset")}
                     </Button>
@@ -3455,31 +3587,38 @@ function ModelsSettings({
                     align="start"
                     className="max-h-[20rem] w-[320px] max-w-[calc(100vw-2rem)] overflow-y-auto"
                   >
-                    {namedPresets.map((preset) => (
-                      <DropdownMenuItem
-                        key={preset.name}
-                        onSelect={() => onChangeCallOrder([...callOrder, preset.name])}
-                        className="flex cursor-default items-center gap-2.5 rounded-[12px] px-2.5 py-2"
-                      >
-                        <ProviderPickerIcon
-                          provider={modelPresetProviderKey(preset, settings)}
-                          showBrandLogos={showBrandLogos}
-                        />
-                        <span className="min-w-0">
-                          <span className="block truncate text-[13px] font-medium">
-                            {preset.label}
-                          </span>
-                          <span className="block truncate text-[11.5px] text-muted-foreground">
-                            {preset.model}
-                          </span>
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuSeparator />
+                    {availablePresets.length > 0 ? (
+                      <>
+                        {availablePresets.map((preset) => (
+                          <DropdownMenuItem
+                            key={preset.name}
+                            onSelect={() => {
+                              selectPreset(preset);
+                              onChangeCallOrder([...callOrder, preset.name]);
+                            }}
+                            className="flex cursor-default items-center gap-2.5 rounded-[12px] px-2.5 py-2"
+                          >
+                            <ProviderPickerIcon
+                              provider={modelPresetProviderKey(preset, settings)}
+                              showBrandLogos={showBrandLogos}
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] font-medium">
+                                {preset.label}
+                              </span>
+                              <span className="block truncate text-[11.5px] text-muted-foreground">
+                                {preset.model}
+                              </span>
+                            </span>
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                      </>
+                    ) : null}
                     <DropdownMenuItem
                       onSelect={() => {
                         window.setTimeout(
-                          () => onCreateConfiguration("call-order"),
+                          () => onCreateConfiguration(),
                           0,
                         );
                       }}
@@ -3490,125 +3629,36 @@ function ModelsSettings({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <div className="flex items-center justify-end gap-3">
-                  <SettingsStatusMessage tone={callOrderDirty ? "accent" : undefined}>
-                    {callOrderDirty
-                      ? tx("settings.status.unsaved", "Unsaved changes")
-                      : tx("settings.status.upToDate", "Up to date.")}
+                {orderSaving ? (
+                  <SettingsStatusMessage>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      {tx("settings.actions.saving", "Saving...")}
+                    </span>
                   </SettingsStatusMessage>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="rounded-full"
-                    disabled={!callOrderDirty || saving || callOrder.length === 0}
-                    onClick={onSaveCallOrder}
-                  >
-                    {saving
-                      ? tx("settings.actions.saving", "Saving...")
-                      : tx("settings.actions.saveOrder", "Save order")}
-                  </Button>
-                </div>
+                ) : null}
               </div>
             </>
           )}
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3 px-1">
-          <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
-            {tx("settings.models.presets", "Model presets")}
-          </h2>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 rounded-full"
-            onClick={() => onCreateConfiguration("presets")}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            {tx("settings.models.newPreset", "New model preset")}
-          </Button>
-        </div>
-        <SettingsGroup>
-          {namedPresets.length ? (
-            namedPresets.map((preset) => {
-              const selected = preset.name === selectedPreset?.name;
-              const provider = modelPresetProviderKey(preset, settings);
-              return (
-                <button
-                  key={preset.name}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => selectPreset(preset)}
-                  className={cn(
-                    "flex min-h-[70px] w-full items-center gap-3 px-4 py-3 text-left transition-colors sm:px-5",
-                    selected ? "bg-muted/55" : "hover:bg-muted/30",
-                  )}
-                >
-                  <ProviderPickerIcon
-                    provider={provider}
-                    showBrandLogos={showBrandLogos}
-                    unconfigured={
-                      !settingsProviderConfigured(
-                        settings,
-                        preset.provider,
-                        preset.resolved_provider,
-                      )
-                    }
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="truncate text-[14px] font-medium text-foreground">
-                        {preset.label}
-                      </span>
-                      {(settings.model_call_order ?? []).includes(preset.name) ? (
-                        <span className="text-[11px] text-muted-foreground">
-                          {tx("settings.models.inCallOrder", "In call order")}
-                        </span>
-                      ) : null}
-                      {!settingsProviderConfigured(
-                        settings,
-                        preset.provider,
-                        preset.resolved_provider,
-                      ) ? (
-                        <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                          {tx("settings.models.providerSetupRequired", "Provider setup required")}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                      {preset.model}
-                    </span>
-                  </span>
-                  <ChevronRight
-                    className={cn(
-                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                      selected && "rotate-90",
-                    )}
-                    aria-hidden
-                  />
-                </button>
-              );
-            })
-          ) : (
-            <div className="px-5 py-8 text-center">
-              <p className="text-[13px] font-medium text-foreground">
-                {tx("settings.models.noPresets", "No model presets yet")}
-              </p>
-              <p className="mt-1 text-[12px] text-muted-foreground">
-                {tx("settings.models.noPresetsHelp", "Create a preset, then add it to the call order.")}
-              </p>
-            </div>
-          )}
-        </SettingsGroup>
-      </section>
 
       {selectedPreset ? (
-        <section>
-          <SettingsSectionTitle>
-            {tx("settings.models.editPreset", "Edit preset")}
-          </SettingsSectionTitle>
-          <SettingsGroup>
+        <>
+            <div className="flex min-h-[52px] items-center justify-between gap-3 bg-muted/15 px-4 py-3 sm:px-5">
+              <span className="text-[13px] font-semibold text-foreground/85">
+                {tx("settings.models.editPreset", "Edit preset")}
+              </span>
+              {selectedOrderIndex >= 0 ? (
+                <StatusPill tone={selectedOrderIndex === 0 ? "success" : "neutral"}>
+                  {selectedOrderIndex === 0
+                    ? tx("settings.models.primary", "Primary")
+                    : tx(
+                        "settings.models.fallbackNumber",
+                        "Fallback {{number}}",
+                        { number: selectedOrderIndex },
+                      )}
+                </StatusPill>
+              ) : null}
+            </div>
             <SettingsRow
               title={tx("settings.models.presetName", "Preset name")}
               description={tx("settings.models.presetNameHelp", "A short name used throughout model settings.")}
@@ -3722,7 +3772,7 @@ function ModelsSettings({
                 size="sm"
                 variant="ghost"
                 className="self-start rounded-full text-muted-foreground hover:text-destructive"
-                disabled={selectedPresetReferenced || saving}
+                disabled={selectedPresetReferenced || saving || orderSaving}
                 title={
                   selectedPresetReferenced
                     ? tx(
@@ -3766,7 +3816,13 @@ function ModelsSettings({
                   size="sm"
                   variant="outline"
                   className="rounded-full"
-                  disabled={!dirty || !selectedProviderConfigured || modelFieldsMissing || saving}
+                  disabled={
+                    !dirty ||
+                    !selectedProviderConfigured ||
+                    modelFieldsMissing ||
+                    saving ||
+                    orderSaving
+                  }
                   onClick={onSave}
                 >
                   {saving
@@ -3775,9 +3831,10 @@ function ModelsSettings({
                 </Button>
               </div>
             </div>
-          </SettingsGroup>
-        </section>
+          </>
       ) : null}
+        </SettingsGroup>
+      </section>
     </div>
   );
 }

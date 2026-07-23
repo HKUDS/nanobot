@@ -378,6 +378,7 @@
       "convertHelp": "기존 기본 및 대체 모델을 프리셋으로 변환하여 여기서 순서를 관리합니다.",
       "converting": "변환 중...",
       "convertAction": "프리셋으로 변환",
+      "dragToReorder": "드래그하여 순서 변경",
       "moveUp": "위로 이동",
       "moveDown": "아래로 이동",
       "removeFromOrder": "호출 순서에서 제거",

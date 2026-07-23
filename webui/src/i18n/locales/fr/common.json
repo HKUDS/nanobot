@@ -378,6 +378,7 @@
       "convertHelp": "Convertissez les modèles principal et de secours existants en préréglages afin de gérer leur ordre ici.",
       "converting": "Conversion...",
       "convertAction": "Convertir en préréglages",
+      "dragToReorder": "Faire glisser pour réorganiser",
       "moveUp": "Monter",
       "moveDown": "Descendre",
       "removeFromOrder": "Retirer de l’ordre d’appel",

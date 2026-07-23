@@ -378,6 +378,7 @@
       "convertHelp": "Ubah model utama dan cadangan yang ada menjadi preset agar urutannya dapat dikelola di sini.",
       "converting": "Mengonversi...",
       "convertAction": "Konversi ke preset",
+      "dragToReorder": "Seret untuk mengurutkan ulang",
       "moveUp": "Naikkan",
       "moveDown": "Turunkan",
       "removeFromOrder": "Hapus dari urutan pemanggilan",

@@ -135,6 +135,7 @@
       "convertHelp": "Converta os modelos principal e alternativos existentes em predefinições para gerenciar a ordem aqui.",
       "converting": "Convertendo...",
       "convertAction": "Converter em predefinições",
+      "dragToReorder": "Arraste para reordenar",
       "moveUp": "Mover para cima",
       "moveDown": "Mover para baixo",
       "removeFromOrder": "Remover da ordem de chamada",

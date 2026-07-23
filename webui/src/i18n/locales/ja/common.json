@@ -378,6 +378,7 @@
       "convertHelp": "既存のプライマリモデルとフォールバックモデルをプリセットに変換し、ここで順序を管理できるようにします。",
       "converting": "変換中...",
       "convertAction": "プリセットに変換",
+      "dragToReorder": "ドラッグして並べ替え",
       "moveUp": "上へ移動",
       "moveDown": "下へ移動",
       "removeFromOrder": "呼び出し順序から削除",

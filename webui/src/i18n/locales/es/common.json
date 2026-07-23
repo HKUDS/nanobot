@@ -378,6 +378,7 @@
       "convertHelp": "Convierte los modelos principal y alternativos existentes en preajustes para administrar aquí su orden.",
       "converting": "Convirtiendo...",
       "convertAction": "Convertir en preajustes",
+      "dragToReorder": "Arrastrar para reordenar",
       "moveUp": "Subir",
       "moveDown": "Bajar",
       "removeFromOrder": "Quitar del orden de llamada",

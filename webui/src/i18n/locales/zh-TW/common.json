@@ -378,6 +378,7 @@
       "convertHelp": "將現有主要模型和備用模型轉換為預設，之後即可在這裡管理呼叫順序。",
       "converting": "正在轉換…",
       "convertAction": "轉換為預設",
+      "dragToReorder": "拖曳調整順序",
       "moveUp": "上移",
       "moveDown": "下移",
       "removeFromOrder": "從呼叫順序中移除",

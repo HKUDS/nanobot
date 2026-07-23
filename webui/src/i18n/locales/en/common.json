@@ -135,6 +135,7 @@
       "convertHelp": "Turn the existing primary and fallback models into presets so their order can be managed here.",
       "converting": "Converting...",
       "convertAction": "Convert to presets",
+      "dragToReorder": "Drag to reorder",
       "moveUp": "Move up",
       "moveDown": "Move down",
       "removeFromOrder": "Remove from call order",
