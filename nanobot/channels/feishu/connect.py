@@ -127,9 +127,16 @@ class FeishuConnectStore:
             session.last_error = str(exc)
             return _pending_payload(session)
 
-        session.domain = str(result.get("domain") or session.domain)
         status = result.get("status")
         if status == "succeeded":
+            if self._sessions.get(session_id) is not session:
+                return {
+                    "session_id": session_id,
+                    "instance_id": session.instance_id,
+                    "status": "cancelled",
+                    "message": "Feishu connection cancelled.",
+                }
+            session.domain = str(result.get("domain") or session.domain)
             session.instance_id = feishu.save_registration_result(
                 result,
                 instance_id=session.instance_id,
@@ -145,6 +152,7 @@ class FeishuConnectStore:
                 "app_id": result.get("app_id"),
             }
 
+        session.domain = str(result.get("domain") or session.domain)
         if status == "failed":
             self._sessions.pop(session_id, None)
             return {
