@@ -719,6 +719,7 @@
       "signOut": "Sign out",
       "signedInAs": "Signed in as {{account}}",
       "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "remoteSignInHelp": "Remote WebUI detected. After xAI redirects to localhost, copy the final URL and paste it back into nanobot.",
       "signInRequired": "Sign in required",
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
@@ -727,6 +728,7 @@
       "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
       "saveProxy": "Save proxy",
       "callbackHelp": "Complete sign-in in your browser. If it doesn't finish automatically, paste the final URL below.",
+      "remoteCallbackHelp": "This WebUI is running on another machine. After xAI redirects to localhost, copy the full URL from the address bar and paste it below.",
       "callbackPlaceholder": "Final URL or authorization code",
       "finishSignIn": "Finish sign-in"
     },

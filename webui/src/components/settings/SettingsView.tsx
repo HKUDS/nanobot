@@ -564,6 +564,8 @@ export function SettingsView({
   const { t } = useTranslation();
   const { token } = useClient();
   const pageVisible = usePageVisibility();
+  const remoteBrowserAccess =
+    typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
@@ -1360,7 +1362,7 @@ export function SettingsView({
   const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
     if (providerSaving) return;
     let popup: Window | null = null;
-    if (action === "login" && providerName === "xai_grok") {
+    if (action === "login" && providerName === "xai_grok" && !remoteBrowserAccess) {
       try {
         popup = window.open("about:blank", "_blank");
         if (popup) popup.opener = null;
@@ -1809,6 +1811,7 @@ export function SettingsView({
               providerSaving={providerSaving}
               query={providerQuery}
               showBrandLogos={localPrefs.brandLogos}
+              remoteBrowserAccess={remoteBrowserAccess}
               onQueryChange={setProviderQuery}
               onToggleProvider={handleToggleProvider}
               onToggleProviderKey={toggleProviderKeyVisibility}
@@ -2060,6 +2063,7 @@ export function SettingsView({
         flow={xaiOAuthFlow}
         callbackValue={xaiOAuthCallback}
         completing={xaiOAuthCompleting}
+        remoteBrowserAccess={remoteBrowserAccess}
         onCallbackChange={setXaiOAuthCallback}
         onOpenAuthorization={() => {
           if (!xaiOAuthFlow) return;
@@ -2680,6 +2684,7 @@ function XaiOAuthLoginDialog({
   flow,
   callbackValue,
   completing,
+  remoteBrowserAccess,
   onCallbackChange,
   onOpenAuthorization,
   onComplete,
@@ -2688,6 +2693,7 @@ function XaiOAuthLoginDialog({
   flow: ProviderOAuthAuthorizationRequired | null;
   callbackValue: string;
   completing: boolean;
+  remoteBrowserAccess: boolean;
   onCallbackChange: (value: string) => void;
   onOpenAuthorization: () => void;
   onComplete: () => void;
@@ -2711,7 +2717,11 @@ function XaiOAuthLoginDialog({
         >
           <DialogHeader>
             <DialogTitle>xAI Grok</DialogTitle>
-            <DialogDescription>{t("settings.oauth.callbackHelp")}</DialogDescription>
+            <DialogDescription>
+              {remoteBrowserAccess
+                ? t("settings.oauth.remoteCallbackHelp")
+                : t("settings.oauth.callbackHelp")}
+            </DialogDescription>
           </DialogHeader>
           <Input
             value={callbackValue}
@@ -3086,6 +3096,7 @@ function ProvidersSettings({
   providerSaving,
   query,
   showBrandLogos,
+  remoteBrowserAccess,
   onQueryChange,
   onToggleProvider,
   onToggleProviderKey,
@@ -3110,6 +3121,7 @@ function ProvidersSettings({
   providerSaving: string | null;
   query: string;
   showBrandLogos: boolean;
+  remoteBrowserAccess: boolean;
   onQueryChange: (query: string) => void;
   onToggleProvider: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
@@ -3223,7 +3235,12 @@ function ProvidersSettings({
                             account: provider.oauth_account || provider.label,
                             defaultValue: "Signed in as {{account}}",
                           })
-                        : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
+                        : provider.name === "xai_grok" && remoteBrowserAccess
+                          ? tx(
+                              "settings.oauth.remoteSignInHelp",
+                              "Remote WebUI detected. After xAI redirects to localhost, copy the final URL and paste it back into nanobot.",
+                            )
+                          : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
                     </p>
                   </div>
                   <div className="flex shrink-0 justify-end gap-2">
