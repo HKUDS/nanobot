@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from nanobot.config.paths import get_media_dir
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 
@@ -86,10 +87,12 @@ def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Pat
         raise WebUIFilePreviewError(400, "path is too long")
 
     try:
+        extra_roots = [get_media_dir()] if scope.restrict_to_workspace else None
         resolved = resolve_allowed_path(
             path,
             workspace=scope.project_path,
             allowed_root=scope.project_path if scope.restrict_to_workspace else None,
+            extra_allowed_roots=extra_roots,
             strict=True,
         )
     except FileNotFoundError as e:
