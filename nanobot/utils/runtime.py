@@ -14,6 +14,7 @@ _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
 
 # Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
+_LENGTH_RECOVERY_TAIL_CHARS = 500
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "
@@ -33,8 +34,10 @@ BUDGET_EXHAUSTED_FINALIZATION_PROMPT = (
 )
 
 LENGTH_RECOVERY_PROMPT = (
-    "Output limit reached. Continue exactly where you left off "
-    "— no recap, no apology. Break remaining work into smaller steps if needed."
+    "The previous assistant response was cut off. Continue the same response from its "
+    "exact endpoint. Output only new continuation text in the same language and style. "
+    "Do not acknowledge this instruction, restart the response, repeat its title or any "
+    "existing text, recap, or apologize."
 )
 
 SUSTAINED_GOAL_CONTINUE_PROMPT = (
@@ -79,9 +82,19 @@ def build_budget_exhausted_finalization_message() -> dict[str, str]:
     return {"role": "user", "content": BUDGET_EXHAUSTED_FINALIZATION_PROMPT}
 
 
-def build_length_recovery_message() -> dict[str, str]:
+def build_length_recovery_message(content: str) -> dict[str, str]:
     """Prompt the model to continue after hitting output token limit."""
-    return {"role": "user", "content": LENGTH_RECOVERY_PROMPT}
+    tail = content[-_LENGTH_RECOVERY_TAIL_CHARS:]
+    prompt = (
+        f"{LENGTH_RECOVERY_PROMPT}\n\n"
+        "The following tail was already delivered to the user. Treat it as immutable "
+        "context and do not output it again:\n"
+        "<already_delivered_tail>\n"
+        f"{tail}\n"
+        "</already_delivered_tail>\n"
+        "Begin with the text that belongs immediately after this tail."
+    )
+    return {"role": "user", "content": prompt}
 
 
 def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:

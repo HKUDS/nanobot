@@ -561,7 +561,7 @@ class AgentRunner:
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
-                    messages.append(build_length_recovery_message())
+                    messages.append(build_length_recovery_message(clean))
                     await hook.after_iteration(context)
                     continue
 
