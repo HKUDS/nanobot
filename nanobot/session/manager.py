@@ -513,6 +513,8 @@ class SessionManager:
         if path.exists():
             return path
 
+        # TODO(v0.2.4): Remove both legacy fallbacks. v0.2.3 is the final
+        # compatibility window for reading and lazily migrating legacy session files.
         fallback_paths = [
             (self._get_legacy_lossy_path(key), "legacy lossy path"),
             (self._get_legacy_session_path(key), "legacy path"),
