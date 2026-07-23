@@ -93,7 +93,7 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
                 # When the only break in range is the opening fence newline,
                 # cutting there re-emits the same fence and never advances.
                 if pos < min_code_pos:
-                    if min_code_pos + len(closing) > max_len:
+                    if min_code_pos + len(closing) >= max_len:
                         chunks.append(content[:max_len])
                         content = content[max_len:].lstrip()
                         continue
@@ -105,15 +105,15 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
                     pos = adjusted if adjusted >= min_code_pos else budget
                 elif pos + len(closing) > max_len:
                     budget = max_len - len(closing)
-                    if budget > 0:
-                        recut = content[:budget]
-                        adjusted = recut.rfind("\n", min_code_pos)
-                        if adjusted < min_code_pos:
-                            adjusted = recut.rfind(" ", min_code_pos)
-                        pos = adjusted if adjusted >= min_code_pos else budget
-                    else:
-                        closing = "```"
-                        pos = max_len - len(closing)
+                    if budget <= min_code_pos:
+                        chunks.append(content[:max_len])
+                        content = content[max_len:].lstrip()
+                        continue
+                    recut = content[:budget]
+                    adjusted = recut.rfind("\n", min_code_pos)
+                    if adjusted < min_code_pos:
+                        adjusted = recut.rfind(" ", min_code_pos)
+                    pos = adjusted if adjusted >= min_code_pos else budget
                 chunks.append(content[:pos] + closing)
                 remainder = content[pos:]
                 if remainder.startswith("\n"):

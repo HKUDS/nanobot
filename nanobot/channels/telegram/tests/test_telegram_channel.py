@@ -268,6 +268,32 @@ def test_split_telegram_markdown_long_single_line_code_body() -> None:
     _assert_code_blocks_render_balanced(chunks)
 
 
+def test_split_telegram_markdown_tiny_limit_hard_cuts_fence_prefix() -> None:
+    """Adaptive HTML limits can shrink max_len to the fence+closer size."""
+    body = "a" * 100
+    content = f"```\n{body}"
+
+    chunks = _split_telegram_markdown(content, max_len=8)
+
+    assert chunks
+    assert all(len(chunk) <= 8 for chunk in chunks)
+    assert "".join(chunks).replace("```", "").replace("\n", "") == body
+
+
+def test_split_telegram_markdown_tiny_limit_with_early_body_newline() -> None:
+    body = "a" * 100
+    content = f"```\na\n{body}"
+
+    chunks = _split_telegram_markdown(content, max_len=8)
+
+    assert chunks
+    assert all(len(chunk) <= 8 for chunk in chunks)
+    plain = "".join(chunks).replace("```", "")
+    assert "a" in plain
+    assert plain.count("a") >= 100
+
+
+
 @pytest.mark.asyncio
 async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     _FakeHTTPXRequest.clear()
