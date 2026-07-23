@@ -208,6 +208,7 @@ class TestExtractText:
         nested = outer_cell.add_table(rows=1, cols=2)
         nested.cell(0, 0).text = "Email"
         nested.cell(0, 1).text = "ada@example.com"
+        outer_cell.add_paragraph("Preferred contact")
         doc.save(docx_file)
 
         result = extract_text(docx_file)
@@ -216,7 +217,13 @@ class TestExtractText:
         assert "Contact" in result
         assert "Email" in result
         assert "ada@example.com" in result
-        assert result.index("Contact") < result.index("Email") < result.index("ada@example.com")
+        assert "Preferred contact" in result
+        assert (
+            result.index("Contact")
+            < result.index("Email")
+            < result.index("ada@example.com")
+            < result.index("Preferred contact")
+        )
 
     def test_extract_text_docx_does_not_expand_grid_spans(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
