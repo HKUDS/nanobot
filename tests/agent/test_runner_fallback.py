@@ -483,6 +483,83 @@ class TestFailoverOnArrearageError:
         factory.assert_not_called()
 
 
+class TestFailoverOnAuthenticationError:
+    @pytest.mark.parametrize(
+        "authentication_error",
+        [
+            pytest.param(
+                _make_response(
+                    (
+                        "Error: {'error': {'type': 'authentication_error', "
+                        "'message': 'The API Key appears to be invalid or may have expired.'}}"
+                    ),
+                    finish_reason="error",
+                    error_type="authentication_error",
+                    error_should_retry=False,
+                ),
+                id="authentication-error-type",
+            ),
+            pytest.param(
+                _make_response(
+                    "unauthorized",
+                    finish_reason="error",
+                    error_status_code=401,
+                    error_kind="http",
+                    error_should_retry=False,
+                ),
+                id="http-401",
+            ),
+            pytest.param(
+                _make_response(
+                    "bad key",
+                    finish_reason="error",
+                    error_type="invalid_request_error",
+                    error_code="invalid_api_key",
+                    error_should_retry=False,
+                ),
+                id="invalid-api-key-code",
+            ),
+            pytest.param(
+                _make_response(
+                    "credentials have expired",
+                    finish_reason="error",
+                    error_should_retry=False,
+                ),
+                id="expired-credentials-text",
+            ),
+            pytest.param(
+                _make_response(
+                    "permission denied",
+                    finish_reason="error",
+                    error_status_code=403,
+                    error_kind="permission",
+                    error_should_retry=False,
+                ),
+                id="permission-error",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_tries_configured_fallback(
+        self,
+        authentication_error: LLMResponse,
+    ) -> None:
+        primary = _FakeProvider("primary", authentication_error)
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fallback_preset = _fallback("fallback-a")
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[fallback_preset],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(fallback_preset)
+
+
 class TestNoFallbackOnNonRetryableError:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:
@@ -508,14 +585,15 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_auth_error(self) -> None:
+    async def test_content_filter_takes_precedence_over_403(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response(
-                "unauthorized",
+                "request blocked by content filter",
                 finish_reason="error",
-                error_status_code=401,
-                error_kind="authentication",
+                error_status_code=403,
+                error_kind="content_filter",
+                error_should_retry=False,
             ),
         )
         factory = MagicMock()

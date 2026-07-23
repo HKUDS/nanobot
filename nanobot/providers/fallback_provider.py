@@ -21,10 +21,36 @@ _FALLBACK_ERROR_KINDS = frozenset({
     "rate_limit",
     "overloaded",
 })
-_NON_FALLBACK_ERROR_KINDS = frozenset({
+_AUTHENTICATION_ERROR_KINDS = frozenset({
     "authentication",
     "auth",
     "permission",
+})
+_AUTHENTICATION_ERROR_TOKENS = (
+    "authentication_error",
+    "authentication error",
+    "invalid_api_key",
+    "invalid api key",
+    "incorrect_api_key",
+    "incorrect api key",
+    "expired_api_key",
+    "expired api key",
+    "invalid credential",
+    "expired credential",
+    "credential has expired",
+    "credentials have expired",
+    "invalid_token",
+    "invalid token",
+    "expired_token",
+    "expired token",
+    "unauthorized",
+    "permission_denied",
+    "permission denied",
+    "access_denied",
+    "account_deactivated",
+    "organization_deactivated",
+)
+_NON_FALLBACK_ERROR_KINDS = frozenset({
     "content_filter",
     "refusal",
     "context_length",
@@ -293,19 +319,36 @@ class FallbackProvider(LLMProvider):
     def _should_fallback(response: LLMResponse) -> bool:
         if LLMProvider.is_arrearage_response(response):
             return True
-        if response.error_should_retry is False:
-            return False
         status = response.error_status_code
         kind = (response.error_kind or "").lower()
         error_type = (response.error_type or "").lower()
         code = (response.error_code or "").lower()
         text = (response.content or "").lower()
+        structured_values = (kind, error_type, code)
 
-        if status in {400, 401, 403, 404, 422}:
-            return False
+        if kind in _AUTHENTICATION_ERROR_KINDS:
+            return True
+        if any(
+            token in value
+            for value in structured_values
+            for token in _AUTHENTICATION_ERROR_TOKENS
+        ):
+            return True
         if kind in _NON_FALLBACK_ERROR_KINDS:
             return False
-        if any(token in value for value in (kind, error_type, code) for token in _NON_FALLBACK_ERROR_KINDS):
+        if any(
+            token in value
+            for value in structured_values
+            for token in _NON_FALLBACK_ERROR_KINDS
+        ):
+            return False
+        if status in {401, 403}:
+            return True
+        if any(token in text for token in _AUTHENTICATION_ERROR_TOKENS):
+            return True
+        if response.error_should_retry is False:
+            return False
+        if status in {400, 404, 422}:
             return False
         if response.error_should_retry is True:
             return True
