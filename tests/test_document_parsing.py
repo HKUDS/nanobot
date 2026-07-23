@@ -238,6 +238,20 @@ class TestExtractText:
 
         assert extract_text(docx_file) == "Only once"
 
+    def test_extract_text_docx_keeps_vertical_merges_compact(self, tmp_path: Path):
+        """Vertically merged labels appear once without shifting later columns."""
+        from docx import Document
+
+        docx_file = tmp_path / "vertical-merge.docx"
+        doc = Document()
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).merge(table.cell(1, 0)).text = "Group"
+        table.cell(0, 1).text = "First"
+        table.cell(1, 1).text = "Second"
+        doc.save(docx_file)
+
+        assert extract_text(docx_file) == "Group\tFirst\n\tSecond"
+
     def test_extract_text_docx_bounds_physical_table_cells(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
