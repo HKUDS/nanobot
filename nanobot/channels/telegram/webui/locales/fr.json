@@ -1,22 +1,21 @@
 {
   "description": "Discutez avec nanobot depuis Telegram.",
-  "requirements": "Un jeton BotFather et, si votre réseau ne peut pas joindre Telegram, un proxy facultatif.",
+  "requirements": "Jeton du bot, utilisateurs autorisés et passerelle",
   "setup": {
     "docsLabel": "Ouvrir le guide Telegram",
     "officialLabel": "Ouvrir BotFather",
+    "tryIt": "Envoyez /start ou un court message privé à votre bot Telegram.",
+    "summary": "L’activation ouvre la prise en charge de Telegram. Un jeton BotFather reste nécessaire pour échanger des messages.",
     "steps": [
       "Créez un bot avec BotFather et copiez son jeton.",
-      "Collez le jeton ici. Si Telegram est bloqué sur votre réseau, ajoutez un proxy dans les options avancées.",
-      "Connectez le bot, puis envoyez-lui un message dans Telegram."
+      "Ajoutez le jeton et choisissez qui peut contacter le bot.",
+      "Enregistrez et activez Telegram, puis envoyez un message privé ou mentionnez le bot dans un groupe."
     ],
     "fields": {
-      "name": {
-        "label": "Nom du bot",
-        "placeholder": "Bot d’assistance"
-      },
       "token": {
         "label": "Jeton du bot",
-        "placeholder": "123456:ABC..."
+        "placeholder": "123456:ABC...",
+        "help": "Créez-le avec BotFather."
       },
       "proxy": {
         "label": "Proxy réseau",
@@ -24,56 +23,17 @@
       },
       "allowFrom": {
         "label": "Utilisateurs autorisés",
-        "placeholder": "* ou ID utilisateur Telegram"
+        "placeholder": "* ou ID utilisateur Telegram",
+        "help": "Laissez vide pour utiliser les codes d’association."
       },
       "groupPolicy": {
         "label": "Comportement en groupe",
         "choices": {
           "mention": "Mentions uniquement",
-          "open": "Tous les messages"
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
         }
       }
     }
-  },
-  "panel": {
-    "toggleBot": "Bot {{name}}",
-    "running": "En cours",
-    "needsToken": "Jeton requis",
-    "finishSetup": "Vérifier et terminer",
-    "connectFirst": "Connectez votre premier bot",
-    "addBot": "Ajouter le bot",
-    "connectBot": "Vérifier et connecter",
-    "advancedOptions": "Options avancées",
-    "tokenRequired": "Saisissez d’abord le jeton BotFather.",
-    "botName": "Nom du bot",
-    "botNamePlaceholder": "Bot d’assistance",
-    "botToken": "Jeton du bot",
-    "hideToken": "Masquer le jeton",
-    "showToken": "Afficher le jeton",
-    "networkProxy": "Proxy réseau (facultatif)",
-    "savedProxyPlaceholder": "Un proxy est déjà enregistré",
-    "hideProxy": "Masquer le proxy",
-    "showProxy": "Afficher le proxy",
-    "proxyUnavailable": "Telegram est inaccessible via ce proxy. Vérifiez l’adresse et les identifiants.",
-    "proxyRequired": "Saisissez d’abord une URL de proxy.",
-    "proxySaved": "Proxy enregistré et connexion vérifiée.",
-    "proxyRemoved": "Proxy enregistré supprimé.",
-    "proxyConfigured": "Configuré",
-    "saveProxy": "Vérifier et enregistrer",
-    "removeProxy": "Supprimer le proxy enregistré",
-    "invalidProxy": "Saisissez une URL de proxy complète, par exemple http://127.0.0.1:7890.",
-    "proxyEnvMissing": "Le proxy enregistré utilise une variable d’environnement non définie.",
-    "tokenEnvMissing": "Le jeton du bot enregistré utilise une variable d’environnement non définie.",
-    "cancel": "Annuler",
-    "checkConnection": "Vérifier la connexion",
-    "connectedAs": "Connecté en tant que {{name}}.",
-    "connected": "Telegram a accepté le jeton enregistré.",
-    "configuredUnverified": "Un jeton enregistré a été trouvé, mais Telegram reste inaccessible. Vérifiez votre réseau ou votre proxy, puis réessayez.",
-    "verificationUnavailable": "Telegram est inaccessible. Vérifiez votre réseau ou ajoutez un proxy dans les options avancées, puis réessayez.",
-    "invalidToken": "Telegram a refusé ce jeton de bot.",
-    "checkFailed": "La connexion n’a pas pu être vérifiée.",
-    "defaultBotName": "Bot Telegram",
-    "numberedBotName": "Bot Telegram {{number}}",
-    "count": "Configurés : {{count}} · En cours : {{running}}"
   }
 }

@@ -4,9 +4,17 @@ import httpx
 import pytest
 
 from nanobot.channels.telegram import validation as telegram_validation
+from nanobot.channels.telegram.manifest import SETUP_SPEC
 from nanobot.channels.validation import validate_channel_config
 from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
+
+
+def test_telegram_setup_exposes_proxy_as_an_optional_secret() -> None:
+    proxy = SETUP_SPEC.fields["proxy"]
+
+    assert proxy.kind == "secret"
+    assert "proxy" not in SETUP_SPEC.simple_required_fields
 
 
 def test_get_me_builds_http_client_with_explicit_proxy(
@@ -240,58 +248,6 @@ def test_validate_telegram_rejects_unset_proxy_env_ref_without_connecting(
     assert result["can_enable"] is False
     assert proxy_ref not in str(result)
     assert any(check["id"] == "proxy_env" for check in result["checks"])
-
-
-def test_validate_telegram_uses_proxy_from_the_requested_instance(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first_token = "123456:abcdefghijklmnopqrstuvwxyz"
-    second_token = "654321:zyxwvutsrqponmlkjihgfedcba"
-    first_proxy = "http://127.0.0.1:7890"
-    second_proxy = "socks5://127.0.0.1:1080"
-    second_proxy_ref = "${TELEGRAM_SUPPORT_PROXY_TEST}"
-    monkeypatch.setenv("TELEGRAM_SUPPORT_PROXY_TEST", second_proxy)
-    config_path = tmp_path / "config.json"
-    save_config(
-        Config.model_validate(
-            {
-                "channels": {
-                    "telegram": {
-                        "instances": [
-                            {
-                                "id": "default",
-                                "token": first_token,
-                                "proxy": first_proxy,
-                            },
-                            {
-                                "id": "support",
-                                "token": second_token,
-                                "proxy": second_proxy_ref,
-                            },
-                        ]
-                    }
-                }
-            }
-        ),
-        config_path,
-    )
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    captured: dict[str, str | None] = {}
-
-    def fake_get_me(token_value: str, proxy_value: str | None) -> dict:
-        captured.update(token=token_value, proxy=proxy_value)
-        return {"ok": True, "result": {"id": 42, "username": "support_bot"}}
-
-    monkeypatch.setattr(telegram_validation, "_get_me", fake_get_me)
-
-    result = validate_channel_config("telegram", instance_id="support")
-
-    assert result["status"] == "connected"
-    assert captured == {"token": second_token, "proxy": second_proxy}
-    assert first_proxy not in str(result)
-    assert second_proxy_ref not in str(result)
-    assert second_proxy not in str(result)
 
 
 def test_validate_telegram_uses_proxy_submitted_with_new_token(

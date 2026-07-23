@@ -113,31 +113,31 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 
 1. Create a bot with `@BotFather` and copy its token.
 2. Run `nanobot webui`, then open **Settings → Channels → Telegram**.
-3. If Telegram support is not installed, turn on the Telegram switch and
-   confirm **Install and enable**. The local WebUI installs Telegram support in
-   nanobot's Python environment; follow any restart prompt, then return to the
-   Telegram card.
-4. Paste the token and select **Check and connect**. The token is the only
-   required field; the local name and network proxy are under **Advanced
-   options**.
-5. Use **Add bot** to connect more Telegram bots. Every entry needs a different
-   BotFather token and has its own connection check and on/off switch.
+3. Paste the token. If the gateway cannot reach Telegram directly, expand
+   **Advanced** and add an HTTP or SOCKS proxy.
+4. Save and enable Telegram, then send the bot a direct message.
 
-Existing settings appear automatically under the saved bot name, so you do not
-need to enter the token again. See the
-[step-by-step Telegram guide](./guides/telegram-ai-agent.md) for the full flow
-and connection-status explanations.
+The configuration badge means nanobot found a saved token. The live connection
+check is separate, so a temporary Telegram or proxy outage does not make an
+existing configuration disappear. Saved tokens and proxy URLs remain masked.
+
+See the [step-by-step Telegram guide](./guides/telegram-ai-agent.md) for pairing
+and troubleshooting.
 
 **Manual setup**
 
-For a headless deployment or a WebUI that cannot install local packages, enable
-Telegram support on the machine that runs nanobot:
+Install the optional channel dependency:
 
 ```bash
 nanobot plugins enable telegram
 ```
 
-Then merge the configuration into `~/.nanobot/config.json`:
+**1. Create a bot**
+- Open Telegram, search `@BotFather`
+- Send `/newbot`, follow prompts
+- Copy the token
+
+**2. Configure**
 
 ```json
 {
@@ -151,55 +151,27 @@ Then merge the configuration into `~/.nanobot/config.json`:
 }
 ```
 
-The flat example above remains the simplest manual setup for one bot. If you
-manage `config.json` directly and need several bots, give each entry a unique
-ID, name, and BotFather token:
+If the gateway cannot reach Telegram directly, add a proxy to the same section:
 
 ```json
 {
   "channels": {
     "telegram": {
-      "instances": [
-        {
-          "id": "default",
-          "name": "Personal bot",
-          "enabled": true,
-          "token": "FIRST_BOT_TOKEN"
-        },
-        {
-          "id": "support",
-          "name": "Support bot",
-          "enabled": true,
-          "token": "SECOND_BOT_TOKEN"
-        }
-      ]
+      "proxy": "http://127.0.0.1:7890"
     }
   }
 }
 ```
 
-Use letters, numbers, `_`, or `-` in an ID. The name is only a label shown in
-nanobot. Turning off one entry leaves the other bots running.
-
-If the machine cannot reach Telegram directly, set a proxy on the affected bot:
-
-```json
-{
-  "token": "YOUR_BOT_TOKEN",
-  "proxy": "http://127.0.0.1:7890"
-}
-```
-
-HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted. A proxy URL may
-contain credentials, so do not share it. In the WebUI, saved proxy values stay
-masked and can be replaced or removed separately for each bot.
+HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted. Treat a proxy URL
+containing a username or password as a secret.
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
 >
 > `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
-Start the gateway:
+**3. Run**
 
 ```bash
 nanobot gateway
@@ -231,11 +203,6 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 > `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot still serializes Telegram updates per conversation before forwarding them to the agent.
 >
 > `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path nanobot listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
->
-> When several enabled bots use webhook mode, assign a different
-> `webhookListenPort` to every bot. The default is `8081`, so the next bots can
-> use `8082`, `8083`, and so on. Long-polling bots do not need local webhook
-> ports.
 
 </details>
 

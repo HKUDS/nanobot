@@ -1,23 +1,18 @@
-import { Send } from "lucide-react";
-
 import type { ChannelUiContribution } from "@/channel-plugins/types";
 import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
-import { TelegramBotsPanel } from "./TelegramBotsPanel";
-
 export default {
-  Panel: TelegramBotsPanel,
   presentation: {
     displayName: "Telegram",
     initials: "TG",
     color: "#229ED9",
-    icon: Send,
+    logoUrl: "https://telegram.org/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("telegram"),
       fields: [
-        { key: "channels.telegram.name" },
         { key: "channels.telegram.token" },
+        { key: "channels.telegram.proxy" },
         { key: "channels.telegram.allowFrom" },
         { key: "channels.telegram.groupPolicy" },
       ],

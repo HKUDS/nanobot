@@ -10,7 +10,9 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
+from pydantic import Field, field_validator, model_validator
 from telegram import (
     BotCommand,
     InlineKeyboardButton,
@@ -27,10 +29,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.channels.telegram.config import TelegramConfig, telegram_default_config
-from nanobot.channels.telegram.instances import runtime_channel_name
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
+from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
 
@@ -318,6 +319,7 @@ def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
 
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
+_STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text calls
 
 
 @dataclass
@@ -337,6 +339,61 @@ class _QueuedTelegramUpdate:
     update: Update
     context: Any
     sort_key: tuple[int, int]
+
+
+class TelegramConfig(Base):
+    """Telegram channel configuration."""
+
+    enabled: bool = False
+    token: str = ""
+    mode: Literal["polling", "webhook"] = "polling"
+    allow_from: list[str] = Field(default_factory=list)
+    proxy: str | None = None
+    reply_to_message: bool = False
+    react_emoji: str = "👀"
+    group_policy: Literal["open", "mention"] = "mention"
+    connection_pool_size: int = 32
+    pool_timeout: float = 5.0
+    streaming: bool = True
+    # Enable inline keyboard buttons in Telegram messages.
+    inline_keyboards: bool = False
+    # Opt in to Bot API 10.1 sendRichMessage for richer markdown rendering.
+    rich_messages: bool = False
+    stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
+    webhook_url: str = ""
+    webhook_listen_host: str = "127.0.0.1"
+    webhook_listen_port: int = Field(default=8081, ge=1, le=65535)
+    webhook_path: str = "/telegram"
+    webhook_secret_token: str = ""
+    webhook_max_connections: int = Field(default=4, ge=1, le=100)
+
+    @field_validator("webhook_path")
+    @classmethod
+    def webhook_path_must_start_with_slash(cls, value: str) -> str:
+        value = value.strip() or "/telegram"
+        if not value.startswith("/"):
+            raise ValueError('webhook_path must start with "/"')
+        return value
+
+    @model_validator(mode="after")
+    def validate_webhook_config(self) -> "TelegramConfig":
+        if self.mode != "webhook":
+            return self
+
+        url = self.webhook_url.strip()
+        if not url:
+            raise ValueError("webhook_url is required when Telegram mode is webhook")
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("webhook_url must be a public HTTPS URL")
+        secret = self.webhook_secret_token.strip()
+        if not secret:
+            raise ValueError("webhook_secret_token is required when Telegram mode is webhook")
+        if len(secret) > 256 or re.match(r"^[A-Za-z0-9_-]+$", secret) is None:
+            raise ValueError(
+                "webhook_secret_token must be 1-256 characters using only A-Z, a-z, 0-9, _ and -"
+            )
+        return self
 
 
 class TelegramChannel(BaseChannel):
@@ -378,12 +435,11 @@ class TelegramChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return telegram_default_config()
+        return TelegramConfig().model_dump(by_alias=True)
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
-        self.name = runtime_channel_name("telegram", config.instance_id)
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self._app: Application | None = None
@@ -1103,15 +1159,12 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
-    def _derive_topic_session_key(
-        message,
-        channel_name: str = "telegram",
-    ) -> str | None:
+    def _derive_topic_session_key(message) -> str | None:
         """Derive topic-scoped session key for Telegram chats with threads."""
         message_thread_id = getattr(message, "message_thread_id", None)
         if message_thread_id is None:
             return None
-        return f"{channel_name}:{message.chat_id}:topic:{message_thread_id}"
+        return f"telegram:{message.chat_id}:topic:{message_thread_id}"
 
     @staticmethod
     def _build_message_metadata(message, user) -> dict:
@@ -1280,9 +1333,10 @@ class TelegramChannel(BaseChannel):
         if len(self._message_threads) > 1000:
             self._message_threads.pop(next(iter(self._message_threads)))
 
-    def _queue_key_for_message(self, message) -> str:
+    @staticmethod
+    def _queue_key_for_message(message) -> str:
         """Return the final nanobot session key used for ordered Telegram ingress."""
-        return self._derive_topic_session_key(message, self.name) or f"{self.name}:{message.chat_id}"
+        return TelegramChannel._derive_topic_session_key(message) or f"telegram:{message.chat_id}"
 
     @staticmethod
     def _sort_key_for_update(update: Update) -> tuple[int, int]:
@@ -1379,7 +1433,7 @@ class TelegramChannel(BaseChannel):
             chat_id=str(message.chat_id),
             content=content,
             metadata=self._build_message_metadata(message, user),
-            session_key=self._derive_topic_session_key(message, self.name),
+            session_key=self._derive_topic_session_key(message),
             is_dm=message.chat.type == "private",
         )
 
@@ -1452,7 +1506,7 @@ class TelegramChannel(BaseChannel):
 
         str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
-        session_key = self._derive_topic_session_key(message, self.name)
+        session_key = self._derive_topic_session_key(message)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):

@@ -1,22 +1,21 @@
 {
   "description": "透過 Telegram 對話與 nanobot 聊天。",
-  "requirements": "BotFather 權杖；如果目前網路無法存取 Telegram，還可設定代理。",
+  "requirements": "機器人權杖、允許的使用者和閘道",
   "setup": {
     "docsLabel": "開啟 Telegram 設定指南",
     "officialLabel": "開啟 BotFather",
+    "tryIt": "向 Telegram 機器人傳送 /start 或一則簡短私訊。",
+    "summary": "啟用只會開啟 Telegram 支援；收發訊息前仍需填入 BotFather 權杖。",
     "steps": [
-      "在 BotFather 中建立機器人並複製權杖。",
-      "在此貼上權杖。如果目前網路無法存取 Telegram，請在「進階選項」中加入代理。",
-      "連接機器人，然後在 Telegram 中傳送一則訊息給它。"
+      "使用 BotFather 建立機器人並複製權杖。",
+      "填入權杖並選擇哪些使用者可以向機器人傳送訊息。",
+      "儲存並啟用 Telegram，然後傳送私訊或在群組中提及機器人。"
     ],
     "fields": {
-      "name": {
-        "label": "機器人名稱",
-        "placeholder": "客服機器人"
-      },
       "token": {
         "label": "機器人權杖",
-        "placeholder": "123456:ABC..."
+        "placeholder": "123456:ABC...",
+        "help": "使用 BotFather 建立。"
       },
       "proxy": {
         "label": "網路代理",
@@ -24,56 +23,17 @@
       },
       "allowFrom": {
         "label": "允許的使用者",
-        "placeholder": "* 或 Telegram 使用者 ID"
+        "placeholder": "* 或 Telegram 使用者 ID",
+        "help": "留空則使用配對碼。"
       },
       "groupPolicy": {
         "label": "群組行為",
         "choices": {
           "mention": "僅提及時",
-          "open": "所有訊息"
+          "open": "所有訊息",
+          "allowlist": "允許清單"
         }
       }
     }
-  },
-  "panel": {
-    "toggleBot": "{{name}} 機器人",
-    "running": "執行中",
-    "needsToken": "需要權杖",
-    "finishSetup": "檢查並完成設定",
-    "connectFirst": "連接第一個機器人",
-    "addBot": "新增機器人",
-    "connectBot": "檢查並連接",
-    "advancedOptions": "進階選項",
-    "tokenRequired": "請先輸入 BotFather 權杖。",
-    "botName": "機器人名稱",
-    "botNamePlaceholder": "客服機器人",
-    "botToken": "機器人權杖",
-    "hideToken": "隱藏權杖",
-    "showToken": "顯示權杖",
-    "networkProxy": "網路代理（選用）",
-    "savedProxyPlaceholder": "已儲存代理",
-    "hideProxy": "隱藏代理",
-    "showProxy": "顯示代理",
-    "proxyUnavailable": "無法透過此代理連線 Telegram，請檢查網址與憑證。",
-    "proxyRequired": "請先輸入代理網址。",
-    "proxySaved": "代理已儲存，連線驗證成功。",
-    "proxyRemoved": "已移除儲存的代理。",
-    "proxyConfigured": "已設定",
-    "saveProxy": "檢查並儲存",
-    "removeProxy": "移除儲存的代理",
-    "invalidProxy": "請輸入完整代理網址，例如 http://127.0.0.1:7890。",
-    "proxyEnvMissing": "已儲存的代理引用了尚未設定的環境變數。",
-    "tokenEnvMissing": "已儲存的機器人權杖引用了尚未設定的環境變數。",
-    "cancel": "取消",
-    "checkConnection": "檢查連線",
-    "connectedAs": "已連接為 {{name}}。",
-    "connected": "Telegram 已接受儲存的權杖。",
-    "configuredUnverified": "已找到儲存的權杖，但無法連線 Telegram。請檢查網路或代理後再試。",
-    "verificationUnavailable": "無法連線 Telegram。請檢查網路；如需代理，請在「進階選項」中設定後再試。",
-    "invalidToken": "Telegram 拒絕了這個機器人權杖。",
-    "checkFailed": "目前無法檢查連線。",
-    "defaultBotName": "Telegram 機器人",
-    "numberedBotName": "Telegram 機器人 {{number}}",
-    "count": "已設定：{{count}} · 執行中：{{running}}"
   }
 }

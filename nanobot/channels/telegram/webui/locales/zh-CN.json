@@ -1,22 +1,21 @@
 {
   "description": "通过 Telegram 会话与 nanobot 聊天。",
-  "requirements": "BotFather 令牌；如果当前网络无法访问 Telegram，还可配置代理。",
+  "requirements": "机器人令牌、允许的用户和网关",
   "setup": {
-    "docsLabel": "打开 Telegram 设置指南",
+    "docsLabel": "打开 Telegram 配置指南",
     "officialLabel": "打开 BotFather",
+    "tryIt": "向 Telegram 机器人发送 /start 或一条简短私信。",
+    "summary": "启用只会打开 Telegram 支持；收发消息前仍需填写 BotFather 令牌。",
     "steps": [
-      "在 BotFather 中创建机器人并复制令牌。",
-      "在此粘贴令牌。如果当前网络无法访问 Telegram，请在“高级选项”中添加代理。",
-      "连接机器人，然后在 Telegram 中向它发送一条消息。"
+      "使用 BotFather 创建机器人并复制令牌。",
+      "填写令牌并选择哪些用户可以向机器人发送消息。",
+      "保存并启用 Telegram，然后向机器人发送私信或在群组中提及它。"
     ],
     "fields": {
-      "name": {
-        "label": "机器人名称",
-        "placeholder": "客服机器人"
-      },
       "token": {
         "label": "机器人令牌",
-        "placeholder": "123456:ABC..."
+        "placeholder": "123456:ABC...",
+        "help": "使用 BotFather 创建。"
       },
       "proxy": {
         "label": "网络代理",
@@ -24,56 +23,17 @@
       },
       "allowFrom": {
         "label": "允许的用户",
-        "placeholder": "* 或 Telegram 用户 ID"
+        "placeholder": "* 或 Telegram 用户 ID",
+        "help": "留空则使用配对码。"
       },
       "groupPolicy": {
         "label": "群组行为",
         "choices": {
           "mention": "仅提及时",
-          "open": "所有消息"
+          "open": "所有消息",
+          "allowlist": "白名单"
         }
       }
     }
-  },
-  "panel": {
-    "toggleBot": "{{name}} 机器人",
-    "running": "运行中",
-    "needsToken": "需要令牌",
-    "finishSetup": "检查并完成配置",
-    "connectFirst": "连接第一个机器人",
-    "addBot": "添加机器人",
-    "connectBot": "检查并连接",
-    "advancedOptions": "高级选项",
-    "tokenRequired": "请先填写 BotFather 令牌。",
-    "botName": "机器人名称",
-    "botNamePlaceholder": "客服机器人",
-    "botToken": "机器人令牌",
-    "hideToken": "隐藏令牌",
-    "showToken": "显示令牌",
-    "networkProxy": "网络代理（可选）",
-    "savedProxyPlaceholder": "已保存代理",
-    "hideProxy": "隐藏代理",
-    "showProxy": "显示代理",
-    "proxyUnavailable": "无法通过此代理访问 Telegram，请检查地址和凭据。",
-    "proxyRequired": "请先输入代理地址。",
-    "proxySaved": "代理已保存，连接验证成功。",
-    "proxyRemoved": "已移除保存的代理。",
-    "proxyConfigured": "已配置",
-    "saveProxy": "检查并保存",
-    "removeProxy": "移除已保存的代理",
-    "invalidProxy": "请输入完整代理地址，例如 http://127.0.0.1:7890。",
-    "proxyEnvMissing": "已保存的代理引用了尚未设置的环境变量。",
-    "tokenEnvMissing": "已保存的机器人令牌引用了尚未设置的环境变量。",
-    "cancel": "取消",
-    "checkConnection": "检查连接",
-    "connectedAs": "已连接为 {{name}}。",
-    "connected": "Telegram 已接受保存的令牌。",
-    "configuredUnverified": "已找到保存的令牌，但无法连接 Telegram。请检查网络或代理后重试。",
-    "verificationUnavailable": "无法连接 Telegram。请检查网络；如需代理，请在“高级选项”中配置后重试。",
-    "invalidToken": "Telegram 拒绝了这个机器人令牌。",
-    "checkFailed": "暂时无法检查连接。",
-    "defaultBotName": "Telegram 机器人",
-    "numberedBotName": "Telegram 机器人 {{number}}",
-    "count": "已配置：{{count}} · 运行中：{{running}}"
   }
 }

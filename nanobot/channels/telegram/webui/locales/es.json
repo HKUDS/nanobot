@@ -1,22 +1,21 @@
 {
   "description": "Chatea con nanobot desde Telegram.",
-  "requirements": "Un token de BotFather y, si tu red no puede acceder a Telegram, un proxy opcional.",
+  "requirements": "Token del bot, usuarios permitidos y gateway",
   "setup": {
     "docsLabel": "Abrir guía de Telegram",
     "officialLabel": "Abrir BotFather",
+    "tryIt": "Envía /start o un DM corto a tu bot de Telegram.",
+    "summary": "Activar habilita Telegram. Aún necesitas un token de BotFather para intercambiar mensajes.",
     "steps": [
       "Crea un bot con BotFather y copia su token.",
-      "Pega el token aquí. Si tu red bloquea Telegram, añade un proxy en Opciones avanzadas.",
-      "Conecta el bot y envíale un mensaje en Telegram."
+      "Añade el token y elige quién puede escribir al bot.",
+      "Guarda y activa Telegram; después envía un DM o menciona el bot en un grupo."
     ],
     "fields": {
-      "name": {
-        "label": "Nombre del bot",
-        "placeholder": "Bot de soporte"
-      },
       "token": {
         "label": "Token del bot",
-        "placeholder": "123456:ABC..."
+        "placeholder": "123456:ABC...",
+        "help": "Créalo con BotFather."
       },
       "proxy": {
         "label": "Proxy de red",
@@ -24,56 +23,17 @@
       },
       "allowFrom": {
         "label": "Usuarios permitidos",
-        "placeholder": "* o ID de usuario de Telegram"
+        "placeholder": "* o ID de usuario de Telegram",
+        "help": "Déjalo vacío para usar códigos de vinculación."
       },
       "groupPolicy": {
         "label": "Comportamiento en grupos",
         "choices": {
           "mention": "Solo menciones",
-          "open": "Todos los mensajes"
+          "open": "Todos los mensajes",
+          "allowlist": "Lista permitida"
         }
       }
     }
-  },
-  "panel": {
-    "toggleBot": "Bot {{name}}",
-    "running": "En ejecución",
-    "needsToken": "Necesita token",
-    "finishSetup": "Comprobar y finalizar",
-    "connectFirst": "Conecta tu primer bot",
-    "addBot": "Añadir bot",
-    "connectBot": "Comprobar y conectar",
-    "advancedOptions": "Opciones avanzadas",
-    "tokenRequired": "Introduce primero el token de BotFather.",
-    "botName": "Nombre del bot",
-    "botNamePlaceholder": "Bot de soporte",
-    "botToken": "Token del bot",
-    "hideToken": "Ocultar token",
-    "showToken": "Mostrar token",
-    "networkProxy": "Proxy de red (opcional)",
-    "savedProxyPlaceholder": "Ya hay un proxy guardado",
-    "hideProxy": "Ocultar proxy",
-    "showProxy": "Mostrar proxy",
-    "proxyUnavailable": "No se pudo acceder a Telegram mediante este proxy. Revisa la dirección y las credenciales.",
-    "proxyRequired": "Introduce primero una URL de proxy.",
-    "proxySaved": "Proxy guardado y conexión verificada.",
-    "proxyRemoved": "Proxy guardado eliminado.",
-    "proxyConfigured": "Configurado",
-    "saveProxy": "Comprobar y guardar",
-    "removeProxy": "Eliminar proxy guardado",
-    "invalidProxy": "Introduce una URL de proxy completa, como http://127.0.0.1:7890.",
-    "proxyEnvMissing": "El proxy guardado usa una variable de entorno que no está definida.",
-    "tokenEnvMissing": "El token de bot guardado usa una variable de entorno que no está definida.",
-    "cancel": "Cancelar",
-    "checkConnection": "Comprobar conexión",
-    "connectedAs": "Conectado como {{name}}.",
-    "connected": "Telegram aceptó el token guardado.",
-    "configuredUnverified": "Se encontró un token guardado, pero no se pudo conectar con Telegram. Comprueba la red o el proxy y vuelve a intentarlo.",
-    "verificationUnavailable": "No se pudo conectar con Telegram. Comprueba la red o añade un proxy en Opciones avanzadas y vuelve a intentarlo.",
-    "invalidToken": "Telegram rechazó este token de bot.",
-    "checkFailed": "No se pudo comprobar la conexión.",
-    "defaultBotName": "Bot de Telegram",
-    "numberedBotName": "Bot de Telegram {{number}}",
-    "count": "Configurados: {{count}} · En ejecución: {{running}}"
   }
 }
