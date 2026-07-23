@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -97,3 +98,52 @@ async def test_weixin_reconnect_keeps_existing_account_until_scan_succeeds(
     cancelled = await store.cancel(started["session_id"])
     assert cancelled["status"] == "cancelled"
     assert json.loads(state_file.read_text(encoding="utf-8")) == existing
+
+
+@pytest.mark.asyncio
+async def test_weixin_cancel_wins_over_inflight_confirmation(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "weixin-state"
+    config_path = tmp_path / "config.json"
+    save_config(
+        Config.model_validate({"channels": {"weixin": {"stateDir": str(state_dir)}}}),
+        config_path,
+    )
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    poll_started = asyncio.Event()
+    release_poll = asyncio.Event()
+
+    async def fake_fetch_qr_code(self: WeixinChannel) -> tuple[str, str]:
+        return "qr-cancel", "https://qr.example/cancel"
+
+    async def fake_api_get_with_base(
+        self: WeixinChannel,
+        **_kwargs: Any,
+    ) -> dict[str, str]:
+        poll_started.set()
+        await release_poll.wait()
+        return {
+            "status": "confirmed",
+            "bot_token": "late-token",
+            "ilink_user_id": "late-user",
+        }
+
+    monkeypatch.setattr(WeixinChannel, "_fetch_qr_code", fake_fetch_qr_code)
+    monkeypatch.setattr(WeixinChannel, "_api_get_with_base", fake_api_get_with_base)
+
+    store = WeixinConnectStore()
+    started = await store.handle("start", {})
+    query = {"session_id": [started["session_id"]]}
+    poll_task = asyncio.create_task(store.handle("poll", query))
+    await asyncio.wait_for(poll_started.wait(), timeout=5)
+
+    cancelled = await store.handle("cancel", query)
+    release_poll.set()
+    completed = await poll_task
+
+    assert cancelled["status"] == "cancelled"
+    assert completed["status"] == "cancelled"
+    assert not (state_dir / "account.json").exists()
