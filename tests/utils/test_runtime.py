@@ -3,7 +3,7 @@ from nanobot.utils.runtime import build_length_recovery_message
 
 def test_length_recovery_message_anchors_the_existing_tail() -> None:
     omitted_prefix = "OMITTED_PREFIX"
-    tail = "x" * 500
+    tail = "x" * 64
 
     message = build_length_recovery_message(omitted_prefix + tail)
 

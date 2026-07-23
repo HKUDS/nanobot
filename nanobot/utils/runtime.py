@@ -14,7 +14,7 @@ _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
 
 # Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
-_LENGTH_RECOVERY_TAIL_CHARS = 500
+_LENGTH_RECOVERY_TAIL_CHARS = 64
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "
