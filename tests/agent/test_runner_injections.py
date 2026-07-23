@@ -354,15 +354,18 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
 
 @pytest.mark.asyncio
 async def test_injected_followup_starts_new_length_recovery_chain():
-    """Recovered content from the prior answer must not prefix a follow-up reply."""
+    """A follow-up gets a fresh recovery budget and no content from the prior answer."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="first", finish_reason="length"),
-        LLMResponse(content="second", finish_reason="stop"),
-        LLMResponse(content="follow-up answer", finish_reason="stop"),
+        LLMResponse(content="first-1 ", finish_reason="length"),
+        LLMResponse(content="first-2 ", finish_reason="length"),
+        LLMResponse(content="first-3 ", finish_reason="length"),
+        LLMResponse(content="first-final", finish_reason="stop"),
+        LLMResponse(content="follow-up ", finish_reason="length"),
+        LLMResponse(content="answer", finish_reason="stop"),
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -378,14 +381,14 @@ async def test_injected_followup_starts_new_length_recovery_chain():
         initial_messages=[{"role": "user", "content": "give a long answer"}],
         tools=tools,
         model="test-model",
-        max_iterations=5,
+        max_iterations=8,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
     assert result.had_injections is True
     assert result.final_content == "follow-up answer"
-    assert provider.chat_with_retry.await_count == 3
+    assert provider.chat_with_retry.await_count == 6
 
 
 @pytest.mark.asyncio
@@ -1171,7 +1174,7 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
 
 @pytest.mark.asyncio
 async def test_drain_injections_on_fatal_tool_error():
-    """Pending injections should be drained even when a fatal tool error occurs."""
+    """A fatal tool error must not leak recovered content into an injected follow-up."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1182,11 +1185,17 @@ async def test_drain_injections_on_fatal_tool_error():
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
+                content="stale prefix ",
+                finish_reason="length",
+                usage={},
+            )
+        if call_count["n"] == 2:
+            return LLMResponse(
                 content="",
                 tool_calls=[ToolCallRequest(id="c1", name="exec", arguments={"cmd": "bad"})],
                 usage={},
             )
-        # Second call: respond normally to the injected follow-up
+        # Third call: respond normally to the injected follow-up.
         return LLMResponse(content="reply to follow-up", tool_calls=[], usage={})
 
     provider.chat_with_retry = chat_with_retry
@@ -1214,6 +1223,7 @@ async def test_drain_injections_on_fatal_tool_error():
 
     assert result.had_injections is True
     assert result.final_content == "reply to follow-up"
+    assert call_count["n"] == 3
     # The injection should be in the messages history
     injected = [
         m for m in result.messages

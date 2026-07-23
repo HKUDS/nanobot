@@ -474,6 +474,8 @@ class AgentRunner:
                     )
                     if should_continue:
                         had_injections = True
+                        length_recovery_count = 0
+                        length_recovery_parts.clear()
                         continue
                     break
                 await self._emit_checkpoint(
@@ -589,6 +591,7 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=should_continue)
 
             if should_continue:
+                length_recovery_count = 0
                 length_recovery_parts.clear()
                 await hook.after_iteration(context)
                 continue
@@ -611,6 +614,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
+                    length_recovery_count = 0
                     length_recovery_parts.clear()
                     continue
                 break
@@ -629,6 +633,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
+                    length_recovery_count = 0
                     length_recovery_parts.clear()
                     continue
                 break
