@@ -343,7 +343,20 @@
       "searchPlaceholder": "搜尋供應商",
       "noMatches": "沒有符合的供應商。",
       "addOwnProvider": "新增自己的模型供應商",
-      "saveProvider": "儲存供應商"
+      "customProvider": "自訂供應商",
+      "customProviderName": "供應商名稱",
+      "customProviderNamePlaceholder": "例如：公司模型閘道",
+      "saveProvider": "儲存供應商",
+      "advancedOptions": "進階選項",
+      "saveAdvancedBeforeSignIn": "請先儲存進階選項再登入。",
+      "apiType": "API 類型",
+      "proxy": "網路代理",
+      "thinkingStyle": "思考模式",
+      "region": "區域",
+      "profile": "設定檔",
+      "extraHeaders": "額外請求標頭",
+      "extraBody": "額外請求本文",
+      "extraQuery": "額外查詢參數"
     },
     "image": {
       "selectProvider": "選擇供應商",

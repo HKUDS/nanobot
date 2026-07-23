@@ -491,7 +491,20 @@
       "searchPlaceholder": "搜索提供商",
       "noMatches": "没有匹配的提供商。",
       "addOwnProvider": "添加自己的模型供应商",
-      "saveProvider": "保存提供商"
+      "customProvider": "自定义供应商",
+      "customProviderName": "供应商名称",
+      "customProviderNamePlaceholder": "例如：公司模型网关",
+      "saveProvider": "保存供应商",
+      "advancedOptions": "高级选项",
+      "saveAdvancedBeforeSignIn": "请先保存高级选项再登录。",
+      "apiType": "API 类型",
+      "proxy": "网络代理",
+      "thinkingStyle": "思考模式",
+      "region": "区域",
+      "profile": "配置档案",
+      "extraHeaders": "额外请求头",
+      "extraBody": "额外请求体",
+      "extraQuery": "额外查询参数"
     },
     "legal": {
       "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"

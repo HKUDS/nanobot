@@ -343,7 +343,20 @@
       "searchPlaceholder": "제공자 검색",
       "noMatches": "일치하는 제공자가 없습니다.",
       "addOwnProvider": "내 모델 제공업체 추가",
-      "saveProvider": "제공자 저장"
+      "customProvider": "사용자 지정 제공업체",
+      "customProviderName": "제공업체 이름",
+      "customProviderNamePlaceholder": "내 모델 제공업체",
+      "saveProvider": "제공업체 저장",
+      "advancedOptions": "고급 옵션",
+      "saveAdvancedBeforeSignIn": "로그인하기 전에 고급 옵션을 저장하세요.",
+      "apiType": "API 유형",
+      "proxy": "네트워크 프록시",
+      "thinkingStyle": "추론 방식",
+      "region": "리전",
+      "profile": "프로필",
+      "extraHeaders": "추가 헤더",
+      "extraBody": "추가 본문",
+      "extraQuery": "추가 쿼리"
     },
     "image": {
       "selectProvider": "제공자 선택",

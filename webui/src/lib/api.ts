@@ -15,6 +15,7 @@ import type {
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
   PairingPayload,
+  ProviderCreationUpdate,
   ProviderModelsPayload,
   ProviderOAuthCompletionResult,
   ProviderOAuthLoginResult,
@@ -54,6 +55,7 @@ function isSlashCommandLifecycle(value: unknown): value is SlashCommandLifecycle
 const CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values";
 const API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values";
 const OAUTH_CODE_HEADER = "X-Nanobot-OAuth-Code";
+const PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values";
 
 export class ApiError extends Error {
   status: number;
@@ -861,15 +863,32 @@ export async function updateProviderSettings(
   update: ProviderSettingsUpdate,
   base: string = "",
 ): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("provider", update.provider);
-  if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
-  if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
-  if (update.apiType !== undefined) query.set("api_type", update.apiType);
-  if (update.proxy !== undefined) query.set("proxy", update.proxy);
+  const { provider, ...values } = update;
+  const query = new URLSearchParams({ provider });
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
     token,
+    {
+      headers: {
+        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(values)),
+      },
+    },
+  );
+}
+
+export async function createProviderSettings(
+  token: string,
+  update: ProviderCreationUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  return request<SettingsPayload>(
+    `${base}/api/settings/provider/create`,
+    token,
+    {
+      headers: {
+        [PROVIDER_VALUES_HEADER]: encodeURIComponent(JSON.stringify(update)),
+      },
+    },
   );
 }
 

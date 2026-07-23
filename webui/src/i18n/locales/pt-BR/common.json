@@ -491,7 +491,20 @@
       "searchPlaceholder": "Buscar provedores",
       "noMatches": "Nenhum provedor corresponde a esta busca.",
       "addOwnProvider": "Adicionar seu próprio provedor de modelos",
-      "saveProvider": "Salvar provedor"
+      "customProvider": "Provedor personalizado",
+      "customProviderName": "Nome do provedor",
+      "customProviderNamePlaceholder": "Meu provedor de modelos",
+      "saveProvider": "Salvar provedor",
+      "advancedOptions": "Opções avançadas",
+      "saveAdvancedBeforeSignIn": "Salve as alterações avançadas antes de entrar.",
+      "apiType": "Tipo de API",
+      "proxy": "Proxy de rede",
+      "thinkingStyle": "Estilo de raciocínio",
+      "region": "Região",
+      "profile": "Perfil",
+      "extraHeaders": "Cabeçalhos adicionais",
+      "extraBody": "Corpo adicional",
+      "extraQuery": "Parâmetros de consulta adicionais"
     },
     "legal": {
       "thirdPartyBrands": "Nomes de produtos, logotipos e marcas são propriedades de seus respectivos donos. O uso é apenas para identificação e não implica endosso."

@@ -491,7 +491,20 @@
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
       "addOwnProvider": "Add your own model provider",
-      "saveProvider": "Save provider"
+      "customProvider": "Custom provider",
+      "customProviderName": "Provider name",
+      "customProviderNamePlaceholder": "My model provider",
+      "saveProvider": "Save provider",
+      "advancedOptions": "Advanced options",
+      "saveAdvancedBeforeSignIn": "Save advanced changes before signing in.",
+      "apiType": "API type",
+      "proxy": "Network proxy",
+      "thinkingStyle": "Thinking style",
+      "region": "Region",
+      "profile": "Profile",
+      "extraHeaders": "Extra headers",
+      "extraBody": "Extra body",
+      "extraQuery": "Extra query"
     },
     "legal": {
       "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."

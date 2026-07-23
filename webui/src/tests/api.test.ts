@@ -4,6 +4,7 @@ import {
   configureChannel,
   completeProviderOAuth,
   createModelConfiguration,
+  createProviderSettings,
   deleteModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -466,23 +467,68 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+      "/api/settings/provider/update?provider=openrouter",
       expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+            apiKey: "sk-or-test",
+            apiBase: "https://openrouter.ai/api/v1",
+          })),
+        },
       }),
     );
   });
 
-  it("serializes OAuth provider proxy updates", async () => {
+  it("serializes OAuth provider advanced settings", async () => {
     await updateProviderSettings("tok", {
       provider: "xai_grok",
       proxy: "http://127.0.0.1:7890",
+      extraBody: '{"service_tier":"priority"}',
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/provider/update?provider=xai_grok&proxy=http%3A%2F%2F127.0.0.1%3A7890",
+      "/api/settings/provider/update?provider=xai_grok",
       expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+            proxy: "http://127.0.0.1:7890",
+            extraBody: '{"service_tier":"priority"}',
+          })),
+        },
+      }),
+    );
+  });
+
+  it("serializes custom provider creation with advanced settings", async () => {
+    await createProviderSettings("tok", {
+      name: "Company Gateway",
+      apiKey: "sk-company",
+      apiBase: "https://gateway.example/v1",
+      extraHeaders: '{"X-Tenant":"engineering"}',
+      extraBody: '{"service_tier":"priority"}',
+      extraQuery: '{"api-version":"2026-01-01"}',
+      proxy: "http://127.0.0.1:7890",
+      thinkingStyle: "enable_thinking",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/create",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+            name: "Company Gateway",
+            apiKey: "sk-company",
+            apiBase: "https://gateway.example/v1",
+            extraHeaders: '{"X-Tenant":"engineering"}',
+            extraBody: '{"service_tier":"priority"}',
+            extraQuery: '{"api-version":"2026-01-01"}',
+            proxy: "http://127.0.0.1:7890",
+            thinkingStyle: "enable_thinking",
+          })),
+        },
       }),
     );
   });

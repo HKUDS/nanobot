@@ -343,7 +343,20 @@
       "searchPlaceholder": "Tìm nhà cung cấp",
       "noMatches": "Không có nhà cung cấp phù hợp.",
       "addOwnProvider": "Thêm nhà cung cấp mô hình của bạn",
-      "saveProvider": "Lưu nhà cung cấp"
+      "customProvider": "Nhà cung cấp tùy chỉnh",
+      "customProviderName": "Tên nhà cung cấp",
+      "customProviderNamePlaceholder": "Nhà cung cấp mô hình của tôi",
+      "saveProvider": "Lưu nhà cung cấp",
+      "advancedOptions": "Tùy chọn nâng cao",
+      "saveAdvancedBeforeSignIn": "Lưu các thay đổi nâng cao trước khi đăng nhập.",
+      "apiType": "Loại API",
+      "proxy": "Proxy mạng",
+      "thinkingStyle": "Kiểu suy luận",
+      "region": "Khu vực",
+      "profile": "Hồ sơ",
+      "extraHeaders": "Header bổ sung",
+      "extraBody": "Body bổ sung",
+      "extraQuery": "Tham số truy vấn bổ sung"
     },
     "image": {
       "selectProvider": "Chọn nhà cung cấp",

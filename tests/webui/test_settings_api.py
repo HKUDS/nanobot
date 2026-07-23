@@ -18,6 +18,7 @@ from nanobot.webui.settings_api import (
     _reasoning_effort_values_for,
     complete_oauth_provider,
     create_model_configuration,
+    create_provider_settings,
     delete_model_configuration,
     login_oauth_provider,
     logout_oauth_provider,
@@ -528,6 +529,93 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     assert dynamic_provider.api_key == "sk-test"
 
 
+def test_create_provider_settings_persists_custom_advanced_options(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_provider_settings(
+        {
+            "name": ["Company Gateway"],
+            "apiBase": ["https://gateway.example/v1"],
+            "apiKey": ["sk-company"],
+            "proxy": ["http://127.0.0.1:7890"],
+            "extraHeaders": [json.dumps({"X-Tenant": "engineering"})],
+            "extraBody": [json.dumps({"service_tier": "priority"})],
+            "extraQuery": [json.dumps({"api-version": "2026-01-01"})],
+            "thinkingStyle": ["enable_thinking"],
+        }
+    )
+
+    provider_name = payload["created_provider"]
+    row = next(provider for provider in payload["providers"] if provider["name"] == provider_name)
+    assert row["label"] == "Company Gateway"
+    assert row["is_custom"] is True
+    assert row["advanced_fields"] == [
+        "extra_headers",
+        "extra_body",
+        "extra_query",
+        "proxy",
+        "thinking_style",
+    ]
+    assert row["extra_headers"] == {"X-Tenant": "engineering"}
+    assert row["extra_body"] == {"service_tier": "priority"}
+    assert row["extra_query"] == {"api-version": "2026-01-01"}
+
+    saved = load_config(config_path).providers.model_extra[provider_name]
+    assert saved.display_name == "Company Gateway"
+    assert saved.api_key == "sk-company"
+    assert saved.api_base == "https://gateway.example/v1"
+    assert saved.proxy == "http://127.0.0.1:7890"
+    assert saved.extra_headers == {"X-Tenant": "engineering"}
+    assert saved.extra_body == {"service_tier": "priority"}
+    assert saved.extra_query == {"api-version": "2026-01-01"}
+    assert saved.thinking_style == "enable_thinking"
+
+
+def test_update_provider_settings_persists_provider_specific_advanced_options(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-openai"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    update_provider_settings(
+        {
+            "provider": ["openai"],
+            "apiType": ["responses"],
+            "proxy": ["http://127.0.0.1:7890"],
+            "extraHeaders": [json.dumps({"X-Trace": "enabled"})],
+            "extraBody": [json.dumps({"service_tier": "priority"})],
+            "extraQuery": [json.dumps({"trace": "true"})],
+        }
+    )
+    update_provider_settings(
+        {
+            "provider": ["bedrock"],
+            "region": ["us-west-2"],
+            "profile": ["production"],
+            "extraBody": [json.dumps({"guardrailIdentifier": "guardrail-1"})],
+        }
+    )
+
+    saved = load_config(config_path)
+    assert saved.providers.openai.api_type == "responses"
+    assert saved.providers.openai.proxy == "http://127.0.0.1:7890"
+    assert saved.providers.openai.extra_headers == {"X-Trace": "enabled"}
+    assert saved.providers.openai.extra_body == {"service_tier": "priority"}
+    assert saved.providers.openai.extra_query == {"trace": "true"}
+    assert saved.providers.bedrock.region == "us-west-2"
+    assert saved.providers.bedrock.profile == "production"
+    assert saved.providers.bedrock.extra_body == {"guardrailIdentifier": "guardrail-1"}
+
+
 @pytest.mark.parametrize(
     ("provider_name", "config_attr"),
     [
@@ -581,7 +669,7 @@ def test_update_provider_settings_keeps_oauth_credentials_read_only(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError, match="only supports proxy settings"):
+    with pytest.raises(WebUISettingsError, match="only supports proxy and extra_body settings"):
         update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
 
 

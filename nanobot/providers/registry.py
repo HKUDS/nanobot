@@ -729,7 +729,12 @@ def find_by_name(name: str) -> ProviderSpec | None:
     return None
 
 
-def create_dynamic_spec(name: str, *, thinking_style: str = "") -> ProviderSpec:
+def create_dynamic_spec(
+    name: str,
+    *,
+    display_name: str = "",
+    thinking_style: str = "",
+) -> ProviderSpec:
     """Create a dynamic ProviderSpec for custom user-defined providers."""
     normalized = to_snake(name.replace("-", "_"))
     strip_prefixes = tuple(dict.fromkeys((name, normalized)))
@@ -737,7 +742,7 @@ def create_dynamic_spec(name: str, *, thinking_style: str = "") -> ProviderSpec:
         name=normalized,
         keywords=(),
         env_key="",
-        display_name=name.title(),
+        display_name=display_name or name.replace("-", " ").replace("_", " ").title(),
         backend="openai_compat",
         is_direct=True,
         strip_model_prefixes=strip_prefixes,

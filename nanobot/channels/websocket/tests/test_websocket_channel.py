@@ -2111,6 +2111,36 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert provider_body["image_generation"]["provider_configured"] is True
         assert "sk-or-test" not in provider_updated.text
 
+        custom_provider_created = await _http_get(
+            f"http://127.0.0.1:{port}/api/settings/provider/create",
+            headers={
+                "Authorization": "Bearer tok",
+                "X-Nanobot-Provider-Values": json.dumps(
+                    {
+                        "name": "Company Gateway",
+                        "apiBase": "https://gateway.example/v1",
+                        "apiKey": "sk-company",
+                        "extraHeaders": json.dumps({"X-Tenant": "engineering"}),
+                        "extraBody": json.dumps({"service_tier": "priority"}),
+                        "extraQuery": json.dumps({"api-version": "2026-01-01"}),
+                        "proxy": "http://127.0.0.1:7890",
+                        "thinkingStyle": "enable_thinking",
+                    }
+                ),
+            },
+        )
+        assert custom_provider_created.status_code == 200
+        custom_provider_body = custom_provider_created.json()
+        custom_provider_name = custom_provider_body["created_provider"]
+        custom_provider_rows = {
+            provider["name"]: provider for provider in custom_provider_body["providers"]
+        }
+        assert custom_provider_rows[custom_provider_name]["label"] == "Company Gateway"
+        assert custom_provider_rows[custom_provider_name]["extra_headers"] == {
+            "X-Tenant": "engineering"
+        }
+        assert "sk-company" not in custom_provider_created.text
+
         local_provider_updated = await _http_get(
             "http://127.0.0.1:"
             f"{port}/api/settings/provider/update?provider=atomic_chat"
@@ -2294,6 +2324,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.providers.openrouter.api_key == "sk-or-next"
         assert saved.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
         assert saved.providers.atomic_chat.api_base == "http://localhost:1337/v1"
+        custom_provider = saved.providers.model_extra[custom_provider_name]
+        assert custom_provider.display_name == "Company Gateway"
+        assert custom_provider.api_base == "https://gateway.example/v1"
+        assert custom_provider.extra_body == {"service_tier": "priority"}
         assert saved.tools.web.search.provider == "searxng"
         assert saved.tools.web.search.api_key == ""
         assert saved.tools.web.search.base_url == "https://search.example.com"

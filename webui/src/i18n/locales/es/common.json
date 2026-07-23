@@ -343,7 +343,20 @@
       "searchPlaceholder": "Buscar proveedores",
       "noMatches": "Ningún proveedor coincide con esta búsqueda.",
       "addOwnProvider": "Añadir tu propio proveedor de modelos",
-      "saveProvider": "Guardar proveedor"
+      "customProvider": "Proveedor personalizado",
+      "customProviderName": "Nombre del proveedor",
+      "customProviderNamePlaceholder": "Mi proveedor de modelos",
+      "saveProvider": "Guardar proveedor",
+      "advancedOptions": "Opciones avanzadas",
+      "saveAdvancedBeforeSignIn": "Guarda los cambios avanzados antes de iniciar sesión.",
+      "apiType": "Tipo de API",
+      "proxy": "Proxy de red",
+      "thinkingStyle": "Estilo de razonamiento",
+      "region": "Región",
+      "profile": "Perfil",
+      "extraHeaders": "Cabeceras adicionales",
+      "extraBody": "Cuerpo adicional",
+      "extraQuery": "Parámetros de consulta adicionales"
     },
     "image": {
       "selectProvider": "Seleccionar proveedor",

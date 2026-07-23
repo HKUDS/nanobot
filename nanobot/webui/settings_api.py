@@ -217,6 +217,73 @@ def _query_first_alias(query: QueryParams, snake: str, camel: str) -> str | None
     return _query_first(query, camel) if value is None else value
 
 
+def _query_has_alias(query: QueryParams, snake: str, camel: str) -> bool:
+    return snake in query or camel in query
+
+
+def _provider_json_setting(
+    query: QueryParams,
+    snake: str,
+    camel: str,
+) -> dict[str, Any] | None:
+    raw = (_query_first_alias(query, snake, camel) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise WebUISettingsError(f"{snake} must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise WebUISettingsError(f"{snake} must be a JSON object")
+    return value or None
+
+
+def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    string_fields = (
+        ("api_key", "apiKey"),
+        ("api_base", "apiBase"),
+        ("api_type", "apiType"),
+        ("proxy", "proxy"),
+        ("thinking_style", "thinkingStyle"),
+        ("region", "region"),
+        ("profile", "profile"),
+        ("display_name", "displayName"),
+    )
+    for snake, camel in string_fields:
+        if _query_has_alias(query, snake, camel):
+            value = (_query_first_alias(query, snake, camel) or "").strip()
+            updates[snake] = value or ("auto" if snake == "api_type" else None)
+
+    for snake, camel in (
+        ("extra_headers", "extraHeaders"),
+        ("extra_body", "extraBody"),
+        ("extra_query", "extraQuery"),
+    ):
+        if _query_has_alias(query, snake, camel):
+            updates[snake] = _provider_json_setting(query, snake, camel)
+    return updates
+
+
+def _validated_provider_config(
+    provider_config: ProviderConfig | None,
+    updates: dict[str, Any],
+) -> ProviderConfig:
+    config_type = type(provider_config) if provider_config is not None else ProviderConfig
+    values = provider_config.model_dump(mode="python") if provider_config is not None else {}
+    values.update(updates)
+    try:
+        return config_type.model_validate(values)
+    except ValueError as exc:
+        errors = getattr(exc, "errors", lambda: [])()
+        if errors:
+            error = errors[0]
+            field = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg", "invalid value"))
+            raise WebUISettingsError(f"{field}: {message}" if field else message) from exc
+        raise WebUISettingsError(str(exc)) from exc
+
+
 def _mask_secret_hint(secret: str | None) -> str | None:
     if not secret:
         return None
@@ -379,8 +446,35 @@ def _resolve_settings_provider(
     normalized = provider_name.replace("-", "_")
     for extra_name, provider_config in _dynamic_provider_items(config):
         if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
-            return create_dynamic_spec(extra_name, thinking_style=(provider_config.thinking_style or "")), extra_name, provider_config
+            return (
+                create_dynamic_spec(
+                    extra_name,
+                    display_name=provider_config.display_name or "",
+                    thinking_style=provider_config.thinking_style or "",
+                ),
+                extra_name,
+                provider_config,
+            )
     return None
+
+
+def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
+    fields: list[str] = []
+    if spec.backend in {"openai_compat", "anthropic"}:
+        fields.append("extra_headers")
+    if spec.backend in {"openai_compat", "bedrock", "openai_codex", "xai_grok"}:
+        fields.append("extra_body")
+    if spec.backend == "openai_compat":
+        fields.extend(("extra_query", "proxy"))
+    if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
+        fields.append("proxy")
+    if spec.name == "openai":
+        fields.append("api_type")
+    if spec.backend == "bedrock":
+        fields.extend(("region", "profile"))
+    if find_by_name(name) is None:
+        fields.append("thinking_style")
+    return fields
 
 
 def _provider_settings_row(
@@ -389,9 +483,12 @@ def _provider_settings_row(
     provider_config: ProviderConfig,
 ) -> dict[str, Any]:
     oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
+    is_custom = find_by_name(name) is None
+
     row = {
         "name": name,
         "label": spec.label,
+        "is_custom": is_custom,
         "configured": (
             bool(oauth_status["configured"])
             if oauth_status is not None
@@ -404,13 +501,19 @@ def _provider_settings_row(
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
         "model_catalog": _model_catalog_kind(spec),
+        "advanced_fields": _provider_advanced_field_names(name, spec),
+        "extra_headers": provider_config.extra_headers,
+        "extra_body": provider_config.extra_body,
+        "extra_query": provider_config.extra_query,
+        "thinking_style": provider_config.thinking_style,
+        "region": getattr(provider_config, "region", None),
+        "profile": getattr(provider_config, "profile", None),
+        "proxy": provider_config.proxy,
     }
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
         row["oauth_expires_at"] = oauth_status["expires_at"]
         row["oauth_login_supported"] = oauth_status["login_supported"]
-    if spec.name in _OAUTH_PROXY_PROVIDERS:
-        row["proxy"] = provider_config.proxy
     if spec.name == "openai":
         row["api_type"] = provider_config.api_type
     return row
@@ -713,6 +816,44 @@ def _model_configuration_slug(label: str) -> str:
     return normalized
 
 
+def _custom_provider_key(config: Any, display_name: str) -> str:
+    slug = _MODEL_CONFIGURATION_SLUG_RE.sub("-", display_name.strip().lower()).strip("-_")
+    base = f"custom-{slug or 'provider'}"
+    if len(base) > 56:
+        base = base[:56].rstrip("-_")
+    existing = {
+        name.replace("_", "-").lower()
+        for name, _provider_config in _dynamic_provider_items(config)
+    }
+    candidate = base
+    suffix = 2
+    while candidate.replace("_", "-").lower() in existing or find_by_name(candidate):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _provider_display_name_exists(
+    config: Any,
+    display_name: str,
+    *,
+    exclude_key: str | None = None,
+) -> bool:
+    normalized = display_name.strip().casefold()
+    if any(spec.label.strip().casefold() == normalized for spec in PROVIDERS):
+        return True
+    for provider_key, provider_config in _dynamic_provider_items(config):
+        if provider_key == exclude_key:
+            continue
+        label = (
+            provider_config.display_name
+            or provider_key.replace("-", " ").replace("_", " ").title()
+        )
+        if label.strip().casefold() == normalized:
+            return True
+    return False
+
+
 def _unique_model_configuration_name(config: Any, label: str) -> str:
     """Return a stable, unused preset name for a migrated model configuration."""
     try:
@@ -874,7 +1015,11 @@ def settings_payload(
         providers.append(
             _provider_settings_row(
                 provider_key,
-                create_dynamic_spec(provider_key, thinking_style=(provider_config.thinking_style or "")),
+                create_dynamic_spec(
+                    provider_key,
+                    display_name=provider_config.display_name or "",
+                    thinking_style=provider_config.thinking_style or "",
+                ),
                 provider_config,
             )
         )
@@ -1429,6 +1574,46 @@ def delete_model_configuration(query: QueryParams) -> dict[str, Any]:
     return settings_payload()
 
 
+def create_provider_settings(query: QueryParams) -> dict[str, Any]:
+    display_name = (_query_first_alias(query, "name", "displayName") or "").strip()
+    if not display_name:
+        raise WebUISettingsError("provider name is required")
+    if len(display_name) > 80:
+        raise WebUISettingsError("provider name must be 80 characters or fewer")
+    updates = _provider_config_updates(query)
+    allowed = {
+        "api_key",
+        "api_base",
+        "proxy",
+        "extra_headers",
+        "extra_body",
+        "extra_query",
+        "thinking_style",
+        "display_name",
+    }
+    unsupported = set(updates) - allowed
+    if unsupported:
+        field = sorted(unsupported)[0]
+        raise WebUISettingsError(f"{field} is not supported for a custom provider")
+    api_base = str(updates.get("api_base") or "")
+    if not api_base:
+        raise WebUISettingsError("API base is required")
+
+    config = load_config()
+    if _provider_display_name_exists(config, display_name):
+        raise WebUISettingsError("provider already exists", status=409)
+
+    provider_key = _custom_provider_key(config, display_name)
+    updates["display_name"] = display_name
+    updates["api_type"] = "auto"
+    provider_config = _validated_provider_config(None, updates)
+    setattr(config.providers, provider_key, provider_config)
+    save_config(config)
+    payload = settings_payload()
+    payload["created_provider"] = provider_key
+    return payload
+
+
 def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
@@ -1439,52 +1624,39 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
+    updates = _provider_config_updates(query)
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")
-        if any(
-            key in query
-            for key in ("api_key", "apiKey", "api_base", "apiBase", "api_type")
-        ):
-            raise WebUISettingsError("OAuth provider only supports proxy settings")
+        unsupported = set(updates) - {"proxy", "extra_body"}
+        if unsupported:
+            raise WebUISettingsError("OAuth provider only supports proxy and extra_body settings")
+    else:
+        allowed = {
+            "api_key",
+            "api_base",
+            *_provider_advanced_field_names(provider_key, spec),
+        }
+        if find_by_name(provider_key) is None:
+            allowed.add("display_name")
+        unsupported = set(updates) - allowed
+        if unsupported:
+            field = sorted(unsupported)[0]
+            raise WebUISettingsError(f"{field} is not supported for this provider")
 
-        changed = False
-        if "proxy" in query:
-            proxy = (_query_first(query, "proxy") or "").strip() or None
-            if provider_config.proxy != proxy:
-                provider_config.proxy = proxy
-                changed = True
-        if changed:
-            save_config(config)
-        return settings_payload()
+    if "display_name" in updates:
+        display_name = str(updates["display_name"] or "")
+        if not display_name:
+            raise WebUISettingsError("provider name is required")
+        if len(display_name) > 80:
+            raise WebUISettingsError("provider name must be 80 characters or fewer")
+        if _provider_display_name_exists(config, display_name, exclude_key=provider_key):
+            raise WebUISettingsError("provider already exists", status=409)
 
-    changed = False
-    if "api_key" in query or "apiKey" in query:
-        api_key = _query_first_alias(query, "api_key", "apiKey")
-        api_key = (api_key or "").strip() or None
-        if provider_config.api_key != api_key:
-            provider_config.api_key = api_key
-            changed = True
-
-    if "api_base" in query or "apiBase" in query:
-        api_base = _query_first_alias(query, "api_base", "apiBase")
-        api_base = (api_base or "").strip() or None
-        if provider_config.api_base != api_base:
-            provider_config.api_base = api_base
-            changed = True
-
-    if "api_type" in query:
-        if spec.name == "openai":
-            api_type = (_query_first(query, "api_type") or "").strip()
-            try:
-                parsed_api_type = type(provider_config)(api_type=api_type).api_type
-            except Exception:
-                raise WebUISettingsError("api_type must be auto, chat_completions, or responses") from None
-            if provider_config.api_type != parsed_api_type:
-                provider_config.api_type = parsed_api_type
-                changed = True
-
+    updated_provider_config = _validated_provider_config(provider_config, updates)
+    changed = updated_provider_config != provider_config
     if changed:
+        setattr(config.providers, provider_key, updated_provider_config)
         save_config(config)
     image_config = config.tools.image_generation
     restart_required = (

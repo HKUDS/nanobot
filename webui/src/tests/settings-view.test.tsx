@@ -2614,6 +2614,8 @@ describe("SettingsView Apps catalog", () => {
         oauth_expires_at: null,
         oauth_login_supported: true,
         proxy: "http://127.0.0.1:7000",
+        advanced_fields: ["extra_body", "proxy"],
+        extra_body: null,
       },
       {
         name: "openai_codex",
@@ -2629,20 +2631,34 @@ describe("SettingsView Apps catalog", () => {
         oauth_expires_at: null,
         oauth_login_supported: true,
         proxy: null,
+        advanced_fields: ["extra_body", "proxy"],
+        extra_body: null,
       },
     ];
     let payload: SettingsPayload = { ...base, providers };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
       if (url.startsWith("/api/settings/provider/update?")) {
         const query = new URLSearchParams(url.split("?")[1]);
         const providerName = query.get("provider");
-        const proxy = query.get("proxy");
+        const headers = init?.headers as Record<string, string>;
+        const values = JSON.parse(decodeURIComponent(
+          headers["X-Nanobot-Provider-Values"],
+        )) as {
+          proxy?: string;
+          extraBody?: string;
+        };
         payload = {
           ...payload,
           providers: payload.providers.map((provider) =>
-            provider.name === providerName ? { ...provider, proxy } : provider,
+            provider.name === providerName
+              ? {
+                  ...provider,
+                  proxy: values.proxy || null,
+                  extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
+                }
+              : provider,
           ),
         };
         return jsonResponse(payload);
@@ -2660,36 +2676,197 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
     await chooseProviderToConfigure("xAI Grok");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     const xaiProxy = screen.getByLabelText("Network proxy");
     expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
     fireEvent.change(xaiProxy, { target: { value: "http://127.0.0.1:7890" } });
     expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sign in" })).toHaveAttribute(
       "title",
-      "Save proxy changes before signing in.",
+      "Save advanced changes before signing in.",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save proxy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/update?provider=xai_grok&proxy=http%3A%2F%2F127.0.0.1%3A7890",
-        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+        "/api/settings/provider/update?provider=xai_grok",
+        expect.objectContaining({
+          headers: {
+            Authorization: "Bearer tok",
+            "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+              extraBody: "",
+              proxy: "http://127.0.0.1:7890",
+            })),
+          },
+        }),
       ),
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
 
+    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
     await chooseProviderToConfigure("OpenAI Codex");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     const codexProxy = screen.getByLabelText("Network proxy");
     expect(codexProxy).toHaveValue("");
     fireEvent.change(codexProxy, { target: { value: "http://proxy.example:8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save proxy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/provider/update?provider=openai_codex&proxy=http%3A%2F%2Fproxy.example%3A8080",
-        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+        "/api/settings/provider/update?provider=openai_codex",
+        expect.objectContaining({
+          headers: {
+            Authorization: "Bearer tok",
+            "X-Nanobot-Provider-Values": encodeURIComponent(JSON.stringify({
+              extraBody: "",
+              proxy: "http://proxy.example:8080",
+            })),
+          },
+        }),
       ),
     );
+  });
+
+  it("creates a custom provider with folded advanced request settings", async () => {
+    const base = settingsPayload();
+    let payload: SettingsPayload = {
+      ...base,
+      providers: [
+        {
+          name: "deepseek",
+          label: "DeepSeek",
+          configured: true,
+          api_key_required: true,
+          api_key_hint: "deep••••test",
+          api_base: "https://api.deepseek.com",
+        },
+        {
+          name: "openrouter",
+          label: "OpenRouter",
+          configured: false,
+          api_key_required: true,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: "https://openrouter.ai/api/v1",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/provider/create") {
+        const headers = init?.headers as Record<string, string>;
+        const values = JSON.parse(decodeURIComponent(
+          headers["X-Nanobot-Provider-Values"],
+        )) as Record<string, string>;
+        payload = {
+          ...payload,
+          created_provider: "custom-company-gateway",
+          providers: [
+            ...payload.providers,
+            {
+              name: "custom-company-gateway",
+              label: values.name,
+              is_custom: true,
+              configured: true,
+              api_key_required: false,
+              api_key_hint: "sk-c••••pany",
+              api_base: values.apiBase,
+              default_api_base: null,
+              advanced_fields: [
+                "extra_headers",
+                "extra_body",
+                "extra_query",
+                "proxy",
+                "thinking_style",
+              ],
+              extra_headers: JSON.parse(values.extraHeaders),
+              extra_body: JSON.parse(values.extraBody),
+              extra_query: JSON.parse(values.extraQuery),
+              proxy: values.proxy,
+              thinking_style: values.thinkingStyle,
+            },
+          ],
+        };
+        return jsonResponse(payload);
+      }
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Add your own model provider" }),
+    );
+    const customOption = await screen.findByRole("menuitem", { name: "Custom provider" });
+    const openRouterOption = screen.getByRole("menuitem", { name: "OpenRouter" });
+    expect(customOption.querySelector("svg, img")).not.toBeNull();
+    expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
+    fireEvent.click(customOption);
+
+    expect(
+      screen.queryByRole("button", { name: "Add your own model provider" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Extra headers")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("My model provider"), {
+      target: { value: "Company Gateway" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+      target: { value: "https://gateway.example/v1" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Enter API key"), {
+      target: { value: "sk-company" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.change(screen.getByLabelText("Extra headers"), {
+      target: { value: '{"X-Tenant":"engineering"}' },
+    });
+    fireEvent.change(screen.getByLabelText("Extra body"), {
+      target: { value: '{"service_tier":"priority"}' },
+    });
+    fireEvent.change(screen.getByLabelText("Extra query"), {
+      target: { value: '{"api-version":"2026-01-01"}' },
+    });
+    fireEvent.change(screen.getByLabelText("Network proxy"), {
+      target: { value: "http://127.0.0.1:7890" },
+    });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const createCall = fetchMock.mock.calls.find(
+        ([input]) => String(input) === "/api/settings/provider/create",
+      );
+      expect(createCall).toBeTruthy();
+      const headers = createCall?.[1]?.headers as Record<string, string>;
+      expect(JSON.parse(decodeURIComponent(
+        headers["X-Nanobot-Provider-Values"],
+      ))).toEqual({
+        name: "Company Gateway",
+        apiKey: "sk-company",
+        apiBase: "https://gateway.example/v1",
+        proxy: "http://127.0.0.1:7890",
+        extraHeaders: '{"X-Tenant":"engineering"}',
+        extraBody: '{"service_tier":"priority"}',
+        extraQuery: '{"api-version":"2026-01-01"}',
+        thinkingStyle: "enable_thinking",
+      });
+    });
+    expect(
+      await screen.findByRole("button", { name: /Company Gateway/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add your own model provider" }),
+    ).toBeInTheDocument();
   });
 
   it("selects image models from provider-specific options", async () => {

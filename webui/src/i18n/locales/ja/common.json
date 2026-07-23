@@ -343,7 +343,20 @@
       "searchPlaceholder": "プロバイダーを検索",
       "noMatches": "一致するプロバイダーはありません。",
       "addOwnProvider": "独自のモデルプロバイダーを追加",
-      "saveProvider": "プロバイダーを保存"
+      "customProvider": "カスタムプロバイダー",
+      "customProviderName": "プロバイダー名",
+      "customProviderNamePlaceholder": "マイモデルプロバイダー",
+      "saveProvider": "プロバイダーを保存",
+      "advancedOptions": "詳細オプション",
+      "saveAdvancedBeforeSignIn": "サインインする前に詳細オプションを保存してください。",
+      "apiType": "API タイプ",
+      "proxy": "ネットワークプロキシ",
+      "thinkingStyle": "思考スタイル",
+      "region": "リージョン",
+      "profile": "プロファイル",
+      "extraHeaders": "追加ヘッダー",
+      "extraBody": "追加ボディ",
+      "extraQuery": "追加クエリ"
     },
     "image": {
       "selectProvider": "プロバイダーを選択",

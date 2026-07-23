@@ -13,6 +13,7 @@ import json
 import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import unquote
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
@@ -51,6 +52,7 @@ from nanobot.webui.settings_api import (
     WebUISettingsError,
     complete_oauth_provider,
     create_model_configuration,
+    create_provider_settings,
     decorate_settings_payload,
     delete_model_configuration,
     login_oauth_provider,
@@ -75,6 +77,8 @@ QueryParams = dict[str, list[str]]
 
 _MCP_VALUES_HEADER = "X-Nanobot-MCP-Values"
 _MCP_VALUES_HEADER_MAX_BYTES = 64 * 1024
+_PROVIDER_VALUES_HEADER = "X-Nanobot-Provider-Values"
+_PROVIDER_VALUES_HEADER_MAX_BYTES = 64 * 1024
 _CHANNEL_VALUES_HEADER = "X-Nanobot-Channel-Values"
 _CHANNEL_VALUES_HEADER_MAX_BYTES = 64 * 1024
 _API_SERVICE_VALUES_HEADER = "X-Nanobot-API-Service-Values"
@@ -156,6 +160,8 @@ class WebUISettingsRouter:
             return self._handle_settings_model_call_order_update(request)
         if path == "/api/settings/provider/update":
             return await self._handle_settings_provider_update(request)
+        if path == "/api/settings/provider/create":
+            return self._handle_settings_provider_create(request)
         if path == "/api/settings/provider-models":
             return await self._handle_settings_provider_models(request)
         if path == "/api/settings/provider/oauth-login":
@@ -278,6 +284,36 @@ class WebUISettingsRouter:
                 merged[key] = [text]
         return merged
 
+    def _parse_provider_settings_query(self, request: WsRequest) -> QueryParams:
+        query = self._query(request)
+        raw = request.headers.get(_PROVIDER_VALUES_HEADER)
+        if not raw:
+            return query
+        if len(raw.encode("utf-8")) > _PROVIDER_VALUES_HEADER_MAX_BYTES:
+            raise WebUISettingsError("provider settings payload is too large")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            try:
+                payload = json.loads(unquote(raw))
+            except json.JSONDecodeError:
+                raise WebUISettingsError("invalid provider settings payload") from exc
+        if not isinstance(payload, dict):
+            raise WebUISettingsError("provider settings payload must be a JSON object")
+
+        merged = {key: list(values) for key, values in query.items()}
+        for key, value in payload.items():
+            if not isinstance(key, str) or not key:
+                raise WebUISettingsError("provider settings payload contains an invalid key")
+            if isinstance(value, str):
+                text = value
+            elif value is None:
+                text = ""
+            else:
+                text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            merged[key] = [text]
+        return merged
+
     def _handle_settings(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
@@ -393,11 +429,20 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         try:
-            payload = update_provider_settings(self._query(request))
+            payload = update_provider_settings(self._parse_provider_settings_query(request))
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         payload = await self._apply_image_generation_runtime_change(payload)
         return self._json_response(self._with_restart_state(payload, section="image"))
+
+    def _handle_settings_provider_create(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = create_provider_settings(self._parse_provider_settings_query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload))
 
     async def _handle_settings_provider_models(self, request: WsRequest) -> Response:
         if not self._authorized(request):

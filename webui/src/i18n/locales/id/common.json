@@ -343,7 +343,20 @@
       "searchPlaceholder": "Cari penyedia",
       "noMatches": "Tidak ada penyedia yang cocok.",
       "addOwnProvider": "Tambahkan penyedia model Anda sendiri",
-      "saveProvider": "Simpan penyedia"
+      "customProvider": "Penyedia khusus",
+      "customProviderName": "Nama penyedia",
+      "customProviderNamePlaceholder": "Penyedia model saya",
+      "saveProvider": "Simpan penyedia",
+      "advancedOptions": "Opsi lanjutan",
+      "saveAdvancedBeforeSignIn": "Simpan perubahan lanjutan sebelum masuk.",
+      "apiType": "Jenis API",
+      "proxy": "Proksi jaringan",
+      "thinkingStyle": "Gaya penalaran",
+      "region": "Wilayah",
+      "profile": "Profil",
+      "extraHeaders": "Header tambahan",
+      "extraBody": "Body tambahan",
+      "extraQuery": "Parameter kueri tambahan"
     },
     "image": {
       "selectProvider": "Pilih penyedia",

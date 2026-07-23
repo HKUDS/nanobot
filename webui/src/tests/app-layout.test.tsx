@@ -1604,7 +1604,10 @@ describe("App layout", () => {
     expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
     expect(document.title).toBe("Settings · nanobot");
     expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
@@ -1697,18 +1700,22 @@ describe("App layout", () => {
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-openai-key" },
     });
+    clickProviderRow("OpenAI");
     await chooseProvider("OpenRouter");
+    clickProviderRow("OpenRouter");
     clickProviderRow("OpenAI");
     expect(screen.getByText("open••••-key")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
+    clickProviderRow("OpenAI");
     await chooseProvider("Ant Ling");
     expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
+    clickProviderRow("Ant Ling");
     await chooseProvider("Atomic Chat");
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save provider" })).toBeEnabled();
 
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Image" }));
-    expect(screen.getByRole("heading", { name: "Image" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Image" })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
     expect(screen.getByText("Provider status")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "openai/gpt-5.4-image-2" })).toBeInTheDocument();
@@ -1768,7 +1775,10 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
   });
 
   it("updates the URL hash when switching settings sections", async () => {
@@ -1779,13 +1789,16 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings");
 
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
 
-    expect(await screen.findByRole("heading", { name: "Models" })).toBeInTheDocument();
+    expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Models" })).not.toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=models");
 
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Voice" }));
@@ -1957,7 +1970,9 @@ describe("App layout", () => {
     await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
