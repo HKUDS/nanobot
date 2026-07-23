@@ -782,6 +782,40 @@ class TestProactiveAutoCompact:
         await _drain_background_tasks(loop)
 
     @pytest.mark.asyncio
+    async def test_idle_tick_survives_session_removed_during_listing(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        removed = loop.sessions.get_or_create("cli:removed")
+        removed.add_message("user", "remove me")
+        loop.sessions.save(removed)
+        healthy = loop.sessions.get_or_create("cli:healthy")
+        healthy.add_message("user", "keep me")
+        loop.sessions.save(healthy)
+
+        removed_path = loop.sessions._get_session_path(removed.key)
+        original_open = open
+
+        def remove_before_open(path, *args, **kwargs):
+            if Path(path) == removed_path:
+                removed_path.unlink()
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", remove_before_open)
+
+        async def idle_once():
+            loop._running = False
+            raise asyncio.TimeoutError
+
+        monkeypatch.setattr(loop.bus, "consume_inbound", idle_once)
+
+        await loop.run()
+
+        assert [row["key"] for row in loop.sessions.list_sessions()] == ["cli:healthy"]
+
+    @pytest.mark.asyncio
     async def test_no_check_when_ttl_disabled(self, tmp_path):
         """check_expired should be a no-op when TTL is 0."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)

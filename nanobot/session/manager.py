@@ -986,6 +986,8 @@ class SessionManager:
                                     "path": str(path),
                                 }
                             )
+            except FileNotFoundError:
+                continue
             except _SESSION_DATA_ERRORS:
                 repaired = self._repair(fallback_key, path=path)
                 if repaired is not None:
