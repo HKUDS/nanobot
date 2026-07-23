@@ -1,7 +1,14 @@
 {
   "description": "Mengobrol dengan nanobot dari Telegram.",
+  "requirements": "Token BotFather dan, jika jaringan Anda tidak dapat menjangkau Telegram, proxy opsional.",
   "setup": {
+    "docsLabel": "Buka panduan Telegram",
     "officialLabel": "Buka BotFather",
+    "steps": [
+      "Buat bot dengan BotFather lalu salin tokennya.",
+      "Tempel token di sini. Jika Telegram diblokir di jaringan Anda, tambahkan proxy di Opsi lanjutan.",
+      "Hubungkan bot, lalu kirim pesan kepadanya di Telegram."
+    ],
     "fields": {
       "name": {
         "label": "Nama bot",
@@ -10,6 +17,10 @@
       "token": {
         "label": "Token bot",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Proxy jaringan",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
@@ -57,8 +68,8 @@
     "checkConnection": "Periksa koneksi",
     "connectedAs": "Terhubung sebagai {{name}}.",
     "connected": "Telegram menerima token tersimpan.",
-    "configuredUnverified": "Token tersimpan ditemukan, tetapi Telegram belum dapat memverifikasinya.",
-    "verificationUnavailable": "Telegram belum dapat memverifikasi token ini. Coba lagi sebelum menghubungkannya.",
+    "configuredUnverified": "Token tersimpan ditemukan, tetapi Telegram tidak dapat dijangkau. Periksa jaringan atau proxy, lalu coba lagi.",
+    "verificationUnavailable": "Telegram tidak dapat dijangkau. Periksa jaringan atau tambahkan proxy di Opsi lanjutan, lalu coba lagi.",
     "invalidToken": "Telegram menolak token bot ini.",
     "checkFailed": "Koneksi tidak dapat diperiksa.",
     "defaultBotName": "Bot Telegram",

@@ -1,7 +1,14 @@
 {
   "description": "Trò chuyện với nanobot từ Telegram.",
+  "requirements": "Token BotFather và proxy tùy chọn nếu mạng của bạn không thể truy cập Telegram.",
   "setup": {
+    "docsLabel": "Mở hướng dẫn Telegram",
     "officialLabel": "Mở BotFather",
+    "steps": [
+      "Tạo bot bằng BotFather rồi sao chép token.",
+      "Dán token vào đây. Nếu Telegram bị chặn trên mạng của bạn, hãy thêm proxy trong Tùy chọn nâng cao.",
+      "Kết nối bot rồi gửi tin nhắn cho bot trên Telegram."
+    ],
     "fields": {
       "name": {
         "label": "Tên bot",
@@ -10,6 +17,10 @@
       "token": {
         "label": "Token bot",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Proxy mạng",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "Người dùng được phép",
@@ -57,8 +68,8 @@
     "checkConnection": "Kiểm tra kết nối",
     "connectedAs": "Đã kết nối với tên {{name}}.",
     "connected": "Telegram đã chấp nhận token đã lưu.",
-    "configuredUnverified": "Đã tìm thấy token lưu sẵn, nhưng Telegram chưa thể xác minh lúc này.",
-    "verificationUnavailable": "Telegram chưa thể xác minh token này. Hãy thử lại trước khi kết nối.",
+    "configuredUnverified": "Đã tìm thấy token lưu sẵn nhưng không thể truy cập Telegram. Hãy kiểm tra mạng hoặc proxy rồi thử lại.",
+    "verificationUnavailable": "Không thể truy cập Telegram. Hãy kiểm tra mạng hoặc thêm proxy trong Tùy chọn nâng cao rồi thử lại.",
     "invalidToken": "Telegram đã từ chối token bot này.",
     "checkFailed": "Không thể kiểm tra kết nối.",
     "defaultBotName": "Bot Telegram",

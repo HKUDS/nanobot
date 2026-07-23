@@ -1,7 +1,14 @@
 {
   "description": "Converse com o nanobot pelo Telegram.",
+  "requirements": "Um token do BotFather e, se a sua rede não alcançar o Telegram, um proxy opcional.",
   "setup": {
+    "docsLabel": "Abrir guia do Telegram",
     "officialLabel": "Abrir BotFather",
+    "steps": [
+      "Crie um bot com o BotFather e copie o token.",
+      "Cole o token aqui. Se o Telegram estiver bloqueado na sua rede, adicione um proxy nas Opções avançadas.",
+      "Conecte o bot e envie uma mensagem para ele no Telegram."
+    ],
     "fields": {
       "name": {
         "label": "Nome do bot",
@@ -10,6 +17,10 @@
       "token": {
         "label": "Token do bot",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Proxy de rede",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "Usuários permitidos",
@@ -57,8 +68,8 @@
     "checkConnection": "Verificar conexão",
     "connectedAs": "Conectado como {{name}}.",
     "connected": "O Telegram aceitou o token salvo.",
-    "configuredUnverified": "Um token salvo foi encontrado, mas o Telegram não pôde verificá-lo agora.",
-    "verificationUnavailable": "O Telegram não pôde verificar este token agora. Tente novamente antes de conectar.",
+    "configuredUnverified": "Um token salvo foi encontrado, mas não foi possível acessar o Telegram. Verifique a rede ou o proxy e tente novamente.",
+    "verificationUnavailable": "Não foi possível acessar o Telegram. Verifique a rede ou adicione um proxy nas Opções avançadas e tente novamente.",
     "invalidToken": "O Telegram rejeitou este token de bot.",
     "checkFailed": "Não foi possível verificar a conexão.",
     "defaultBotName": "Bot do Telegram",

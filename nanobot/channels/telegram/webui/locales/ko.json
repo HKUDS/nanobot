@@ -1,7 +1,14 @@
 {
   "description": "Telegram 채팅에서 nanobot과 대화합니다.",
+  "requirements": "BotFather 토큰과, 네트워크에서 Telegram에 연결할 수 없는 경우 선택적 프록시.",
   "setup": {
+    "docsLabel": "Telegram 설정 가이드 열기",
     "officialLabel": "BotFather 열기",
+    "steps": [
+      "BotFather에서 봇을 만들고 토큰을 복사합니다.",
+      "여기에 토큰을 붙여 넣습니다. 네트워크에서 Telegram이 차단된 경우 고급 옵션에서 프록시를 추가합니다.",
+      "봇을 연결한 다음 Telegram에서 메시지를 보냅니다."
+    ],
     "fields": {
       "name": {
         "label": "봇 이름",
@@ -10,6 +17,10 @@
       "token": {
         "label": "봇 토큰",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "네트워크 프록시",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "허용된 사용자",
@@ -57,8 +68,8 @@
     "checkConnection": "연결 확인",
     "connectedAs": "{{name}}(으)로 연결되었습니다.",
     "connected": "Telegram이 저장된 토큰을 승인했습니다.",
-    "configuredUnverified": "저장된 토큰을 찾았지만 지금은 Telegram에서 확인할 수 없습니다.",
-    "verificationUnavailable": "지금은 Telegram에서 이 토큰을 확인할 수 없습니다. 연결하기 전에 다시 시도하세요.",
+    "configuredUnverified": "저장된 토큰을 찾았지만 Telegram에 연결할 수 없습니다. 네트워크 또는 프록시를 확인한 후 다시 시도하세요.",
+    "verificationUnavailable": "Telegram에 연결할 수 없습니다. 네트워크를 확인하거나 고급 옵션에서 프록시를 추가한 후 다시 시도하세요.",
     "invalidToken": "Telegram이 이 봇 토큰을 거부했습니다.",
     "checkFailed": "연결을 확인할 수 없습니다.",
     "defaultBotName": "Telegram 봇",

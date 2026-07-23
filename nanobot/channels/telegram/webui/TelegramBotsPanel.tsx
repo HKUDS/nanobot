@@ -7,9 +7,22 @@ import {
   type ChannelTranslator,
 } from "@/channel-plugins/i18n";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
-import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
-import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
-import { ChannelOfficialLink } from "@/components/settings/channels/ChannelSetupParts";
+import { ToggleButton } from "@/components/settings/ToggleButton";
+import {
+  ChannelLogo,
+  ChannelRuntimeError,
+  ChannelStatusBadge,
+  channelDescription,
+  channelRequirements,
+  channelSetup,
+  channelStatusLabel,
+  channelToggleChecked,
+  localizedChannelDisplayName,
+} from "@/components/settings/channels/ChannelIdentity";
+import {
+  ChannelGuideLink,
+  ChannelOfficialLink,
+} from "@/components/settings/channels/ChannelSetupParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { configureChannel, validateChannel } from "@/lib/api";
@@ -21,6 +34,8 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { TelegramInstancesPanel } from "./TelegramInstancesPanel";
+
 const NAME_KEY = "channels.telegram.name";
 const TOKEN_KEY = "channels.telegram.token";
 const PROXY_KEY = "channels.telegram.proxy";
@@ -30,7 +45,10 @@ export const TELEGRAM_PROXY_CLEAR_VALUE = "__nanobot_clear_telegram_proxy__";
 export function TelegramBotsPanel({
   token,
   feature,
+  actionKey,
+  chatAppsDocsUrl,
   showBrandLogos,
+  onAction,
   onFeaturesUpdate,
 }: ChannelPluginPanelProps) {
   const { t, i18n } = useTranslation();
@@ -40,24 +58,52 @@ export function TelegramBotsPanel({
     : [defaultTelegramInstance(feature)];
   const instances = allInstances.filter(isVisibleTelegramInstance);
   const configuredCount = instances.filter((instance) => instance.configured).length;
+  const panelFeature = useMemo(() => withoutGenericProxyField(feature), [feature]);
   const setup = useMemo(
     () => channelSetup(feature, i18n.resolvedLanguage ?? i18n.language),
     [feature.name, feature.setup, i18n.language, i18n.resolvedLanguage],
   );
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [addingBot, setAddingBot] = useState(false);
+  const [configurationRevisions, setConfigurationRevisions] = useState<Record<string, number>>({});
+  const markInstanceChanged = (instanceId: string) => {
+    setConfigurationRevisions((current) => ({
+      ...current,
+      [instanceId]: (current[instanceId] ?? 0) + 1,
+    }));
+  };
+  const publishInstanceUpdate = (
+    instanceId: string,
+    payload: NanobotFeaturesPayload,
+  ) => {
+    markInstanceChanged(instanceId);
+    onFeaturesUpdate(payload);
+  };
+
+  if (!feature.installed && feature.install_supported) {
+    return (
+      <TelegramInstallGate
+        feature={feature}
+        actionKey={actionKey}
+        showBrandLogos={showBrandLogos}
+        onAction={onAction}
+      />
+    );
+  }
 
   return (
-    <ChannelInstancesPanel
+    <TelegramInstancesPanel
       token={token}
-      feature={feature}
+      feature={panelFeature}
       showBrandLogos={showBrandLogos}
+      chatAppsDocsUrl={chatAppsDocsUrl}
       instances={instances}
       selectedInstanceId={selectedInstanceId}
       onSelectedInstanceChange={(instanceId) => {
         setSelectedInstanceId(instanceId);
         if (instanceId) setAddingBot(false);
       }}
+      onInstanceMutation={markInstanceChanged}
       onFeaturesUpdate={onFeaturesUpdate}
       customization={{
         countLabel: (runningCount) => tx(
@@ -71,7 +117,12 @@ export function TelegramBotsPanel({
         configuredLabel: tx("panel.running", "Running"),
         needsSetupLabel: tx("panel.needsToken", "Needs token"),
         renderInstanceAction: (instance) => instance.configured ? (
-          <TelegramConnectionCheck key={instance.id} token={token} instance={instance} />
+          <TelegramConnectionCheck
+            key={instance.id}
+            token={token}
+            instance={instance}
+            configurationRevision={configurationRevisions[instance.id] ?? 0}
+          />
         ) : (
           <TelegramCredentialsForm
             key={instance.id}
@@ -82,7 +133,7 @@ export function TelegramBotsPanel({
             instanceEnabled={instance.enabled}
             submitLabel={tx("panel.finishSetup", "Check and finish setup")}
             tx={tx}
-            onFeaturesUpdate={onFeaturesUpdate}
+            onFeaturesUpdate={(payload) => publishInstanceUpdate(instance.id, payload)}
           />
         ),
         showSetupSteps: () => false,
@@ -92,7 +143,7 @@ export function TelegramBotsPanel({
             key={instance.id}
             token={token}
             instance={instance}
-            onFeaturesUpdate={onFeaturesUpdate}
+            onFeaturesUpdate={(payload) => publishInstanceUpdate(instance.id, payload)}
           />
         ) : null,
         footer: (
@@ -102,17 +153,97 @@ export function TelegramBotsPanel({
             instances={allInstances}
             visibleInstances={instances}
             setup={setup}
+            chatAppsDocsUrl={chatAppsDocsUrl}
             tx={tx}
             open={addingBot}
             onOpenChange={(open) => {
               setAddingBot(open);
               if (open) setSelectedInstanceId(null);
             }}
+            onInstanceMutation={markInstanceChanged}
             onFeaturesUpdate={onFeaturesUpdate}
           />
         ),
       }}
     />
+  );
+}
+
+function TelegramInstallGate({
+  feature,
+  actionKey,
+  showBrandLogos,
+  onAction,
+}: Pick<
+  ChannelPluginPanelProps,
+  "feature" | "actionKey" | "showBrandLogos" | "onAction"
+>) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const displayName = localizedChannelDisplayName(feature, t);
+  const enableBusy = actionKey === `enable:${feature.name}`;
+  const disableBusy = actionKey === `disable:${feature.name}`;
+  const channelBusy = enableBusy || disableBusy;
+  const channelChecked = channelToggleChecked(feature);
+  const toggleAriaLabel = t("settings.channels.toggleChannel", {
+    name: displayName,
+    defaultValue: "{{name}} channel",
+  });
+
+  return (
+    <aside className="min-h-full rounded-[20px] border border-border/80 bg-background p-5 shadow-none">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
+              {displayName}
+            </h3>
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              {channelDescription(feature, t)}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 pt-1">
+          <ChannelStatusBadge status={feature.runtime_status}>
+            {channelStatusLabel(feature, tx)}
+          </ChannelStatusBadge>
+          {channelBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
+          ) : null}
+          <ToggleButton
+            checked={channelChecked}
+            disabled={channelBusy || !feature.install_supported}
+            ariaLabel={toggleAriaLabel}
+            label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            onChange={(checked) => onAction(checked ? "enable" : "disable", feature.name)}
+          />
+        </div>
+      </div>
+
+      <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
+
+      <div className="mt-5 rounded-[16px] border border-border/65 bg-muted/20 px-4 py-4">
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          {channelRequirements(feature, t)}
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-3 h-8 rounded-full px-3 text-[12px] font-semibold"
+          disabled={enableBusy}
+          onClick={() => onAction("enable", feature.name)}
+        >
+          {enableBusy ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {tx("settings.nanobotFeatures.installSupport", "Install support")}
+        </Button>
+      </div>
+    </aside>
   );
 }
 
@@ -122,9 +253,11 @@ function TelegramBotCreator({
   instances,
   visibleInstances,
   setup,
+  chatAppsDocsUrl,
   tx,
   open,
   onOpenChange,
+  onInstanceMutation,
   onFeaturesUpdate,
 }: {
   token: string;
@@ -132,9 +265,11 @@ function TelegramBotCreator({
   instances: NanobotChannelInstanceInfo[];
   visibleInstances: NanobotChannelInstanceInfo[];
   setup: ReturnType<typeof channelSetup>;
+  chatAppsDocsUrl?: string;
   tx: ChannelTranslator;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onInstanceMutation: (instanceId: string) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 }) {
   const firstBot = visibleInstances.length === 0;
@@ -163,7 +298,15 @@ function TelegramBotCreator({
             ? tx("panel.connectFirst", "Connect your first bot")
             : tx("panel.addBot", "Add bot")}
         </div>
-        <ChannelOfficialLink feature={feature} setup={setup} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ChannelOfficialLink feature={feature} setup={setup} />
+          <ChannelGuideLink
+            feature={feature}
+            setup={setup}
+            chatAppsDocsUrl={chatAppsDocsUrl}
+            compact
+          />
+        </div>
       </div>
 
       <div className="mt-4 border-t border-border/55 pt-4">
@@ -174,7 +317,10 @@ function TelegramBotCreator({
             ? tx("panel.connectBot", "Check and connect")
             : tx("panel.addBot", "Add bot")}
           tx={tx}
-          onFeaturesUpdate={onFeaturesUpdate}
+          onFeaturesUpdate={(payload) => {
+            onInstanceMutation(instanceId);
+            onFeaturesUpdate(payload);
+          }}
           onComplete={() => onOpenChange(false)}
           onCancel={!firstBot ? () => onOpenChange(false) : undefined}
         />
@@ -256,7 +402,7 @@ export function TelegramCredentialsForm({
             )
             : tx(
               "panel.verificationUnavailable",
-              "Telegram could not verify this token right now. Try again before connecting.",
+              "Telegram could not be reached. Check your network, or add a proxy under Advanced options, then try again.",
             )
           : validationMessage(validation, tx));
         return;
@@ -664,9 +810,11 @@ export function TelegramProxySettings({
 export function TelegramConnectionCheck({
   token,
   instance,
+  configurationRevision = 0,
 }: {
   token: string;
   instance: NanobotChannelInstanceInfo;
+  configurationRevision?: number;
 }) {
   const { t } = useTranslation();
   const tx = channelTranslator(t, "telegram");
@@ -680,7 +828,7 @@ export function TelegramConnectionCheck({
     setBusy(false);
     setValidation(null);
     setError(null);
-  }, [instance]);
+  }, [configurationRevision, instance.id]);
 
   const checkConnection = async () => {
     const revision = checkRevision.current + 1;
@@ -715,14 +863,14 @@ export function TelegramConnectionCheck({
     <div className={cn(
       "flex min-w-0 flex-wrap items-center gap-3",
       feedback
-        ? "w-full justify-between sm:w-auto sm:flex-1"
+        ? "w-full basis-full flex-col items-stretch gap-2"
         : "ml-auto shrink-0 justify-end",
     )}>
       {feedback ? (
         <div
           role="status"
           className={cn(
-            "min-w-0 flex-1 text-[12px] leading-5",
+            "w-full min-w-0 text-[12px] leading-5",
             validation?.status === "connected"
               ? "text-emerald-700 dark:text-emerald-200"
               : validation?.status === "invalid" || error
@@ -737,7 +885,10 @@ export function TelegramConnectionCheck({
         type="button"
         size="sm"
         variant="outline"
-        className="h-8 shrink-0 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold"
+        className={cn(
+          "h-8 shrink-0 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold",
+          feedback && "self-end",
+        )}
         onClick={() => void checkConnection()}
         disabled={busy}
       >
@@ -783,7 +934,7 @@ function validationMessage(
   if (validation.status === "configured") {
     return tx(
       "panel.configuredUnverified",
-      "A saved token was found, but Telegram could not verify it right now.",
+      "A saved token was found, but Telegram could not be reached. Check your network or proxy, then try again.",
     );
   }
   if (validation.status === "needs_setup") {
@@ -835,6 +986,17 @@ export function isVisibleTelegramInstance(instance: NanobotChannelInstanceInfo):
     }
     return true;
   });
+}
+
+function withoutGenericProxyField(feature: NanobotFeatureInfo): NanobotFeatureInfo {
+  if (!feature.setup?.fields.some((field) => field.key === PROXY_KEY)) return feature;
+  return {
+    ...feature,
+    setup: {
+      ...feature.setup,
+      fields: feature.setup.fields.filter((field) => field.key !== PROXY_KEY),
+    },
+  };
 }
 
 function hasConfiguredProxy(instance: NanobotChannelInstanceInfo): boolean {

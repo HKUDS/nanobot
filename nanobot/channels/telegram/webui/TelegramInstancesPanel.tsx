@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -39,22 +39,28 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type ChannelInstancesPanelCustomization = {
+export type TelegramInstancesPanelCustomization = {
   countLabel?: (runningCount: number) => string;
   toggleAriaLabel?: (instance: NanobotChannelInstanceInfo) => string;
   configuredLabel?: string;
   needsSetupLabel?: string;
   renderInstanceSummary?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   renderInstanceAction?: (instance: NanobotChannelInstanceInfo) => ReactNode;
+  showSetupSteps?: (instance: NanobotChannelInstanceInfo) => boolean;
+  showInstanceFields?: (instance: NanobotChannelInstanceInfo) => boolean;
+  renderInstanceAdvanced?: (instance: NanobotChannelInstanceInfo) => ReactNode;
   footer?: ReactNode;
 };
 
-export function ChannelInstancesPanel({
+export function TelegramInstancesPanel({
   token,
   feature,
   showBrandLogos,
   chatAppsDocsUrl,
   instances: providedInstances,
+  selectedInstanceId,
+  onSelectedInstanceChange,
+  onInstanceMutation,
   onFeaturesUpdate,
   customization = {},
 }: {
@@ -63,14 +69,20 @@ export function ChannelInstancesPanel({
   showBrandLogos: boolean;
   chatAppsDocsUrl?: string;
   instances?: NanobotChannelInstanceInfo[];
+  selectedInstanceId?: string | null;
+  onSelectedInstanceChange?: (instanceId: string | null) => void;
+  onInstanceMutation?: (instanceId: string) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
-  customization?: ChannelInstancesPanelCustomization;
+  customization?: TelegramInstancesPanelCustomization;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
+  const selectedId = selectedInstanceId === undefined
+    ? internalSelectedId
+    : selectedInstanceId;
   const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
@@ -82,6 +94,8 @@ export function ChannelInstancesPanel({
     () => channelInstanceFields(feature, setup.fields, setup.manualFields),
     [feature, setup.fields, setup.manualFields],
   );
+  const instanceFieldsRef = useRef(instanceFields);
+  instanceFieldsRef.current = instanceFields;
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(instanceFields, selected?.config_values),
   );
@@ -89,6 +103,7 @@ export function ChannelInstancesPanel({
   const [savingFields, setSavingFields] = useState(false);
   const configuredCount = instances.filter((instance) => instance.configured).length;
   const runningCount = instances.filter((instance) => instance.runtime_status === "running").length;
+  const instanceFieldsKey = JSON.stringify(instanceFields);
   const selectedValuesKey = JSON.stringify(selected?.config_values ?? {});
   const selectedConfiguredFields = useMemo(
     () => new Set(selected?.configured_fields ?? []),
@@ -97,14 +112,20 @@ export function ChannelInstancesPanel({
 
   useEffect(() => {
     if (selectedId && !instances.some((instance) => instance.id === selectedId)) {
-      setSelectedId(null);
+      if (selectedInstanceId === undefined) {
+        setInternalSelectedId(null);
+      }
+      onSelectedInstanceChange?.(null);
     }
-  }, [instances, selectedId]);
+  }, [instances, onSelectedInstanceChange, selectedId, selectedInstanceId]);
 
   useEffect(() => {
-    setFieldValues(defaultChannelFieldValues(instanceFields, selected?.config_values));
+    setFieldValues(defaultChannelFieldValues(
+      instanceFieldsRef.current,
+      selected?.config_values,
+    ));
     setVisibleSecrets({});
-  }, [instanceFields, selected?.id, selectedValuesKey]);
+  }, [instanceFieldsKey, selected?.id, selectedValuesKey]);
 
   const toggleInstance = async (instance: NanobotChannelInstanceInfo, checked: boolean) => {
     setBusyInstanceId(instance.id);
@@ -113,6 +134,7 @@ export function ChannelInstancesPanel({
       const payload = checked
         ? await enableNanobotFeature(token, feature.name, { instanceId: instance.id })
         : await disableNanobotFeature(token, feature.name, { instanceId: instance.id });
+      onInstanceMutation?.(instance.id);
       onFeaturesUpdate(payload);
     } catch (err) {
       setNotice((err as Error).message);
@@ -133,6 +155,7 @@ export function ChannelInstancesPanel({
         { enable: selected.enabled, instanceId: selected.id },
       );
       if (payload.nanobot_features) {
+        onInstanceMutation?.(selected.id);
         onFeaturesUpdate(payload.nanobot_features);
       }
       setNotice(tx("settings.channels.savedSettings", "Saved settings."));
@@ -173,6 +196,16 @@ export function ChannelInstancesPanel({
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id;
+          const instanceSummary = expanded
+            ? customization.renderInstanceSummary?.(instance)
+            : null;
+          const instanceAction = expanded
+            ? customization.renderInstanceAction?.(instance)
+            : null;
+          const showSetupSteps = customization.showSetupSteps?.(instance) ?? true;
+          const showInstanceFields = customization.showInstanceFields?.(instance) ?? true;
+          const hasInstanceFields = showInstanceFields && instanceFields.length > 0;
+          const instanceAdvanced = customization.renderInstanceAdvanced?.(instance);
           return (
             <article
               key={instance.id}
@@ -187,9 +220,13 @@ export function ChannelInstancesPanel({
                 <button
                   type="button"
                   className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  onClick={() =>
-                    setSelectedId((current) => (current === instance.id ? null : instance.id))
-                  }
+                  onClick={() => {
+                    const nextSelectedId = expanded ? null : instance.id;
+                    if (selectedInstanceId === undefined) {
+                      setInternalSelectedId(nextSelectedId);
+                    }
+                    onSelectedInstanceChange?.(nextSelectedId);
+                  }}
                   aria-expanded={expanded}
                 >
                   <ChannelInstanceAvatar
@@ -231,31 +268,39 @@ export function ChannelInstancesPanel({
 
               {expanded ? (
                 <div className="border-t border-border/60">
-                  <section className="px-4 py-4">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
-                        {customization.renderInstanceSummary?.(instance) ?? instance.id}
-                      </p>
+                  <section className={cn("px-4", instance.configured ? "py-3" : "py-4")}>
+                    <div className={cn(
+                      "flex flex-wrap items-center justify-between gap-3",
+                      !instance.configured && instanceAction != null && "mb-3",
+                    )}>
+                      {instanceSummary != null ? (
+                        <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
+                          {instanceSummary}
+                        </p>
+                      ) : null}
                       <ChannelInstanceStatusBadge
                         instance={instance}
                         configuredLabel={customization.configuredLabel}
                         needsSetupLabel={customization.needsSetupLabel}
                       />
+                      {instance.configured ? instanceAction : null}
                     </div>
-                    {customization.renderInstanceAction?.(instance)}
+                    {!instance.configured ? instanceAction : null}
                   </section>
-                  <ChannelSetupSteps
-                    steps={setup.steps}
-                    action={
-                      <ChannelGuideLink
-                        feature={feature}
-                        setup={setup}
-                        chatAppsDocsUrl={chatAppsDocsUrl}
-                        compact
-                      />
-                    }
-                  />
-                  {instanceFields.length ? (
+                  {showSetupSteps ? (
+                    <ChannelSetupSteps
+                      steps={setup.steps}
+                      action={
+                        <ChannelGuideLink
+                          feature={feature}
+                          setup={setup}
+                          chatAppsDocsUrl={chatAppsDocsUrl}
+                          compact
+                        />
+                      }
+                    />
+                  ) : null}
+                  {hasInstanceFields || instanceAdvanced ? (
                     <details className="group border-t border-border/60 px-4 py-3 text-[12px] leading-5 text-muted-foreground">
                       <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
                         <span className="inline-flex items-center gap-1.5">
@@ -266,41 +311,51 @@ export function ChannelInstancesPanel({
                           />
                         </span>
                       </summary>
-                      <form
-                        className="mt-3"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void saveSelectedInstanceSettings();
-                        }}
-                      >
-                        <CredentialForm
-                          fields={instanceFields}
-                          values={fieldValues}
-                          configuredFields={selectedConfiguredFields}
-                          visibleSecrets={visibleSecrets}
-                          onChange={(key, value) =>
-                            setFieldValues((current) => ({ ...current, [key]: value }))
-                          }
-                          onToggleSecret={(key) =>
-                            setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))
-                          }
-                          compact
-                        />
-                        <div className="mt-3 flex justify-end">
-                          <Button
-                            type="submit"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
-                            disabled={savingFields}
-                          >
-                            {savingFields ? (
-                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                            ) : null}
-                            {tx("settings.channels.saveSettings", "Save settings")}
-                          </Button>
+                      {hasInstanceFields ? (
+                        <form
+                          className="mt-3"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveSelectedInstanceSettings();
+                          }}
+                        >
+                          <CredentialForm
+                            fields={instanceFields}
+                            values={fieldValues}
+                            configuredFields={selectedConfiguredFields}
+                            visibleSecrets={visibleSecrets}
+                            onChange={(key, value) =>
+                              setFieldValues((current) => ({ ...current, [key]: value }))
+                            }
+                            onToggleSecret={(key) =>
+                              setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))
+                            }
+                            compact
+                          />
+                          <div className="mt-3 flex justify-end">
+                            <Button
+                              type="submit"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+                              disabled={savingFields}
+                            >
+                              {savingFields ? (
+                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                              ) : null}
+                              {tx("settings.channels.saveSettings", "Save settings")}
+                            </Button>
+                          </div>
+                        </form>
+                      ) : null}
+                      {instanceAdvanced ? (
+                        <div className={cn(
+                          "mt-3",
+                          hasInstanceFields && "border-t border-border/50 pt-4",
+                        )}>
+                          {instanceAdvanced}
                         </div>
-                      </form>
+                      ) : null}
                     </details>
                   ) : null}
                 </div>

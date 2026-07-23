@@ -1,7 +1,14 @@
 {
   "description": "Telegram のチャットから nanobot と会話します。",
+  "requirements": "BotFather のトークンと、ネットワークから Telegram に接続できない場合は任意のプロキシ。",
   "setup": {
+    "docsLabel": "Telegram 設定ガイドを開く",
     "officialLabel": "BotFather を開く",
+    "steps": [
+      "BotFather でボットを作成し、トークンをコピーします。",
+      "ここにトークンを貼り付けます。ネットワークで Telegram がブロックされている場合は、詳細オプションでプロキシを追加します。",
+      "ボットを接続し、Telegram からメッセージを送信します。"
+    ],
     "fields": {
       "name": {
         "label": "ボット名",
@@ -10,6 +17,10 @@
       "token": {
         "label": "ボットトークン",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "許可するユーザー",
@@ -57,8 +68,8 @@
     "checkConnection": "接続を確認",
     "connectedAs": "{{name}} として接続しました。",
     "connected": "Telegram が保存済みトークンを受け付けました。",
-    "configuredUnverified": "保存済みトークンは見つかりましたが、現在 Telegram で検証できません。",
-    "verificationUnavailable": "現在 Telegram でこのトークンを検証できません。接続する前にもう一度お試しください。",
+    "configuredUnverified": "保存済みトークンは見つかりましたが、Telegram に接続できません。ネットワークまたはプロキシを確認して、もう一度お試しください。",
+    "verificationUnavailable": "Telegram に接続できません。ネットワークを確認するか、詳細オプションでプロキシを追加して、もう一度お試しください。",
     "invalidToken": "Telegram がこのボットトークンを拒否しました。",
     "checkFailed": "接続を確認できませんでした。",
     "defaultBotName": "Telegram ボット",

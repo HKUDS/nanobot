@@ -1,7 +1,14 @@
 {
   "description": "通过 Telegram 会话与 nanobot 聊天。",
+  "requirements": "BotFather 令牌；如果当前网络无法访问 Telegram，还可配置代理。",
   "setup": {
+    "docsLabel": "打开 Telegram 设置指南",
     "officialLabel": "打开 BotFather",
+    "steps": [
+      "在 BotFather 中创建机器人并复制令牌。",
+      "在此粘贴令牌。如果当前网络无法访问 Telegram，请在“高级选项”中添加代理。",
+      "连接机器人，然后在 Telegram 中向它发送一条消息。"
+    ],
     "fields": {
       "name": {
         "label": "机器人名称",
@@ -10,6 +17,10 @@
       "token": {
         "label": "机器人令牌",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "网络代理",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "允许的用户",
@@ -57,8 +68,8 @@
     "checkConnection": "检查连接",
     "connectedAs": "已连接为 {{name}}。",
     "connected": "Telegram 已接受保存的令牌。",
-    "configuredUnverified": "已找到保存的令牌，但 Telegram 暂时无法完成验证。",
-    "verificationUnavailable": "Telegram 暂时无法验证此令牌，请稍后重试再连接。",
+    "configuredUnverified": "已找到保存的令牌，但无法连接 Telegram。请检查网络或代理后重试。",
+    "verificationUnavailable": "无法连接 Telegram。请检查网络；如需代理，请在“高级选项”中配置后重试。",
     "invalidToken": "Telegram 拒绝了这个机器人令牌。",
     "checkFailed": "暂时无法检查连接。",
     "defaultBotName": "Telegram 机器人",

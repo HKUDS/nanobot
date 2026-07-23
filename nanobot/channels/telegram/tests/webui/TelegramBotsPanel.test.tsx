@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -82,6 +82,7 @@ function telegramFeature(instance: NanobotChannelInstanceInfo): NanobotFeatureIn
       fields: [
         field("channels.telegram.name", "string"),
         field("channels.telegram.token", "secret", true),
+        field("channels.telegram.proxy", "secret"),
         field("channels.telegram.allowFrom", "list"),
         field("channels.telegram.groupPolicy", "enum"),
       ],
@@ -128,6 +129,34 @@ describe("TelegramBotsPanel", () => {
     expect(nextTelegramInstanceId([virtualDefault])).toBe("default");
   });
 
+  it("keeps missing Telegram support behind a channel-local install gate", async () => {
+    const user = userEvent.setup();
+    const feature = telegramFeature(telegramInstance());
+    feature.installed = false;
+    feature.ready = false;
+    feature.status = "missing_dependency";
+    feature.install_supported = true;
+    const onAction = vi.fn();
+
+    render(
+      <TelegramBotsPanel
+        token="api-token"
+        feature={feature}
+        actionKey={null}
+        showBrandLogos={false}
+        onAction={onAction}
+        onFeaturesUpdate={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Bot token", { selector: "input" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install support" })).toBeVisible();
+
+    await user.click(screen.getByRole("switch", { name: "Telegram channel" }));
+
+    expect(onAction).toHaveBeenCalledWith("enable", "telegram");
+  });
+
   it("renders one token form for an incomplete bot without setup steps", async () => {
     const user = userEvent.setup();
     const customDefault = telegramInstance({
@@ -156,6 +185,7 @@ describe("TelegramBotsPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Add bot" }));
     expect(screen.getByRole("link", { name: "Open BotFather" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Open Telegram setup" })).toBeVisible();
     expect(screen.getAllByLabelText("Bot token", { selector: "input" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Support bot" })).toHaveAttribute(
       "aria-expanded",
@@ -240,7 +270,57 @@ describe("TelegramBotsPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Add bot" }));
     expect(screen.getByRole("link", { name: "Open BotFather" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Open Telegram setup" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Telegram setup" })).toBeVisible();
+  });
+
+  it("keeps unsaved advanced settings across an equivalent feature refresh", async () => {
+    const user = userEvent.setup();
+    const instance = telegramInstance({
+      enabled: true,
+      configured: true,
+      runtime_status: "running",
+      configured_fields: [...defaultFields, "channels.telegram.token"],
+    });
+    const feature = telegramFeature(instance);
+    const onFeaturesUpdate = vi.fn();
+    const { rerender } = render(
+      <TelegramBotsPanel
+        token="api-token"
+        feature={feature}
+        showBrandLogos={false}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "nanobot" }));
+    await user.click(screen.getByText("Advanced"));
+    const nameInput = screen.getByLabelText("Bot name", { selector: "input" });
+    await user.clear(nameInput);
+    await user.type(nameInput, "Draft bot name");
+
+    const refreshedInstance = {
+      ...instance,
+      config_values: { ...instance.config_values },
+      configured_fields: [...instance.configured_fields],
+    };
+    rerender(
+      <TelegramBotsPanel
+        token="api-token"
+        feature={{
+          ...feature,
+          setup: feature.setup
+            ? { ...feature.setup, fields: [...feature.setup.fields] }
+            : undefined,
+          instances: [refreshedInstance],
+        }}
+        showBrandLogos={false}
+        onFeaturesUpdate={onFeaturesUpdate}
+      />,
+    );
+
+    expect(screen.getByLabelText("Bot name", { selector: "input" })).toHaveValue(
+      "Draft bot name",
+    );
   });
 
   it("connects with only the required token and keeps optional settings collapsed", async () => {
@@ -314,7 +394,7 @@ describe("TelegramBotsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Check and connect" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Telegram could not verify this token right now. Try again before connecting.",
+      "Telegram could not be reached. Check your network, or add a proxy under Advanced options, then try again.",
     );
     expect(apiMocks.configureChannel).not.toHaveBeenCalled();
   });
@@ -488,7 +568,7 @@ describe("TelegramBotsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Check connection" }));
 
     expect(await screen.findByText(
-      "A saved token was found, but Telegram could not verify it right now.",
+      "A saved token was found, but Telegram could not be reached. Check your network or proxy, then try again.",
     )).toBeInTheDocument();
     expect(screen.queryByText(/address and credentials/)).not.toBeInTheDocument();
   });
@@ -518,15 +598,56 @@ describe("TelegramBotsPanel", () => {
     )).toBeInTheDocument();
   });
 
-  it("clears a checked identity when refreshed instance data arrives", async () => {
+  it("keeps a checked identity across equivalent refreshed instance data", async () => {
     const validation = telegramValidation({
       identity: { name: "old_bot" },
     });
-    apiMocks.validateChannel.mockResolvedValue(validation);
+    let resolveValidation!: (value: ChannelValidationPayload) => void;
+    apiMocks.validateChannel.mockImplementation(() => new Promise((resolve) => {
+      resolveValidation = resolve;
+    }));
     const user = userEvent.setup();
     const instance = telegramInstance({ configured: true });
     const { rerender } = render(
       <TelegramConnectionCheck token="api-token" instance={instance} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Check connection" }));
+
+    rerender(
+      <TelegramConnectionCheck
+        token="api-token"
+        instance={{ ...instance }}
+      />,
+    );
+
+    await act(async () => {
+      resolveValidation(validation);
+    });
+    expect(await screen.findByText("Connected as @old_bot.")).toBeInTheDocument();
+
+    rerender(
+      <TelegramConnectionCheck
+        token="api-token"
+        instance={{ ...instance }}
+      />,
+    );
+
+    expect(screen.getByText("Connected as @old_bot.")).toBeInTheDocument();
+  });
+
+  it("clears a checked identity after a real configuration revision", async () => {
+    apiMocks.validateChannel.mockResolvedValue(telegramValidation({
+      identity: { name: "old_bot" },
+    }));
+    const user = userEvent.setup();
+    const instance = telegramInstance({ configured: true });
+    const { rerender } = render(
+      <TelegramConnectionCheck
+        token="api-token"
+        instance={instance}
+        configurationRevision={0}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Check connection" }));
@@ -536,6 +657,7 @@ describe("TelegramBotsPanel", () => {
       <TelegramConnectionCheck
         token="api-token"
         instance={{ ...instance }}
+        configurationRevision={1}
       />,
     );
 

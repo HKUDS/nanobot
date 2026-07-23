@@ -115,7 +115,6 @@ class ChannelFieldSpec:
     default: Any = None
     writable: bool = True
     snapshot: bool = True
-    generic_setup: bool = True
 
     @property
     def route_type(self) -> RouteFieldType:
@@ -196,7 +195,7 @@ class ChannelSetupSpec:
         simple_required = set(self.simple_required_fields)
         fields = []
         for name, field in self.fields.items():
-            if not field.writable or not field.generic_setup:
+            if not field.writable:
                 continue
             public_field = {
                 "key": f"channels.{channel_name}.{name}",

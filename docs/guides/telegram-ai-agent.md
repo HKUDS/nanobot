@@ -108,10 +108,10 @@ Useful ways to separate bots include:
 |---|---|---|
 | **Connected as @name** | Telegram accepted the saved token. | Send a test message. |
 | **Telegram rejected this bot token** | The token is wrong, revoked, or belongs to a deleted bot. | Copy the current token from BotFather, or create a new one. |
-| **Could not verify this token right now** | nanobot could not reach Telegram during first setup. | Check internet/proxy access and try again; the new token was not saved. |
+| **Telegram could not be reached** | nanobot could not reach Telegram during first setup. | Check internet access or expand **Advanced options** and add a proxy; the new token was not saved. |
 | **Telegram could not be reached through this proxy** | The proxy is offline, its address is wrong, or its credentials were rejected. | Check the proxy URL and credentials, then try **Check and save** again. |
 | **Enter a full proxy URL** | The proxy address is missing a supported scheme or host. | Use a complete URL beginning with `http://`, `https://`, `socks5://`, or `socks5h://`. |
-| **A saved token was found, but Telegram could not verify it right now** | Settings already exist, but the live check could not reach Telegram. | Keep the gateway running and retry **Check connection** later. |
+| **A saved token was found, but Telegram could not be reached** | Settings already exist, but the live check could not reach Telegram. | Check the gateway's network or the bot's proxy, then retry **Check connection**. |
 
 ## Existing Telegram setups
 

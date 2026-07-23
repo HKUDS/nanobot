@@ -277,7 +277,7 @@ Then check:
 | Unknown sender ignored | Configure `allowFrom`, pairing, or the channel-specific allow list. |
 | Telegram support is not installed | In **Settings → Channels**, open Telegram, turn on its switch, and confirm **Install and enable**. If WebUI installation is unavailable, run `nanobot plugins enable telegram` in the gateway's Python environment. |
 | Telegram token is rejected | Copy the current token from BotFather or regenerate it. Do not reuse one token for two bot entries. |
-| Telegram token cannot be checked right now | In **Settings → Channels → Telegram**, open **Network proxy** for that bot. Enter the proxy URL and choose **Check and save**, or confirm the gateway can reach `api.telegram.org` directly. |
+| Telegram token cannot be checked right now | In **Settings → Channels → Telegram**, open the bot, expand **Advanced**, enter the proxy URL under **Network proxy**, and choose **Check and save**. Or confirm the gateway can reach `api.telegram.org` directly. |
 | A second Telegram webhook bot will not start | Give each enabled webhook bot a different `webhookListenPort`. |
 | Discord replies missing | Enable Message Content intent and invite the bot with the required permissions. |
 | WhatsApp or WeChat login expired | Re-run `nanobot channels login whatsapp` or `nanobot channels login weixin`. |

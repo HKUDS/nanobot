@@ -1,7 +1,14 @@
 {
   "description": "Discutez avec nanobot depuis Telegram.",
+  "requirements": "Un jeton BotFather et, si votre réseau ne peut pas joindre Telegram, un proxy facultatif.",
   "setup": {
+    "docsLabel": "Ouvrir le guide Telegram",
     "officialLabel": "Ouvrir BotFather",
+    "steps": [
+      "Créez un bot avec BotFather et copiez son jeton.",
+      "Collez le jeton ici. Si Telegram est bloqué sur votre réseau, ajoutez un proxy dans les options avancées.",
+      "Connectez le bot, puis envoyez-lui un message dans Telegram."
+    ],
     "fields": {
       "name": {
         "label": "Nom du bot",
@@ -10,6 +17,10 @@
       "token": {
         "label": "Jeton du bot",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Proxy réseau",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "Utilisateurs autorisés",
@@ -57,8 +68,8 @@
     "checkConnection": "Vérifier la connexion",
     "connectedAs": "Connecté en tant que {{name}}.",
     "connected": "Telegram a accepté le jeton enregistré.",
-    "configuredUnverified": "Un jeton enregistré a été trouvé, mais Telegram ne peut pas le vérifier maintenant.",
-    "verificationUnavailable": "Telegram ne peut pas vérifier ce jeton maintenant. Réessayez avant de le connecter.",
+    "configuredUnverified": "Un jeton enregistré a été trouvé, mais Telegram reste inaccessible. Vérifiez votre réseau ou votre proxy, puis réessayez.",
+    "verificationUnavailable": "Telegram est inaccessible. Vérifiez votre réseau ou ajoutez un proxy dans les options avancées, puis réessayez.",
     "invalidToken": "Telegram a refusé ce jeton de bot.",
     "checkFailed": "La connexion n’a pas pu être vérifiée.",
     "defaultBotName": "Bot Telegram",

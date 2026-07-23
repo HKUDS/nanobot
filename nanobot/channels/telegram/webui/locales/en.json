@@ -1,7 +1,14 @@
 {
   "description": "Chat with nanobot from Telegram chats.",
+  "requirements": "A BotFather token and, if your network cannot reach Telegram, an optional proxy.",
   "setup": {
+    "docsLabel": "Open Telegram setup",
     "officialLabel": "Open BotFather",
+    "steps": [
+      "Create a bot with BotFather and copy its token.",
+      "Paste the token here. If Telegram is blocked on your network, add a proxy under Advanced options.",
+      "Connect the bot, then send it a message in Telegram."
+    ],
     "fields": {
       "name": {
         "label": "Bot name",
@@ -10,6 +17,10 @@
       "token": {
         "label": "Bot token",
         "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Network proxy",
+        "placeholder": "http://127.0.0.1:7890"
       },
       "allowFrom": {
         "label": "Allowed users",
@@ -57,8 +68,8 @@
     "checkConnection": "Check connection",
     "connectedAs": "Connected as {{name}}.",
     "connected": "Telegram accepted the saved token.",
-    "configuredUnverified": "A saved token was found, but Telegram could not verify it right now.",
-    "verificationUnavailable": "Telegram could not verify this token right now. Try again before connecting.",
+    "configuredUnverified": "A saved token was found, but Telegram could not be reached. Check your network or proxy, then try again.",
+    "verificationUnavailable": "Telegram could not be reached. Check your network, or add a proxy under Advanced options, then try again.",
     "invalidToken": "Telegram rejected this bot token.",
     "checkFailed": "The connection could not be checked.",
     "defaultBotName": "Telegram bot",

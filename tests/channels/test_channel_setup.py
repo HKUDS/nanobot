@@ -130,22 +130,12 @@ def test_channel_locales_cover_authoritative_setup_contracts() -> None:
         setup_messages = english["setup"]
         field_messages = setup_messages.get("fields", {})
         for field_name, field in plugin.setup.fields.items():
-            if not field.writable or not field.generic_setup:
+            if not field.writable:
                 continue
             message_key = re.sub(r"[^A-Za-z0-9_-]+", "_", field_name)
             assert message_key in field_messages, f"{name} field {field_name} has no locale copy"
         if plugin.setup.official_url:
             assert setup_messages.get("officialLabel"), f"{name} has no localized official label"
-
-
-def test_telegram_proxy_uses_custom_setup_without_losing_write_access() -> None:
-    telegram = channel_setup_spec("telegram")
-
-    assert telegram is not None
-    assert telegram.route_field_types["proxy"] == "secret"
-    assert "proxy" not in {
-        field["field"] for field in telegram.to_public_dict("telegram")["fields"]
-    }
 
 
 def test_channel_manifests_only_import_contract_modules() -> None:
