@@ -121,6 +121,7 @@ allow-direct-references = true
 
 [tool.hatch.build]
 include = [
+    "examples/**/*.md",
     "nanobot/**/*.py",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
@@ -142,8 +143,13 @@ exclude = ["nanobot/channels/*/tests/**"]
 [tool.hatch.build.targets.wheel.sources]
 "nanobot" = "nanobot"
 
+[tool.hatch.build.targets.wheel.force-include]
+"bridge" = "nanobot/bridge"
+"examples" = "examples"
+
 [tool.hatch.build.targets.sdist]
 include = [
+    "examples/",
     "nanobot/",
     "nanobot/web/dist/",
     "hatch_build.py",
