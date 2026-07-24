@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
+import yaml
 from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
@@ -617,20 +618,66 @@ class MemoryStore:
             workspace=workspace,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
+            write_guard=self._dream_skill_write_guard,
             file_states=file_states,
         ))
         tools.register(ApplyPatchTool(
             workspace=workspace,
             allowed_dir=skills_dir,
             extra_write_allowed_files=editable_files,
+            write_guard=self._dream_skill_write_guard,
             file_states=file_states,
         ))
         tools.register(WriteFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            write_guard=self._dream_skill_write_guard,
             file_states=file_states,
         ))
         return tools
+
+    def _dream_skill_write_guard(self, path: Path, content: str | None = None) -> str | None:
+        """Allow Dream to write only skills it explicitly owns."""
+        skills_dir = (self.workspace / "skills").resolve(strict=False)
+        try:
+            target = path.resolve(strict=False)
+            rel = target.relative_to(skills_dir)
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+        parts = rel.parts
+        if len(parts) < 2:
+            return "Dream may only modify skill files inside a named skill directory"
+
+        marker_file = skills_dir / parts[0] / "SKILL.md"
+        if marker_file.exists():
+            try:
+                marker_text = marker_file.read_text(encoding="utf-8")
+            except OSError:
+                return f"Dream could not verify ownership for skill {parts[0]!r}"
+            if self._skill_content_is_dream_managed(marker_text):
+                return None
+            return f"Dream may not modify unmarked user skill {parts[0]!r}"
+
+        if parts[-1] == "SKILL.md" and content is not None:
+            if self._skill_content_is_dream_managed(content):
+                return None
+        return "Dream may only create skills whose SKILL.md has dream_managed: true"
+
+    @staticmethod
+    def _skill_content_is_dream_managed(content: str) -> bool:
+        text = content.lstrip("\ufeff")
+        lines = text.splitlines()
+        if not lines or lines[0].strip() != "---":
+            return False
+        end_index = next((idx for idx, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
+        if end_index is None:
+            return False
+        try:
+            frontmatter = yaml.safe_load("\n".join(lines[1:end_index]))
+        except yaml.YAMLError:
+            return False
+        return isinstance(frontmatter, dict) and frontmatter.get("dream_managed") is True
 
     @staticmethod
     def dream_run_completed(resp: object | None) -> bool:

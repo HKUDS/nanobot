@@ -44,6 +44,115 @@ class TestMemoryStoreBasicIO:
         assert "Long-term Memory" in ctx
         assert "important fact" in ctx
 
+    @pytest.mark.asyncio
+    async def test_dream_write_tools_block_unmarked_user_skill(self, store):
+        skill_file = store.workspace / "skills" / "weather" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text("# Weather\n\nUser-owned skill.\n", encoding="utf-8")
+        tools = store.build_dream_tools()
+
+        write_result = await tools.get("write_file").execute(
+            path="skills/weather/SKILL.md",
+            content="# Weather\n\nOverwritten.\n",
+        )
+        edit_result = await tools.get("edit_file").execute(
+            path="skills/weather/SKILL.md",
+            old_text="User-owned skill.",
+            new_text="Overwritten.",
+        )
+        patch_result = await tools.get("apply_patch").execute(
+            edits=[{
+                "path": "skills/weather/SKILL.md",
+                "action": "replace",
+                "old_text": "User-owned skill.",
+                "new_text": "Overwritten.",
+            }]
+        )
+
+        assert "unmarked user skill" in write_result
+        assert "unmarked user skill" in edit_result
+        assert "unmarked user skill" in patch_result
+        assert skill_file.read_text(encoding="utf-8") == "# Weather\n\nUser-owned skill.\n"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "frontmatter",
+        [
+            "description: |\n  dream_managed: true\n",
+            "metadata:\n  dream_managed: true\n",
+        ],
+    )
+    async def test_dream_write_tools_ignore_nested_or_block_ownership_markers(
+        self,
+        store,
+        frontmatter,
+    ):
+        skill_file = store.workspace / "skills" / "weather" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        original = f"---\n{frontmatter}---\n# Weather\n\nUser-owned skill.\n"
+        skill_file.write_text(original, encoding="utf-8")
+        tools = store.build_dream_tools()
+
+        write_result = await tools.get("write_file").execute(
+            path="skills/weather/SKILL.md",
+            content="---\ndream_managed: true\n---\n# Weather\n\nOverwritten.\n",
+        )
+
+        assert "unmarked user skill" in write_result
+        assert skill_file.read_text(encoding="utf-8") == original
+
+    @pytest.mark.asyncio
+    async def test_dream_write_tools_allow_marked_skill(self, store):
+        skill_file = store.workspace / "skills" / "weather" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "---\ndream_managed: true\n---\n# Weather\n\nOriginal.\n",
+            encoding="utf-8",
+        )
+        tools = store.build_dream_tools()
+
+        edit_result = await tools.get("edit_file").execute(
+            path="skills/weather/SKILL.md",
+            old_text="Original.",
+            new_text="Updated.",
+        )
+        patch_result = await tools.get("apply_patch").execute(
+            edits=[{
+                "path": "skills/weather/SKILL.md",
+                "action": "replace",
+                "old_text": "Updated.",
+                "new_text": "Patched.",
+            }]
+        )
+        write_result = await tools.get("write_file").execute(
+            path="skills/weather/notes.md",
+            content="Dream notes.\n",
+        )
+
+        assert "Successfully edited" in edit_result
+        assert "Patch applied" in patch_result
+        assert "Successfully wrote" in write_result
+        assert "Patched." in skill_file.read_text(encoding="utf-8")
+        assert (store.workspace / "skills" / "weather" / "notes.md").exists()
+
+    @pytest.mark.asyncio
+    async def test_dream_can_create_only_marked_skill(self, store):
+        tools = store.build_dream_tools()
+
+        unmarked = await tools.get("write_file").execute(
+            path="skills/new-skill/SKILL.md",
+            content="# New Skill\n",
+        )
+        marked = await tools.get("write_file").execute(
+            path="skills/dream-skill/SKILL.md",
+            content="---\ndream_managed: true\n---\n# Dream Skill\n",
+        )
+
+        assert "dream_managed: true" in unmarked
+        assert "Successfully wrote" in marked
+        assert not (store.workspace / "skills" / "new-skill" / "SKILL.md").exists()
+        assert (store.workspace / "skills" / "dream-skill" / "SKILL.md").exists()
+
 
 class TestHistoryWithCursor:
     def test_append_history_returns_cursor(self, store):

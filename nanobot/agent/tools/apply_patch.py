@@ -265,6 +265,9 @@ class ApplyPatchTool(_FsTool):
                     _format_summary(summary) for summary in summaries
                 )
 
+            for path, content in writes.items():
+                self._check_write_guard(path, content)
+
             backups: dict[Path, bytes | None] = {}
             for path in writes:
                 backups[path] = path.read_bytes() if path.exists() else None
