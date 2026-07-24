@@ -422,6 +422,81 @@ async def test_gemini_flash_reference_images(tmp_path: Path) -> None:
     assert parts[1] == {"text": "edit this"}
 
 
+def _gemini_flash_image_response() -> FakeResponse:
+    return FakeResponse(
+        {
+            "candidates": [
+                {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": RAW_B64}}]}}
+            ]
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_gemini_flash_forwards_aspect_ratio_and_image_size() -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw a cat",
+        model="gemini-3-pro-image",
+        aspect_ratio="16:9",
+        image_size="2K",
+    )
+
+    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    assert image_config == {"aspectRatio": "16:9", "imageSize": "2K"}
+
+
+@pytest.mark.asyncio
+async def test_gemini_flash_2_5_drops_image_size() -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw a cat",
+        model="gemini-2.5-flash-image",
+        aspect_ratio="4:3",
+        image_size="1K",
+    )
+
+    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    assert image_config == {"aspectRatio": "4:3"}
+
+
+@pytest.mark.asyncio
+async def test_gemini_flash_2_0_drops_image_size() -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw a cat",
+        model="gemini-2.0-flash-preview-image-generation",
+        aspect_ratio="16:9",
+        image_size="1K",
+    )
+
+    image_config = fake.calls[0]["json"]["generationConfig"]["responseFormat"]["image"]
+    assert image_config == {"aspectRatio": "16:9"}
+
+
+@pytest.mark.asyncio
+async def test_gemini_flash_ignores_unsupported_hints() -> None:
+    fake = FakeClient(_gemini_flash_image_response())
+    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
+
+    # 7:5 is not a documented ratio; 1:8 is only valid for 3.1 Flash, not Pro;
+    # 1024x1024 is not a valid Gemini image-size token. All are dropped.
+    await client.generate(
+        prompt="draw a cat",
+        model="gemini-3-pro-image",
+        aspect_ratio="1:8",
+        image_size="1024x1024",
+    )
+
+    assert "responseFormat" not in fake.calls[0]["json"]["generationConfig"]
+
+
 @pytest.mark.asyncio
 async def test_gemini_requires_api_key() -> None:
     client = GeminiImageGenerationClient(api_key=None)

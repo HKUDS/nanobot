@@ -33,6 +33,16 @@ _AIHUBMIX_ASPECT_RATIO_SIZES = {
 }
 _GEMINI_DEFAULT_TIMEOUT_S = 120.0
 _GEMINI_IMAGEN_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "3:4", "4:3"}
+# Aspect ratios documented for every Gemini Flash image (generateContent) model.
+# The extreme ratios (1:4, 4:1, 1:8, 8:1) are only listed for the 3.1 Flash /
+# Flash Lite tables, so they are left out to avoid sending an unsupported value
+# to 2.5 Flash Image or 3.1 Pro Image.
+_GEMINI_FLASH_ASPECT_RATIOS = {
+    "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
+}
+# Image-size tokens accepted by Gemini 3+ image models (earlier Flash image
+# models expose only a single fixed resolution).
+_GEMINI_FLASH_IMAGE_SIZES = {"512", "1K", "2K", "4K"}
 _OLLAMA_DEFAULT_SIDE = 1024
 _OLLAMA_SIZE_PRESETS = {
     "1K": 1024,
@@ -635,7 +645,11 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
                 prompt=prompt, model=model, aspect_ratio=aspect_ratio
             )
         return await self._generate_gemini_flash(
-            prompt=prompt, model=model, reference_images=reference_images or []
+            prompt=prompt,
+            model=model,
+            reference_images=reference_images or [],
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
         )
 
     async def _generate_imagen(
@@ -691,15 +705,22 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
         prompt: str,
         model: str,
         reference_images: list[str],
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
     ) -> GeneratedImageResponse:
         parts: list[dict[str, Any]] = [
             {"inlineData": image_path_to_inline_data(path)} for path in reference_images
         ]
         parts.append({"text": prompt})
 
+        generation_config: dict[str, Any] = {"responseModalities": ["TEXT", "IMAGE"]}
+        image_config = _gemini_flash_image_config(model, aspect_ratio, image_size)
+        if image_config:
+            generation_config["responseFormat"] = {"image": image_config}
+
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+            "generationConfig": generation_config,
         }
         body.update(self.extra_body)
 
@@ -746,6 +767,36 @@ class GeminiImageGenerationClient(ImageGenerationProvider):
             content="\n".join(t for t in text_parts if t).strip(),
             raw=data,
         )
+
+
+def _gemini_flash_image_config(
+    model: str,
+    aspect_ratio: str | None,
+    image_size: str | None,
+) -> dict[str, str]:
+    """Build the ``responseFormat.image`` config for Gemini Flash image models.
+
+    Aspect ratio applies to all Flash image models; image size is only honored
+    by Gemini 3+ image models (``gemini-2.5-flash-image`` ignores it).
+    """
+    config: dict[str, str] = {}
+    if aspect_ratio and aspect_ratio in _GEMINI_FLASH_ASPECT_RATIOS:
+        config["aspectRatio"] = aspect_ratio
+    if image_size and _gemini_flash_supports_image_size(model):
+        normalized = image_size.strip().upper()
+        if normalized in _GEMINI_FLASH_IMAGE_SIZES:
+            config["imageSize"] = normalized
+    return config
+
+
+def _gemini_flash_supports_image_size(model: str) -> bool:
+    """Return whether the model honors ``imageSize``.
+
+    Only Gemini 3+ image models expose a configurable image size; earlier Flash
+    image models (2.0, 2.5) generate at a single fixed resolution, so ``imageSize``
+    is identified positively rather than by excluding a single version.
+    """
+    return "gemini-3" in model.lower()
 
 
 async def _aihubmix_images_from_payload(
