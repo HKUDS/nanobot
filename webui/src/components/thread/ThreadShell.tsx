@@ -165,6 +165,7 @@ function toModelBadgeLabel(modelName: string | null): string | null {
 
 interface ModelBadgeInfo {
   label: string | null;
+  model: string | null;
   provider: string | null;
   providerLabel: string | null;
   needsSetup: boolean;
@@ -196,7 +197,7 @@ function toModelBadgeInfo(
   const model = scopedPreset
     ? preset?.model || null
     : settings?.agent.model || modelName || null;
-  const label = toModelBadgeLabel(model);
+  const label = preset?.label?.trim() || scopedPreset || toModelBadgeLabel(model);
   const rawProvider = preset?.provider
     || (!scopedPreset ? settings?.agent.provider : null)
     || null;
@@ -213,6 +214,7 @@ function toModelBadgeInfo(
   );
   return {
     label,
+    model: toModelBadgeLabel(model),
     provider,
     providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
     needsSetup,
@@ -890,6 +892,7 @@ export function ThreadShell({
               : t("thread.composer.placeholderThread")
           }
           modelLabel={modelBadgeLabel}
+          modelDetail={modelBadge.model}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
@@ -928,6 +931,7 @@ export function ThreadShell({
               : t("thread.composer.placeholderHero")
           }
           modelLabel={modelBadgeLabel}
+          modelDetail={modelBadge.model}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}

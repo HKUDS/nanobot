@@ -387,7 +387,7 @@ describe("ThreadShell", () => {
     );
 
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
-    expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
+    expect(screen.getByText("Default")).toBeInTheDocument();
     expect(screen.queryByText("ling-3.0-flash")).not.toBeInTheDocument();
   });
 
@@ -406,8 +406,8 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByTitle("deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+    expect(await screen.findByTitle("Fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -442,7 +442,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("gpt-4 · Company Proxy")).toBeInTheDocument();
+    expect(await screen.findByTitle("Fast · gpt-4 · Company Proxy")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
   });
 
@@ -459,7 +459,7 @@ describe("ThreadShell", () => {
       "openai-codex/gpt-5.5",
     ));
 
-    expect(await screen.findByText("gpt-5.5")).toBeInTheDocument();
+    expect(await screen.findByText("Default")).toBeInTheDocument();
     const configuredBadge = screen.getByTestId("composer-model-logo-openai_codex").parentElement;
     expect(configuredBadge).not.toBeNull();
     expect(configuredBadge).toHaveClass("composer-model-badge");
@@ -477,7 +477,7 @@ describe("ThreadShell", () => {
     const badge = logo.parentElement;
     expect(badge).not.toBeNull();
     expect(badge).toBe(configuredBadge);
-    expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
+    expect(screen.getByText("Default")).toBeInTheDocument();
     expect(screen.queryByText("deepseek-chat")).not.toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
     expect(badge).toHaveAttribute(
@@ -500,7 +500,7 @@ describe("ThreadShell", () => {
     });
     expect(
       screen.getByTestId("composer-model-logo-openai_codex").parentElement,
-    ).toHaveAttribute("title", "gpt-5.5 · OpenAI Codex");
+    ).toHaveAttribute("title", "Default · gpt-5.5 · OpenAI Codex");
     expect(
       screen.getByTestId("composer-model-logo-openai_codex").parentElement,
     ).toBe(badge);

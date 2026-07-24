@@ -168,6 +168,7 @@ interface ThreadComposerProps {
   placeholder?: string;
   isStreaming?: boolean;
   modelLabel?: string | null;
+  modelDetail?: string | null;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -814,6 +815,7 @@ export function ThreadComposer({
   placeholder,
   isStreaming = false,
   modelLabel = null,
+  modelDetail = null,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -2086,6 +2088,7 @@ export function ThreadComposer({
             {modelLabel && !voiceRecorder.isRecording ? (
               <ComposerModelBadge
                 label={modelLabel}
+                modelDetail={modelDetail}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
@@ -2375,6 +2378,7 @@ function QueuedPromptRow({
 
 function ComposerModelBadge({
   label,
+  modelDetail,
   provider,
   providerLabel,
   needsSetup,
@@ -2383,6 +2387,7 @@ function ComposerModelBadge({
   onClick,
 }: {
   label: string;
+  modelDetail?: string | null;
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
@@ -2390,11 +2395,15 @@ function ComposerModelBadge({
   isHero: boolean;
   onClick?: () => void;
 }) {
-  const inferredProvider = needsSetup ? null : provider || inferProviderFromModelName(label);
+  const inferredProvider = needsSetup
+    ? null
+    : provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   const showLogo = !!logoUrl;
-  const title = providerLabel ? `${label} · ${providerLabel}` : label;
+  const title = [label, modelDetail, providerLabel]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(" · ");
   const interactive = Boolean(onClick);
   const Container = interactive ? "button" : "span";
 
@@ -2406,13 +2415,13 @@ function ComposerModelBadge({
       type={interactive ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "composer-model-badge thread-composer-model-badge inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
+        "composer-model-badge thread-composer-model-badge inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-semibold text-foreground/58",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
         isHero
-          ? "h-8 max-w-[min(12.5rem,44vw)] gap-1.5 px-2 text-[11.5px]"
-          : "h-9 max-w-[min(12rem,44vw)] gap-2 px-2.5 text-[12px]",
+          ? "h-8 max-w-[min(12.5rem,44vw)] gap-1.5 px-2.5 text-[12px]"
+          : "h-9 max-w-[min(12rem,44vw)] gap-2 px-3 text-[12.5px]",
       )}
     >
       <span
@@ -2422,7 +2431,7 @@ function ComposerModelBadge({
           needsSetup
             ? "text-amber-800 dark:text-amber-200"
             : "rounded-full border bg-background",
-          isHero ? "h-[18px] w-[18px]" : "h-5 w-5",
+          isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
         )}
         style={{
           borderColor: !needsSetup && brand ? `${brand.color}28` : undefined,
