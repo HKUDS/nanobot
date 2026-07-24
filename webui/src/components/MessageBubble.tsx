@@ -327,14 +327,9 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
       title={text}
     >
       <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-      <div className="min-w-0">
-        <span className="block text-[11px]/[1.3] font-medium text-muted-foreground/70">
-          {label}
-        </span>
-        <p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
-          {text}
-        </p>
-      </div>
+      <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
+        {text}
+      </p>
     </blockquote>
   );
 }

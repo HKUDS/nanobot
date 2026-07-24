@@ -124,6 +124,7 @@ describe("MessageBubble", () => {
 
     const quote = screen.getByLabelText("Quoted context");
     expect(quote).toHaveTextContent("selected assistant excerpt");
+    expect(screen.queryByText("Quoted context")).not.toBeInTheDocument();
     expect(screen.getByText("What about this?")).toBeInTheDocument();
 
     rerender(
