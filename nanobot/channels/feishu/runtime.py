@@ -2203,6 +2203,7 @@ class FeishuChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 

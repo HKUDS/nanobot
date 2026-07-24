@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 import os
 import time
 from collections.abc import Mapping
@@ -830,9 +831,9 @@ class AgentLoop:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
-        *on_stream_end(resuming)*: called when a streaming session finishes.
-        ``resuming=True`` means tool calls follow (spinner should restart);
-        ``resuming=False`` means this is the final response.
+        *on_stream_end(resuming, merge_next)*: called when a streaming session finishes.
+        ``resuming=True`` means the active turn continues. ``merge_next=True`` means
+        the next text segment belongs to the same user-visible assistant message.
 
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
@@ -1014,7 +1015,12 @@ class AgentLoop:
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
             if on_stream and on_stream_end and should_stream:
-                await on_stream(result.final_content or "")
+                stream_content = (
+                    result.pending_stream_content
+                    if result.pending_stream_content is not None
+                    else result.final_content or ""
+                )
+                await on_stream(stream_content)
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
@@ -1161,6 +1167,14 @@ class AgentLoop:
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
+                    try:
+                        await delivery.abort_stream()
+                    except Exception:
+                        logger.debug(
+                            "Could not close stream for cancelled session {}",
+                            session_key,
+                            exc_info=True,
+                        )
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
                     # messages accumulated before /stop.  The checkpoint was
@@ -1330,6 +1344,19 @@ class AgentLoop:
         if ctx.on_stream is not None:
             stream_callback = ctx.on_stream
             stream_end_callback = ctx.on_stream_end
+            stream_end_accepts_merge_next = False
+            if stream_end_callback is not None:
+                try:
+                    stream_end_signature = inspect.signature(stream_end_callback)
+                    stream_end_accepts_merge_next = (
+                        "merge_next" in stream_end_signature.parameters
+                        or any(
+                            parameter.kind is inspect.Parameter.VAR_KEYWORD
+                            for parameter in stream_end_signature.parameters.values()
+                        )
+                    )
+                except (TypeError, ValueError):
+                    pass
             segment_streamed_content = False
 
             async def _tracked_stream(delta: str) -> None:
@@ -1338,12 +1365,19 @@ class AgentLoop:
                     segment_streamed_content = True
                 await stream_callback(delta)
 
-            async def _tracked_stream_end(*, resuming: bool = False) -> None:
+            async def _tracked_stream_end(
+                *,
+                resuming: bool = False,
+                merge_next: bool = False,
+            ) -> None:
                 nonlocal segment_streamed_content
                 ctx.streamed_content = segment_streamed_content
                 segment_streamed_content = False
                 if stream_end_callback is not None:
-                    await stream_end_callback(resuming=resuming)
+                    if merge_next and stream_end_accepts_merge_next:
+                        await stream_end_callback(resuming=resuming, merge_next=True)
+                    else:
+                        await stream_end_callback(resuming=resuming)
 
             ctx.on_stream = _tracked_stream
             ctx.on_stream_end = _tracked_stream_end

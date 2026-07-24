@@ -94,7 +94,12 @@ def test_legacy_stream_metadata_flags_create_runtime_events() -> None:
         channel="websocket",
         chat_id="chat-1",
         content="",
-        metadata={"_stream_end": True, "_stream_id": "s1", "_resuming": True},
+        metadata={
+            "_stream_end": True,
+            "_stream_id": "s1",
+            "_resuming": True,
+            "_merge_next": True,
+        },
     )
 
     delta_event = outbound_event_from_message(delta)
@@ -106,6 +111,7 @@ def test_legacy_stream_metadata_flags_create_runtime_events() -> None:
     assert isinstance(end_event, StreamEndEvent)
     assert end_event.stream_id == "s1"
     assert end_event.resuming is True
+    assert end_event.merge_next is True
 
 
 def test_legacy_webui_runtime_metadata_flags_create_runtime_events() -> None:
@@ -221,7 +227,7 @@ def test_replace_outbound_event_keeps_routing_metadata() -> None:
 
     updated = replace_outbound_event(
         msg,
-        StreamEndEvent(stream_id="s1", resuming=True),
+        StreamEndEvent(stream_id="s1", resuming=True, merge_next=True),
         content="hello world",
     )
 
@@ -230,6 +236,7 @@ def test_replace_outbound_event_keeps_routing_metadata() -> None:
     assert isinstance(updated.event, StreamEndEvent)
     assert updated.event.stream_id == "s1"
     assert updated.event.resuming is True
+    assert updated.event.merge_next is True
 
 
 def test_streamed_response_event_keeps_final_content_outside_event_payload() -> None:

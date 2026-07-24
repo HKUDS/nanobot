@@ -923,6 +923,7 @@ class TelegramChannel(BaseChannel):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
         if not self._app:

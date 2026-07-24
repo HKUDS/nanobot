@@ -1351,6 +1351,39 @@ async def test_send_delta_marks_resuming_stream_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_keeps_buffer_across_merged_stream_boundary() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "streaming": True},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_delta("chat-1", "first ", stream_id="sid")
+    await channel.send_delta(
+        "chat-1",
+        "",
+        stream_id="sid",
+        stream_end=True,
+        resuming=True,
+        merge_next=True,
+    )
+    await channel.send_delta("chat-1", "second", stream_id="sid")
+    await channel.send_delta("chat-1", "", stream_id="sid", stream_end=True)
+
+    payloads = [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
+    assert payloads[1]["merge_next"] is True
+    assert payloads[1]["resuming"] is True
+    assert [payload["text"] for payload in payloads if payload["event"] == "delta"] == [
+        "first ",
+        "second",
+    ]
+    assert ("chat-1", "sid") not in channel._stream_text_buffers
+
+
+@pytest.mark.asyncio
 async def test_send_delta_stream_end_includes_inline_final_text() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))

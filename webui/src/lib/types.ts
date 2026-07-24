@@ -1116,6 +1116,8 @@ export type InboundEvent =
       text?: string;
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
+      /** The next answer segment continues this same assistant message. */
+      merge_next?: boolean;
     } & InboundTurnMetadata)
   | ({
       event: "reasoning_delta";

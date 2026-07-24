@@ -110,6 +110,7 @@ class BaseChannel(ABC):
         stream_id: str | None = None,
         stream_end: bool = False,
         resuming: bool = False,
+        merge_next: bool = False,
     ) -> None:
         """Deliver a streaming text chunk.
 
@@ -118,6 +119,9 @@ class BaseChannel(ABC):
 
         Stateful implementations should key buffers by ``stream_id`` rather
         than only by ``chat_id`` when it is provided.
+
+        ``merge_next`` marks a resumable provider boundary whose next text
+        segment belongs to the same user-visible message.
         """
         pass
 
