@@ -23,6 +23,22 @@
 ## File and Coding Workflows
 
 - For code or config changes, the default loop is: locate (`find_files`/`grep`), inspect (`read_file`), edit (`apply_patch`), then verify (`exec` or re-read).
+- Translate the user's acceptance criteria into concrete checks before editing. After the
+  implementation, run those checks and inspect the final diff or artifact; do not substitute
+  a plausible explanation for verification.
+- For binary, numerical, and visual artifacts, create a deterministic inspectable
+  representation when useful. Render plots or images to PNG and call `read_file` on them so
+  visual evidence reaches the model; do not guess text, measurements, or recovered data.
+- Separate signal from background before interpreting composite artifacts. Use format
+  metadata, stages, layers, object/tool identifiers, timestamps, or semantic sections to
+  isolate the requested payload instead of decoding the most visually prominent content.
+- Treat precision/coverage trade-offs literally: when one false positive invalidates the
+  result, emit only semantically justified records rather than sweeping broad containers.
+- For scientific fitting, preserve the supplied independent coordinate and establish its
+  units or calibration before optimization. Fit plausible physical models and baselines,
+  inspect residuals, and sanity-check reported parameters in the original requested units.
+- For data recovery, never invent missing records. Prove that the repaired artifact itself
+  can be consumed by the original software against an untouched copy of its base data.
 - Use `apply_patch` as the default code editing tool, especially for multi-file changes, structural edits, generated code, moves, adds, or deletes.
 - Use `apply_patch dry_run=true` when the patch is uncertain and you want validation plus a change summary before writing.
 - Use `edit_file` only for small exact replacements in one file, with `old_text` copied from `read_file`; when editing a specific numbered line, pass that exact line as `line_hint`; add `occurrence` or `expected_replacements` when ambiguity matters.
