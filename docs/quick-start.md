@@ -36,7 +36,7 @@ If you prefer to inspect the scripts first, open [`install.sh`](../scripts/insta
 
 ## 2. Configure Your Model
 
-On a local desktop, the installer opens the WebUI. Go to **Settings → Models** to choose a provider, enter its credentials, and select a model. The gateway stays available while this setup is incomplete, but chat will ask you to finish model setup first.
+On a local desktop, the installer opens the WebUI. Go to **Settings → Models** to choose a provider, enter its credentials, and select a model. While this setup is incomplete, nanobot serves only the local WebUI; chat will ask you to finish model setup first.
 
 In a headless or terminal-only environment, run the terminal wizard instead:
 

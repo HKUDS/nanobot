@@ -2912,6 +2912,115 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     assert turn_delivery_factory.route_policy.sessions is agent.sessions
 
 
+def test_gateway_setup_mode_runs_only_local_webui(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    setattr(config.channels, "websocket", {"enabled": True})
+    setattr(config.channels, "telegram", {"enabled": True, "token": "token"})
+    seen: dict[str, object] = {}
+
+    class _FakeSessionManager:
+        def list_sessions(self) -> list[dict[str, object]]:
+            return []
+
+        def flush_all(self) -> int:
+            return 0
+
+    class _FakeCron:
+        def __init__(self) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            seen["cron_started"] = True
+
+        def stop(self) -> None:
+            return None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            seen["cron_job_registered"] = True
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        session_manager=lambda _workspace: _FakeSessionManager(),
+        cron_service=lambda _store_path: _FakeCron(),
+    )
+
+    class _FakeMemory:
+        def get_latest_cursor(self) -> int:
+            return 0
+
+        def get_last_dream_cursor(self) -> int:
+            return 0
+
+        def set_last_dream_cursor(self, _cursor: int) -> None:
+            return None
+
+    class _FakeAgent:
+        @classmethod
+        def from_config(cls, _config, bus=None, **kwargs):
+            return cls(**kwargs)
+
+        def __init__(self, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = _fake_provider()
+            self.tools = {}
+            self.sessions = kwargs["session_manager"]
+            self.context = SimpleNamespace(memory=_FakeMemory())
+            self.runtime_resolver = MagicMock()
+
+        def _schedule_background(self, _coro) -> None:
+            return None
+
+        async def run(self) -> None:
+            await asyncio.Event().wait()
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, channel_config, *_args, **_kwargs) -> None:
+            seen["channel_config"] = channel_config
+            self.enabled_channels = ["websocket"]
+
+        async def start_all(self) -> None:
+            raise _StopGatewayError("stop")
+
+        async def stop_all(self) -> None:
+            return None
+
+        def get_channel(self, _name: str) -> None:
+            return None
+
+    async def _unexpected_local_trigger_queue(**_kwargs) -> None:
+        raise AssertionError("setup mode must not run local triggers")
+
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgent)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr(
+        "nanobot.triggers.local_runner.run_local_trigger_queue",
+        _unexpected_local_trigger_queue,
+    )
+
+    cli_commands._run_gateway(
+        config,
+        health_server_enabled=False,
+        unconfigured_provider_error="No API key configured",
+    )
+
+    channel_config = seen["channel_config"]
+    assert getattr(channel_config.channels, "websocket")["enabled"] is True
+    assert getattr(channel_config.channels, "telegram")["enabled"] is False
+    assert "cron_started" not in seen
+    assert "cron_job_registered" not in seen
+
+
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -30,6 +30,9 @@ Run it in the background when you do not want to keep a terminal open:
 nanobot webui --background
 ```
 
+Complete first-time model setup in a foreground `nanobot webui` session before using
+`--background`.
+
 Manage the background gateway with `nanobot gateway status`, `nanobot gateway
 logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
 

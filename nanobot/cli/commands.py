@@ -1639,6 +1639,7 @@ def _run_gateway(
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
 
+    setup_mode = unconfigured_provider_error is not None
     port = port if port is not None else config.gateway.port
     webui_url = _webui_browser_url(config)
     gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
@@ -1946,10 +1947,19 @@ def _run_gateway(
             return stripped or None
         return None
 
+    # Setup mode exposes only the local WebUI needed to configure a model. It
+    # must not reconnect external channels while the agent cannot serve them.
+    channel_config = config
+    if setup_mode:
+        channel_config = config.model_copy(deep=True)
+        for name, channel in (channel_config.channels.model_extra or {}).items():
+            if name != "websocket" and isinstance(channel, dict):
+                channel["enabled"] = False
+
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
     channels = ChannelManager(
-        config,
+        channel_config,
         bus,
         session_manager=session_manager,
         cron_service=cron,
@@ -2042,10 +2052,12 @@ def _run_gateway(
         _print_gateway_health_endpoint(host, health_port)
         async with server:
             await server.serve_forever()
-    # Register Dream system job (idempotent on restart)
+    # Register Dream and heartbeat only when the agent has a usable provider.
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream
-    if dream_cfg.enabled:
+    if setup_mode:
+        console.print("[yellow]Setup mode: external channels and automations are paused.[/yellow]")
+    elif dream_cfg.enabled:
         cron.register_system_job(CronJob(
             id="dream",
             name="dream",
@@ -2058,7 +2070,7 @@ def _run_gateway(
         _advance_dream_cursor_if_behind(agent.context.memory)
 
     # Register Heartbeat system job (idempotent on restart)
-    if hb_cfg.enabled:
+    if not setup_mode and hb_cfg.enabled:
         cron.register_system_job(CronJob(
             id="heartbeat",
             name="heartbeat",
@@ -2113,7 +2125,8 @@ def _run_gateway(
             console.print,
         )
         try:
-            await cron.start()
+            if not setup_mode:
+                await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
             tasks = [
@@ -2126,15 +2139,18 @@ def _run_gateway(
                 ),
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
-                asyncio.create_task(
-                    run_local_trigger_queue(
-                        store=trigger_store,
-                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
-                        is_channel_enabled=lambda name: channels.get_channel(name) is not None,
-                    ),
-                    name="nanobot-local-triggers",
-                ),
             ]
+            if not setup_mode:
+                tasks.append(
+                    asyncio.create_task(
+                        run_local_trigger_queue(
+                            store=trigger_store,
+                            submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                            is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+                        ),
+                        name="nanobot-local-triggers",
+                    )
+                )
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),
