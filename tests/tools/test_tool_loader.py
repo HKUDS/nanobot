@@ -88,9 +88,11 @@ def test_discover_finds_concrete_tools():
     discovered = loader.discover()
     class_names = {cls.__name__ for cls in discovered}
     assert "ApplyPatchTool" in class_names
+    assert "ExpandGoalNodeTool" in class_names
     assert "ExecTool" in class_names
     assert "CliAppsTool" in class_names
     assert "MessageTool" in class_names
+    assert "ReplanGoalTool" in class_names
     assert "SpawnTool" in class_names
     assert "WriteStdinTool" in class_names
 

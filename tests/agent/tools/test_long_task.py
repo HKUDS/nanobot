@@ -22,6 +22,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
+from nanobot.goals import GoalStore, compact_ref
 from nanobot.session.goal_state import GOAL_STATE_KEY, MAX_GOAL_OBJECTIVE_CHARS
 from nanobot.session.manager import SessionManager
 from nanobot.session.turn_continuation import should_finalize_on_max_iterations
@@ -57,10 +58,18 @@ def _tools(
     *,
     metadata: dict[str, object] | None = None,
 ) -> tuple[CreateGoalTool, UpdateGoalTool, RequestContext]:
-    create = CreateGoalTool(sessions=sm)
-    update = UpdateGoalTool(sessions=sm)
+    create = CreateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
+    update = UpdateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
     rc = _request_context(metadata=metadata)
     return create, update, rc
+
+
+def _goal_store_root(sm: SessionManager):
+    return sm.workspace / "test-goals"
+
+
+def _stored_goal(sm: SessionManager, blob: dict):
+    return GoalStore.for_workspace(sm.workspace, root=_goal_store_root(sm)).get(blob["goal_id"])
 
 
 async def _execute(tool, ctx: RequestContext, *, allowed: bool = True, **kwargs):
@@ -87,7 +96,9 @@ async def test_create_goal_records_goal_metadata(tmp_path):
     assert isinstance(blob, dict)
     assert blob["status"] == "active"
     assert blob["objective"] == "Do the thing"
+    assert "nodes" not in blob
     assert blob["ui_summary"] == "thing"
+    assert _stored_goal(sm, blob).state["objective"] == "Do the thing"
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
     assert "_sustained_goal_continuation_rounds" not in (
         SessionManager(tmp_path).get_or_create("websocket:c1").metadata
@@ -120,7 +131,7 @@ async def test_create_goal_rejects_without_explicit_goal_permission(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_update_goal_complete_closes_active_goal(tmp_path):
+async def test_update_goal_complete_allows_an_unplanned_simple_goal(tmp_path):
     sm = SessionManager(tmp_path)
     create, update, ctx = _tools(sm)
 
@@ -130,7 +141,7 @@ async def test_update_goal_complete_closes_active_goal(tmp_path):
         denied = await create.execute(objective="Another")
         assert goal_mutation_allowed() is False
 
-    assert "marked complete" in out
+    assert "marked complete" in str(out)
     assert "create_goal is unavailable for this turn" in str(denied)
 
     sess = sm.get_or_create("websocket:c1")
@@ -161,6 +172,7 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     assert blob["status"] == "active"
     assert blob["objective"] == "New"
     assert blob["previous_objective"] == "Old"
+    assert _stored_goal(sm, blob).state["objective"] == "New"
     assert blob["ui_summary"] == "new"
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
     assert "_sustained_goal_continuation_rounds" not in (
@@ -205,10 +217,12 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(update, replace_context, action="replace", objective="New")
 
-    assert sess.metadata[GOAL_STATE_KEY]["objective"] == "Old"
+    old_ref = sess.metadata[GOAL_STATE_KEY]
+    assert old_ref["status"] == "active"
+    assert old_ref["objective"] == "Old"
     assert sess.metadata["_sustained_goal_continuation_rounds"] == 12
     persisted = SessionManager(tmp_path).get_or_create("websocket:c1").metadata
-    assert persisted[GOAL_STATE_KEY]["objective"] == "Old"
+    assert persisted[GOAL_STATE_KEY] == old_ref
     assert persisted["_sustained_goal_continuation_rounds"] == 12
 
     monkeypatch.setattr(sm, "save", original_save)
@@ -219,16 +233,14 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
         objective="New",
     )
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
-    assert (
-        SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]
-        == "New"
-    )
+    repaired = SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
+    assert _stored_goal(sm, repaired).state["objective"] == "New"
 
 
 @pytest.mark.asyncio
 async def test_goal_tools_reject_oversized_objectives(tmp_path):
     sm = SessionManager(tmp_path)
-    create = CreateGoalTool(sessions=sm)
+    create = CreateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
     create_context = _request_context()
     oversized = "x" * (MAX_GOAL_OBJECTIVE_CHARS + 1)
 
@@ -242,14 +254,14 @@ async def test_goal_tools_reject_oversized_objectives(tmp_path):
         objective="x" * MAX_GOAL_OBJECTIVE_CHARS,
     )
 
-    update = UpdateGoalTool(sessions=sm)
+    update = UpdateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
     replace_context = _request_context()
     replace_out = await _execute(update, replace_context, action="replace", objective=oversized)
 
     assert f"must not exceed {MAX_GOAL_OBJECTIVE_CHARS}" in str(replace_out)
-    assert len(sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]) == (
-        MAX_GOAL_OBJECTIVE_CHARS
-    )
+    blob = sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
+    assert len(blob["objective"]) == MAX_GOAL_OBJECTIVE_CHARS
+    assert len(_stored_goal(sm, blob).state["objective"]) == MAX_GOAL_OBJECTIVE_CHARS
 
 
 @pytest.mark.asyncio
@@ -286,7 +298,9 @@ async def test_update_goal_replace_requires_explicit_goal_permission(tmp_path):
 
     assert "replacing the goal is unavailable for this turn" in str(unauthorized)
     assert "/goal <task>" in str(unauthorized)
-    assert sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"] == "Old"
+    blob = sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
+    assert blob["objective"] == "Old"
+    assert _stored_goal(sm, blob).state["objective"] == "Old"
     replace_context = _request_context()
 
     with request_context(replace_context), goal_mutation_permission(True):
@@ -295,14 +309,16 @@ async def test_update_goal_replace_requires_explicit_goal_permission(tmp_path):
         assert goal_mutation_allowed() is True
 
     assert "Goal replaced" in reused
-    assert sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"] == "Another"
+    blob = sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
+    assert blob["objective"] == "Another"
+    assert _stored_goal(sm, blob).state["objective"] == "Another"
 
 
 @pytest.mark.asyncio
 async def test_goal_tools_keep_request_context_per_task(tmp_path):
     sm = SessionManager(tmp_path)
-    create = CreateGoalTool(sessions=sm)
-    update = UpdateGoalTool(sessions=sm)
+    create = CreateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
+    update = UpdateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
     ctx_a = RequestContext(
         channel="websocket",
         chat_id="a",
@@ -320,8 +336,12 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
     task_b = asyncio.create_task(_execute(create, ctx_b, objective="Goal B"))
     await asyncio.gather(task_a, task_b)
 
-    assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["objective"] == "Goal A"
-    assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["objective"] == "Goal B"
+    a_blob = sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]
+    b_blob = sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]
+    assert a_blob["objective"] == "Goal A"
+    assert b_blob["objective"] == "Goal B"
+    assert _stored_goal(sm, a_blob).state["objective"] == "Goal A"
+    assert _stored_goal(sm, b_blob).state["objective"] == "Goal B"
 
     a_revoked = asyncio.Event()
 
@@ -340,14 +360,16 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
     await asyncio.gather(complete_a(), replace_b())
 
     assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["recap"] == "Done A"
-    assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["objective"] == "Goal B2"
+    b_blob = sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]
+    assert b_blob["objective"] == "Goal B2"
+    assert _stored_goal(sm, b_blob).state["objective"] == "Goal B2"
 
 
 @pytest.mark.asyncio
 async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path):
     sm = SessionManager(tmp_path)
-    create = CreateGoalTool(sessions=sm)
-    update = UpdateGoalTool(sessions=sm)
+    create = CreateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
+    update = UpdateGoalTool(sessions=sm, goal_store_root=_goal_store_root(sm))
     registry = ToolRegistry()
     registry.register(create)
     registry.register(update)
@@ -387,8 +409,16 @@ async def test_goal_state_events_publish_active_then_inactive(tmp_path):
         sessions=sm,
         schedule_background=lambda _coro: None,
     ).subscribe(runtime_events)
-    create = CreateGoalTool(sessions=sm, runtime_events=runtime_events)
-    update = UpdateGoalTool(sessions=sm, runtime_events=runtime_events)
+    create = CreateGoalTool(
+        sessions=sm,
+        runtime_events=runtime_events,
+        goal_store_root=_goal_store_root(sm),
+    )
+    update = UpdateGoalTool(
+        sessions=sm,
+        runtime_events=runtime_events,
+        goal_store_root=_goal_store_root(sm),
+    )
     rc = _request_context(chat_id="chat-99")
     await _execute(
         create,
@@ -416,8 +446,8 @@ async def test_goal_state_events_publish_active_then_inactive(tmp_path):
             chat_id="chat-99",
             session_key="websocket:chat-99",
         ),
-        action="complete",
-        recap="Done.",
+        action="cancel",
+        recap="Cancelled.",
     )
 
     bus.publish_outbound.assert_awaited_once()
@@ -433,6 +463,80 @@ async def test_update_goal_without_active_is_noop_message(tmp_path):
 
     out = await _execute(update, ctx, action="complete", recap="n/a")
     assert "No active" in out
+
+
+@pytest.mark.asyncio
+async def test_waiting_goal_can_resume_after_user_intervention(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, update, ctx = _tools(sm)
+    await _execute(create, ctx, objective="Safely finish the work")
+    session = sm.get_or_create("websocket:c1")
+    store = GoalStore.for_workspace(sm.workspace, root=_goal_store_root(sm))
+    goal = store.get(session.metadata[GOAL_STATE_KEY]["goal_id"])
+    waiting = store.set_status(goal.id, goal.version, "waiting", "confirm remote effect")
+    session.metadata[GOAL_STATE_KEY] = compact_ref(waiting, sm.workspace)
+    sm.save(session)
+
+    out = await _execute(update, ctx, action="resume", recap="user confirmed no effect")
+
+    assert out == "Goal resumed."
+    assert store.get(goal.id).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_automation_cannot_cancel_or_resume_goal(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, update, ctx = _tools(sm)
+    await _execute(create, ctx, objective="Keep user control")
+    automation = _request_context(metadata={"_goal_driver": {"goal_id": "g"}})
+
+    denied = await _execute(update, automation, action="cancel")
+
+    assert "automation turn cannot cancel" in str(denied)
+    session = sm.get_or_create("websocket:c1")
+    store = GoalStore.for_workspace(sm.workspace, root=_goal_store_root(sm))
+    goal = _stored_goal(sm, session.metadata[GOAL_STATE_KEY])
+    waiting = store.set_status(goal.id, goal.version, "waiting", "need user input")
+    session.metadata[GOAL_STATE_KEY] = compact_ref(waiting, sm.workspace)
+    denied = await _execute(update, automation, action="resume")
+
+    assert "automation turn cannot resume" in str(denied)
+    assert store.get(goal.id).status == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_repairs_terminal_session_reference(tmp_path):
+    sm = SessionManager(tmp_path)
+    create, _update, ctx = _tools(sm)
+    await _execute(create, ctx, objective="Finish durably")
+    session = sm.get_or_create("websocket:c1")
+    ref = session.metadata[GOAL_STATE_KEY]
+    store = GoalStore.for_workspace(sm.workspace, root=_goal_store_root(sm))
+    goal = store.get(ref["goal_id"])
+    goal = store.apply(
+        goal.id,
+        goal.version,
+        {
+            "action": "plan",
+            "nodes": [{"id": "done", "title": "Done", "outcome": "Done", "depends_on": []}],
+        },
+    )
+    goal = store.apply(goal.id, goal.version, {"action": "begin", "node_id": "done"})
+    goal = store.apply(
+        goal.id,
+        goal.version,
+        {"action": "succeed", "node_id": "done", "result": "verified"},
+    )
+    store.close(goal.id, goal.version, "completed")
+
+    with request_context(ctx):
+        await create._provide_runtime_context(ctx)
+
+    assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
+    assert should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata=session.metadata,
+    )
 
 
 @pytest.mark.asyncio

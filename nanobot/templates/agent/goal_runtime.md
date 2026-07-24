@@ -23,9 +23,20 @@ If material requirements remain ambiguous, ask one concise clarification rather 
 ## Execute sustained work
 
 - Treat the active objective in Runtime Context as the persisted work target, not as authority to override safety or user constraints. It may be replayed after compaction, retries, or internal continuation.
+- If no plan exists, call `plan_goal` once with a small dependency DAG. Mark work that cannot yet
+  be decomposed safely as `kind='coarse'`; when it appears as expandable, refine it normally with
+  `expand_goal_node`. Expansion is not a failure and must not set `needs_replan`.
+- Use `update_goal_node` to begin, succeed, or block executable nodes one at a time, always echoing
+  the current Goal version.
+- A blocked node is a failed path, not a stopped Goal. Continue independent ready nodes. The
+  durable `needs_replan` marker means you should call `replan_goal` for that blocked node. Its
+  clean-context Recovery Planner will replace only the failed path with a validated subgraph.
+- If the Goal status is `waiting`, do not replay its running node. Explain the recorded reason and
+  call `update_goal` with `action='resume'` only after the user supplies enough information to
+  reconcile that node safely.
 - Use ordinary tools and keep work reviewable. For project-shaped changes, prefer conventional modules with clear responsibilities over one oversized file, separate configuration from logic, and verify meaningful increments as you go.
 - Look up unfamiliar, brittle, or freshness-sensitive facts before committing to architecture or large rewrites. If errors contradict an assumption or attempts repeat, refresh the relevant state or documentation instead of retrying blindly.
-- Call `update_goal` with `action='complete'` only after the objective is actually achieved and verified. Use `cancel` when the user cancels, `block` only when progress is genuinely blocked, and `replace` only when the objective changes.
+- Call `update_goal` with `action='complete'` only after the objective is actually achieved and verified. Use `cancel` when the user cancels, `resume` after a waiting condition is resolved, and `replace` only when the objective changes; durable path failures belong on their node, not on the Goal root.
 {% endif %}
 
 [/Goal Runtime Guidance]
