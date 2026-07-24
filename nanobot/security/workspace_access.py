@@ -352,7 +352,7 @@ def current_workspace_scope() -> WorkspaceScope | None:
 def current_tool_workspace(
     default_workspace: str | Path | None,
     *,
-    restrict_to_workspace: bool = False,
+    restrict_to_workspace: bool = True,
     sandbox_restricts_workspace: bool = False,
 ) -> ToolWorkspace:
     """Return the workspace/access policy for the current tool call."""
