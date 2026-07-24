@@ -63,3 +63,60 @@ async def test_feishu_cancel_wins_over_inflight_confirmation(
     assert cancelled["status"] == "cancelled"
     assert completed["status"] == "cancelled"
     assert saved_results == []
+
+
+@pytest.mark.asyncio
+async def test_feishu_cancel_does_not_interleave_with_registration_save(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    save_started = threading.Event()
+    release_save = threading.Event()
+
+    monkeypatch.setattr(feishu, "_init_registration", lambda _domain: None)
+    monkeypatch.setattr(
+        feishu,
+        "_begin_registration",
+        lambda _domain: {
+            "device_code": "device-lock",
+            "qr_url": "https://qr.example/lock",
+            "expire_in": 600,
+            "interval": 2,
+        },
+    )
+    monkeypatch.setattr(
+        feishu,
+        "poll_registration_once",
+        lambda **_kwargs: {
+            "status": "succeeded",
+            "domain": "feishu",
+            "app_id": "saved-app",
+            "app_secret": "saved-secret",
+        },
+    )
+
+    def fake_save_registration_result(
+        _result: dict[str, Any],
+        **_kwargs: Any,
+    ) -> str:
+        save_started.set()
+        assert release_save.wait(timeout=5)
+        return "default"
+
+    monkeypatch.setattr(feishu, "save_registration_result", fake_save_registration_result)
+
+    store = FeishuConnectStore()
+    started = await store.handle("start", {})
+    query = {"session_id": [started["session_id"]]}
+    poll_task = asyncio.create_task(store.handle("poll", query))
+    assert await asyncio.to_thread(save_started.wait, 5)
+
+    cancel_task = asyncio.create_task(store.handle("cancel", query))
+    await asyncio.sleep(0)
+    assert not cancel_task.done()
+
+    release_save.set()
+    completed = await poll_task
+    cancelled = await cancel_task
+
+    assert completed["status"] == "succeeded"
+    assert cancelled["status"] == "cancelled"
