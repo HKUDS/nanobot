@@ -283,6 +283,20 @@ class TestConvertMessages:
         }]
         assert "_meta" not in str(items[0])
 
+    def test_tool_message_preserves_unknown_list_as_json(self):
+        content = [
+            {"type": "text", "text": "status", "code": 7},
+            {"kind": "record", "value": 42},
+        ]
+
+        _, items = convert_messages([{
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": content,
+        }])
+
+        assert items[0]["output"] == json.dumps(content, ensure_ascii=False)
+
     def test_non_standard_keys_not_leaked(self):
         """Extra keys on messages must not appear in converted items."""
         _, items = convert_messages([{

@@ -99,31 +99,60 @@ def convert_tool_output(content: Any) -> str | list[dict[str, Any]]:
         converted: list[dict[str, Any]] = []
         for item in content:
             if not isinstance(item, dict):
-                continue
+                break
             item_type = item.get("type")
             if item_type in {"text", "input_text"}:
+                if set(item) - {"type", "text", "_meta"}:
+                    break
                 text = item.get("text")
-                if isinstance(text, str):
-                    converted.append({"type": "input_text", "text": text})
+                if not isinstance(text, str):
+                    break
+                converted.append({"type": "input_text", "text": text})
             elif item_type in {"image_url", "input_image"}:
                 image = item.get("image_url")
+                if isinstance(image, dict) and set(image) - {"url", "detail"}:
+                    break
+                if set(item) - {"type", "image_url", "file_id", "detail", "_meta"}:
+                    break
                 url = image.get("url") if isinstance(image, dict) else image
+                file_id = item.get("file_id")
+                detail = item.get(
+                    "detail",
+                    image.get("detail", "auto") if isinstance(image, dict) else "auto",
+                )
+                if detail not in {"low", "high", "auto", "original"}:
+                    break
+                block = {"type": "input_image", "detail": detail}
                 if isinstance(url, str) and url:
-                    converted.append({
-                        "type": "input_image",
-                        "image_url": url,
-                        "detail": item.get("detail", "auto"),
-                    })
+                    block["image_url"] = url
+                elif isinstance(file_id, str) and file_id:
+                    block["file_id"] = file_id
+                else:
+                    break
+                converted.append(block)
             elif item_type in {"file", "input_file"}:
+                if set(item) - {
+                    "type",
+                    "file_data",
+                    "file_id",
+                    "file_url",
+                    "filename",
+                    "_meta",
+                }:
+                    break
                 block = {"type": "input_file"}
                 for key in ("file_data", "file_id", "file_url", "filename"):
                     value = item.get(key)
                     if isinstance(value, str) and value:
                         block[key] = value
-                if len(block) > 1:
-                    converted.append(block)
-        if converted:
-            return converted
+                if not any(key in block for key in ("file_data", "file_id", "file_url")):
+                    break
+                converted.append(block)
+            else:
+                break
+        else:
+            if converted:
+                return converted
     return json.dumps(content, ensure_ascii=False)
 
 
