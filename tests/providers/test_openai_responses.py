@@ -240,6 +240,49 @@ class TestConvertMessages:
         }])
         assert items[0]["output"] == '{"key": "value"}'
 
+    def test_tool_message_preserves_image_content(self):
+        _, items = convert_messages([{
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,abc"},
+                    "_meta": {"path": "/private/image.png"},
+                },
+                {"type": "text", "text": "(Image file: image.png)"},
+            ],
+        }])
+
+        assert items[0]["output"] == [
+            {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,abc",
+                "detail": "auto",
+            },
+            {"type": "input_text", "text": "(Image file: image.png)"},
+        ]
+        assert "_meta" not in str(items[0])
+
+    def test_tool_message_preserves_file_content(self):
+        _, items = convert_messages([{
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": [{
+                "type": "input_file",
+                "file_id": "file_123",
+                "filename": "report.pdf",
+                "_meta": {"path": "/private/report.pdf"},
+            }],
+        }])
+
+        assert items[0]["output"] == [{
+            "type": "input_file",
+            "file_id": "file_123",
+            "filename": "report.pdf",
+        }]
+        assert "_meta" not in str(items[0])
+
     def test_non_standard_keys_not_leaked(self):
         """Extra keys on messages must not appear in converted items."""
         _, items = convert_messages([{
