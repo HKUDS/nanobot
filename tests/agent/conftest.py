@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,6 +12,12 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+
+
+@pytest.fixture
+def cmd_python() -> str:
+    """Return the Python command name available to ExecTool tests."""
+    return "python" if os.name == "nt" else "python3"
 
 
 def make_provider(

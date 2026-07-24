@@ -257,7 +257,10 @@ async def test_filesystem_write_tool_full_scope_allows_outside_project(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> None:
+async def test_exec_tool_uses_scope_project_as_default_cwd(
+    tmp_path: Path,
+    cmd_python: str,
+) -> None:
     project = tmp_path / "project"
     project.mkdir()
     tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=False, timeout=5)
@@ -267,7 +270,6 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
         default_restrict_to_workspace=False,
     )
     token = bind_workspace_scope(scope)
-    cmd_python = "python" if os.name == "nt" else "python3"
     try:
         result = await tool.execute(
             command=(
@@ -283,7 +285,10 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Path) -> None:
+async def test_exec_full_scope_allows_explicit_cwd_outside_project(
+    tmp_path: Path,
+    cmd_python: str,
+) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
     project.mkdir()
@@ -295,7 +300,6 @@ async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Pat
         default_restrict_to_workspace=True,
     )
     token = bind_workspace_scope(scope)
-    cmd_python = "python" if os.name == "nt" else "python3"
     try:
         result = await tool.execute(
             command=(
