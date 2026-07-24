@@ -150,6 +150,57 @@ class TestBwrapBackend:
         try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in try_indices}
         assert (str(fake_media), str(fake_media)) in try_pairs
 
+    def test_custom_read_only_binds_use_ro_bind_try(self, tmp_path):
+        ws = tmp_path / "project"
+        tool_bin = tmp_path / "home" / ".local" / "bin"
+
+        result = wrap_command(
+            "bwrap",
+            "uv --version",
+            str(ws),
+            str(ws),
+            sandbox_ro_binds=[str(tool_bin)],
+        )
+        tokens = _parse(result)
+
+        try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
+        try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in try_indices}
+        assert (str(tool_bin.resolve(strict=False)), str(tool_bin.resolve(strict=False))) in try_pairs
+
+    def test_custom_read_write_binds_use_bind_try(self, tmp_path):
+        ws = tmp_path / "project"
+        cache_dir = tmp_path / "cache"
+
+        result = wrap_command(
+            "bwrap",
+            "touch cache/file",
+            str(ws),
+            str(ws),
+            sandbox_rw_binds=[str(cache_dir)],
+        )
+        tokens = _parse(result)
+
+        bind_try_indices = [i for i, t in enumerate(tokens) if t == "--bind-try"]
+        bind_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in bind_try_indices}
+        resolved = str(cache_dir.resolve(strict=False))
+        assert (resolved, resolved) in bind_try_pairs
+
+    def test_custom_relative_bind_paths_are_ignored(self, tmp_path):
+        ws = tmp_path / "project"
+
+        result = wrap_command(
+            "bwrap",
+            "ls",
+            str(ws),
+            str(ws),
+            sandbox_ro_binds=["relative/bin"],
+            sandbox_rw_binds=["relative/cache"],
+        )
+        tokens = _parse(result)
+
+        assert "relative/bin" not in tokens
+        assert "relative/cache" not in tokens
+
 
 class TestUnknownBackend:
     def test_raises_value_error(self, tmp_path):

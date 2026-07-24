@@ -714,6 +714,22 @@ def test_exec_config_timeout_uncapped_and_zero() -> None:
         ExecToolConfig(timeout=-1)
 
 
+def test_exec_config_accepts_bwrap_bind_aliases() -> None:
+    cfg = ExecToolConfig.model_validate(
+        {
+            "sandboxRoBinds": ["/home/user/.local/bin"],
+            "sandboxRwBinds": ["/home/user/.cache/uv"],
+        }
+    )
+
+    dumped = cfg.model_dump(by_alias=True)
+
+    assert cfg.sandbox_ro_binds == ["/home/user/.local/bin"]
+    assert cfg.sandbox_rw_binds == ["/home/user/.cache/uv"]
+    assert dumped["sandboxRoBinds"] == ["/home/user/.local/bin"]
+    assert dumped["sandboxRwBinds"] == ["/home/user/.cache/uv"]
+
+
 def test_resolve_timeout_config_uncapped_and_unlimited() -> None:
     """Config timeout drives the hard timeout uncapped; 0 means no limit (#3595)."""
     assert ExecTool(timeout=3600)._resolve_timeout(None) == 3600
