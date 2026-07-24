@@ -134,6 +134,30 @@ def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None 
     return f"data: {_json.dumps(payload)}\n\n".encode()
 
 
+def _sse_event(event: str, data: dict[str, Any]) -> bytes:
+    """Format a named SSE event."""
+    return f"event: {event}\ndata: {_json.dumps(data, default=str)}\n\n".encode()
+
+
+def _tool_progress_payload(evt: dict[str, Any]) -> dict[str, Any]:
+    phase = evt.get("phase")
+    status = {
+        "start": "running",
+        "end": "completed",
+        "error": "error",
+    }.get(phase, str(phase or "unknown"))
+    payload = {
+        "tool": evt.get("name", ""),
+        "toolCallId": evt.get("call_id", ""),
+        "status": status,
+        "arguments": evt.get("arguments"),
+        "result": evt.get("result"),
+    }
+    if evt.get("error") is not None:
+        payload["error"] = evt.get("error")
+    return payload
+
+
 _SSE_DONE = b"data: [DONE]\n\n"
 
 # ---------------------------------------------------------------------------
@@ -283,7 +307,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         await resp.prepare(request)
 
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         stream_failed = False
         emitted_content = False
 
@@ -291,7 +315,23 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
             nonlocal emitted_content
             if token:
                 emitted_content = True
-            await queue.put(token)
+            await queue.put(_sse_chunk(token, model_name, chunk_id))
+
+        async def _on_progress(
+            _content: str,
+            *,
+            tool_hint: bool = False,
+            tool_events: list[dict[str, Any]] | None = None,
+        ) -> None:
+            if not tool_events:
+                return
+            for event in tool_events:
+                await queue.put(
+                    _sse_event(
+                        "nanobot.tool.progress",
+                        _tool_progress_payload(event),
+                    )
+                )
 
         async def _on_stream_end(*_a: Any, **_kw: Any) -> None:
             # Agent stream-end callbacks mark generation segment boundaries.
@@ -310,6 +350,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                             session_key=session_key,
                             channel="api",
                             chat_id=API_CHAT_ID,
+                            on_progress=_on_progress,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         ),
@@ -318,7 +359,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                     if not emitted_content:
                         response_text = _response_text(response)
                         if response_text.strip():
-                            await queue.put(response_text)
+                            await queue.put(_sse_chunk(response_text, model_name, chunk_id))
             except Exception:
                 stream_failed = True
                 logger.exception("Streaming error for session {}", session_key)
@@ -328,10 +369,10 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         task = asyncio.create_task(_run())
         try:
             while True:
-                token = await queue.get()
-                if token is None:
+                event = await queue.get()
+                if event is None:
                     break
-                await resp.write(_sse_chunk(token, model_name, chunk_id))
+                await resp.write(event)
         finally:
             if not task.done():
                 task.cancel()
