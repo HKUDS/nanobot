@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./images/readme-cover-dark.png">
-  <img alt="nanobot README cover" src="./images/readme-cover-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./images/readme-cover-dark.svg">
+  <img alt="nanobot README cover" src="./images/readme-cover-light.svg">
 </picture>
 
 <div align="center">
