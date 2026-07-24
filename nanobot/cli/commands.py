@@ -6,8 +6,8 @@ import select
 import signal
 import sys
 import time
-from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager, nullcontext, suppress
+from collections.abc import Callable, Iterable
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
 
@@ -1035,22 +1035,6 @@ def _webui_browser_url(config: Config) -> str:
     return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"
 
 
-@contextmanager
-def _webui_dev_server_context(gateway_webui_url: str) -> Iterator[None]:
-    """Run Vite beside the gateway and translate startup failures into CLI errors."""
-    from nanobot.webui.dev import WebUIDevServerError, run_webui_dev_server
-
-    def _print(message: str) -> None:
-        console.print(f"[cyan]{escape(message)}[/cyan]")
-
-    try:
-        with run_webui_dev_server(gateway_webui_url, output=_print):
-            yield
-    except WebUIDevServerError as exc:
-        console.print(f"[red]Error: {escape(str(exc))}[/red]")
-        raise typer.Exit(1) from exc
-
-
 def _webui_display_url(url: str) -> str:
     marker = "bootstrapSecret="
     if marker not in url:
@@ -1243,21 +1227,6 @@ def _attach_to_background_gateway(runtime: Any) -> None:
     console.print("[yellow]Gateway stopped.[/yellow]")
 
 
-def _attach_dev_server_to_existing_gateway(host: str, port: int) -> None:
-    """Keep Vite attached without taking ownership of an existing gateway."""
-    console.print()
-    console.print("[green]Vite is attached to the existing nanobot gateway.[/green]")
-    console.print("[dim]Frontend source changes will hot reload in the browser.[/dim]")
-    console.print("[dim]Press Ctrl+C to stop Vite; the existing gateway will keep running.[/dim]")
-    try:
-        while _gateway_health_ready(host, port):
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Stopping the WebUI dev server; gateway left running.[/yellow]")
-        return
-    console.print("[yellow]The existing gateway stopped; stopping the WebUI dev server.[/yellow]")
-
-
 def _gateway_instance_command(
     subcommand: str,
     *,
@@ -1444,11 +1413,6 @@ def webui(
     ),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    dev: bool = typer.Option(
-        False,
-        "--dev",
-        help="Run the WebUI from source with Vite hot reload",
-    ),
     background: bool = typer.Option(
         False,
         "--background",
@@ -1462,19 +1426,11 @@ def webui(
         help="Apply safe local WebUI defaults without prompting",
     ),
 ) -> None:
-    """Prepare the WebUI, start the gateway, and open the browser workbench."""
+    """Prepare the local WebUI, start the gateway, and open the browser workbench."""
     from nanobot.config.loader import save_config
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
-    from nanobot.webui.dev import webui_dev_browser_url
 
     _ensure_interactive_tty_mode()
-    if dev and background:
-        console.print(
-            "[red]Error: --dev and --background cannot be used together because "
-            "Vite must stay attached to this terminal.[/red]"
-        )
-        raise typer.Exit(1)
-
     config_path = _resolve_webui_config_path(config)
     created_config = not config_path.exists()
     if created_config:
@@ -1503,7 +1459,6 @@ def webui(
     except ValueError as exc:
         console.print(f"[red]Error: invalid WebUI channel config: {exc}[/red]")
         raise typer.Exit(1) from exc
-    browser_url = webui_dev_browser_url(webui_url) if dev else webui_url
 
     if created_config or provider_error or changed_webui or workspace:
         save_config(setup_config, config_path)
@@ -1517,10 +1472,7 @@ def webui(
     effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
 
     console.print()
-    webui_label = "WebUI (Vite)" if dev else "WebUI"
-    console.print(f"{webui_label}: [cyan]{_webui_display_url(browser_url)}[/cyan]")
-    if dev:
-        console.print(f"WebUI gateway: [cyan]{_webui_display_url(webui_url)}[/cyan]")
+    console.print(f"WebUI: [cyan]{_webui_display_url(webui_url)}[/cyan]")
     gateway_health_url = _gateway_health_url(
         runtime_config.gateway.host,
         effective_gateway_port,
@@ -1540,7 +1492,7 @@ def webui(
                 f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
             )
 
-    webui_bundle_mode: BuildMode = "skip" if dev else _webui_build_mode_for_interactive(yes=yes)
+    webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
 
     config_arg = str(config_path)
     workspace_arg = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
@@ -1599,27 +1551,19 @@ def webui(
     webui_ready = _webui_endpoint_reachable(webui_url)
     if gateway_ready and webui_ready:
         console.print("[yellow]Gateway is already running; attaching to the existing WebUI.[/yellow]")
-        if not dev:
+        console.print(
+            "Restart the gateway if you need it to pick up local source changes: "
+            f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
+        )
+        if not no_open:
+            _open_webui_browser(webui_url, wait=False)
+        if runtime.status().running:
+            _attach_to_background_gateway(runtime)
+        else:
             console.print(
-                "Restart the gateway if you need it to pick up local source changes: "
-                f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
+                "[yellow]This gateway is controlled by another foreground command. "
+                "Stop it from that terminal.[/yellow]"
             )
-        dev_server = _webui_dev_server_context(webui_url) if dev else nullcontext()
-        with dev_server:
-            if not no_open:
-                _open_webui_browser(browser_url, wait=False)
-            if dev:
-                _attach_dev_server_to_existing_gateway(
-                    runtime_config.gateway.host,
-                    effective_gateway_port,
-                )
-            elif runtime.status().running:
-                _attach_to_background_gateway(runtime)
-            else:
-                console.print(
-                    "[yellow]This gateway is controlled by another foreground command. "
-                    "Stop it from that terminal.[/yellow]"
-                )
         return
 
     gateway_port_taken = gateway_ready or _tcp_endpoint_reachable(
@@ -1636,16 +1580,12 @@ def webui(
         raise typer.Exit(1)
 
     _print_webui_foreground_lifecycle(attached=False)
-    dev_server = _webui_dev_server_context(webui_url) if dev else nullcontext()
-    with dev_server:
-        _run_gateway(
-            runtime_config,
-            port=effective_gateway_port,
-            open_browser_url=None if no_open else browser_url,
-            open_browser_ready_url=webui_url if dev else None,
-            webui_static_dist=not dev,
-            webui_bundle_mode=webui_bundle_mode,
-        )
+    _run_gateway(
+        runtime_config,
+        port=effective_gateway_port,
+        open_browser_url=None if no_open else webui_url,
+        webui_bundle_mode=webui_bundle_mode,
+    )
 
 
 # ============================================================================
@@ -1658,14 +1598,13 @@ def _run_gateway(
     *,
     port: int | None = None,
     open_browser_url: str | None = None,
-    open_browser_ready_url: str | None = None,
     webui_static_dist: bool = True,
     webui_bundle_mode: BuildMode = "warn",
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
 ) -> None:
-    """Shared gateway runtime; optionally open a browser once its backend is ready."""
+    """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
@@ -2121,8 +2060,7 @@ def _run_gateway(
         import webbrowser
         from urllib.parse import urlparse
 
-        ready_url = open_browser_ready_url or open_browser_url
-        parsed = urlparse(ready_url)
+        parsed = urlparse(open_browser_url)
         target_host = parsed.hostname or config.gateway.host or "127.0.0.1"
         target_port = parsed.port or port
         # Channels start asynchronously; a short poll lets us avoid racing the bind.
@@ -2140,14 +2078,9 @@ def _run_gateway(
                 await asyncio.sleep(0.1)
         try:
             webbrowser.open(open_browser_url)
-            console.print(
-                f"[green]✓[/green] Opened browser at {_webui_display_url(open_browser_url)}"
-            )
+            console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
         except Exception as e:
-            console.print(
-                f"[yellow]Could not open browser ({e}); "
-                f"visit {_webui_display_url(open_browser_url)}[/yellow]"
-            )
+            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
     async def run():
         tasks: list[asyncio.Task] = []

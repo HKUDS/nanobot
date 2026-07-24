@@ -3,7 +3,7 @@ import json
 import re
 import shutil
 import signal
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1821,15 +1821,6 @@ def _patch_gateway_ports_free(monkeypatch) -> None:
     monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_a, **_kw: False)
 
 
-def _patch_webui_dev_server(monkeypatch, seen: dict[str, object]) -> None:
-    @contextmanager
-    def _fake_dev_server(gateway_url: str):
-        seen["dev_gateway_url"] = gateway_url
-        yield
-
-    monkeypatch.setattr("nanobot.cli.commands._webui_dev_server_context", _fake_dev_server)
-
-
 def _patch_cli_command_runtime(
     monkeypatch,
     config: Config,
@@ -2031,8 +2022,6 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert seen["gateway_kwargs"] == {
         "port": 18888,
         "open_browser_url": None,
-        "open_browser_ready_url": None,
-        "webui_static_dist": True,
         "webui_bundle_mode": "auto",
     }
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
@@ -2041,134 +2030,6 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "rerun without --no-open" in compact_output
     assert "nanobot is running in this terminal" in compact_output
     assert "Press Ctrl+C here to stop nanobot" in compact_output
-
-
-def test_webui_dev_rejects_background_before_mutating_config(tmp_path: Path) -> None:
-    config_file = tmp_path / "config.json"
-
-    result = runner.invoke(
-        app,
-        [
-            "webui",
-            "--config",
-            str(config_file),
-            "--dev",
-            "--background",
-            "--yes",
-        ],
-    )
-
-    assert result.exit_code == 1
-    assert "--dev and --background cannot be used together" in result.stdout
-    assert not config_file.exists()
-
-
-def test_webui_dev_runs_vite_against_gateway_without_building_bundle(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    config_file = _write_instance_config(tmp_path)
-    seen: dict[str, object] = {}
-    _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    _patch_gateway_ports_free(monkeypatch)
-    _patch_webui_dev_server(monkeypatch, seen)
-
-    def _fake_run_gateway(config: Config, **kwargs) -> None:
-        seen["gateway_config"] = config
-        seen["gateway_kwargs"] = kwargs
-
-    monkeypatch.setattr("nanobot.cli.commands._run_gateway", _fake_run_gateway)
-
-    result = runner.invoke(
-        app,
-        [
-            "webui",
-            "--config",
-            str(config_file),
-            "--port",
-            "8899",
-            "--gateway-port",
-            "18888",
-            "--dev",
-            "--yes",
-        ],
-    )
-
-    assert result.exit_code == 0
-    gateway_url = seen["dev_gateway_url"]
-    assert isinstance(gateway_url, str)
-    assert gateway_url.startswith("http://127.0.0.1:8899/#/?bootstrapSecret=")
-    kwargs = seen["gateway_kwargs"]
-    assert isinstance(kwargs, dict)
-    browser_url = kwargs["open_browser_url"]
-    assert isinstance(browser_url, str)
-    assert browser_url.startswith("http://127.0.0.1:5173/#/?bootstrapSecret=")
-    ready_url = kwargs["open_browser_ready_url"]
-    assert ready_url == gateway_url
-    assert kwargs["port"] == 18888
-    assert kwargs["webui_static_dist"] is False
-    assert kwargs["webui_bundle_mode"] == "skip"
-    compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
-    assert "WebUI (Vite): http://127.0.0.1:5173/#/?bootstrapSecret=<redacted>" in compact_output
-    assert "WebUI gateway: http://127.0.0.1:8899/#/?bootstrapSecret=<redacted>" in compact_output
-
-
-def test_webui_dev_reuses_existing_gateway_without_taking_ownership(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    config_file = _write_instance_config(tmp_path)
-    seen: dict[str, object] = {}
-    _patch_webui_provider_ready(monkeypatch)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._gateway_health_ready",
-        lambda *_args, **_kwargs: True,
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._webui_endpoint_reachable",
-        lambda *_args, **_kwargs: True,
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._run_gateway",
-        lambda *_args, **_kwargs: pytest.fail("existing gateway should be reused"),
-    )
-
-    _patch_webui_dev_server(monkeypatch, seen)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._open_webui_browser",
-        lambda url, **kwargs: seen.update({"opened_url": url, "open_kwargs": kwargs}),
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._attach_dev_server_to_existing_gateway",
-        lambda host, port: seen.update({"attached_host": host, "attached_port": port}),
-    )
-
-    class _FakeRuntime:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def status(self):
-            pytest.fail("development mode must not take ownership of the existing gateway")
-
-    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", _FakeRuntime)
-
-    result = runner.invoke(
-        app,
-        ["webui", "--config", str(config_file), "--dev", "--yes"],
-    )
-
-    assert result.exit_code == 0
-    assert seen["attached_host"] == "127.0.0.1"
-    assert seen["attached_port"] == 18790
-    assert seen["open_kwargs"] == {"wait": False}
-    opened_url = seen["opened_url"]
-    assert isinstance(opened_url, str)
-    assert opened_url.startswith("http://127.0.0.1:5173/#/?bootstrapSecret=")
-    gateway_url = seen["dev_gateway_url"]
-    assert isinstance(gateway_url, str)
-    assert gateway_url.startswith("http://127.0.0.1:8765/#/?bootstrapSecret=")
 
 
 def test_webui_yes_refuses_missing_provider_setup(monkeypatch, tmp_path: Path) -> None:
