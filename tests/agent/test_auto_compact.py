@@ -11,7 +11,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, Config
 from nanobot.providers.base import LLMResponse
 
 
@@ -180,10 +180,62 @@ class TestSessionTTLConfig:
         assert data["idleCompactAfterMinutes"] == 30
         assert "sessionTtlMinutes" not in data
 
+    def test_idle_scan_interval_defaults_to_zero(self):
+        """The default should preserve a scan on every idle tick."""
+        defaults = AgentDefaults()
+        assert defaults.idle_compact_check_interval_seconds == 0
+
+    def test_idle_scan_interval_uses_camel_case_config_key(self):
+        """The JSON config should use the standard camelCase alias."""
+        defaults = AgentDefaults.model_validate({"idleCompactCheckIntervalSeconds": 10})
+        assert defaults.idle_compact_check_interval_seconds == 10
+        data = defaults.model_dump(mode="json", by_alias=True)
+        assert data["idleCompactCheckIntervalSeconds"] == 10
+
     def test_session_file_cap_is_internal_constant(self):
         """Session file cap should remain an internal constant, not a config field."""
         from nanobot.session.manager import FILE_MAX_MESSAGES
         assert FILE_MAX_MESSAGES == 2000
+
+
+class TestIdleScanThrottling:
+    """Test scheduling of full idle-session scans."""
+
+    def test_configured_idle_scan_interval_throttles_checks(self, tmp_path, monkeypatch):
+        """The configured interval should reach the loop and gate session scans."""
+        ticks = iter((1_000.0, 1_000.0, 1_009.999, 1_010.0))
+        monkeypatch.setattr("nanobot.agent.loop.time.monotonic", lambda: next(ticks))
+        config = Config.model_validate({
+            "agents": {
+                "defaults": {
+                    "workspace": str(tmp_path),
+                    "idleCompactCheckIntervalSeconds": 10,
+                }
+            }
+        })
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop.from_config(config, provider=provider)
+        loop.auto_compact.check_expired = MagicMock()
+
+        loop._check_expired_sessions_if_due()
+        loop.auto_compact.check_expired.assert_called_once()
+        loop._check_expired_sessions_if_due()
+        loop.auto_compact.check_expired.assert_called_once()
+        loop._check_expired_sessions_if_due()
+
+        assert loop.auto_compact.check_expired.call_count == 2
+
+    def test_default_idle_scan_interval_checks_every_tick(self, tmp_path, monkeypatch):
+        """The zero default should leave each idle tick eligible to scan."""
+        monkeypatch.setattr("nanobot.agent.loop.time.monotonic", lambda: 1_000.0)
+        loop = _make_loop(tmp_path)
+        loop.auto_compact.check_expired = MagicMock()
+
+        loop._check_expired_sessions_if_due()
+        loop._check_expired_sessions_if_due()
+
+        assert loop.auto_compact.check_expired.call_count == 2
 
 
 class TestAgentLoopTTLParam:

@@ -2155,7 +2155,8 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 {
   "agents": {
     "defaults": {
-      "idleCompactAfterMinutes": 15
+      "idleCompactAfterMinutes": 15,
+      "idleCompactCheckIntervalSeconds": 0
     }
   }
 }
@@ -2164,11 +2165,12 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.idleCompactAfterMinutes` | `15` | Minutes of idle time before auto-compaction starts. Set to `0` to disable. The default is close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+| `agents.defaults.idleCompactCheckIntervalSeconds` | `0` | Minimum number of seconds between scans for idle sessions. |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 
 How it works:
-1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration.
+1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration, subject to the minimum interval set by `idleCompactCheckIntervalSeconds`.
 2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
 3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
 4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
