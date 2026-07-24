@@ -212,6 +212,22 @@ def make_provider(
     return provider
 
 
+def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> ProviderSnapshot:
+    """Build a non-networking runtime so the WebUI can collect first-time setup."""
+    from nanobot.providers.unconfigured_provider import UnconfiguredProvider
+
+    preset = config.resolve_preset()
+    provider = UnconfiguredProvider(setup_error, preset.model)
+    provider.generation = preset.to_generation_settings()
+    return ProviderSnapshot(
+        provider=provider,
+        model=preset.model,
+        context_window_tokens=preset.context_window_tokens,
+        signature=("unconfigured", setup_error, preset.model),
+        generation=provider.generation,
+    )
+
+
 def provider_signature(
     config: Config,
     *,

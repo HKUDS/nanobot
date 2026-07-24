@@ -34,15 +34,15 @@ The installer chooses an active virtual environment, `uv`, `pipx`, or a managed 
 
 If you prefer to inspect the scripts first, open [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1).
 
-## 2. Complete Quick Start
+## 2. Configure Your Model
 
-The installer opens `nanobot onboard --wizard`. Choose **Quick Start** and follow the prompts:
+On a local desktop, the installer opens the WebUI. Go to **Settings → Models** to choose a provider, enter its credentials, and select a model. The gateway stays available while this setup is incomplete, but chat will ask you to finish model setup first.
 
-1. Choose the provider or endpoint that owns your credential.
-2. Enter its API key or base URL when requested.
-3. Enter a model ID that the same provider can run.
-4. Let Quick Start enable the local WebUI.
-5. Set a WebUI password and review the summary.
+In a headless or terminal-only environment, run the terminal wizard instead:
+
+```bash
+nanobot onboard --wizard
+```
 
 Quick Start creates or updates:
 
@@ -51,13 +51,7 @@ Quick Start creates or updates:
 | `~/.nanobot/config.json` | Provider, model, WebUI, channel, tool, and runtime settings |
 | `~/.nanobot/workspace/` | Sessions, memory, skills, automations, and generated files |
 
-If the installer did not open the wizard, run it yourself:
-
-```bash
-nanobot onboard --wizard
-```
-
-Current source versions also provide `nanobot webui`. When run without a usable model, that launcher offers the same Quick Start flow before starting the browser.
+If the installer did not open the browser, run `nanobot webui`. Use `nanobot onboard --wizard` only for terminal-only setup.
 
 ## 3. Check the Setup
 
@@ -76,10 +70,10 @@ Most other providers can say `not set`. This command validates local setup but d
 ## 4. Get the First Reply
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Quick Start has already prepared the local WebSocket channel. Leave the gateway terminal open and visit `http://127.0.0.1:8765`; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. On current source versions, you can run `nanobot webui` instead to perform the local WebUI checks, start the gateway, and open the browser automatically.
+Quick Start has already prepared the local WebSocket channel. This starts the gateway and opens the browser; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. In a headless or terminal-only environment, run `nanobot gateway` instead and connect through the deployment's chosen access path.
 
 Send:
 

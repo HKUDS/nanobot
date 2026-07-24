@@ -133,6 +133,18 @@ function Get-NanobotCommand {
     }
 }
 
+function Test-BrowserSession {
+    if ($env:SSH_CONNECTION -or $env:SSH_TTY -or -not [Environment]::UserInteractive) {
+        return $false
+    }
+
+    $CurrentSessionId = (Get-Process -Id $PID).SessionId
+    return @(
+        Get-Process -Name explorer -ErrorAction SilentlyContinue |
+            Where-Object { $_.SessionId -eq $CurrentSessionId }
+    ).Count -gt 0
+}
+
 function Install-WithActivePython {
     Write-Info "Detected an active virtual environment. Installing into it..."
     Ensure-Pip $Python
@@ -293,6 +305,16 @@ if ($LASTEXITCODE -ne 0) {
     Fail "nanobot was installed, but the command could not be started."
 }
 
+if (Test-BrowserSession) {
+    Write-Info "Starting nanobot WebUI..."
+    Write-Info "Configure your first provider and model in Settings > Models."
+    Invoke-Nanobot @("webui", "--yes")
+    if ($LASTEXITCODE -ne 0) {
+        Fail "WebUI did not start."
+    }
+    return
+}
+
 if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
     Write-Info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
     Write-Info "Run this later: $(Get-NanobotCommand) onboard --wizard"
@@ -305,4 +327,5 @@ if ($LASTEXITCODE -ne 0) {
     Fail "Setup wizard did not complete."
 }
 
-Write-Info "Done. Try: $(Get-NanobotCommand) agent -m `"Hello!`""
+Write-Info "Done. Start nanobot: $(Get-NanobotCommand) gateway"
+Write-Info "For a terminal chat, run: $(Get-NanobotCommand) agent"

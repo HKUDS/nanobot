@@ -104,6 +104,24 @@ nanobot_try_command() {
   esac
 }
 
+has_browser_session() {
+  # A remote or headless terminal should keep the service-oriented gateway
+  # command. Local macOS terminals can open the system browser; Linux desktop
+  # sessions expose a display socket.
+  if [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
+    return 1
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      return 0
+      ;;
+    *)
+      [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]
+      ;;
+  esac
+}
+
 install_with_active_python() {
   info "Detected an active virtual environment. Installing into it..."
   ensure_pip "$python_bin" || return 1
@@ -263,6 +281,13 @@ fi
 info "Installed nanobot:"
 run_nanobot --version
 
+if has_browser_session; then
+  info "Starting nanobot WebUI..."
+  info "Configure your first provider and model in Settings > Models."
+  run_nanobot webui --yes
+  exit 0
+fi
+
 if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
   info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
   info "Run this later: $(nanobot_try_command) onboard --wizard"
@@ -280,4 +305,5 @@ else
   info "Run this later: $(nanobot_try_command) onboard --wizard"
 fi
 
-info "Done. Try: $(nanobot_try_command) agent -m \"Hello!\""
+info "Done. Start nanobot: $(nanobot_try_command) gateway"
+info "For a terminal chat, run: $(nanobot_try_command) agent"

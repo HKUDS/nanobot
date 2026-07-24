@@ -113,10 +113,10 @@ If the terminal cannot find `nanobot`, take the exact command printed by the ins
 Run:
 
 ```bash
-nanobot gateway
+nanobot webui
 ```
 
-Leave the terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password from the wizard if the browser asks for it. Current source versions also provide `nanobot webui`, which starts the gateway and opens the browser automatically.
+This starts the gateway and opens the browser. If this is your first setup, open **Settings → Models** and add your provider and model before sending a message. The browser workbench is for local desktop sessions; in a headless or terminal-only environment, use `nanobot gateway` instead.
 
 Send this message:
 

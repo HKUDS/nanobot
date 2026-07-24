@@ -1443,10 +1443,14 @@ def webui(
 
     provider_error = _provider_setup_error(setup_config)
     if provider_error:
-        console.print(f"[dim]Provider check: {provider_error}[/dim]")
-        setup_config = _run_quick_start_for_webui(setup_config, yes=yes)
-        if workspace:
-            setup_config.agents.defaults.workspace = workspace
+        console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
+        console.print("Configure a provider and model in WebUI Settings → Models.")
+        if background:
+            console.print(
+                "[red]First-time WebUI setup must run in the foreground. "
+                "Run `nanobot webui` without --background.[/red]"
+            )
+            raise typer.Exit(1)
 
     try:
         changed_webui, generated_bootstrap_secret = _ensure_local_webui_channel(
@@ -1585,6 +1589,7 @@ def webui(
         port=effective_gateway_port,
         open_browser_url=None if no_open else webui_url,
         webui_bundle_mode=webui_bundle_mode,
+        unconfigured_provider_error=provider_error,
     )
 
 
@@ -1603,6 +1608,7 @@ def _run_gateway(
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
+    unconfigured_provider_error: str | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.model_presets import load_model_preset_catalog
@@ -1616,7 +1622,11 @@ def _run_gateway(
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
-    from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
+    from nanobot.providers.factory import (
+        build_provider_snapshot,
+        build_unconfigured_provider_snapshot,
+        load_provider_snapshot,
+    )
     from nanobot.providers.fallback_provider import FallbackProvider
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
@@ -1664,13 +1674,20 @@ def _run_gateway(
         return snapshot
 
     def _load_gateway_provider_snapshot(*args: Any, **kwargs: Any):
-        return _observe_fallback_models(load_provider_snapshot(*args, **kwargs))
+        try:
+            return _observe_fallback_models(load_provider_snapshot(*args, **kwargs))
+        except ValueError as exc:
+            if unconfigured_provider_error is None:
+                raise
+            return build_unconfigured_provider_snapshot(config, str(exc))
 
     try:
         provider_snapshot = _observe_fallback_models(build_provider_snapshot(config))
     except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(1) from exc
+        if unconfigured_provider_error is None:
+            console.print(f"[red]Error: {exc}[/red]")
+            raise typer.Exit(1) from exc
+        provider_snapshot = build_unconfigured_provider_snapshot(config, str(exc))
     session_manager = SessionManager(config.workspace_path)
 
     # Self-heal the gateway state file with the current PID after any restart.

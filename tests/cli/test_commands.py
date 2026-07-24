@@ -2023,6 +2023,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
         "port": 18888,
         "open_browser_url": None,
         "webui_bundle_mode": "auto",
+        "unconfigured_provider_error": None,
     }
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
     assert "bootstrap secret was generated" in compact_output
@@ -2032,19 +2033,27 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert "Press Ctrl+C here to stop nanobot" in compact_output
 
 
-def test_webui_yes_refuses_missing_provider_setup(monkeypatch, tmp_path: Path) -> None:
+def test_webui_yes_starts_settings_mode_without_provider_setup(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "config.json"
+    seen: dict[str, object] = {}
 
-    def _missing_provider(_config: Config, **_kwargs) -> ProviderSnapshot:
-        raise ValueError("No API key configured for provider 'custom'.")
+    monkeypatch.setattr(
+        "nanobot.cli.commands._provider_setup_error",
+        lambda _config: "No API key configured for provider 'custom'.",
+    )
+    _patch_gateway_ports_free(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._run_gateway",
+        lambda config, **kwargs: seen.update(config=config, **kwargs),
+    )
 
-    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _missing_provider)
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
 
-    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes"])
-
-    assert result.exit_code == 1
-    assert "provider/model setup is incomplete" in result.stdout
-    assert not config_file.exists()
+    assert result.exit_code == 0
+    assert config_file.exists()
+    assert seen["unconfigured_provider_error"] == "No API key configured for provider 'custom'."
+    assert "Configure a provider and model in WebUI Settings → Models." in result.stdout
 
 
 def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path: Path) -> None:
