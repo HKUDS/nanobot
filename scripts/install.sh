@@ -244,6 +244,9 @@ if [ "$dry_run" = "1" ]; then
   fi
   if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
     info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
+  elif has_browser_session; then
+    info "Dry run: would start the WebUI when supported by the installed version."
+    info "Dry run: would fall back to the setup wizard for older releases."
   else
     info "Dry run: would run the setup wizard."
   fi
@@ -281,17 +284,21 @@ fi
 info "Installed nanobot:"
 run_nanobot --version
 
-if has_browser_session; then
-  info "Starting nanobot WebUI..."
-  info "Configure your first provider and model in Settings > Models."
-  run_nanobot webui --yes
-  exit 0
-fi
-
 if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
   info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
   info "Run this later: $(nanobot_try_command) onboard --wizard"
   exit 0
+fi
+
+if has_browser_session; then
+  if run_nanobot webui --help >/dev/null 2>&1; then
+    info "Starting nanobot WebUI..."
+    info "Configure your first provider and model in Settings > Models."
+    run_nanobot webui --yes
+    exit 0
+  fi
+  info "The installed release does not support nanobot webui yet."
+  info "Falling back to the setup wizard..."
 fi
 
 if [ -t 0 ]; then

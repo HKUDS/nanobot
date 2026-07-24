@@ -36,7 +36,7 @@ If you prefer to inspect the scripts first, open [`install.sh`](../scripts/insta
 
 ## 2. Configure Your Model
 
-On a local desktop, the installer opens the WebUI. Go to **Settings → Models** to choose a provider, enter its credentials, and select a model. While this setup is incomplete, nanobot serves only the local WebUI; chat will ask you to finish model setup first.
+On a local desktop, the installer opens the WebUI when the installed release supports it. Older releases fall back to the terminal wizard. In the WebUI, go to **Settings → Models** to choose a provider, enter its credentials, and select a model. While this setup is incomplete, nanobot serves only the local WebUI; chat will ask you to finish model setup first.
 
 In a headless or terminal-only environment, run the terminal wizard instead:
 
@@ -74,6 +74,9 @@ nanobot webui
 ```
 
 Quick Start has already prepared the local WebSocket channel. This starts the gateway and opens the browser; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. In a headless or terminal-only environment, run `nanobot gateway` instead and connect through the deployment's chosen access path.
+
+If your installed release does not recognize `nanobot webui`, run `nanobot gateway`
+and open `http://127.0.0.1:8765` manually.
 
 Send:
 

@@ -265,6 +265,9 @@ if ($DryRun) {
     }
     if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
         Write-Info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
+    } elseif (Test-BrowserSession) {
+        Write-Info "Dry run: would start the WebUI when supported by the installed version."
+        Write-Info "Dry run: would fall back to the setup wizard for older releases."
     } else {
         Write-Info "Dry run: would run the setup wizard."
     }
@@ -305,20 +308,25 @@ if ($LASTEXITCODE -ne 0) {
     Fail "nanobot was installed, but the command could not be started."
 }
 
-if (Test-BrowserSession) {
-    Write-Info "Starting nanobot WebUI..."
-    Write-Info "Configure your first provider and model in Settings > Models."
-    Invoke-Nanobot @("webui", "--yes")
-    if ($LASTEXITCODE -ne 0) {
-        Fail "WebUI did not start."
-    }
-    return
-}
-
 if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
     Write-Info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
     Write-Info "Run this later: $(Get-NanobotCommand) onboard --wizard"
     return
+}
+
+if (Test-BrowserSession) {
+    Invoke-Nanobot @("webui", "--help") *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Info "Starting nanobot WebUI..."
+        Write-Info "Configure your first provider and model in Settings > Models."
+        Invoke-Nanobot @("webui", "--yes")
+        if ($LASTEXITCODE -ne 0) {
+            Fail "WebUI did not start."
+        }
+        return
+    }
+    Write-Info "The installed release does not support nanobot webui yet."
+    Write-Info "Falling back to the setup wizard..."
 }
 
 Write-Info "Starting setup wizard..."
