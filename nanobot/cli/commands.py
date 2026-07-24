@@ -622,6 +622,32 @@ def main(
 
 
 # ============================================================================
+# Doctor / Diagnostics
+# ============================================================================
+
+
+@app.command()
+def doctor(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed check timings"),
+):
+    """Run health checks on configuration, providers, network, and workspace."""
+    import asyncio
+
+    from nanobot.cli.doctor import print_report, run_doctor
+
+    config_path = Path(config).expanduser().resolve() if config else None
+
+    async def _run():
+        report = await run_doctor(config_path)
+        print_report(report, console)
+        if not report.all_pass:
+            raise typer.Exit(1)
+
+    asyncio.run(_run())
+
+
+# ============================================================================
 # Onboard / Setup
 # ============================================================================
 
