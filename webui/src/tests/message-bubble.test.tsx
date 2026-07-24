@@ -112,6 +112,31 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
+  it("styles only generated quoted context in user messages", () => {
+    const message: UIMessage = {
+      id: "u-quote",
+      role: "user",
+      content: "> [!QUOTE]\n> selected assistant excerpt\n\nWhat about this?",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    const quote = screen.getByLabelText("Quoted context");
+    expect(quote).toHaveTextContent("selected assistant excerpt");
+    expect(screen.getByText("What about this?")).toBeInTheDocument();
+
+    rerender(
+      <MessageBubble
+        message={{
+          ...message,
+          content: "> manually typed quote\n\nWhat about this?",
+        }}
+      />,
+    );
+    expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+  });
+
   it("copies user messages from the shared message action", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

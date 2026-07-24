@@ -12,6 +12,7 @@ import {
   Clock3,
   Copy,
   ImageIcon,
+  Quote,
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -33,6 +34,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatTurnLatency } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
+import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   CliAppInfo,
   McpPresetInfo,
@@ -158,20 +160,23 @@ export function MessageBubble({
     const media = message.media ?? [];
     const hasImages = images.length > 0;
     const hasMedia = media.length > 0;
-    const hasText = message.content.trim().length > 0;
-    const slashCommand = matchingSlashCommand(message.content, slashCommands);
+    const parsedMessage = parseQuotedUserMessage(message.content);
+    const userContent = parsedMessage.content;
+    const hasText = userContent.trim().length > 0;
+    const quotedContext = parsedMessage.quotedContext;
+    const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const messageText = slashCommand ? (
       <>
         <SlashCommandText command={slashCommand.command} />
         <UserMessageText
-          text={message.content.slice(slashCommand.command.length)}
+          text={userContent.slice(slashCommand.command.length)}
           cliApps={mentionCliApps}
           mcpPresets={mentionMcpPresets}
         />
       </>
     ) : (
       <UserMessageText
-        text={message.content}
+        text={userContent}
         cliApps={mentionCliApps}
         mcpPresets={mentionMcpPresets}
       />
@@ -186,6 +191,12 @@ export function MessageBubble({
         {hasImages ? <UserImages images={images} align="right" /> : null}
         {!hasImages && hasMedia ? (
           <MessageMedia media={media} align="right" />
+        ) : null}
+        {quotedContext ? (
+          <UserQuotedContext
+            text={quotedContext}
+            label={t("thread.composer.quotedContext")}
+          />
         ) : null}
         {hasText ? (
           <p
@@ -302,6 +313,29 @@ export function MessageBubble({
         </>
       )}
     </div>
+  );
+}
+
+function UserQuotedContext({ text, label }: { text: string; label: string }) {
+  return (
+    <blockquote
+      className={cn(
+        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-[14px]",
+        "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
+      )}
+      aria-label={label}
+      title={text}
+    >
+      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+      <div className="min-w-0">
+        <span className="block text-[11px]/[1.3] font-medium text-muted-foreground/70">
+          {label}
+        </span>
+        <p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
+          {text}
+        </p>
+      </div>
+    </blockquote>
   );
 }
 

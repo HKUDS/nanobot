@@ -10,6 +10,7 @@ import {
 } from "@/lib/tool-traces";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
+import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   InboundEvent,
   OutboundCliAppMention,
@@ -1184,6 +1185,9 @@ export function useNanobotStream(
       const sideChannel = options?.sideChannel === true;
       const finalizeActiveTurn = options?.finalizeActiveTurn === true;
       const continueActiveTurn = options?.continueActiveTurn === true;
+      const outboundContent = options?.quotedContext
+        ? formatQuotedUserMessage(content, options.quotedContext)
+        : content;
       flushPendingStreamEvents();
       if (finalizeActiveTurn) {
         cancelStreamEndTimer();
@@ -1211,7 +1215,7 @@ export function useNanobotStream(
           {
             id: crypto.randomUUID(),
             role: "user",
-            content,
+            content: outboundContent,
             turnId,
             turnPhase: "user",
             turnSeq: 0,
@@ -1225,10 +1229,11 @@ export function useNanobotStream(
       if (!sideChannel) setIsStreaming(true);
       const wireMedia = hasAttachments ? images!.map((i) => i.media) : undefined;
       const wireOptions = { ...options, turnId };
+      delete wireOptions.quotedContext;
       delete wireOptions.sideChannel;
       delete wireOptions.finalizeActiveTurn;
       delete wireOptions.continueActiveTurn;
-      client.sendMessage(chatId, content, wireMedia, wireOptions);
+      client.sendMessage(chatId, outboundContent, wireMedia, wireOptions);
     },
     [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );

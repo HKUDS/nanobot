@@ -95,6 +95,7 @@ import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
+import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -1466,7 +1467,7 @@ export function ThreadComposer({
   const queueGuidancePrompt = useCallback(() => {
     const text = value.trim();
     if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
-    if (utf8Bytes(text) > maxTextBytes) {
+    if (utf8Bytes(formatQuotedUserMessage(text, normalizedQuotedContext)) > maxTextBytes) {
       setInlineError(textTooLargeMessage());
       return;
     }
@@ -1608,7 +1609,7 @@ export function ThreadComposer({
     if (!canSend) return;
     const trimmed = value.trim();
     const content = trimmed;
-    if (utf8Bytes(content) > maxTextBytes) {
+    if (utf8Bytes(formatQuotedUserMessage(content, normalizedQuotedContext)) > maxTextBytes) {
       setInlineError(textTooLargeMessage());
       return;
     }

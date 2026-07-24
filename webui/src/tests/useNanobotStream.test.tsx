@@ -1600,6 +1600,25 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("inlines quoted context into the optimistic and outbound user message", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-quote", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      result.current.send("What about this?", undefined, {
+        quotedContext: "selected assistant excerpt",
+      });
+    });
+
+    const expectedContent = "> [!QUOTE]\n> selected assistant excerpt\n\nWhat about this?";
+    expect(result.current.messages[0].content).toBe(expectedContent);
+    const outbound = fake.client.sendMessage.mock.calls.at(-1)!;
+    expect(outbound[1]).toBe(expectedContent);
+    expect(outbound[3]).not.toHaveProperty("quotedContext");
+  });
+
   it("attaches assistant media_urls to complete messages", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-m", EMPTY_MESSAGES), {
