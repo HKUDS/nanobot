@@ -7,7 +7,6 @@ import json
 import os
 import re
 import threading
-import weakref
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -760,13 +759,15 @@ class Consolidator:
         self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
-        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
-            weakref.WeakValueDictionary()
-        )
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
-        return self._locks.setdefault(session_key, asyncio.Lock())
+        lock = self._locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[session_key] = lock
+        return lock
 
     def pick_consolidation_boundary(
         self,

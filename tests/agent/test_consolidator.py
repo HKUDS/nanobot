@@ -1,5 +1,7 @@
 """Tests for the lightweight Consolidator — append-only to HISTORY.md."""
 
+import gc
+import weakref
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -72,6 +74,18 @@ def _tool_round(call_id: str) -> list[dict]:
         },
         {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
     ]
+
+
+def test_get_lock_persists_lock_reference(consolidator):
+    """Per-session locks persist across GC cycles so the same lock is always returned for a given session key."""
+    lock = consolidator.get_lock("cli:lock")
+    lock_ref = weakref.ref(lock)
+    assert consolidator.get_lock("cli:lock") is lock
+
+    del lock
+    gc.collect()
+
+    assert consolidator.get_lock("cli:lock") is lock_ref()
 
 
 class TestConsolidatorSummarize:
