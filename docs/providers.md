@@ -302,6 +302,37 @@ If your custom endpoint documents a nonstandard thinking toggle, set `providers.
 
 This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
 
+### ModelScope
+
+ModelScope (魔搭社区) exposes an OpenAI-compatible LLM endpoint plus a separate async image generation API. Both are covered by the built-in `modelscope` provider.
+
+```json
+{
+  "providers": {
+    "modelscope": {
+      "apiKey": "${MODELSCOPE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "modelscope",
+      "model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Use the model ID exactly as ModelScope publishes it (usually `Namespace/model-name`). The default base URL is `https://api-inference.modelscope.cn/v1`; override with `providers.modelscope.apiBase` only if your account routes through a different host. Model IDs may optionally be prefixed with `modelscope/`; the prefix is stripped before the request is sent.
+
+ModelScope also provides image generation through the same provider key. Reference it as the image model in your agent config, for example `imageModel: "modelscope/MusePublic/489_ckpt_FLUX_1"`; nanobot handles the async submit/poll pattern automatically.
+
 ### Ollama
 
 Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
