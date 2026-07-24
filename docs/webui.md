@@ -1,8 +1,8 @@
 # Nanobot WebUI: Browser Workbench for Self-Hosted AI Agents
 
-<!-- Meta description: Run nanobot from a browser WebUI with persistent chat sessions, visible tool activity, workspace controls, Apps, MCP presets, Skills, settings, and Automations. -->
+<!-- Meta description: Run nanobot from a browser WebUI with persistent topics, visible tool activity, workspace controls, Apps, MCP presets, Skills, settings, and Automations. -->
 
-The WebUI is nanobot's browser workbench for persistent chat sessions, visible
+The WebUI is nanobot's browser workbench for persistent topics, visible
 agent activity, workspace controls, Apps, Skills, settings, and Automations in
 one place.
 
@@ -57,9 +57,9 @@ gateway health endpoint, `18790` by default, is not the browser UI.
 
 Use the WebUI as the primary setup surface after Quick Start:
 
-1. Send `Hello!` in a new chat to prove the selected model works.
+1. Send `Hello!` in a new topic to prove the selected model works.
 2. Open **Settings → Models** and confirm the active model preset.
-3. Start a separate chat before project work, then choose the intended workspace and access mode.
+3. Start a separate topic before project work, then choose the intended workspace and access mode.
 4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
 5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
 
@@ -69,7 +69,7 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 
 | Area | Use it for |
 |---|---|
-| Chat | Start, switch, search, fork, and delete browser sessions |
+| Topics | Start, switch, search, fork, and delete browser topics |
 | Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
@@ -80,10 +80,10 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
-## Chat Workspace
+## Topic Workspace
 
-The sidebar is the session switcher. A session keeps its own history, title,
-workspace metadata, and linked automations. Use a new session when you want a
+The sidebar is the topic switcher. Each topic keeps its own history, title,
+workspace selection, and linked automations. Use a new topic when you want a
 separate context; use fork when you want to continue from an existing point
 without changing the original thread.
 
@@ -123,7 +123,7 @@ directory.
 The access control in the composer controls the local capability level for the
 chat. It does not bypass your gateway, provider, shell sandbox, or operating
 system configuration; it only selects among the capabilities that are already
-available to this WebUI session.
+available to the current topic.
 
 In Restricted mode, ordinary file and shell work stays inside the selected
 project. To preserve agent continuity, filesystem/search tools receive narrow,
@@ -133,7 +133,7 @@ neighboring memory or profile files, and it does not allow writes outside the
 selected project. These tool exceptions do not broaden the browser's file
 preview boundary.
 
-Remote WebUI sessions may reduce access for the current workspace. Selecting a
+Remote WebUI connections may reduce access for the current workspace. Selecting a
 different workspace or enabling Full Access remains limited to local and native
 clients.
 
@@ -199,10 +199,10 @@ to perform that task.
 
 ## Automations
 
-Automations are agent turns that run later in a linked chat/session. They should
-be created from the chat, channel, or session where they are supposed to run so
-nanobot keeps the correct target context. When an automation runs, it normally
-delivers the result back to that linked chat.
+Automations are agent turns that run later in a linked topic. Create them from
+the topic or channel where they are supposed to run so nanobot keeps the
+correct target context. When an automation runs, it normally delivers the
+result back to that topic.
 
 For the full automation model, creation flow, trigger CLI usage, and delivery
 semantics, see [`automations.md`](./automations.md).
@@ -221,7 +221,7 @@ instead of creating a chat automation.
 Use the Automations view to:
 
 - Filter by all, active, paused, needs-attention, or system jobs.
-- Search by task name, message, trigger command, linked chat, schedule, or status.
+- Search by task name, message, trigger command, linked topic, schedule, or status.
 - Sort by next run, last run, updated time, or name.
 - Run scheduled automations now.
 - Pause or resume, rename, or delete user-created automations.
@@ -232,9 +232,9 @@ Search accepts plain text and field filters such as `name:backup`,
 `chat:WeChat`, `schedule:09:30`, `cron:"0 23 * * *"`, `trigger`, and
 `status:paused`.
 
-An automation without a linked chat cannot be enabled or run from the WebUI,
+An automation without a linked topic cannot be enabled or run from the WebUI,
 because nanobot would not know where to deliver the scheduled turn. Recreate it
-from the target chat or channel so the automation has complete context.
+from the target topic or channel so the automation has complete context.
 
 Local triggers do not have a WebUI "Run now" action because each run needs a
 message. Use the copied `nanobot trigger ...` command and replace `"message"`

@@ -142,7 +142,7 @@ describe("ChatList", () => {
     expect(screen.queryByText("Today")).not.toBeInTheDocument();
   });
 
-  it("keeps default workspace chats in the Chats section instead of a project folder", () => {
+  it("keeps default workspace topics in the Topics section instead of a project folder", () => {
     const sessions = [
       session({
         chatId: "default",
@@ -184,7 +184,7 @@ describe("ChatList", () => {
     expect(screen.getByRole("region", { name: "nanobot" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "workspace" })).not.toBeInTheDocument();
 
-    const chatsSection = screen.getByRole("region", { name: "Chats" });
+    const chatsSection = screen.getByRole("region", { name: "Topics" });
     expect(within(chatsSection).getByText("Default workspace chat")).toBeInTheDocument();
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
@@ -229,13 +229,13 @@ describe("ChatList", () => {
     expect(within(projectSection).queryByText("Alpha task")).not.toBeInTheDocument();
 
     fireEvent.click(
-      within(projectSection).getByRole("button", { name: "Start a new chat in Photos" }),
+      within(projectSection).getByRole("button", { name: "Start a new topic in Photos" }),
     );
     expect(onNewChatInProject).toHaveBeenCalledWith("/Users/me/nanobot", "Photos");
     expect(onToggleGroup).toHaveBeenCalledTimes(1);
 
     fireEvent.pointerDown(
-      within(projectSection).getByLabelText("Chat actions for Photos"),
+      within(projectSection).getByLabelText("Topic actions for Photos"),
       { button: 0 },
     );
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
@@ -300,13 +300,13 @@ describe("ChatList", () => {
     };
 
     const { rerender } = render(<ChatList {...baseProps} />);
-    const chatsSection = screen.getByRole("region", { name: "Chats" });
+    const chatsSection = screen.getByRole("region", { name: "Topics" });
 
     expect(within(chatsSection).getByText("Chat 9")).toBeInTheDocument();
     expect(within(chatsSection).getByText("Chat 2")).toBeInTheDocument();
     expect(within(chatsSection).queryByText("Chat 1")).not.toBeInTheDocument();
     expect(within(chatsSection).queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
-    fireEvent.click(within(chatsSection).getByRole("button", { name: "2 hidden chats" }));
+    fireEvent.click(within(chatsSection).getByRole("button", { name: "2 hidden topics" }));
 
     expect(onToggleGroup).toHaveBeenCalledWith("workspace:chats");
 
@@ -321,7 +321,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).getByRole("button", { name: "Show less" })).toBeInTheDocument();
   });
 
-  it("sorts Chats section among project groups by recency, not always last", () => {
+  it("sorts Topics section among project groups by recency, not always last", () => {
     const sessions = [
       session({
         chatId: "recent-chat",
@@ -367,8 +367,8 @@ describe("ChatList", () => {
     const regionNames = allRegions.map((r) => r.getAttribute("aria-label") ?? r.textContent);
 
     // The most recently updated conversation ("Recent chat" at 12:00) must be
-    // in the first group — Chats should come before both projects.
-    const chatsIdx = regionNames.findIndex((n) => n?.includes("Chats"));
+    // in the first group — Topics should come before both projects.
+    const chatsIdx = regionNames.findIndex((n) => n?.includes("Topics"));
     const projAIdx = regionNames.findIndex((n) => n?.includes("project-a"));
     const projBIdx = regionNames.findIndex((n) => n?.includes("project-b"));
 
@@ -377,7 +377,7 @@ describe("ChatList", () => {
     expect(within(allRegions[chatsIdx]).getByText("Recent chat")).toBeInTheDocument();
   });
 
-  it("keeps one Projects heading when Chats sorts between project groups", () => {
+  it("keeps one Projects heading when Topics sorts between project groups", () => {
     const sessions = [
       session({
         chatId: "project-a",
@@ -423,11 +423,11 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "Chats", "project-b"]);
+    expect(regionNames).toEqual(["project-a", "Topics", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 
-  it("keeps Chats last when its latest conversation is older than all projects", () => {
+  it("keeps Topics last when its latest conversation is older than all projects", () => {
     const sessions = [
       session({
         chatId: "project-a",
@@ -473,7 +473,7 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "project-b", "Chats"]);
+    expect(regionNames).toEqual(["project-a", "project-b", "Topics"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 });

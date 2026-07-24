@@ -71,7 +71,7 @@ describe("useSessions", () => {
       updatedAt: "2026-04-16T10:00:00Z",
       title: "",
       preview: "hi",
-    })).toBe("New chat");
+    })).toBe("New topic");
 
     expect(sessionTitle({
       key: "websocket:chat-work",

@@ -43,12 +43,12 @@
   "sidebar": {
     "navigation": "側邊欄導覽",
     "collapse": "收合側邊欄",
-    "newChat": "新增對話",
+    "newChat": "新增話題",
     "searchAria": "搜尋",
     "searchPlaceholder": "搜尋",
     "searchResults": "搜尋結果",
-    "noSearchResults": "沒有符合的對話。",
-    "recent": "最近對話",
+    "noSearchResults": "沒有符合的話題。",
+    "recent": "最近話題",
     "settings": "設定",
     "language": {
       "label": "語言",
@@ -805,15 +805,15 @@
     }
   },
   "chat": {
-    "fallbackTitle": "對話 {{id}}",
+    "fallbackTitle": "話題 {{id}}",
     "forkTitle": "分支：{{title}}",
     "loading": "載入中…",
-    "noSessions": "目前還沒有對話。",
+    "noSessions": "目前還沒有話題。",
     "showMore": "再顯示 {{count}} 個",
-    "collapsed": "已隱藏 {{count}} 個對話",
+    "collapsed": "已隱藏 {{count}} 個話題",
     "showLess": "收起",
-    "actions": "「{{title}}」的對話操作",
-    "newInProject": "在 {{project}} 中開始新對話",
+    "actions": "「{{title}}」的話題操作",
+    "newInProject": "在 {{project}} 中開始新話題",
     "activity": {
       "running": "Agent 正在執行",
       "complete": "Agent 已完成",
@@ -822,9 +822,9 @@
     "pin": "置頂",
     "unpin": "取消置頂",
     "rename": "重新命名",
-    "renameTitle": "重新命名對話",
-    "renameDescription": "為這個對話選擇僅顯示於本機側邊欄的名稱。",
-    "renamePlaceholder": "對話名稱",
+    "renameTitle": "重新命名話題",
+    "renameDescription": "為這個話題選擇僅顯示於本機側邊欄的名稱。",
+    "renamePlaceholder": "話題名稱",
     "renameProjectTitle": "重新命名專案",
     "renameProjectDescription": "為這個專案選擇僅顯示於本機側邊欄的名稱。",
     "renameProjectPlaceholder": "專案名稱",
@@ -834,10 +834,10 @@
     "showArchived": "顯示封存",
     "hideArchived": "隱藏封存",
     "delete": "刪除",
-    "newChat": "新增對話",
+    "newChat": "新增話題",
     "groups": {
       "pinned": "置頂",
-      "all": "對話",
+      "all": "話題",
       "projects": "專案",
       "today": "今天",
       "yesterday": "昨天",
@@ -846,11 +846,11 @@
     }
   },
   "deleteConfirm": {
-    "title": "刪除這個對話？",
+    "title": "刪除這個話題？",
     "description": "此操作無法復原。",
     "cancel": "取消",
     "confirm": "刪除",
-    "automationsDescription": "這個對話含有已排程的自動任務。刪除對話時也會一併刪除這些任務。",
+    "automationsDescription": "這個話題含有已排程的自動任務。刪除話題時也會一併刪除這些任務。",
     "moreAutomations": "另有 {{count}} 個",
     "confirmWithAutomations": "刪除",
     "schedule": {
@@ -877,7 +877,7 @@
     "error": "連線錯誤"
   },
   "thread": {
-    "loadingConversation": "正在載入對話…",
+    "loadingConversation": "正在載入話題…",
     "empty": {
       "greetings": {
         "workOn": "我們要一起做點什麼？",
@@ -940,14 +940,14 @@
     },
     "header": {
       "toggleSidebar": "切換側邊欄",
-      "newChat": "開始新對話",
+      "newChat": "開始新話題",
       "toggleTheme": "切換佈景主題",
       "settings": "開啟設定",
       "sessionInfo": "對話詳細資料"
     },
     "sessionInfo": {
       "title": "對話",
-      "untitled": "未命名對話",
+      "untitled": "未命名話題",
       "automations": "自動任務",
       "count": "{{count}}",
       "loading": "正在載入自動任務…",
@@ -973,7 +973,7 @@
     "composer": {
       "placeholderThread": "輸入訊息…",
       "placeholderHero": "任何問題都可以問…",
-      "placeholderOpening": "正在開啟新對話…",
+      "placeholderOpening": "正在開啟新話題…",
       "placeholderStreaming": "模型正在回覆…",
       "inputAria": "訊息輸入框",
       "sendHint": "Enter 送出 · Shift+Enter 換行",
@@ -1042,8 +1042,8 @@
         "closeHint": "Esc 關閉",
         "commands": {
           "new": {
-            "title": "新增對話",
-            "description": "重置目前對話，並開始新的對話。"
+            "title": "新增話題",
+            "description": "重置目前話題，並開始新的話題。"
           },
           "stop": {
             "title": "停止目前任務",
