@@ -479,9 +479,16 @@ describe("ThreadComposer", () => {
     longPress(badge);
     expect(badge).toHaveAttribute("data-switching", "true");
     const viewport = screen.getByTestId("composer-model-pill-viewport");
-    expect(viewport).toHaveClass("overflow-hidden", "-left-2", "-top-3", "-bottom-3");
+    expect(viewport).toHaveClass(
+      "right-0",
+      "w-max",
+      "max-w-[calc(44vw+0.5rem)]",
+      "overflow-hidden",
+      "-top-3",
+      "-bottom-3",
+    );
     const track = screen.getByTestId("composer-model-pill-track");
-    expect(track).toHaveClass("items-end", "gap-1");
+    expect(track).toHaveClass("w-max", "max-w-full", "items-end", "gap-1");
     const activeTouchMove = new Event("touchmove", {
       bubbles: true,
       cancelable: true,

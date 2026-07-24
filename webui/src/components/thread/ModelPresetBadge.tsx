@@ -266,7 +266,7 @@ export function ModelPresetBadge({
         <span
           data-testid="composer-model-pill-viewport"
           className={cn(
-            "composer-model-pill-viewport pointer-events-none absolute -left-2 right-0 overflow-hidden bg-transparent",
+            "composer-model-pill-viewport pointer-events-none absolute right-0 w-max max-w-[calc(44vw+0.5rem)] overflow-hidden bg-transparent pl-2 sm:max-w-[18.5rem]",
             isHero ? "-bottom-2.5 -top-2.5" : "-bottom-3 -top-3",
           )}
           aria-hidden
@@ -274,7 +274,7 @@ export function ModelPresetBadge({
           <span
             data-testid="composer-model-pill-track"
             data-settling={motion.settling ? "true" : undefined}
-            className="composer-model-pill-track ml-auto flex w-[calc(100%-0.5rem)] flex-col items-end gap-1 will-change-transform"
+            className="composer-model-pill-track ml-auto flex w-max max-w-full flex-col items-end gap-1 will-change-transform"
             onTransitionEnd={(event) => {
               if (motion.settling && event.currentTarget === event.target) setMotion(null);
             }}
