@@ -225,7 +225,7 @@ def _build_runnable_dream(
 
 @pytest.mark.asyncio
 async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
-    """A real file delta => productive run => cursor advances (Tier 3)."""
+    """A completed run with a real file delta advances the cursor."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="SOUL.md: +1 -0")
     await cmd_dream(ctx)
     await asyncio.sleep(0)
@@ -233,19 +233,83 @@ async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dream_keeps_cursor_on_completed_noop(tmp_path) -> None:
-    """Completed run with no file changes must NOT advance the cursor, so the
-    history batch is reconsidered next run instead of silently swallowed."""
+async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
+    """A completed no-op has processed the batch and must not repeat it."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
     await cmd_dream(ctx)
     await asyncio.sleep(0)
-    assert store._last_dream_cursor == 5  # unchanged
+    assert store._last_dream_cursor == 42
+    assert "no memory changes" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
+    """An incomplete run remains retryable even if it left a partial edit."""
+    ctx, store = _build_runnable_dream(
+        tmp_path,
+        initialized=True,
+        content_diff="SOUL.md: +1 -0",
+        stop_reason="length",
+    )
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+    assert store._last_dream_cursor == 5
+    assert "did not complete" in ctx.loop.bus.outbound[0].content
+
+
+@pytest.mark.asyncio
+async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
+    """A no-op first batch must not starve later history entries."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = MemoryStore(workspace)
+    store.write_soul("# Soul")
+    store.write_memory("# Memory")
+    for index in range(1, 22):
+        store.append_history(f"entry-{index:02d}")
+    store.git.init()
+
+    processed_prompts: list[str] = []
+
+    async def process_direct(prompt, *args, **kwargs):
+        processed_prompts.append(prompt)
+        return OutboundMessage(
+            channel="cli",
+            chat_id="direct",
+            content="done",
+            metadata={"_stop_reason": "completed"},
+        )
+
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
+    bus = _FakeBus()
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    loop = SimpleNamespace(
+        bus=bus,
+        context=SimpleNamespace(memory=store, timezone="UTC"),
+        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        process_direct=process_direct,
+    )
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
+
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+
+    assert len(processed_prompts) == 1
+    assert "entry-20" in processed_prompts[0]
+    assert "entry-21" not in processed_prompts[0]
+    assert store.get_last_dream_cursor() == 20
+    next_result = store.build_dream_prompt()
+    assert next_result is not None
+    next_prompt, next_cursor = next_result
+    assert next_cursor == 21
+    assert "entry-21" in next_prompt
+    assert "entry-01" not in next_prompt
 
 
 @pytest.mark.asyncio
 async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
-    """Without git there is no diff signal; productivity falls back to the
-    completion check so non-git workspaces keep working."""
+    """Non-git workspaces use the same clean-completion gate."""
     ctx, store = _build_runnable_dream(
         tmp_path, initialized=False, content_diff="", stop_reason="completed",
     )

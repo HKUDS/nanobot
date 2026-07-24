@@ -1802,20 +1802,23 @@ def _run_gateway(
                     tools=store.build_dream_tools(),
                     on_progress=_silent,
                 )
-                # Ground truth: the real file delta, not the LLM's self-report.
+                # The real file delta grounds the audit record; clean completion
+                # decides whether this history batch has finished processing.
                 diff_body = store.dream_content_diff()
-                productive = bool(diff_body) or (
-                    not store.git.is_initialized()
-                    and MemoryStore.dream_run_completed(resp)
-                )
-                if productive:
+                completed = MemoryStore.dream_run_completed(resp)
+                if completed:
                     store.set_last_dream_cursor(last_cursor)
-                    logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
-                elif MemoryStore.dream_run_completed(resp):
-                    logger.info(
-                        "Dream cron job completed with no memory changes; "
-                        "cursor not advanced",
-                    )
+                    if diff_body:
+                        logger.info(
+                            "Dream cron job completed, cursor advanced to {}",
+                            last_cursor,
+                        )
+                    else:
+                        logger.info(
+                            "Dream cron job completed with no memory changes; "
+                            "cursor advanced to {}",
+                            last_cursor,
+                        )
                 else:
                     logger.warning(
                         "Dream cron job did not complete; cursor remains at {}",

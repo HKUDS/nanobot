@@ -437,17 +437,16 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 on_progress=_silent,
             )
             elapsed = time.monotonic() - t0
-            # Ground truth: the real file delta, not the LLM's self-report.
+            # The real file delta grounds the audit record; clean completion
+            # decides whether this history batch has finished processing.
             diff_body = store.dream_content_diff()
-            productive = bool(diff_body) or (
-                not store.git.is_initialized()
-                and MemoryStore.dream_run_completed(resp)
-            )
-            if productive:
+            completed = MemoryStore.dream_run_completed(resp)
+            if completed:
                 store.set_last_dream_cursor(last_cursor)
-                content = f"Dream completed in {elapsed:.1f}s."
-            elif MemoryStore.dream_run_completed(resp):
-                content = f"Dream completed in {elapsed:.1f}s; no memory changes."
+                if diff_body:
+                    content = f"Dream completed in {elapsed:.1f}s."
+                else:
+                    content = f"Dream completed in {elapsed:.1f}s; no memory changes."
             else:
                 content = (
                     f"Dream did not complete after {elapsed:.1f}s; "

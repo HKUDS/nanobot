@@ -47,9 +47,9 @@ class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
 
     _DEFAULT_MAX_HISTORY = 1000
-    # Durable files whose real working-tree delta grounds Dream commit messages
-    # and the cursor-advance gate. Deliberately excludes memory/.dream_cursor so
-    # that advancing the cursor itself is never mistaken for a productive edit.
+    # Durable files whose real working-tree delta grounds Dream commit messages.
+    # Deliberately excludes memory/.dream_cursor so progress bookkeeping never
+    # appears as a durable-memory edit in the audit record.
     _DREAM_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
     # Per-file cap when embedding current contents into the Dream prompt. The
     # durable files are tiny in practice (~5 KB total), but a runaway file must
@@ -583,8 +583,7 @@ class MemoryStore:
         """Structured summary of uncommitted changes to the durable memory files.
 
         Returns "" when git is unavailable or no content file changed. This is
-        the ground-truth input for diff-grounded Dream commit messages and for
-        gating cursor advance on real edits (never on LLM self-report).
+        the ground-truth input for diff-grounded Dream commit messages.
         """
         if not self._git.is_initialized():
             return ""
