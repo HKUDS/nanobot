@@ -222,7 +222,7 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
     builder = ContextBuilder(workspace)
 
     prompt = builder.build_system_prompt()
-    assert "single-step tasks" in prompt
+    assert "clear user request" in prompt
     assert "multi-step tasks" in prompt
     assert "Read before you write" in prompt
     assert "verify the result" in prompt
@@ -254,8 +254,9 @@ def test_default_soul_template_contains_execution_rules() -> None:
     """Default SOUL.md template must contain execution rules with act/plan layering."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
     assert "## Execution Rules" in soul
-    assert "single-step tasks" in soul
+    assert "clear user request" in soul
     assert "multi-step tasks" in soul
+    assert "irreversible action needs confirmation" in soul
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
