@@ -79,6 +79,10 @@ class ProviderSpec:
     # Provider is listed for shared credentials but cannot serve chat completions.
     is_transcription_only: bool = False
 
+    # Preserve assistant text alongside tool_calls + force string-only content.
+    # DeepSeek needs this for multi-step preamble text to remain visible.
+    preserve_content_with_tool_calls: bool = False
+
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
@@ -461,6 +465,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        preserve_content_with_tool_calls=True,
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
