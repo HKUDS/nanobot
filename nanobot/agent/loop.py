@@ -996,7 +996,12 @@ class AgentLoop:
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
             if on_stream and on_stream_end and should_stream:
-                await on_stream(result.final_content or "")
+                stream_content = (
+                    result.pending_stream_content
+                    if result.pending_stream_content is not None
+                    else result.final_content or ""
+                )
+                await on_stream(stream_content)
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
@@ -1143,6 +1148,14 @@ class AgentLoop:
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
+                    try:
+                        await delivery.abort_stream()
+                    except Exception:
+                        logger.debug(
+                            "Could not close stream for cancelled session {}",
+                            session_key,
+                            exc_info=True,
+                        )
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
                     # messages accumulated before /stop.  The checkpoint was

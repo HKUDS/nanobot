@@ -483,6 +483,40 @@ async def test_runner_length_recovery_returns_all_segments():
 
 
 @pytest.mark.asyncio
+async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
+    """Budget exhaustion must not replace output already produced by recovery."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="partial answer", finish_reason="length")
+    )
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "give a long answer"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        finalize_on_max_iterations=False,
+        max_iterations_message="limit reached",
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.final_content == "partial answer\n\nlimit reached"
+    assert result.pending_stream_content == "\n\nlimit reached"
+    assert [
+        message["content"]
+        for message in result.messages
+        if message.get("role") == "assistant"
+    ] == ["partial answer", "limit reached"]
+
+
+@pytest.mark.asyncio
 async def test_runner_length_recovery_does_not_leak_across_tool_calls():
     """A recovered prefix belongs only to its contiguous response chain."""
     from nanobot.agent.runner import AgentRunner

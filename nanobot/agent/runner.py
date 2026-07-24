@@ -108,6 +108,8 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    # Terminal tail to emit when the preceding final-content prefix was already streamed.
+    pending_stream_content: str | None = None
 
 
 class AgentRunner:
@@ -352,6 +354,7 @@ class AgentRunner:
         had_injections = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
+        pending_stream_content: str | None = None
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -672,17 +675,25 @@ class AgentRunner:
             )
             if drained_after_max_iterations:
                 had_injections = True
-            final_content = None
+            terminal_content = None
             if spec.finalize_on_max_iterations:
-                final_content = await self._try_finalize_after_max_iterations(
+                terminal_content = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
                     messages,
                     usage,
                 )
-            if final_content is None:
-                final_content = self._max_iterations_fallback(spec)
-            self._append_final_message(messages, final_content)
+            if terminal_content is None:
+                terminal_content = self._max_iterations_fallback(spec)
+            if length_recovery_parts:
+                terminal_tail = f"\n\n{terminal_content.lstrip()}"
+                final_content = (
+                    "".join(length_recovery_parts).rstrip() + terminal_tail
+                ).strip()
+                pending_stream_content = terminal_tail
+            else:
+                final_content = terminal_content
+            self._append_final_message(messages, terminal_content)
 
         return AgentRunResult(
             final_content=final_content,
@@ -693,6 +704,7 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            pending_stream_content=pending_stream_content,
         )
 
     def _build_request_kwargs(

@@ -581,6 +581,96 @@ class TestToolEventProgress:
         assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
 
     @pytest.mark.asyncio
+    async def test_length_recovery_at_max_iterations_streams_only_missing_tail(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "test-model"
+
+        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+            await on_content_delta("partial")
+            return LLMResponse(content="partial", finish_reason="length")
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(content="summary", finish_reason="stop")
+        )
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.max_iterations = 1
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="give a long answer",
+            metadata={"_wants_stream": True},
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        deltas = [m.event for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+        endings = [m.event for m in outbound if isinstance(m.event, StreamEndEvent)]
+        final = [m for m in outbound if isinstance(m.event, StreamedResponseEvent)]
+
+        assert [event.content for event in deltas] == ["partial", "\n\nsummary"]
+        assert [event.merge_next for event in endings] == [True, False]
+        assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
+        assert [message.content for message in final] == ["partial\n\nsummary"]
+
+    @pytest.mark.asyncio
+    async def test_cancelled_length_recovery_closes_merged_stream(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+
+        async def cancel_after_merge(
+            _msg: InboundMessage,
+            *,
+            on_stream,
+            on_stream_end,
+            **_kwargs,
+        ):
+            assert on_stream is not None
+            assert on_stream_end is not None
+            await on_stream("partial")
+            await on_stream_end(resuming=True, merge_next=True)
+            raise asyncio.CancelledError
+
+        loop._process_message = cancel_after_merge  # type: ignore[method-assign]
+
+        with pytest.raises(asyncio.CancelledError):
+            await loop._dispatch(InboundMessage(
+                channel="websocket",
+                sender_id="u1",
+                chat_id="chat1",
+                content="give a long answer",
+                metadata={"_wants_stream": True},
+            ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        endings = [m.event for m in outbound if isinstance(m.event, StreamEndEvent)]
+        assert [(event.resuming, event.merge_next) for event in endings] == [
+            (True, True),
+            (False, False),
+        ]
+        assert endings[0].stream_id == endings[1].stream_id
+
+    @pytest.mark.asyncio
     async def test_non_streamed_finalization_is_delivered_as_regular_message(
         self,
         tmp_path: Path,
