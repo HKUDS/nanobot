@@ -13,6 +13,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
     ToolContext,
@@ -308,8 +309,8 @@ class SubagentManager:
         )
         self._task_statuses[task_id] = status
         logger.info("Running inline subagent [{}]: {}", task_id, display_label)
-        try:
-            return await self._run_subagent(
+        inline_task = asyncio.create_task(
+            self._run_subagent(
                 task_id,
                 task,
                 display_label,
@@ -320,8 +321,22 @@ class SubagentManager:
                 workspace_scope,
                 announce=False,
             )
+        )
+        self._running_tasks[task_id] = inline_task
+        if session_key:
+            self._session_tasks.setdefault(session_key, set()).add(task_id)
+        try:
+            result = await inline_task
+            if status.phase == "error" or status.stop_reason in {"error", "tool_error"}:
+                return ToolResult.error(result)
+            return result
         finally:
+            self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
+            if session_key and (ids := self._session_tasks.get(session_key)):
+                ids.discard(task_id)
+                if not ids:
+                    del self._session_tasks[session_key]
 
     async def _run_subagent(
         self,
