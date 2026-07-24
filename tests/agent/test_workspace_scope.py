@@ -267,10 +267,11 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(tmp_path: Path) -> No
         default_restrict_to_workspace=False,
     )
     token = bind_workspace_scope(scope)
+    cmd_python = "python" if os.name == "nt" else "python3"
     try:
         result = await tool.execute(
             command=(
-                'python3 -c "from pathlib import Path; '
+                f'{cmd_python} -c "from pathlib import Path; '
                 "Path('scoped-marker.txt').write_text('ok')\""
             )
         )
@@ -294,10 +295,11 @@ async def test_exec_full_scope_allows_explicit_cwd_outside_project(tmp_path: Pat
         default_restrict_to_workspace=True,
     )
     token = bind_workspace_scope(scope)
+    cmd_python = "python" if os.name == "nt" else "python3"
     try:
         result = await tool.execute(
             command=(
-                'python3 -c "from pathlib import Path; '
+                f'{cmd_python} -c "from pathlib import Path; '
                 "Path('outside-marker.txt').write_text('ok')\""
             ),
             working_dir=str(outside),
