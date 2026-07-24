@@ -105,16 +105,20 @@ nanobot_try_command() {
 }
 
 has_browser_session() {
-  # A remote or headless terminal should keep the service-oriented gateway
-  # command. Local macOS terminals can open the system browser; Linux desktop
-  # sessions expose a display socket.
+  # A remote or non-interactive shell should keep the terminal setup path.
+  # The one-line installer runs with piped stdin, so /dev/tty is the reliable
+  # signal that a person still owns the surrounding terminal session.
   if [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
+    return 1
+  fi
+  if ! : 2>/dev/null < /dev/tty; then
     return 1
   fi
 
   case "$(uname -s)" in
     Darwin)
-      return 0
+      command -v launchctl >/dev/null 2>&1 &&
+        launchctl print "gui/$(id -u)" >/dev/null 2>&1
       ;;
     *)
       [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]

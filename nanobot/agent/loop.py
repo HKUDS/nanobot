@@ -296,6 +296,7 @@ class AgentLoop:
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
         local_trigger_store: Any | None = None,
+        mcp_activation_guard: Callable[[], bool] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -401,6 +402,7 @@ class AgentLoop:
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, MCPConnection] = {}
         self._mcp_connecting = False
+        self._mcp_activation_guard = mcp_activation_guard
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
@@ -631,7 +633,20 @@ class AgentLoop:
 
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""
+        if not self.mcp_activation_allowed():
+            logger.info("MCP connections are paused until model setup is complete")
+            return
         await agent_context.connect_mcp(self, self.tools)
+
+    def mcp_activation_allowed(self) -> bool:
+        """Return whether configured MCP processes may connect in this runtime."""
+        if self._mcp_activation_guard is None:
+            return True
+        try:
+            return bool(self._mcp_activation_guard())
+        except Exception:
+            logger.exception("MCP activation guard failed")
+            return False
 
     def register_runtime_context_provider(
         self,

@@ -5,14 +5,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _script(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
 def _post_install_section(path: str, marker: str) -> str:
-    script = (ROOT / path).read_text(encoding="utf-8")
-    return script.split(marker, 1)[1]
+    return _script(path).split(marker, 1)[1]
 
 
 def test_shell_installer_skips_before_browser_and_probes_webui() -> None:
-    section = _post_install_section("scripts/install.sh", 'info "Installed nanobot:"')
+    script = _script("scripts/install.sh")
+    browser_check = script.split("has_browser_session() {", 1)[1].split(
+        "install_with_active_python() {",
+        1,
+    )[0]
+    section = script.split('info "Installed nanobot:"', 1)[1]
 
+    assert "if ! : 2>/dev/null < /dev/tty; then" in browser_check
+    assert 'launchctl print "gui/$(id -u)"' in browser_check
     assert section.index('NANOBOT_SKIP_WIZARD:-}" = "1"') < section.index(
         "if has_browser_session"
     )

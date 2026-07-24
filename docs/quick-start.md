@@ -16,7 +16,7 @@ Git is only needed for a source install. The published package already contains 
 
 ## 1. Install nanobot
 
-The recommended installer keeps nanobot out of the system Python environment and opens the setup wizard when installation finishes.
+The recommended installer keeps nanobot out of the system Python environment. On a local desktop it opens the WebUI when the installed release supports it; older releases and terminal-only environments use the setup wizard.
 
 **macOS / Linux**
 
@@ -51,7 +51,7 @@ Quick Start creates or updates:
 | `~/.nanobot/config.json` | Provider, model, WebUI, channel, tool, and runtime settings |
 | `~/.nanobot/workspace/` | Sessions, memory, skills, automations, and generated files |
 
-If the installer did not open the browser, run `nanobot webui`. Use `nanobot onboard --wizard` only for terminal-only setup.
+If a current release did not open the browser, run `nanobot webui`. If that command is unavailable, or the environment is terminal-only, run `nanobot onboard --wizard`.
 
 ## 3. Check the Setup
 
@@ -69,11 +69,13 @@ Most other providers can say `not set`. This command validates local setup but d
 
 ## 4. Get the First Reply
 
+If the installer already opened the WebUI, keep that terminal process running. Otherwise:
+
 ```bash
 nanobot webui
 ```
 
-Quick Start has already prepared the local WebSocket channel. This starts the gateway and opens the browser; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. In a headless or terminal-only environment, run `nanobot gateway` instead and connect through the deployment's chosen access path.
+The installer or Quick Start has already prepared the local WebSocket channel. `nanobot webui` starts the gateway and opens the browser; the first-run WebUI is bound to localhost, so other devices on your network cannot reach it. In a headless or terminal-only environment, run `nanobot gateway` instead and connect through the deployment's chosen access path.
 
 If your installed release does not recognize `nanobot webui`, run `nanobot gateway`
 and open `http://127.0.0.1:8765` manually.

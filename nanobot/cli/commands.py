@@ -785,7 +785,12 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
-def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
+def _load_runtime_config(
+    config: str | None = None,
+    workspace: str | None = None,
+    *,
+    resolve_env: bool = True,
+) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
 
@@ -799,7 +804,9 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
-        loaded = resolve_config_env_vars(load_config(config_path))
+        loaded = load_config(config_path)
+        if resolve_env:
+            loaded = resolve_config_env_vars(loaded)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -1472,7 +1479,11 @@ def webui(
     workspace_path.mkdir(parents=True, exist_ok=True)
     sync_workspace_templates(workspace_path)
 
-    runtime_config = _load_runtime_config(str(config_path), workspace)
+    runtime_config = _load_runtime_config(
+        str(config_path),
+        workspace,
+        resolve_env=provider_error is None,
+    )
     effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
 
     console.print()
@@ -1611,7 +1622,10 @@ def _run_gateway(
     unconfigured_provider_error: str | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.model_presets import load_model_preset_catalog
+    from nanobot.agent.model_presets import (
+        configured_model_presets,
+        load_model_preset_catalog,
+    )
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
@@ -1682,13 +1696,24 @@ def _run_gateway(
                 raise
             return build_unconfigured_provider_snapshot(config, str(exc))
 
-    try:
-        provider_snapshot = _observe_fallback_models(build_provider_snapshot(config))
-    except ValueError as exc:
-        if unconfigured_provider_error is None:
+    def _load_gateway_preset_catalog():
+        if setup_mode:
+            from nanobot.config.loader import load_config
+
+            return configured_model_presets(load_config())
+        return load_model_preset_catalog()
+
+    if unconfigured_provider_error is not None:
+        provider_snapshot = build_unconfigured_provider_snapshot(
+            config,
+            unconfigured_provider_error,
+        )
+    else:
+        try:
+            provider_snapshot = _observe_fallback_models(build_provider_snapshot(config))
+        except ValueError as exc:
             console.print(f"[red]Error: {exc}[/red]")
             raise typer.Exit(1) from exc
-        provider_snapshot = build_unconfigured_provider_snapshot(config, str(exc))
     session_manager = SessionManager(config.workspace_path)
 
     # Self-heal the gateway state file with the current PID after any restart.
@@ -1721,6 +1746,19 @@ def _run_gateway(
     )
 
     # Create agent with cron service
+    agent = None
+
+    def _runtime_activation_allowed() -> bool:
+        if not setup_mode:
+            return True
+        try:
+            load_provider_snapshot()
+        except ValueError:
+            return False
+        if agent is not None:
+            agent.invalidate_runtime_config()
+        return True
+
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
@@ -1730,13 +1768,14 @@ def _run_gateway(
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
-        preset_catalog_loader=load_model_preset_catalog,
+        preset_catalog_loader=_load_gateway_preset_catalog,
         runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
+        mcp_activation_guard=_runtime_activation_allowed if setup_mode else None,
     )
     webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,
@@ -1974,6 +2013,7 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
+        channel_activation_guard=_runtime_activation_allowed if setup_mode else None,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:

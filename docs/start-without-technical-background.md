@@ -70,13 +70,15 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer downloads the stable nanobot package into an isolated Python environment and opens the setup wizard. It can take a few minutes on the first run. When it finishes, it prints the exact command it used to run nanobot. Keep that command: if `nanobot` is not found later, reuse the whole printed command instead of switching to a different Python command.
+The installer downloads the stable nanobot package into an isolated Python environment. On a local desktop it opens the WebUI when the installed release supports it; older releases and terminal-only environments open the setup wizard. It can take a few minutes on the first run. The installer also prints the exact command it used to run nanobot. Keep that command: if `nanobot` is not found later, reuse the whole printed command instead of switching to a different Python command.
 
 If your organization blocks downloaded install scripts, use the [alternative install methods](./quick-start.md#other-install-methods) or ask your administrator to review the scripts first.
 
-## 4. Follow Quick Start
+## 4. Configure Your Model
 
-The wizard shows a menu similar to:
+If the browser opens, go to **Settings → Models**, choose your provider, enter its credential or endpoint, and select a model. Keep the installer terminal open while using the WebUI.
+
+If the terminal wizard opens instead, it shows a menu similar to:
 
 ```text
 > What would you like to do?
@@ -100,23 +102,29 @@ The wizard asks for only the information needed for the first reply:
 
 When you paste a password or API key, the terminal may hide the characters. That is normal.
 
-If the installer finishes without opening the wizard and `nanobot` is available, run:
-
-```bash
-nanobot onboard --wizard
-```
-
-If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `onboard --wizard`. That command may begin with `uv tool run`, `pipx run`, or the full path to nanobot's private Python environment.
-
-## 5. Open the Browser
-
-Run:
+If neither setup surface opens, run this on a local desktop:
 
 ```bash
 nanobot webui
 ```
 
-This starts the gateway and opens the browser. If this is your first setup, open **Settings → Models** and add your provider and model before sending a message. The browser workbench is for local desktop sessions; in a headless or terminal-only environment, use `nanobot gateway` instead.
+In a terminal-only environment, run:
+
+```bash
+nanobot onboard --wizard
+```
+
+If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `webui` or `onboard --wizard`. That command may begin with `uv tool run`, `pipx run`, or the full path to nanobot's private Python environment.
+
+## 5. Open the Browser
+
+If the installer already opened the WebUI, continue in that browser tab. Otherwise run:
+
+```bash
+nanobot webui
+```
+
+This starts the gateway and opens the browser. If setup is incomplete, open **Settings → Models** and add your provider and model before sending a message. The browser workbench is for local desktop sessions; in a headless or terminal-only environment, use `nanobot gateway` instead.
 
 Send this message:
 

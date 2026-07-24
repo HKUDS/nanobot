@@ -25,6 +25,7 @@ from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
+from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
     WEBUI_MESSAGE_SOURCE_METADATA_KEY,
@@ -2056,6 +2057,43 @@ def test_webui_yes_starts_settings_mode_without_provider_setup(monkeypatch, tmp_
     assert "Configure a provider and model in WebUI Settings → Models." in result.stdout
 
 
+def test_webui_missing_provider_env_starts_settings_mode(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "config.json"
+    missing_env = "NANOBOT_TEST_MISSING_PROVIDER_KEY"
+    monkeypatch.delenv(missing_env, raising=False)
+    config_file.write_text(
+        json.dumps({
+            "agents": {
+                "defaults": {
+                    "provider": "openai",
+                    "model": "openai/gpt-4.1",
+                }
+            },
+            "providers": {
+                "openai": {
+                    "apiKey": f"${{{missing_env}}}",
+                }
+            },
+        }),
+        encoding="utf-8",
+    )
+    seen: dict[str, object] = {}
+    _patch_gateway_ports_free(monkeypatch)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._run_gateway",
+        lambda config, **kwargs: seen.update(config=config, **kwargs),
+    )
+
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--yes", "--no-open"])
+
+    assert result.exit_code == 0
+    runtime_config = seen["config"]
+    assert isinstance(runtime_config, Config)
+    assert runtime_config.providers.openai.api_key == f"${{{missing_env}}}"
+    assert missing_env in str(seen["unconfigured_provider_error"])
+
+
 def test_webui_background_starts_runtime_and_opens_browser(monkeypatch, tmp_path: Path) -> None:
     from nanobot.gateway import GatewayStartOptions, GatewayStatus, RuntimeResult
 
@@ -2949,6 +2987,22 @@ def test_gateway_setup_mode_runs_only_local_webui(monkeypatch, tmp_path: Path) -
         cron_service=lambda _store_path: _FakeCron(),
     )
 
+    def _missing_provider_snapshot(*_args, **_kwargs):
+        raise ValueError("No API key configured")
+
+    monkeypatch.setattr(
+        "nanobot.providers.factory.load_provider_snapshot",
+        _missing_provider_snapshot,
+    )
+
+    def _unexpected_resolved_preset_catalog():
+        raise AssertionError("setup mode must not resolve provider environment variables")
+
+    monkeypatch.setattr(
+        "nanobot.agent.model_presets.load_model_preset_catalog",
+        _unexpected_resolved_preset_catalog,
+    )
+
     class _FakeMemory:
         def get_latest_cursor(self) -> int:
             return 0
@@ -2971,6 +3025,9 @@ def test_gateway_setup_mode_runs_only_local_webui(monkeypatch, tmp_path: Path) -
             self.sessions = kwargs["session_manager"]
             self.context = SimpleNamespace(memory=_FakeMemory())
             self.runtime_resolver = MagicMock()
+            seen["agent_provider"] = kwargs["provider"]
+            seen["mcp_activation_guard"] = kwargs["mcp_activation_guard"]
+            seen["preset_catalog_loader"] = kwargs["preset_catalog_loader"]
 
         def _schedule_background(self, _coro) -> None:
             return None
@@ -2985,8 +3042,9 @@ def test_gateway_setup_mode_runs_only_local_webui(monkeypatch, tmp_path: Path) -
             return None
 
     class _FakeChannelManager:
-        def __init__(self, channel_config, *_args, **_kwargs) -> None:
+        def __init__(self, channel_config, *_args, **kwargs) -> None:
             seen["channel_config"] = channel_config
+            seen["channel_activation_guard"] = kwargs["channel_activation_guard"]
             self.enabled_channels = ["websocket"]
 
         async def start_all(self) -> None:
@@ -3017,6 +3075,10 @@ def test_gateway_setup_mode_runs_only_local_webui(monkeypatch, tmp_path: Path) -
     channel_config = seen["channel_config"]
     assert getattr(channel_config.channels, "websocket")["enabled"] is True
     assert getattr(channel_config.channels, "telegram")["enabled"] is False
+    assert isinstance(seen["agent_provider"], UnconfiguredProvider)
+    assert seen["mcp_activation_guard"]() is False
+    assert seen["channel_activation_guard"]() is False
+    assert seen["preset_catalog_loader"]()["default"].model == config.agents.defaults.model
     assert "cron_started" not in seen
     assert "cron_job_registered" not in seen
 
