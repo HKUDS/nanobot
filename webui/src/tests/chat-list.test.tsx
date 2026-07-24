@@ -18,6 +18,28 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
 }
 
 describe("ChatList", () => {
+  it("does not render /model commands as session previews", () => {
+    render(
+      <ChatList
+        sessions={[session({
+          chatId: "model-command",
+          title: "Model chat",
+          preview: "/model fast",
+        })]}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        showPreviews
+      />,
+    );
+
+    expect(screen.getByText("Model chat")).toBeInTheDocument();
+    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+  });
+
   it("orders chats by latest session activity by default", () => {
     const sessions = [
       session({

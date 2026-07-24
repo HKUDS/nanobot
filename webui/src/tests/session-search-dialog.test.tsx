@@ -40,6 +40,31 @@ describe("SessionSearchDialog", () => {
     expect(screen.getByTestId("session-search-scroll")).toHaveClass("overflow-y-auto");
   });
 
+  it("does not render or search /model session previews", () => {
+    render(
+      <SessionSearchDialog
+        open
+        sessions={[{
+          ...session(1),
+          title: "Model chat",
+          preview: "/model fast",
+        }]}
+        activeKey={null}
+        loading={false}
+        onOpenChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Model chat")).toBeInTheDocument();
+    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
+      target: { value: "model fast" },
+    });
+    expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
+  });
+
   it("keeps keyboard navigation scrollable through long result lists", () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {

@@ -1689,7 +1689,7 @@ function Shell({
     } catch {
       // ignore storage errors
     }
-    client.sendMessage(chatId, "/restart");
+    void client.sendSystemCommand(chatId, "/restart").catch(() => {});
   }, [activeSession?.chatId, client]);
 
   useEffect(() => {

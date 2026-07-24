@@ -88,16 +88,33 @@ export type StreamError =
 
 type ErrorHandler = (error: StreamError) => void;
 
-interface PendingNewChat {
-  resolve: (chatId: string) => void;
+interface PendingRequest<Result> {
+  resolve: (result: Result) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
-interface PendingTranscription {
-  resolve: (text: string) => void;
-  reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+type PendingNewChat = PendingRequest<string>;
+type PendingTranscription = PendingRequest<string>;
+type PendingSystemCommand = PendingRequest<void>;
+
+const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
+
+export function isSystemCommandTurnId(
+  value: string | null | undefined,
+): value is string {
+  return typeof value === "string" && value.startsWith(SYSTEM_COMMAND_TURN_PREFIX);
+}
+
+function rejectPendingRequests<Result>(
+  pendingRequests: Map<string, PendingRequest<Result>>,
+  detail: string,
+): void {
+  for (const pending of pendingRequests.values()) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error(detail));
+  }
+  pendingRequests.clear();
 }
 
 export interface NanobotClientOptions {
@@ -138,6 +155,7 @@ export class NanobotClient {
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingNewChat | null = null;
   private pendingTranscriptions = new Map<string, PendingTranscription>();
+  private pendingSystemCommands = new Map<string, PendingSystemCommand>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -407,6 +425,26 @@ export class NanobotClient {
     this.queueSend(frame);
   }
 
+  sendSystemCommand(
+    chatId: string,
+    command: string,
+    timeoutMs: number = 5_000,
+  ): Promise<void> {
+    const normalized = command.trim();
+    if (!normalized.startsWith("/")) {
+      return Promise.reject(new Error("system command must be a slash command"));
+    }
+    const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingSystemCommands.delete(turnId);
+        reject(new Error("system command timed out"));
+      }, timeoutMs);
+      this.pendingSystemCommands.set(turnId, { resolve, reject, timer });
+      this.sendMessage(chatId, normalized, undefined, { turnId });
+    });
+  }
+
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     this.knownChats.add(chatId);
     this.queueSend({
@@ -460,6 +498,16 @@ export class NanobotClient {
 
     if (wsInboundDebugEnabled()) {
       console.log("[nanobot ws inbound]", summarizeInboundWsPayload(parsed));
+    }
+
+    const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
+      ? parsed.turn_id
+      : null;
+    if (isSystemCommandTurnId(turnId)) {
+      if (parsed.event === "message" || parsed.event === "turn_end") {
+        this.resolveSystemCommand(turnId);
+      }
+      return;
     }
 
     if (parsed.event === "ready") {
@@ -577,7 +625,8 @@ export class NanobotClient {
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
-    this.rejectAllTranscriptions("socket closed");
+    rejectPendingRequests(this.pendingTranscriptions, "socket closed");
+    rejectPendingRequests(this.pendingSystemCommands, "socket closed");
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -616,7 +665,7 @@ export class NanobotClient {
 
   private rejectTranscription(requestId: string | undefined, detail: string): void {
     if (!requestId) {
-      this.rejectAllTranscriptions(detail);
+      rejectPendingRequests(this.pendingTranscriptions, detail);
       return;
     }
     const pending = this.pendingTranscriptions.get(requestId);
@@ -626,12 +675,12 @@ export class NanobotClient {
     pending.reject(new Error(detail));
   }
 
-  private rejectAllTranscriptions(detail: string): void {
-    for (const [requestId, pending] of this.pendingTranscriptions) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error(detail));
-      this.pendingTranscriptions.delete(requestId);
-    }
+  private resolveSystemCommand(turnId: string): void {
+    const pending = this.pendingSystemCommands.get(turnId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingSystemCommands.delete(turnId);
+    pending.resolve();
   }
 
   private scheduleReconnect(): void {

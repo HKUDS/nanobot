@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
@@ -169,6 +170,9 @@ interface ThreadComposerProps {
   isStreaming?: boolean;
   modelLabel?: string | null;
   modelDetail?: string | null;
+  modelPreset?: string | null;
+  modelPresets?: ModelPresetOption[];
+  onModelPresetChange?: (name: string) => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -197,6 +201,13 @@ interface ThreadComposerProps {
   quotedContext?: string | null;
   focusRequest?: number;
   onQuotedContextChange?: (text: string | null) => void;
+}
+
+export interface ModelPresetOption {
+  name: string;
+  label: string;
+  model?: string | null;
+  provider?: string | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -816,6 +827,9 @@ export function ThreadComposer({
   isStreaming = false,
   modelLabel = null,
   modelDetail = null,
+  modelPreset = null,
+  modelPresets = [],
+  onModelPresetChange,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -2089,6 +2103,9 @@ export function ThreadComposer({
               <ComposerModelBadge
                 label={modelLabel}
                 modelDetail={modelDetail}
+                modelPreset={modelPreset}
+                modelPresets={modelPresets}
+                onPresetChange={onModelPresetChange}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}
@@ -2376,9 +2393,71 @@ function QueuedPromptRow({
   );
 }
 
+const MODEL_PRESET_LONG_PRESS_MS = 400;
+const MODEL_PRESET_PRESS_SLOP_PX = 8;
+const MODEL_PRESET_PILL_GAP_PX = 4;
+const MODEL_PRESET_PILL_OFFSETS = [-2, -1, 0, 1, 2] as const;
+const MODEL_PRESET_HANDOFF_HYSTERESIS = 0.06;
+const MODEL_PRESET_PRESSED_SCALE = 0.98;
+const MODEL_PRESET_DOCK_MAX_SCALE = 1.08;
+const MODEL_PRESET_DOCK_RADIUS = 1.5;
+const MODEL_PRESET_SETTLE_MS = 180;
+const MODEL_PRESET_SETTLE_FALLBACK_MS = MODEL_PRESET_SETTLE_MS + 80;
+const MODEL_PRESET_VIEWPORT_MASK = [
+  "linear-gradient(to bottom,",
+  "transparent 0,",
+  "black 4px,",
+  "black calc(100% - 4px),",
+  "transparent 100%)",
+].join(" ");
+const MODEL_PRESET_MOTION_STYLE = {
+  "--composer-model-pressed-scale": MODEL_PRESET_PRESSED_SCALE.toFixed(4),
+  "--composer-model-viewport-enter-scale": (
+    MODEL_PRESET_PRESSED_SCALE / MODEL_PRESET_DOCK_MAX_SCALE
+  ).toFixed(4),
+  "--composer-model-settle-duration": `${MODEL_PRESET_SETTLE_MS}ms`,
+} as CSSProperties;
+
+function wrapPresetIndex(index: number, length: number): number {
+  return ((index % length) + length) % length;
+}
+
+function modelPresetDockScale(distanceFromFocus: number): number {
+  const distance = Math.abs(distanceFromFocus);
+  if (distance >= MODEL_PRESET_DOCK_RADIUS) return 1;
+  const influence = (
+    1 + Math.cos(Math.PI * distance / MODEL_PRESET_DOCK_RADIUS)
+  ) / 2;
+  return 1 + (MODEL_PRESET_DOCK_MAX_SCALE - 1) * influence;
+}
+
+function modelPresetStepWithHysteresis(
+  rawSteps: number,
+  currentStep: number,
+): number {
+  const threshold = 0.5 + MODEL_PRESET_HANDOFF_HYSTERESIS;
+  let nextStep = currentStep;
+  while (rawSteps > nextStep + threshold) nextStep += 1;
+  while (rawSteps < nextStep - threshold) nextStep -= 1;
+  return nextStep;
+}
+
+interface ModelPresetPointerGesture {
+  active: boolean;
+  baseIndex: number;
+  latestY: number;
+  pointerId: number;
+  startY: number;
+  stepOffset: number;
+  target: HTMLElement;
+}
+
 function ComposerModelBadge({
   label,
   modelDetail,
+  modelPreset,
+  modelPresets,
+  onPresetChange,
   provider,
   providerLabel,
   needsSetup,
@@ -2388,6 +2467,9 @@ function ComposerModelBadge({
 }: {
   label: string;
   modelDetail?: string | null;
+  modelPreset?: string | null;
+  modelPresets?: ModelPresetOption[];
+  onPresetChange?: (name: string) => void;
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
@@ -2395,37 +2477,506 @@ function ComposerModelBadge({
   isHero: boolean;
   onClick?: () => void;
 }) {
+  const interactive = Boolean(onClick);
+  const activePresetName = modelPreset?.trim() || "";
+  const enabledPresets = useMemo(() => {
+    const seen = new Set<string>();
+    return (modelPresets ?? []).filter((preset) => {
+      const name = preset.name.trim();
+      if (!name || seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+  }, [modelPresets]);
+  const carouselPresets = useMemo(() => {
+    if (!activePresetName) return enabledPresets;
+    const currentFromList = enabledPresets.find(
+      (preset) => preset.name === activePresetName,
+    );
+    const currentPreset: ModelPresetOption = {
+      ...currentFromList,
+      name: activePresetName,
+      label: label || currentFromList?.label || activePresetName,
+      model: modelDetail ?? currentFromList?.model,
+      provider: provider || currentFromList?.provider,
+    };
+    if (!currentFromList) return [currentPreset, ...enabledPresets];
+    return enabledPresets.map((preset) => (
+      preset.name === activePresetName ? currentPreset : preset
+    ));
+  }, [activePresetName, enabledPresets, label, modelDetail, provider]);
+  const canSwitch = (
+    !interactive
+    && Boolean(onPresetChange)
+    && Boolean(activePresetName)
+    && carouselPresets.length > 1
+  );
+  const currentIndex = Math.max(
+    0,
+    carouselPresets.findIndex((preset) => preset.name === activePresetName),
+  );
+  const Container = interactive || canSwitch ? "button" : "span";
+  const pillHeight = isHero ? 32 : 36;
+  const pillStride = pillHeight + MODEL_PRESET_PILL_GAP_PX;
+  const [switching, setSwitching] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [switchingWidth, setSwitchingWidth] = useState<number | null>(null);
+  const [previewVirtualIndex, setPreviewVirtualIndex] = useState(currentIndex);
+  const [dragRemainder, setDragRemainder] = useState(0);
+  const containerRef = useRef<HTMLElement | null>(null);
+  const switchingRef = useRef(false);
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureRef = useRef<ModelPresetPointerGesture | null>(null);
+
+  const clearPressTimer = useCallback(() => {
+    if (pressTimerRef.current === null) return;
+    clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = null;
+  }, []);
+
+  const clearSettleTimer = useCallback(() => {
+    if (settleTimerRef.current === null) return;
+    clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = null;
+  }, []);
+
+  const resetGestureState = useCallback(() => {
+    clearPressTimer();
+    clearSettleTimer();
+    gestureRef.current = null;
+    switchingRef.current = false;
+    setSwitching(false);
+    setSettling(false);
+    setSwitchingWidth(null);
+    setDragRemainder(0);
+  }, [clearPressTimer, clearSettleTimer]);
+
+  useEffect(() => {
+    if (switching) return;
+    setPreviewVirtualIndex(currentIndex);
+    setDragRemainder(0);
+  }, [currentIndex, switching]);
+
+  useEffect(() => {
+    if (canSwitch || !switchingRef.current) return;
+    resetGestureState();
+  }, [canSwitch, resetGestureState]);
+
+  useEffect(() => () => {
+    clearPressTimer();
+    clearSettleTimer();
+    gestureRef.current = null;
+    switchingRef.current = false;
+  }, [clearPressTimer, clearSettleTimer]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || !canSwitch) return;
+    const preventScrollWhileSwitching = (event: TouchEvent) => {
+      if (switchingRef.current && event.cancelable) event.preventDefault();
+    };
+    node.addEventListener("touchmove", preventScrollWhileSwitching, {
+      passive: false,
+    });
+    return () => {
+      node.removeEventListener("touchmove", preventScrollWhileSwitching);
+    };
+  }, [canSwitch]);
+
+  const updatePresetPreview = useCallback((
+    gesture: ModelPresetPointerGesture,
+    clientY: number,
+  ) => {
+    const rawSteps = -(clientY - gesture.startY) / pillStride;
+    const stepOffset = modelPresetStepWithHysteresis(
+      rawSteps,
+      gesture.stepOffset,
+    );
+    gesture.stepOffset = stepOffset;
+    const nextVirtualIndex = gesture.baseIndex + stepOffset;
+    setPreviewVirtualIndex(nextVirtualIndex);
+    setDragRemainder(rawSteps - stepOffset);
+  }, [pillStride]);
+
+  const handlePresetPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (
+      !canSwitch
+      || gestureRef.current
+      || switchingRef.current
+      || event.isPrimary === false
+      || (event.pointerType === "mouse" && event.button !== 0)
+    ) {
+      return;
+    }
+    const gesture: ModelPresetPointerGesture = {
+      active: false,
+      baseIndex: currentIndex,
+      latestY: event.clientY,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      stepOffset: 0,
+      target: event.currentTarget,
+    };
+    gestureRef.current = gesture;
+    setSettling(false);
+    clearPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      if (gestureRef.current !== gesture) return;
+      gesture.active = true;
+      switchingRef.current = true;
+      updatePresetPreview(gesture, gesture.latestY);
+      const measuredWidth = gesture.target.getBoundingClientRect().width;
+      setSwitchingWidth(measuredWidth > 0 ? measuredWidth : null);
+      setSwitching(true);
+      try {
+        gesture.target.setPointerCapture(gesture.pointerId);
+      } catch {
+        // The pointer may have ended while the long-press timer was firing.
+      }
+    }, MODEL_PRESET_LONG_PRESS_MS);
+  }, [canSwitch, clearPressTimer, currentIndex, updatePresetPreview]);
+
+  const handlePresetPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    gesture.latestY = event.clientY;
+    const movement = event.clientY - gesture.startY;
+    if (!gesture.active) {
+      if (Math.abs(movement) > MODEL_PRESET_PRESS_SLOP_PX) {
+        clearPressTimer();
+        gestureRef.current = null;
+      }
+      return;
+    }
+    event.preventDefault();
+    updatePresetPreview(gesture, event.clientY);
+  }, [clearPressTimer, updatePresetPreview]);
+
+  const finishPresetSettling = useCallback(() => {
+    if (!switchingRef.current) return;
+    clearSettleTimer();
+    switchingRef.current = false;
+    setSwitching(false);
+    setSettling(false);
+    setSwitchingWidth(null);
+    setDragRemainder(0);
+  }, [clearSettleTimer]);
+
+  const finishPresetGesture = useCallback((
+    event: ReactPointerEvent<HTMLElement>,
+    commit: boolean,
+  ) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const shouldCommit = commit && gesture.active;
+    const selected = shouldCommit
+      ? carouselPresets[
+          wrapPresetIndex(
+            gesture.baseIndex + gesture.stepOffset,
+            carouselPresets.length,
+          )
+        ]
+      : null;
+    gestureRef.current = null;
+    clearPressTimer();
+    try {
+      if (gesture.target.hasPointerCapture(gesture.pointerId)) {
+        gesture.target.releasePointerCapture(gesture.pointerId);
+      }
+    } catch {
+      // Pointer capture may already have been released by the browser.
+    }
+    if (!shouldCommit) {
+      resetGestureState();
+      return;
+    }
+    setSettling(true);
+    setDragRemainder(0);
+    clearSettleTimer();
+    settleTimerRef.current = setTimeout(
+      finishPresetSettling,
+      MODEL_PRESET_SETTLE_FALLBACK_MS,
+    );
+    if (selected && selected.name !== activePresetName) {
+      onPresetChange?.(selected.name);
+    }
+  }, [
+    activePresetName,
+    carouselPresets,
+    clearPressTimer,
+    clearSettleTimer,
+    finishPresetSettling,
+    onPresetChange,
+    resetGestureState,
+  ]);
+
+  const handlePresetPointerLeave = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = gestureRef.current;
+    if (
+      !gesture
+      || gesture.pointerId !== event.pointerId
+      || gesture.active
+    ) {
+      return;
+    }
+    clearPressTimer();
+    gestureRef.current = null;
+  }, [clearPressTimer]);
+
+  const handlePresetKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!canSwitch) return;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowUp") {
+      nextIndex = wrapPresetIndex(currentIndex - 1, carouselPresets.length);
+    } else if (event.key === "ArrowDown") {
+      nextIndex = wrapPresetIndex(currentIndex + 1, carouselPresets.length);
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = carouselPresets.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const next = carouselPresets[nextIndex];
+    if (next && next.name !== activePresetName) onPresetChange?.(next.name);
+  }, [activePresetName, canSwitch, carouselPresets, currentIndex, onPresetChange]);
+
+  const visiblePills = switching
+    ? MODEL_PRESET_PILL_OFFSETS.map((offset) => ({
+        dockScale: settling
+          ? 1
+          : modelPresetDockScale(offset - dragRemainder),
+        offset,
+        virtualIndex: previewVirtualIndex + offset,
+        preset: carouselPresets[
+          wrapPresetIndex(previewVirtualIndex + offset, carouselPresets.length)
+        ],
+      }))
+    : [];
+  const trackOffset = -pillStride * 2 - dragRemainder * pillStride;
+  const trackTransform = `translate3d(0, ${trackOffset}px, 0)`;
+  const viewportBleedPx = isHero ? 10 : 12;
+  const viewportHorizontalBleedPx = Math.ceil(
+    (switchingWidth ?? 92) * (MODEL_PRESET_DOCK_MAX_SCALE - 1),
+  ) + 1;
+  const previewIndex = carouselPresets.length > 0
+    ? wrapPresetIndex(previewVirtualIndex, carouselPresets.length)
+    : 0;
+  const currentPreset = carouselPresets[currentIndex];
+  const previewPreset = carouselPresets[previewIndex];
+
+  return (
+    <Container
+      ref={(node) => {
+        containerRef.current = node;
+      }}
+      data-switching={switching ? "true" : undefined}
+      data-settling={settling ? "true" : undefined}
+      aria-label={label}
+      aria-orientation={canSwitch ? "vertical" : undefined}
+      aria-valuemax={canSwitch ? carouselPresets.length - 1 : undefined}
+      aria-valuemin={canSwitch ? 0 : undefined}
+      aria-valuenow={canSwitch ? (switching ? previewIndex : currentIndex) : undefined}
+      aria-valuetext={
+        canSwitch
+          ? (switching ? previewPreset : currentPreset)?.label || label
+          : undefined
+      }
+      role={canSwitch ? "spinbutton" : undefined}
+      type={interactive || canSwitch ? "button" : undefined}
+      onClick={interactive ? onClick : undefined}
+      onKeyDown={handlePresetKeyDown}
+      onPointerDown={handlePresetPointerDown}
+      onPointerMove={handlePresetPointerMove}
+      onPointerLeave={handlePresetPointerLeave}
+      onPointerUp={(event) => finishPresetGesture(event, true)}
+      onPointerCancel={(event) => finishPresetGesture(event, false)}
+      onLostPointerCapture={(event) => finishPresetGesture(event, false)}
+      onContextMenu={(event) => {
+        if (switchingRef.current) event.preventDefault();
+      }}
+      onDragStart={(event) => event.preventDefault()}
+      style={{
+        ...MODEL_PRESET_MOTION_STYLE,
+        touchAction: canSwitch ? "manipulation" : undefined,
+        width: switchingWidth === null ? undefined : `${switchingWidth}px`,
+        minWidth: switchingWidth === null ? undefined : `${switchingWidth}px`,
+        maxWidth: switchingWidth === null ? undefined : `${switchingWidth}px`,
+        flex: switchingWidth === null ? undefined : `0 0 ${switchingWidth}px`,
+      }}
+      className={cn(
+        "thread-composer-model-badge group/model-badge relative inline-flex w-[5.75rem] min-w-0 justify-end appearance-none border-0 bg-transparent p-0 shadow-none",
+        interactive && "cursor-pointer",
+        canSwitch && [
+          "cursor-grab select-none",
+          "focus-visible:outline-none",
+        ],
+        switching && "z-10 cursor-grabbing",
+        isHero ? "h-8 max-w-[44vw]" : "h-9 max-w-[44vw]",
+      )}
+    >
+      <ComposerModelPill
+        label={label}
+        modelDetail={modelDetail}
+        provider={provider}
+        providerLabel={providerLabel}
+        needsSetup={needsSetup}
+        fallbackModelName={fallbackModelName}
+        isHero={isHero}
+        exposeTestId
+        className={cn(switching && "invisible")}
+      />
+      {switching ? (
+        <span
+          data-testid="composer-model-pill-viewport"
+          className="composer-model-pill-viewport pointer-events-none absolute overflow-hidden bg-transparent"
+          style={{
+            top: `-${viewportBleedPx}px`,
+            right: 0,
+            bottom: `-${viewportBleedPx}px`,
+            left: `-${viewportHorizontalBleedPx}px`,
+            WebkitMaskImage: MODEL_PRESET_VIEWPORT_MASK,
+            maskImage: MODEL_PRESET_VIEWPORT_MASK,
+            WebkitMaskRepeat: "no-repeat",
+            maskRepeat: "no-repeat",
+          }}
+          aria-hidden
+        >
+          <span
+            data-testid="composer-model-pill-track"
+            data-settling={settling ? "true" : undefined}
+            className="composer-model-pill-track ml-auto flex flex-col items-end gap-1 will-change-transform"
+            onTransitionEnd={(event) => {
+              if (
+                settling
+                && event.currentTarget === event.target
+                && event.propertyName === "transform"
+              ) {
+                finishPresetSettling();
+              }
+            }}
+            style={{
+              width: `calc(100% - ${viewportHorizontalBleedPx}px)`,
+              paddingTop: `${viewportBleedPx}px`,
+              transform: trackTransform,
+            }}
+          >
+            {visiblePills.map(({ dockScale, offset, preset, virtualIndex }) => (
+              <ComposerModelPill
+                key={virtualIndex}
+                label={preset.label || preset.name}
+                modelDetail={preset.model}
+                provider={preset.provider}
+                isHero={isHero}
+                presetOffset={offset}
+                dockScale={dockScale}
+                elevated={false}
+                className={cn(
+                  "composer-model-pill-dock",
+                  settling && "composer-model-pill-settling",
+                  offset === 0 && "composer-model-pill-selected",
+                )}
+                style={{
+                  height: `${pillHeight}px`,
+                  transform: `scale(${dockScale.toFixed(4)})`,
+                  zIndex: Math.round(dockScale * 100),
+                }}
+              />
+            ))}
+          </span>
+        </span>
+      ) : null}
+    </Container>
+  );
+}
+
+function ComposerModelPill({
+  label,
+  modelDetail,
+  provider,
+  providerLabel,
+  needsSetup = false,
+  fallbackModelName,
+  isHero,
+  exposeTestId = false,
+  presetOffset,
+  dockScale,
+  elevated = true,
+  className,
+  style,
+}: {
+  label: string;
+  modelDetail?: string | null;
+  provider?: string | null;
+  providerLabel?: string | null;
+  needsSetup?: boolean;
+  fallbackModelName?: string | null;
+  isHero: boolean;
+  exposeTestId?: boolean;
+  presetOffset?: number;
+  dockScale?: number;
+  elevated?: boolean;
+  className?: string | false;
+  style?: CSSProperties;
+}) {
+  const labelRef = useRef<HTMLSpanElement | null>(null);
+  const [labelOverflows, setLabelOverflows] = useState(false);
   const inferredProvider = needsSetup
     ? null
     : provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
-  const showLogo = !!logoUrl;
   const title = [label, modelDetail, providerLabel]
     .filter((value, index, values) => value && values.indexOf(value) === index)
     .join(" · ");
-  const interactive = Boolean(onClick);
-  const Container = interactive ? "button" : "span";
+
+  useLayoutEffect(() => {
+    const node = labelRef.current;
+    if (!node) return;
+    const updateOverflow = () => {
+      setLabelOverflows(node.scrollWidth > node.clientWidth + 1);
+    };
+    updateOverflow();
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updateOverflow);
+    observer?.observe(node);
+    window.addEventListener("resize", updateOverflow);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateOverflow);
+    };
+  }, [label]);
 
   return (
-    <Container
+    <span
       data-fallback={fallbackModelName ? "true" : undefined}
-      title={fallbackModelName || title}
-      aria-label={label}
-      type={interactive ? "button" : undefined}
-      onClick={onClick}
+      data-preset-offset={presetOffset}
+      data-dock-scale={dockScale?.toFixed(4)}
+      title={fallbackModelName || title || undefined}
       className={cn(
-        "composer-model-badge thread-composer-model-badge inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-semibold text-foreground/58",
-        "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
-        interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
+        "composer-model-badge composer-model-pill inline-flex h-full w-fit max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-semibold text-foreground/58",
+        elevated && "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
+        "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible/model-badge:ring-2 group-focus-visible/model-badge:ring-ring/45",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
         isHero
-          ? "h-8 max-w-[min(12.5rem,44vw)] gap-1.5 px-2.5 text-[12px]"
-          : "h-9 max-w-[min(12rem,44vw)] gap-2 px-3 text-[12.5px]",
+          ? "gap-1.5 px-2.5 text-[12px]"
+          : "gap-2 px-3 text-[12.5px]",
+        className,
       )}
+      style={style}
     >
       <span
-        data-testid={needsSetup ? "composer-model-setup-icon" : inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
+        data-testid={
+          exposeTestId
+            ? needsSetup
+              ? "composer-model-setup-icon"
+              : inferredProvider
+                ? `composer-model-logo-${inferredProvider}`
+                : "composer-model-logo"
+            : undefined
+        }
         className={cn(
           "grid shrink-0 place-items-center overflow-hidden",
           needsSetup
@@ -2440,11 +2991,15 @@ function ComposerModelBadge({
         aria-hidden
       >
         {needsSetup ? (
-          <CircleHelp className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
-        ) : showLogo ? (
+          <CircleHelp
+            className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
+            strokeWidth={1.8}
+          />
+        ) : logoUrl ? (
           <img
             src={logoUrl}
             alt=""
+            draggable={false}
             decoding="async"
             loading="lazy"
             className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
@@ -2462,11 +3017,22 @@ function ComposerModelBadge({
             {brand.initials.slice(0, 2)}
           </span>
         ) : (
-          <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3 w-3" : "h-3 w-3")} />
+          <Sparkles
+            className="h-3 w-3 text-muted-foreground/65"
+          />
         )}
       </span>
-      <span className="thread-composer-model-label truncate">{label}</span>
-    </Container>
+      <span
+        ref={labelRef}
+        data-overflow-fade={labelOverflows ? "true" : undefined}
+        className={cn(
+          "thread-composer-model-label min-w-0 overflow-hidden whitespace-nowrap text-center",
+          labelOverflows && "thread-composer-model-label-fade",
+        )}
+      >
+        {label}
+      </span>
+    </span>
   );
 }
 

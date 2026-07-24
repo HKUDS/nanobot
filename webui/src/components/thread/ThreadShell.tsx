@@ -6,7 +6,7 @@ import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailab
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ThreadComposer, type ModelPresetOption } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -30,7 +30,12 @@ import {
   installedMcpPresetsFromPayload,
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
+import {
+  isModelCommandText,
+  isModelCommandResponseText,
+} from "@/lib/format";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
+import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -45,7 +50,25 @@ import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
-  return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
+  const normalized = scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
+  const hiddenModelTurnIds = new Set(
+    normalized
+      .filter((message) => (
+        message.role === "user"
+        && isModelCommandText(message.content)
+        && message.turnId
+      ))
+      .map((message) => message.turnId as string),
+  );
+
+  return normalized.filter((message) => {
+    const modelCommand = message.role === "user" && isModelCommandText(message.content);
+    if (modelCommand) return false;
+    if (isSystemCommandTurnId(message.turnId)) return false;
+    if (message.turnId && hiddenModelTurnIds.has(message.turnId)) return false;
+    if (message.role === "assistant" && isModelCommandResponseText(message.content)) return false;
+    return true;
+  });
 }
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content">;
@@ -219,6 +242,37 @@ function toModelBadgeInfo(
     providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
     needsSetup,
   };
+}
+
+function modelPresetOptionsFromSettings(
+  settings: SettingsPayload | null,
+): ModelPresetOption[] {
+  if (!settings) return [];
+  const byName = new Map<string, SettingsPayload["model_presets"][number]>();
+  for (const preset of settings.model_presets ?? []) {
+    const name = preset.name.trim();
+    if (!preset.is_default && name) byName.set(name, preset);
+  }
+
+  const options: ModelPresetOption[] = [];
+  const seen = new Set<string>();
+  const appendOption = (rawName: string) => {
+    const name = rawName.trim();
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    const preset = byName.get(name);
+    if (!preset) return;
+    options.push({
+      name,
+      label: preset.label?.trim() || name,
+      model: preset.model,
+      provider: preset.resolved_provider || preset.provider,
+    });
+  };
+
+  for (const name of settings.model_call_order ?? []) appendOption(name);
+  for (const preset of settings.model_presets ?? []) appendOption(preset.name);
+  return options;
 }
 
 const HERO_GREETING_KEYS = [
@@ -543,12 +597,54 @@ export function ThreadShell({
     token,
   ]);
 
-  const showHeroComposer = messages.length === 0 && !loading;
+  const showHeroComposer = displayMessages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
+  const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
+  const optimisticModelPresetRef = useRef<{
+    name: string;
+    sessionKey: string | null;
+    baseSessionPreset: string | null;
+  } | null>(null);
+  useEffect(() => {
+    optimisticModelPresetRef.current = null;
+    setLocalModelPreset(null);
+  }, [session?.key]);
+  useEffect(() => {
+    const optimistic = optimisticModelPresetRef.current;
+    if (!optimistic || optimistic.sessionKey !== (session?.key ?? null)) return;
+    if (
+      sessionModelPreset === optimistic.name
+      || sessionModelPreset !== optimistic.baseSessionPreset
+    ) {
+      optimisticModelPresetRef.current = null;
+      setLocalModelPreset(null);
+    }
+  }, [session?.key, sessionModelPreset]);
+  const activeModelPreset = (
+    localModelPreset
+    || sessionModelPreset
+    || settings?.agent.model_preset
+    || "default"
+  );
+  const handleModelPresetChange = useCallback((name: string) => {
+    optimisticModelPresetRef.current = {
+      name,
+      sessionKey: session?.key ?? null,
+      baseSessionPreset: sessionModelPreset,
+    };
+    setLocalModelPreset(name);
+    if (chatId) {
+      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+    }
+  }, [chatId, client, session?.key, sessionModelPreset]);
+  const modelPresetOptions = useMemo(
+    () => modelPresetOptionsFromSettings(settings),
+    [settings],
+  );
   const modelBadge = useMemo(
-    () => toModelBadgeInfo(modelName, settings, sessionModelPreset),
-    [modelName, sessionModelPreset, settings],
+    () => toModelBadgeInfo(modelName, settings, activeModelPreset),
+    [activeModelPreset, modelName, settings],
   );
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })
@@ -681,7 +777,7 @@ export function ThreadShell({
     if (chatId) {
       const prev = prevChatIdForCacheRef.current;
       if (prev && prev !== chatId) {
-        messageCacheRef.current.set(prev, projectWebuiThreadMessages(messages));
+        messageCacheRef.current.set(prev, displayMessages);
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = chatId;
@@ -689,13 +785,13 @@ export function ThreadShell({
       if (prevChatIdForCacheRef.current) {
         messageCacheRef.current.set(
           prevChatIdForCacheRef.current,
-          projectWebuiThreadMessages(messages),
+          displayMessages,
         );
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = null;
     }
-  }, [chatId, messages]);
+  }, [chatId, displayMessages]);
 
   // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
   // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
@@ -711,8 +807,8 @@ export function ThreadShell({
     if (loading) {
       return;
     }
-    messageCacheRef.current.set(chatId, projectWebuiThreadMessages(messages));
-  }, [chatId, loading, messages]);
+    messageCacheRef.current.set(chatId, displayMessages);
+  }, [chatId, displayMessages, loading]);
 
   // The landing composer queues the first message while `new_chat` is in flight.
   // Only the chat created for that send may consume it; selecting another chat
@@ -759,9 +855,12 @@ export function ThreadShell({
         setBooting(false);
         return;
       }
+      if (localModelPreset) {
+        await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
+      }
       setPendingFirstTargetChatId(newId);
     },
-    [booting, onCreateChat, withWorkspaceScope, workspaceScope],
+    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
   );
 
   const handleThreadSend = useCallback(
@@ -893,6 +992,9 @@ export function ThreadShell({
           }
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
+          modelPreset={activeModelPreset}
+          modelPresets={modelPresetOptions}
+          onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
@@ -932,6 +1034,9 @@ export function ThreadShell({
           }
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
+          modelPreset={activeModelPreset}
+          modelPresets={modelPresetOptions}
+          onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}

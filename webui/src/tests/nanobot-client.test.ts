@@ -552,6 +552,75 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("hides only the exact system-command turn and keeps concurrent chat events", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const chatHandler = vi.fn();
+    const sessionHandler = vi.fn();
+    client.onChat("chat-x", chatHandler);
+    client.onSessionUpdate(sessionHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const pending = client.sendSystemCommand("chat-x", "  /model fast  ", 1_000);
+    const frame = JSON.parse(lastSocket().sent.at(-1) as string);
+    expect(frame).toMatchObject({
+      type: "message",
+      chat_id: "chat-x",
+      content: "/model fast",
+      webui: true,
+    });
+    expect(frame.turn_id).toMatch(/^webui-system:/);
+    expect(frame).not.toHaveProperty("silent");
+
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "chat-x",
+      text: "normal reply",
+      turn_id: "normal-turn",
+    });
+    lastSocket().fakeMessage({
+      event: "session_updated",
+      chat_id: "chat-x",
+      scope: "content",
+    });
+    lastSocket().fakeMessage({
+      event: "message",
+      chat_id: "chat-x",
+      text: "Switched model preset to fast.",
+      turn_id: frame.turn_id,
+    });
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(chatHandler).toHaveBeenCalledTimes(1);
+    expect(chatHandler).toHaveBeenCalledWith(expect.objectContaining({
+      text: "normal reply",
+      turn_id: "normal-turn",
+    }));
+    expect(sessionHandler).toHaveBeenCalledWith("chat-x", "content", undefined);
+  });
+
+  it("validates system commands and rejects pending ones when the socket closes", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    await expect(client.sendSystemCommand("chat-x", "model fast")).rejects.toThrow(
+      "slash command",
+    );
+    const pending = client.sendSystemCommand("chat-x", "/model fast", 1_000);
+    lastSocket().close();
+
+    await expect(pending).rejects.toThrow("socket closed");
+  });
+
   it("sends selected assistant text as separate quoted context", () => {
     const client = new NanobotClient({
       url: "ws://test",

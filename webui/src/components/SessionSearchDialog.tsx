@@ -8,7 +8,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { deriveTitle } from "@/lib/format";
+import { deriveTitle, visibleSessionPreview } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
 
@@ -41,7 +41,7 @@ export function SessionSearchDialog({
   const sessionResults = useMemo(() => {
     if (!open) return [];
     if (!normalizedQuery) return sessions;
-    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+    const terms = normalizedQuery.split(/\s+/);
     return sessions.filter((session) =>
       sessionMatchesTerms(session, terms, titleOverrides[session.key]),
     );
@@ -167,7 +167,7 @@ export function SessionSearchDialog({
                   const title = titleOverrides[session.key]?.trim() ||
                     session.title?.trim() ||
                     deriveTitle(session.preview, t("chat.newChat"));
-                  const preview = session.preview.trim();
+                  const preview = visibleSessionPreview(session.preview);
                   const showPreview =
                     preview.length > 0 &&
                     preview.toLowerCase() !== title.trim().toLowerCase();
@@ -228,7 +228,7 @@ function sessionMatchesTerms(
   const haystack = [
     titleOverride,
     session.title,
-    session.preview,
+    visibleSessionPreview(session.preview),
   ]
     .filter(Boolean)
     .join(" ")

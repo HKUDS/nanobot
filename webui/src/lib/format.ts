@@ -16,7 +16,31 @@ const LOW_INFORMATION_TITLE_PREVIEWS = new Set([
   "在吗",
 ]);
 
+export function isModelCommandText(text: string | null | undefined): boolean {
+  return /^\/model(?:@[A-Za-z0-9_]+)?(?:\s|$)/i.test(text?.trim() ?? "");
+}
+
+export function isModelCommandResponseText(text: string | null | undefined): boolean {
+  const normalized = text?.trim() ?? "";
+  return (
+    /^## Model\s+- Current (?:model|selection error):/.test(normalized)
+    || normalized.startsWith("Switched model preset to ")
+    || normalized.startsWith("Could not switch model preset:")
+    || normalized === "Usage: `/model [preset]`"
+  );
+}
+
+export function shouldHideModelMessageText(text: string | null | undefined): boolean {
+  return isModelCommandText(text) || isModelCommandResponseText(text);
+}
+
+export function visibleSessionPreview(preview: string | null | undefined): string {
+  const normalized = preview?.trim() ?? "";
+  return shouldHideModelMessageText(normalized) ? "" : normalized;
+}
+
 function isLowInformationTitlePreview(text: string): boolean {
+  if (isModelCommandResponseText(text)) return true;
   const normalized = text.toLowerCase().replace(/[.!?。！？~～\s]+$/g, "").trim();
   return (
     normalized.startsWith("/") ||
