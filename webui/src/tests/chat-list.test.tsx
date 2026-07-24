@@ -18,33 +18,12 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
 }
 
 describe("ChatList", () => {
-  it("does not render /model commands as session previews", () => {
-    render(
-      <ChatList
-        sessions={[session({
-          chatId: "model-command",
-          title: "Model chat",
-          preview: "/model fast",
-        })]}
-        activeKey={null}
-        onSelect={vi.fn()}
-        onRequestDelete={vi.fn()}
-        onTogglePin={vi.fn()}
-        onRequestRename={vi.fn()}
-        onToggleArchive={vi.fn()}
-        showPreviews
-      />,
-    );
-
-    expect(screen.getByText("Model chat")).toBeInTheDocument();
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
-  });
-
   it("orders chats by latest session activity by default", () => {
     const sessions = [
       session({
         chatId: "older",
         title: "Older chat",
+        preview: "/model fast",
         updatedAt: "2026-05-21T10:00:00Z",
       }),
       session({
@@ -68,6 +47,7 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
+        showPreviews
       />,
     );
 
@@ -76,6 +56,7 @@ describe("ChatList", () => {
 
     expect(text.indexOf("Newest chat")).toBeLessThan(text.indexOf("Middle chat"));
     expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
+    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
   });
 
   it("shows a pin indicator for pinned chats", () => {

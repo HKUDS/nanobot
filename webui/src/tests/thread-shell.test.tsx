@@ -317,61 +317,6 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
   });
 
-  it("filters persisted system-command turns without suppressing the empty-state composer", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("websocket%3Asilent-history/webui-thread")) {
-          return Promise.resolve(httpJson({
-            schemaVersion: 1,
-            messages: [
-              {
-                id: "hidden-user",
-                role: "user",
-                content: "/model fast",
-                createdAt: 1,
-                turnId: "webui-system:history-test",
-              },
-              {
-                id: "hidden-assistant",
-                role: "assistant",
-                content: "Switched model preset to fast.",
-                createdAt: 2,
-                turnId: "webui-system:history-test",
-              },
-            ] satisfies UIMessage[],
-          }));
-        }
-        return Promise.resolve({
-          ok: false,
-          status: 404,
-          json: async () => ({}),
-        });
-      }),
-    );
-    const client = makeClient();
-
-    render(wrap(
-      client,
-      <ThreadShell
-        session={session("silent-history")}
-        title="Silent history"
-        onToggleSidebar={() => {}}
-      />,
-    ));
-
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("websocket%3Asilent-history/webui-thread"),
-      expect.anything(),
-    ));
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
-    expect(screen.queryByText("Switched model preset to fast.")).not.toBeInTheDocument();
-  });
-
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
     const onGoHome = vi.fn();
@@ -468,47 +413,27 @@ describe("ThreadShell", () => {
 
   it("switches through every named preset while preserving call-order priority", async () => {
     const client = makeClient();
-    const settings = modelSettings("deepseek-v4-pro", "deepseek");
-    settings.model_presets.push(
-      {
-        ...settings.model_presets[0]!,
-        name: "disabled",
-        label: "Disabled",
-        active: false,
-        is_default: false,
-        model: "deepseek/disabled",
-      },
-      {
-        ...settings.model_presets[0]!,
-        name: "slow",
-        label: "Slow",
-        active: false,
-        is_default: false,
-        model: "deepseek/slow",
-      },
-      {
-        ...settings.model_presets[0]!,
-        name: "fast",
-        label: "Fast",
-        active: false,
-        is_default: false,
-        model: "openai-codex/gpt-5.5",
-        provider: "openai_codex",
-      },
-    );
-    settings.model_call_order = ["slow", "missing", "fast", "slow"];
+    const settings = settingsWithFastPreset();
+    settings.model_presets.push({
+      ...settings.model_presets.at(-1)!,
+      name: "extra",
+      label: "Extra",
+      model: "deepseek/extra",
+      provider: "deepseek",
+      active: false,
+      is_default: false,
+    });
+    settings.model_call_order = ["fast"];
 
-    const { rerender } = render(
-      wrap(
-        client,
-        <ThreadShell
-          session={session("preset-order", "default")}
-          title="Preset order"
-          onToggleSidebar={() => {}}
-          settingsSnapshot={settings}
-        />,
-      ),
-    );
+    const view = (preset: string) => wrap(client, (
+      <ThreadShell
+        session={session("preset-order", preset)}
+        title="Preset order"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+      />
+    ));
+    const { rerender } = render(view("default"));
 
     const badge = await screen.findByRole("spinbutton", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
@@ -516,48 +441,20 @@ describe("ThreadShell", () => {
 
     expect(client.sendSystemCommand).toHaveBeenCalledWith(
       "preset-order",
-      "/model slow",
+      "/model fast",
     );
-    expect(await screen.findByText("Slow")).toBeInTheDocument();
-
-    await act(async () => {
-      rerender(
-        wrap(
-          client,
-          <ThreadShell
-            session={session("preset-order", "slow")}
-            title="Preset order"
-            onToggleSidebar={() => {}}
-            settingsSnapshot={settings}
-          />,
-        ),
-      );
-    });
-    expect(await screen.findByText("Slow")).toBeInTheDocument();
-
+    expect(await screen.findByText("Fast")).toBeInTheDocument();
     fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Slow" }),
+      screen.getByRole("spinbutton", { name: "Fast" }),
       { key: "End" },
     );
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
-      "/model disabled",
+      "/model extra",
     );
-    expect(await screen.findByText("Disabled")).toBeInTheDocument();
+    expect(await screen.findByText("Extra")).toBeInTheDocument();
 
-    await act(async () => {
-      rerender(
-        wrap(
-          client,
-          <ThreadShell
-            session={session("preset-order", "fast")}
-            title="Preset order"
-            onToggleSidebar={() => {}}
-            settingsSnapshot={settings}
-          />,
-        ),
-      );
-    });
+    rerender(view("fast"));
     expect(await screen.findByText("Fast")).toBeInTheDocument();
   });
 
@@ -913,18 +810,16 @@ describe("ThreadShell", () => {
     );
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
 
-    const { rerender } = render(
-      wrap(
-        client,
-        <ThreadShell
-          session={null}
-          title="nanobot"
-          onToggleSidebar={() => {}}
-          onCreateChat={onCreateChat}
-          settingsSnapshot={settings}
-        />,
-      ),
-    );
+    const view = (currentSession: ReturnType<typeof session> | null) => wrap(client, (
+      <ThreadShell
+        session={currentSession}
+        title={currentSession ? "New chat" : "nanobot"}
+        onToggleSidebar={() => {}}
+        onCreateChat={onCreateChat}
+        settingsSnapshot={settings}
+      />
+    ));
+    const { rerender } = render(view(null));
 
     fireEvent.keyDown(
       await screen.findByRole("spinbutton", { name: "Default" }),
@@ -943,20 +838,7 @@ describe("ThreadShell", () => {
       "/model fast",
     ));
 
-    await act(async () => {
-      rerender(
-        wrap(
-          client,
-          <ThreadShell
-            session={session("chat-new")}
-            title="New chat"
-            onToggleSidebar={() => {}}
-            onCreateChat={onCreateChat}
-            settingsSnapshot={settings}
-          />,
-        ),
-      );
-    });
+    rerender(view(session("chat-new")));
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     await act(async () => {

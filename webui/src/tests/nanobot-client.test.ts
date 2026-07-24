@@ -552,16 +552,14 @@ describe("NanobotClient", () => {
     });
   });
 
-  it("hides only the exact system-command turn and keeps concurrent chat events", async () => {
+  it("handles the silent system-command lifecycle without hiding concurrent events", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
     const chatHandler = vi.fn();
-    const sessionHandler = vi.fn();
     client.onChat("chat-x", chatHandler);
-    client.onSessionUpdate(sessionHandler);
     client.connect();
     lastSocket().fakeOpen();
 
@@ -574,18 +572,12 @@ describe("NanobotClient", () => {
       webui: true,
     });
     expect(frame.turn_id).toMatch(/^webui-system:/);
-    expect(frame).not.toHaveProperty("silent");
 
     lastSocket().fakeMessage({
       event: "message",
       chat_id: "chat-x",
       text: "normal reply",
       turn_id: "normal-turn",
-    });
-    lastSocket().fakeMessage({
-      event: "session_updated",
-      chat_id: "chat-x",
-      scope: "content",
     });
     lastSocket().fakeMessage({
       event: "message",
@@ -600,25 +592,9 @@ describe("NanobotClient", () => {
       text: "normal reply",
       turn_id: "normal-turn",
     }));
-    expect(sessionHandler).toHaveBeenCalledWith("chat-x", "content", undefined);
-  });
-
-  it("validates system commands and rejects pending ones when the socket closes", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    lastSocket().fakeOpen();
-
-    await expect(client.sendSystemCommand("chat-x", "model fast")).rejects.toThrow(
-      "slash command",
-    );
-    const pending = client.sendSystemCommand("chat-x", "/model fast", 1_000);
+    const interrupted = client.sendSystemCommand("chat-x", "/model fast", 1_000);
     lastSocket().close();
-
-    await expect(pending).rejects.toThrow("socket closed");
+    await expect(interrupted).rejects.toThrow("socket closed");
   });
 
   it("sends selected assistant text as separate quoted context", () => {

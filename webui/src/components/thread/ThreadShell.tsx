@@ -6,7 +6,8 @@ import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailab
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import { ThreadComposer, type ModelPresetOption } from "@/components/thread/ThreadComposer";
+import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -30,12 +31,7 @@ import {
   installedMcpPresetsFromPayload,
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
-import {
-  isModelCommandText,
-  isModelCommandResponseText,
-} from "@/lib/format";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -45,31 +41,8 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
-import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
 import { useClient } from "@/providers/ClientProvider";
-
-function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
-  const normalized = scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
-  const hiddenModelTurnIds = new Set(
-    normalized
-      .filter((message) => (
-        message.role === "user"
-        && isModelCommandText(message.content)
-        && message.turnId
-      ))
-      .map((message) => message.turnId as string),
-  );
-
-  return normalized.filter((message) => {
-    const modelCommand = message.role === "user" && isModelCommandText(message.content);
-    if (modelCommand) return false;
-    if (isSystemCommandTurnId(message.turnId)) return false;
-    if (message.turnId && hiddenModelTurnIds.has(message.turnId)) return false;
-    if (message.role === "assistant" && isModelCommandResponseText(message.content)) return false;
-    return true;
-  });
-}
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content">;
 
@@ -248,31 +221,24 @@ function modelPresetOptionsFromSettings(
   settings: SettingsPayload | null,
 ): ModelPresetOption[] {
   if (!settings) return [];
-  const byName = new Map<string, SettingsPayload["model_presets"][number]>();
-  for (const preset of settings.model_presets ?? []) {
-    const name = preset.name.trim();
-    if (!preset.is_default && name) byName.set(name, preset);
-  }
-
-  const options: ModelPresetOption[] = [];
-  const seen = new Set<string>();
-  const appendOption = (rawName: string) => {
-    const name = rawName.trim();
-    if (!name || seen.has(name)) return;
-    seen.add(name);
-    const preset = byName.get(name);
-    if (!preset) return;
-    options.push({
-      name,
-      label: preset.label?.trim() || name,
-      model: preset.model,
-      provider: preset.resolved_provider || preset.provider,
+  const order = new Map(
+    (settings.model_call_order ?? []).map((name, index) => [name.trim(), index]),
+  );
+  return settings.model_presets
+    .filter((preset) => !preset.is_default && preset.name.trim())
+    .sort((a, b) => (
+      (order.get(a.name.trim()) ?? Number.POSITIVE_INFINITY)
+      - (order.get(b.name.trim()) ?? Number.POSITIVE_INFINITY)
+    ))
+    .map((preset) => {
+      const name = preset.name.trim();
+      return {
+        name,
+        label: preset.label?.trim() || name,
+        model: preset.model,
+        provider: preset.resolved_provider || preset.provider,
+      };
     });
-  };
-
-  for (const name of settings.model_call_order ?? []) appendOption(name);
-  for (const preset of settings.model_presets ?? []) appendOption(preset.name);
-  return options;
 }
 
 const HERO_GREETING_KEYS = [
@@ -601,25 +567,8 @@ export function ThreadShell({
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
-  const optimisticModelPresetRef = useRef<{
-    name: string;
-    sessionKey: string | null;
-    baseSessionPreset: string | null;
-  } | null>(null);
   useEffect(() => {
-    optimisticModelPresetRef.current = null;
     setLocalModelPreset(null);
-  }, [session?.key]);
-  useEffect(() => {
-    const optimistic = optimisticModelPresetRef.current;
-    if (!optimistic || optimistic.sessionKey !== (session?.key ?? null)) return;
-    if (
-      sessionModelPreset === optimistic.name
-      || sessionModelPreset !== optimistic.baseSessionPreset
-    ) {
-      optimisticModelPresetRef.current = null;
-      setLocalModelPreset(null);
-    }
   }, [session?.key, sessionModelPreset]);
   const activeModelPreset = (
     localModelPreset
@@ -628,16 +577,11 @@ export function ThreadShell({
     || "default"
   );
   const handleModelPresetChange = useCallback((name: string) => {
-    optimisticModelPresetRef.current = {
-      name,
-      sessionKey: session?.key ?? null,
-      baseSessionPreset: sessionModelPreset,
-    };
     setLocalModelPreset(name);
     if (chatId) {
       void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
     }
-  }, [chatId, client, session?.key, sessionModelPreset]);
+  }, [chatId, client]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -727,17 +671,16 @@ export function ThreadShell({
         return normalizedHistory;
       }
       if (cached && cached.length > 0) {
-        const normalizedCached = projectWebuiThreadMessages(cached);
         if (
-          normalizedHistory.length > normalizedCached.length
+          normalizedHistory.length > cached.length
           && !isStaleThreadSnapshot(prev, normalizedHistory)
         ) {
           messageCacheRef.current.set(chatId, normalizedHistory);
           appliedHistoryVersionRef.current.set(chatId, historyVersion);
           return normalizedHistory;
         }
-        if (isStaleThreadSnapshot(prev, normalizedCached)) return keepLiveMessages(prev);
-        return normalizedCached;
+        if (isStaleThreadSnapshot(prev, cached)) return keepLiveMessages(prev);
+        return cached;
       }
       if (isStaleThreadSnapshot(prev, normalizedHistory)) return keepLiveMessages(prev);
       appliedHistoryVersionRef.current.set(chatId, historyVersion);

@@ -41,7 +41,7 @@ export function SessionSearchDialog({
   const sessionResults = useMemo(() => {
     if (!open) return [];
     if (!normalizedQuery) return sessions;
-    const terms = normalizedQuery.split(/\s+/);
+    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
     return sessions.filter((session) =>
       sessionMatchesTerms(session, terms, titleOverrides[session.key]),
     );

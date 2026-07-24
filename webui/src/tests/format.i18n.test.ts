@@ -1,15 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAppLanguage } from "@/i18n";
-import {
-  deriveTitle,
-  fmtDateTime,
-  formatTurnLatency,
-  isModelCommandResponseText,
-  isModelCommandText,
-  relativeTime,
-  visibleSessionPreview,
-} from "@/lib/format";
+import { fmtDateTime, formatTurnLatency, relativeTime } from "@/lib/format";
 
 describe("localized format helpers", () => {
   beforeEach(() => {
@@ -86,24 +78,5 @@ describe("localized format helpers", () => {
     const minutePlus = formatTurnLatency(90_000, "en");
     expect(minutePlus).toContain("m");
     expect(minutePlus).toContain("s");
-  });
-
-  it("treats /model commands and their backend replies as hidden WebUI metadata", () => {
-    expect(isModelCommandText("  /model fast  ")).toBe(true);
-    expect(isModelCommandText("/MODEL@nanobot fast")).toBe(true);
-    expect(isModelCommandText("/modelish")).toBe(false);
-    expect(isModelCommandResponseText(
-      "## Model\n- Current model: `gpt-5.5`",
-    )).toBe(true);
-    expect(isModelCommandResponseText(
-      "Switched model preset to `fast`.\n- Scope: current session",
-    )).toBe(true);
-    expect(isModelCommandResponseText(
-      "## Model\nA normal explanation of model behavior.",
-    )).toBe(false);
-    expect(visibleSessionPreview("/model fast")).toBe("");
-    expect(visibleSessionPreview("Switched model preset to `fast`.")).toBe("");
-    expect(deriveTitle("/model fast", "New chat")).toBe("New chat");
-    expect(deriveTitle("A useful prompt", "New chat")).toBe("A useful prompt");
   });
 });

@@ -698,30 +698,18 @@
 }
 
 .thread-composer-model-label-fade {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 0,
-    #000 calc(100% - 0.75rem),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    #000 0,
-    #000 calc(100% - 0.75rem),
-    transparent 100%
-  );
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
 .thread-composer-model-badge:not([data-switching="true"]):active
   > .composer-model-pill {
-  transform: scale(var(--composer-model-pressed-scale, 0.98));
+  transform: scale(0.98);
 }
 
 @keyframes composer-model-pill-viewport-enter {
   from {
-    transform: scale(var(--composer-model-viewport-enter-scale, 0.9074));
+    transform: scale(0.9074);
   }
 
   to {
@@ -733,6 +721,8 @@
   transform-origin: right center;
   animation: composer-model-pill-viewport-enter 210ms
     cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
 }
 
 .composer-model-pill-dock {
@@ -742,14 +732,8 @@
 }
 
 .composer-model-pill-track[data-settling="true"],
-.composer-model-pill-dock.composer-model-pill-settling {
-  transition: transform var(--composer-model-settle-duration, 180ms)
-    cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.composer-model-pill-selected {
-  position: relative;
-  z-index: 1;
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

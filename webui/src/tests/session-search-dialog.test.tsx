@@ -25,7 +25,7 @@ describe("SessionSearchDialog", () => {
     render(
       <SessionSearchDialog
         open
-        sessions={[session(1)]}
+        sessions={[{ ...session(1), title: "Model chat", preview: "/model fast" }]}
         activeKey={null}
         loading={false}
         onOpenChange={() => {}}
@@ -38,27 +38,7 @@ describe("SessionSearchDialog", () => {
     expect(dialog.className).not.toContain("bg-popover/");
     expect(dialog.className).not.toContain("backdrop-blur");
     expect(screen.getByTestId("session-search-scroll")).toHaveClass("overflow-y-auto");
-  });
-
-  it("does not render or search /model session previews", () => {
-    render(
-      <SessionSearchDialog
-        open
-        sessions={[{
-          ...session(1),
-          title: "Model chat",
-          preview: "/model fast",
-        }]}
-        activeKey={null}
-        loading={false}
-        onOpenChange={() => {}}
-        onSelect={() => {}}
-      />,
-    );
-
-    expect(screen.getByText("Model chat")).toBeInTheDocument();
     expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
-
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
       target: { value: "model fast" },
     });

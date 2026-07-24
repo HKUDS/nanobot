@@ -30,17 +30,12 @@ export function isModelCommandResponseText(text: string | null | undefined): boo
   );
 }
 
-export function shouldHideModelMessageText(text: string | null | undefined): boolean {
-  return isModelCommandText(text) || isModelCommandResponseText(text);
-}
-
 export function visibleSessionPreview(preview: string | null | undefined): string {
   const normalized = preview?.trim() ?? "";
-  return shouldHideModelMessageText(normalized) ? "" : normalized;
+  return isModelCommandText(normalized) || isModelCommandResponseText(normalized) ? "" : normalized;
 }
 
 function isLowInformationTitlePreview(text: string): boolean {
-  if (isModelCommandResponseText(text)) return true;
   const normalized = text.toLowerCase().replace(/[.!?。！？~～\s]+$/g, "").trim();
   return (
     normalized.startsWith("/") ||
@@ -51,7 +46,7 @@ function isLowInformationTitlePreview(text: string): boolean {
 /** Truncate the first user message into a chat title. */
 export function deriveTitle(preview: string | undefined, fallback: string): string {
   if (!preview) return fallback;
-  const oneLine = preview.replace(/\s+/g, " ").trim();
+  const oneLine = visibleSessionPreview(preview).replace(/\s+/g, " ").trim();
   if (!oneLine) return fallback;
   if (isLowInformationTitlePreview(oneLine)) return fallback;
   return oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;

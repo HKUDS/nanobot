@@ -88,33 +88,16 @@ export type StreamError =
 
 type ErrorHandler = (error: StreamError) => void;
 
-interface PendingRequest<Result> {
-  resolve: (result: Result) => void;
+interface PendingRequest<T> {
+  resolve: (value: T) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
-type PendingNewChat = PendingRequest<string>;
-type PendingTranscription = PendingRequest<string>;
-type PendingSystemCommand = PendingRequest<void>;
-
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
 
-export function isSystemCommandTurnId(
-  value: string | null | undefined,
-): value is string {
+export function isSystemCommandTurnId(value: string | null | undefined): value is string {
   return typeof value === "string" && value.startsWith(SYSTEM_COMMAND_TURN_PREFIX);
-}
-
-function rejectPendingRequests<Result>(
-  pendingRequests: Map<string, PendingRequest<Result>>,
-  detail: string,
-): void {
-  for (const pending of pendingRequests.values()) {
-    clearTimeout(pending.timer);
-    pending.reject(new Error(detail));
-  }
-  pendingRequests.clear();
 }
 
 export interface NanobotClientOptions {
@@ -153,9 +136,9 @@ export class NanobotClient {
   private runStartedAtByChatId = new Map<string, number>();
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
-  private pendingNewChat: PendingNewChat | null = null;
-  private pendingTranscriptions = new Map<string, PendingTranscription>();
-  private pendingSystemCommands = new Map<string, PendingSystemCommand>();
+  private pendingNewChat: PendingRequest<string> | null = null;
+  private pendingTranscriptions = new Map<string, PendingRequest<string>>();
+  private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -425,15 +408,8 @@ export class NanobotClient {
     this.queueSend(frame);
   }
 
-  sendSystemCommand(
-    chatId: string,
-    command: string,
-    timeoutMs: number = 5_000,
-  ): Promise<void> {
+  sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {
     const normalized = command.trim();
-    if (!normalized.startsWith("/")) {
-      return Promise.reject(new Error("system command must be a slash command"));
-    }
     const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -625,8 +601,12 @@ export class NanobotClient {
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
-    rejectPendingRequests(this.pendingTranscriptions, "socket closed");
-    rejectPendingRequests(this.pendingSystemCommands, "socket closed");
+    this.rejectAllTranscriptions("socket closed");
+    for (const pending of this.pendingSystemCommands.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("socket closed"));
+    }
+    this.pendingSystemCommands.clear();
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -665,7 +645,7 @@ export class NanobotClient {
 
   private rejectTranscription(requestId: string | undefined, detail: string): void {
     if (!requestId) {
-      rejectPendingRequests(this.pendingTranscriptions, detail);
+      this.rejectAllTranscriptions(detail);
       return;
     }
     const pending = this.pendingTranscriptions.get(requestId);
@@ -673,6 +653,14 @@ export class NanobotClient {
     clearTimeout(pending.timer);
     this.pendingTranscriptions.delete(requestId);
     pending.reject(new Error(detail));
+  }
+
+  private rejectAllTranscriptions(detail: string): void {
+    for (const [requestId, pending] of this.pendingTranscriptions) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(detail));
+      this.pendingTranscriptions.delete(requestId);
+    }
   }
 
   private resolveSystemCommand(turnId: string): void {
