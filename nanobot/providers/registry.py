@@ -191,6 +191,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
     ),
+    # Eden AI: EU-hosted, OpenAI-compatible gateway. Models use the "provider/model"
+    # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
+    ProviderSpec(
+        name="edenai",
+        keywords=("edenai", "eden"),
+        env_key="EDENAI_API_KEY",
+        display_name="Eden AI",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="edenai",
+        default_api_base="https://api.edenai.run/v3",
+        gateway_reasoning_style="reasoning_effort",
+    ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
     # "opencode/<model>"; send the bare model upstream.
