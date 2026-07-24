@@ -40,27 +40,38 @@ python -m pip install -e .
 
 > Editable installs intentionally **skip** the WebUI bundle step — Vite HMR is faster than rebuilding `dist/` on every change.
 
-### 2. Enable the WebSocket channel
+### 2. Start nanobot with Vite
 
-In `~/.nanobot/config.json`, merge:
+From the repository root:
 
-```json
-{ "channels": { "websocket": { "enabled": true } } }
+```bash
+nanobot webui --dev
 ```
 
-### 3. Start the gateway
+This prepares the local WebSocket channel, starts the gateway and Vite together,
+and opens `http://127.0.0.1:5173`. The first run installs the WebUI dependencies
+when needed. Keep the terminal open; frontend source changes are applied through
+Vite HMR without rebuilding the production bundle or restarting nanobot.
 
-In one terminal:
+`--port` still selects the gateway/WebSocket port, and the Vite proxy follows it
+automatically:
+
+```bash
+nanobot webui --dev --port 9000
+```
+
+`--dev` cannot be combined with `--background`, because Vite must remain attached
+to a terminal. When the command starts both processes, `Ctrl+C` stops both. If it
+attaches to an already-running gateway, `Ctrl+C` stops only Vite.
+
+### Manual two-terminal setup
+
+You can still run the processes separately when debugging their startup:
 
 ```bash
 nanobot gateway
-```
 
-### 4. Start the WebUI dev server
-
-In another terminal:
-
-```bash
+# In another terminal:
 cd webui
 bun install            # npm install also works
 bun run dev
@@ -68,7 +79,8 @@ bun run dev
 
 Then open `http://127.0.0.1:5173`.
 
-By default the dev server proxies `/api`, `/webui`, `/auth`, and WebSocket traffic to `http://127.0.0.1:8765`.
+By default the dev server proxies `/api`, `/webui`, and `/auth` to
+`http://127.0.0.1:8765`. The app WebSocket connects directly to the gateway.
 
 If your gateway listens on a non-default port, point the dev server at it:
 
