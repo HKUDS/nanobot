@@ -406,6 +406,34 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
   });
 
+  it("lets long model preset labels use their intrinsic width", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        modelLabel="gpt-5.6-sol"
+        modelPreset="gpt-5-6-sol"
+        modelProvider="openai_codex"
+        modelPresets={[
+          {
+            name: "gpt-5-6-sol",
+            label: "gpt-5.6-sol",
+            model: "openai-codex/gpt-5.6-sol",
+            provider: "openai_codex",
+          },
+          ...MODEL_PRESETS,
+        ]}
+        onModelPresetChange={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+      />,
+    );
+
+    const badge = screen.getByRole("spinbutton", { name: "gpt-5.6-sol" });
+    expect(badge).toHaveClass("w-fit", "max-w-[min(18rem,44vw)]");
+    expect(badge).not.toHaveClass("w-[5.75rem]");
+    expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();
+  });
+
   it("keeps the thread composer compact while matching the hero style", () => {
     render(
       <ThreadComposer
