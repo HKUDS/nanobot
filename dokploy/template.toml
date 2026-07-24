@@ -1,0 +1,15 @@
+[variables]
+web_token = "${password:32}"
+
+[config]
+mounts = []
+
+[[config.domains]]
+serviceName = "nanobot"
+port = 8765
+host = "${domain}"
+
+[config.env]
+ANTHROPIC_API_KEY = ""
+NANOBOT_WEB_TOKEN = "${web_token}"
+DOKPLOY_CONFIG = "/app/dokploy-config.json"

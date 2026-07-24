@@ -1,0 +1,43 @@
+# Dokploy one-click template for nanobot (gateway + WebUI).
+#
+# Image: nanobot does not yet publish an official image to GHCR or Docker Hub.
+# This compose builds from the repo Dockerfile. Once an official image is
+# available, replace `build:` with:
+#   image: ghcr.io/hkuds/nanobot:latest
+#
+# First-boot config (dokploy-config.json):
+#   - Mounted read-only at /app/dokploy-config.json
+#   - Copied to ~/.nanobot/config.json on first start by entrypoint.sh
+#   - Edit ~/.nanobot/config.json on the host after first boot to customise
+#
+# Volumes:
+#   - nanobot_data persists ~/.nanobot (config, workspace, sessions, memory)
+#
+# Ports:
+#   - 8765: WebUI (WebSocket channel + bundled browser interface)
+#
+# ⚠️  This template ships with NO default LLM provider key.
+#     Deploy → Environment → set ANTHROPIC_API_KEY to your key.
+#     Without it the gateway starts but the agent cannot call an LLM.
+
+services:
+  nanobot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["gateway"]
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - nanobot_data:/home/nanobot/.nanobot
+      - ./dokploy-config.json:/app/dokploy-config.json:ro
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - NANOBOT_WEB_TOKEN=${NANOBOT_WEB_TOKEN}
+      - DOKPLOY_CONFIG=/app/dokploy-config.json
+    cap_drop:
+      - ALL
+
+volumes:
+  nanobot_data:
