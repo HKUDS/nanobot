@@ -146,7 +146,7 @@ class SubagentManager:
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
-        self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -275,6 +275,54 @@ class SubagentManager:
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
+    async def run_inline(
+        self,
+        task: str,
+        label: str | None = None,
+        origin_channel: str = "cli",
+        origin_chat_id: str = "direct",
+        session_key: str | None = None,
+        origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+        *,
+        runtime: LLMRuntime | None = None,
+    ) -> str:
+        """Run a subagent synchronously and return its result to the caller."""
+        if runtime is None:
+            runtime = self._compat_spawn_runtime()
+        if temperature is not None:
+            runtime = runtime.with_generation_overrides(temperature=temperature)
+        task_id = str(uuid.uuid4())[:8]
+        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        origin = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+        }
+        status = SubagentStatus(
+            task_id=task_id,
+            label=display_label,
+            task_description=task,
+            started_at=time.monotonic(),
+        )
+        self._task_statuses[task_id] = status
+        logger.info("Running inline subagent [{}]: {}", task_id, display_label)
+        try:
+            return await self._run_subagent(
+                task_id,
+                task,
+                display_label,
+                origin,
+                status,
+                runtime,
+                origin_message_id,
+                workspace_scope,
+                announce=False,
+            )
+        finally:
+            self._task_statuses.pop(task_id, None)
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -285,7 +333,9 @@ class SubagentManager:
         runtime: LLMRuntime,
         origin_message_id: str | None = None,
         workspace_scope: WorkspaceScope | None = None,
-    ) -> None:
+        *,
+        announce: bool = True,
+    ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
@@ -347,27 +397,43 @@ class SubagentManager:
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
-                await self._announce_result(
-                    task_id, label, task,
-                    self._format_partial_progress(result),
-                    origin, "error", origin_message_id,
-                )
+                final_result = self._format_partial_progress(result)
+                final_status = "error"
             elif result.stop_reason == "error":
-                await self._announce_result(
-                    task_id, label, task,
-                    result.error or "Error: subagent execution failed.",
-                    origin, "error", origin_message_id,
-                )
+                final_result = result.error or "Error: subagent execution failed."
+                final_status = "error"
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
+                final_status = "ok"
                 logger.info("Subagent [{}] completed successfully", task_id)
-                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
+            if announce:
+                await self._announce_result(
+                    task_id,
+                    label,
+                    task,
+                    final_result,
+                    origin,
+                    final_status,
+                    origin_message_id,
+                )
+            return final_result
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            final_result = f"Error: {e}"
+            if announce:
+                await self._announce_result(
+                    task_id,
+                    label,
+                    task,
+                    final_result,
+                    origin,
+                    "error",
+                    origin_message_id,
+                )
+            return final_result
 
     async def _announce_result(
         self,
