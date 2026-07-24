@@ -18,7 +18,7 @@ export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   view: {
     density: "comfortable",
     show_previews: false,
-    show_timestamps: false,
+    show_timestamps: true,
     show_archived: false,
     sort: "updated_desc",
   },
@@ -86,6 +86,9 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
   const sort = ["updated_desc", "created_desc", "title_asc"].includes(view.sort)
     ? view.sort
     : "updated_desc";
+  const showTimestamps = typeof view.show_timestamps === "boolean"
+    ? view.show_timestamps
+    : DEFAULT_SIDEBAR_STATE.view.show_timestamps;
   return {
     schema_version: 1,
     pinned_keys: uniqueStrings(value.pinned_keys),
@@ -97,7 +100,7 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     view: {
       density,
       show_previews: Boolean(view.show_previews),
-      show_timestamps: Boolean(view.show_timestamps),
+      show_timestamps: showTimestamps,
       show_archived: Boolean(view.show_archived),
       sort,
     },
