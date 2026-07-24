@@ -19,10 +19,10 @@ nanobot webui
 
 `nanobot webui` creates the config/workspace when needed, enables the local
 WebSocket channel after confirmation, generates a WebUI bootstrap secret when
-one is missing, starts the gateway, and opens the browser. When no model is
-configured, it starts in settings mode so you can finish setup in **Settings →
-Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so it
-is not available from other devices on your LAN.
+one is missing, starts the gateway, and opens the browser. With a fresh config,
+it can open before a model is configured so you can finish setup in **Settings
+→ Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so
+it is not available from other devices on your LAN.
 
 Run it in the background when you do not want to keep a terminal open:
 

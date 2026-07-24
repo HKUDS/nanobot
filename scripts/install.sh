@@ -104,28 +104,6 @@ nanobot_try_command() {
   esac
 }
 
-has_browser_session() {
-  # A remote or non-interactive shell should keep the terminal setup path.
-  # The one-line installer runs with piped stdin, so /dev/tty is the reliable
-  # signal that a person still owns the surrounding terminal session.
-  if [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
-    return 1
-  fi
-  if ! : 2>/dev/null < /dev/tty; then
-    return 1
-  fi
-
-  case "$(uname -s)" in
-    Darwin)
-      command -v launchctl >/dev/null 2>&1 &&
-        launchctl print "gui/$(id -u)" >/dev/null 2>&1
-      ;;
-    *)
-      [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]
-      ;;
-  esac
-}
-
 install_with_active_python() {
   info "Detected an active virtual environment. Installing into it..."
   ensure_pip "$python_bin" || return 1
@@ -248,9 +226,6 @@ if [ "$dry_run" = "1" ]; then
   fi
   if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
     info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
-  elif has_browser_session; then
-    info "Dry run: would start the WebUI when supported by the installed version."
-    info "Dry run: would fall back to the setup wizard for older releases."
   else
     info "Dry run: would run the setup wizard."
   fi
@@ -294,17 +269,6 @@ if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
   exit 0
 fi
 
-if has_browser_session; then
-  if run_nanobot webui --help >/dev/null 2>&1; then
-    info "Starting nanobot WebUI..."
-    info "Configure your first provider and model in Settings > Models."
-    run_nanobot webui --yes
-    exit 0
-  fi
-  info "The installed release does not support nanobot webui yet."
-  info "Falling back to the setup wizard..."
-fi
-
 if [ -t 0 ]; then
   info "Starting setup wizard..."
   run_nanobot onboard --wizard
@@ -316,5 +280,4 @@ else
   info "Run this later: $(nanobot_try_command) onboard --wizard"
 fi
 
-info "Done. Start nanobot: $(nanobot_try_command) gateway"
-info "For a terminal chat, run: $(nanobot_try_command) agent"
+info "Done. Try: $(nanobot_try_command) agent -m \"Hello!\""

@@ -785,12 +785,7 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
-def _load_runtime_config(
-    config: str | None = None,
-    workspace: str | None = None,
-    *,
-    resolve_env: bool = True,
-) -> Config:
+def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
 
@@ -804,9 +799,7 @@ def _load_runtime_config(
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
-        loaded = load_config(config_path)
-        if resolve_env:
-            loaded = resolve_config_env_vars(loaded)
+        loaded = resolve_config_env_vars(load_config(config_path))
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -927,11 +920,10 @@ def _load_webui_setup_config(config_path: Path) -> Config:
 
 def _provider_setup_error(config: Config) -> str | None:
     """Return the provider setup error, or None when the current model can start."""
-    from nanobot.config.loader import resolve_config_env_vars
     from nanobot.providers.factory import build_provider_snapshot
 
     try:
-        build_provider_snapshot(resolve_config_env_vars(config.model_copy(deep=True)))
+        build_provider_snapshot(config)
     except ValueError as exc:
         return str(exc)
     return None
@@ -1434,7 +1426,7 @@ def webui(
     ),
 ) -> None:
     """Prepare the local WebUI, start the gateway, and open the browser workbench."""
-    from nanobot.config.loader import save_config
+    from nanobot.config.loader import resolve_config_env_vars, save_config
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
 
     _ensure_interactive_tty_mode()
@@ -1448,8 +1440,15 @@ def webui(
     if workspace:
         setup_config.agents.defaults.workspace = workspace
 
-    provider_error = _provider_setup_error(setup_config)
-    if provider_error:
+    try:
+        resolved_setup_config = resolve_config_env_vars(setup_config.model_copy(deep=True))
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    provider_error = _provider_setup_error(resolved_setup_config)
+    settings_setup_error = provider_error if provider_error and created_config else None
+    if settings_setup_error:
         console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
         console.print("Configure a provider and model in WebUI Settings → Models.")
         if background:
@@ -1458,6 +1457,11 @@ def webui(
                 "Run `nanobot webui` without --background.[/red]"
             )
             raise typer.Exit(1)
+    elif provider_error:
+        console.print(f"[dim]Provider check: {provider_error}[/dim]")
+        setup_config = _run_quick_start_for_webui(setup_config, yes=yes)
+        if workspace:
+            setup_config.agents.defaults.workspace = workspace
 
     try:
         changed_webui, generated_bootstrap_secret = _ensure_local_webui_channel(
@@ -1479,11 +1483,7 @@ def webui(
     workspace_path.mkdir(parents=True, exist_ok=True)
     sync_workspace_templates(workspace_path)
 
-    runtime_config = _load_runtime_config(
-        str(config_path),
-        workspace,
-        resolve_env=provider_error is None,
-    )
+    runtime_config = _load_runtime_config(str(config_path), workspace)
     effective_gateway_port = gateway_port if gateway_port is not None else runtime_config.gateway.port
 
     console.print()
@@ -1600,7 +1600,7 @@ def webui(
         port=effective_gateway_port,
         open_browser_url=None if no_open else webui_url,
         webui_bundle_mode=webui_bundle_mode,
-        unconfigured_provider_error=provider_error,
+        unconfigured_provider_error=settings_setup_error,
     )
 
 
@@ -1622,10 +1622,7 @@ def _run_gateway(
     unconfigured_provider_error: str | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.model_presets import (
-        configured_model_presets,
-        load_model_preset_catalog,
-    )
+    from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
@@ -1653,7 +1650,6 @@ def _run_gateway(
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.token_usage import TokenUsageHook
 
-    setup_mode = unconfigured_provider_error is not None
     port = port if port is not None else config.gateway.port
     webui_url = _webui_browser_url(config)
     gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
@@ -1695,13 +1691,6 @@ def _run_gateway(
             if unconfigured_provider_error is None:
                 raise
             return build_unconfigured_provider_snapshot(config, str(exc))
-
-    def _load_gateway_preset_catalog():
-        if setup_mode:
-            from nanobot.config.loader import load_config
-
-            return configured_model_presets(load_config())
-        return load_model_preset_catalog()
 
     if unconfigured_provider_error is not None:
         provider_snapshot = build_unconfigured_provider_snapshot(
@@ -1746,19 +1735,6 @@ def _run_gateway(
     )
 
     # Create agent with cron service
-    agent = None
-
-    def _runtime_activation_allowed() -> bool:
-        if not setup_mode:
-            return True
-        try:
-            load_provider_snapshot()
-        except ValueError:
-            return False
-        if agent is not None:
-            agent.invalidate_runtime_config()
-        return True
-
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
@@ -1768,14 +1744,13 @@ def _run_gateway(
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
-        preset_catalog_loader=_load_gateway_preset_catalog,
+        preset_catalog_loader=load_model_preset_catalog,
         runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
-        mcp_activation_guard=_runtime_activation_allowed if setup_mode else None,
     )
     webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,
@@ -1986,19 +1961,10 @@ def _run_gateway(
             return stripped or None
         return None
 
-    # Setup mode exposes only the local WebUI needed to configure a model. It
-    # must not reconnect external channels while the agent cannot serve them.
-    channel_config = config
-    if setup_mode:
-        channel_config = config.model_copy(deep=True)
-        for name, channel in (channel_config.channels.model_extra or {}).items():
-            if name != "websocket" and isinstance(channel, dict):
-                channel["enabled"] = False
-
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
     channels = ChannelManager(
-        channel_config,
+        config,
         bus,
         session_manager=session_manager,
         cron_service=cron,
@@ -2013,7 +1979,6 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
-        channel_activation_guard=_runtime_activation_allowed if setup_mode else None,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
@@ -2092,12 +2057,10 @@ def _run_gateway(
         _print_gateway_health_endpoint(host, health_port)
         async with server:
             await server.serve_forever()
-    # Register Dream and heartbeat only when the agent has a usable provider.
+    # Register Dream system job (idempotent on restart)
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream
-    if setup_mode:
-        console.print("[yellow]Setup mode: external channels and automations are paused.[/yellow]")
-    elif dream_cfg.enabled:
+    if dream_cfg.enabled:
         cron.register_system_job(CronJob(
             id="dream",
             name="dream",
@@ -2110,7 +2073,7 @@ def _run_gateway(
         _advance_dream_cursor_if_behind(agent.context.memory)
 
     # Register Heartbeat system job (idempotent on restart)
-    if not setup_mode and hb_cfg.enabled:
+    if hb_cfg.enabled:
         cron.register_system_job(CronJob(
             id="heartbeat",
             name="heartbeat",
@@ -2165,8 +2128,7 @@ def _run_gateway(
             console.print,
         )
         try:
-            if not setup_mode:
-                await cron.start()
+            await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
             tasks = [
@@ -2179,18 +2141,15 @@ def _run_gateway(
                 ),
                 asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
                 asyncio.create_task(channels.start_all(), name="nanobot-channels"),
+                asyncio.create_task(
+                    run_local_trigger_queue(
+                        store=trigger_store,
+                        submit_turn=getattr(agent, "submit_local_trigger_turn", None),
+                        is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+                    ),
+                    name="nanobot-local-triggers",
+                ),
             ]
-            if not setup_mode:
-                tasks.append(
-                    asyncio.create_task(
-                        run_local_trigger_queue(
-                            store=trigger_store,
-                            submit_turn=getattr(agent, "submit_local_trigger_turn", None),
-                            is_channel_enabled=lambda name: channels.get_channel(name) is not None,
-                        ),
-                        name="nanobot-local-triggers",
-                    )
-                )
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),

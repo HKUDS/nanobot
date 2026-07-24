@@ -8,9 +8,8 @@ from nanobot.providers.base import LLMProvider, LLMResponse
 class UnconfiguredProvider(LLMProvider):
     """Keep the gateway available for settings before a model is configured."""
 
-    def __init__(self, setup_error: str, default_model: str) -> None:
+    def __init__(self, default_model: str) -> None:
         super().__init__()
-        self._setup_error = setup_error
         self._default_model = default_model
 
     async def chat(

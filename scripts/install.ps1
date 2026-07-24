@@ -133,18 +133,6 @@ function Get-NanobotCommand {
     }
 }
 
-function Test-BrowserSession {
-    if ($env:SSH_CONNECTION -or $env:SSH_TTY -or -not [Environment]::UserInteractive) {
-        return $false
-    }
-
-    $CurrentSessionId = (Get-Process -Id $PID).SessionId
-    return @(
-        Get-Process -Name explorer -ErrorAction SilentlyContinue |
-            Where-Object { $_.SessionId -eq $CurrentSessionId }
-    ).Count -gt 0
-}
-
 function Install-WithActivePython {
     Write-Info "Detected an active virtual environment. Installing into it..."
     Ensure-Pip $Python
@@ -265,9 +253,6 @@ if ($DryRun) {
     }
     if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
         Write-Info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
-    } elseif (Test-BrowserSession) {
-        Write-Info "Dry run: would start the WebUI when supported by the installed version."
-        Write-Info "Dry run: would fall back to the setup wizard for older releases."
     } else {
         Write-Info "Dry run: would run the setup wizard."
     }
@@ -314,26 +299,10 @@ if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
     return
 }
 
-if (Test-BrowserSession) {
-    Invoke-Nanobot @("webui", "--help") *> $null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Info "Starting nanobot WebUI..."
-        Write-Info "Configure your first provider and model in Settings > Models."
-        Invoke-Nanobot @("webui", "--yes")
-        if ($LASTEXITCODE -ne 0) {
-            Fail "WebUI did not start."
-        }
-        return
-    }
-    Write-Info "The installed release does not support nanobot webui yet."
-    Write-Info "Falling back to the setup wizard..."
-}
-
 Write-Info "Starting setup wizard..."
 Invoke-Nanobot @("onboard", "--wizard")
 if ($LASTEXITCODE -ne 0) {
     Fail "Setup wizard did not complete."
 }
 
-Write-Info "Done. Start nanobot: $(Get-NanobotCommand) gateway"
-Write-Info "For a terminal chat, run: $(Get-NanobotCommand) agent"
+Write-Info "Done. Try: $(Get-NanobotCommand) agent -m `"Hello!`""

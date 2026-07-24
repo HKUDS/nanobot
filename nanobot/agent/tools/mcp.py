@@ -1288,17 +1288,6 @@ async def handle_runtime_control(state: Any, msg: InboundMessage, registry: Tool
         return False
 
     ack = metadata.get(RUNTIME_CONTROL_ACK)
-    activation_allowed = getattr(state, "mcp_activation_allowed", None)
-    if callable(activation_allowed) and not activation_allowed():
-        result = {
-            "ok": False,
-            "message": "MCP activation is paused until a model is configured.",
-            "requires_restart": True,
-        }
-        if isinstance(ack, asyncio.Future) and not ack.done():
-            ack.set_result(result)
-        return True
-
     try:
         result = await reload_servers(state, registry)
     except Exception as exc:

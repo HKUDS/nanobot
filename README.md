@@ -134,7 +134,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then opens `nanobot webui` on a local desktop session when the installed release supports it. Older releases and headless or terminal-only sessions fall back to the terminal Quick Start wizard. Configure your first provider and model in **Settings → Models** when the WebUI opens. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps below and go straight to **Open the WebUI**. The installer also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -261,16 +261,13 @@ For another provider, the same config shape still applies:
 
 **3. Open the WebUI**
 
-For a local desktop session, run:
+The stable-compatible path is:
 
 ```bash
-nanobot webui
+nanobot gateway
 ```
 
-It prepares the local WebSocket channel if needed, starts the gateway, and opens the browser automatically. The first-run WebUI binds to `127.0.0.1` by default, so it is not exposed to your LAN. In a headless or terminal-only environment, run `nanobot gateway` instead. Prefer not to keep a terminal open? Use `nanobot gateway --background`, then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
-
-If your installed release does not recognize `nanobot webui`, run `nanobot gateway`
-and open `http://127.0.0.1:8765` manually.
+Leave the terminal open and visit `http://127.0.0.1:8765`. Current source versions also provide `nanobot webui`, which prepares the local WebSocket channel if needed, starts the gateway, and opens the browser automatically. The first-run WebUI binds to `127.0.0.1` by default, so it is not exposed to your LAN. Prefer not to keep a terminal open? Use `nanobot gateway --background`, then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
 
 For manual or terminal-only setup, test one CLI message:
 

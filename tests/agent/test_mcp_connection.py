@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from contextlib import AsyncExitStack
 from types import SimpleNamespace
 from typing import Any
@@ -20,12 +19,6 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools import mcp as mcp_runtime
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.mcp import MCPResourceWrapper, MCPToolWrapper
-from nanobot.bus.events import (
-    INBOUND_META_RUNTIME_CONTROL,
-    RUNTIME_CONTROL_ACK,
-    RUNTIME_CONTROL_MCP_RELOAD,
-    InboundMessage,
-)
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import MCPServerConfig
@@ -81,12 +74,7 @@ class _FakeMcpTool(Tool):
         return "ok"
 
 
-def _make_loop(
-    tmp_path,
-    *,
-    mcp_servers: dict | None = None,
-    mcp_activation_guard: Callable[[], bool] | None = None,
-) -> AgentLoop:
+def _make_loop(tmp_path, *, mcp_servers: dict | None = None) -> AgentLoop:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -97,7 +85,6 @@ def _make_loop(
         workspace=tmp_path,
         model="test-model",
         mcp_servers=mcp_servers or {"test": object()},
-        mcp_activation_guard=mcp_activation_guard,
     )
 
 
@@ -168,48 +155,6 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
 
     assert attempts == 2
     assert loop._mcp_stacks == {}
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_respects_activation_guard(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    loop = _make_loop(tmp_path, mcp_activation_guard=lambda: False)
-
-    async def _unexpected_connect(_servers, _registry):
-        raise AssertionError("guarded MCP servers must not connect")
-
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _unexpected_connect)
-
-    await loop._connect_mcp()
-
-    assert loop._mcp_stacks == {}
-
-
-@pytest.mark.asyncio
-async def test_mcp_reload_respects_activation_guard(tmp_path):
-    loop = _make_loop(tmp_path, mcp_activation_guard=lambda: False)
-    ack: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-    msg = InboundMessage(
-        channel="system",
-        sender_id="webui-settings",
-        chat_id="runtime",
-        content=RUNTIME_CONTROL_MCP_RELOAD,
-        metadata={
-            INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MCP_RELOAD,
-            RUNTIME_CONTROL_ACK: ack,
-        },
-    )
-
-    handled = await mcp_runtime.handle_runtime_control(loop, msg, loop.tools)
-
-    assert handled is True
-    assert await ack == {
-        "ok": False,
-        "message": "MCP activation is paused until a model is configured.",
-        "requires_restart": True,
-    }
 
 
 @pytest.mark.asyncio

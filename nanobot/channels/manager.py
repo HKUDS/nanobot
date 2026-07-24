@@ -97,7 +97,6 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
-        channel_activation_guard: Callable[[], bool] | None = None,
     ):
         self.config = config
         self.bus = bus
@@ -110,7 +109,6 @@ class ChannelManager:
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
-        self._channel_activation_guard = channel_activation_guard
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -403,22 +401,6 @@ class ChannelManager:
                 "requires_restart": True,
                 "message": f"{plugin.display_name} is always enabled and is applied on restart.",
             }
-        if action == "enable" and self._channel_activation_guard is not None:
-            try:
-                activation_allowed = bool(self._channel_activation_guard())
-            except Exception:
-                logger.exception("Channel activation guard failed for {}", name)
-                activation_allowed = False
-            if not activation_allowed:
-                return {
-                    "handled": True,
-                    "ok": False,
-                    "requires_restart": True,
-                    "message": (
-                        f"{plugin.display_name} is saved but remains paused until "
-                        "a model is configured."
-                    ),
-                }
 
         from nanobot.config.loader import load_config
 

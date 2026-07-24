@@ -217,7 +217,7 @@ def build_unconfigured_provider_snapshot(config: Config, setup_error: str) -> Pr
     from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 
     preset = config.resolve_preset()
-    provider = UnconfiguredProvider(setup_error, preset.model)
+    provider = UnconfiguredProvider(preset.model)
     provider.generation = preset.to_generation_settings()
     return ProviderSnapshot(
         provider=provider,

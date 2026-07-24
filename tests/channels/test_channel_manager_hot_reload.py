@@ -148,38 +148,6 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_apply_channel_feature_action_respects_activation_guard(monkeypatch):
-    disabled = Config.model_validate({
-        "channels": {
-            "websocket": {"enabled": False},
-            "hot": {"enabled": False},
-        }
-    })
-    _stub_registry(monkeypatch, _plugin(_HotChannel))
-
-    def _unexpected_load_config():
-        raise AssertionError("guarded channel must not load config")
-
-    monkeypatch.setattr("nanobot.config.loader.load_config", _unexpected_load_config)
-    manager = ChannelManager(
-        disabled,
-        MessageBus(),
-        channel_activation_guard=lambda: False,
-    )
-    manager._started = True
-
-    result = await manager.apply_channel_feature_action("enable", "hot")
-
-    assert result == {
-        "handled": True,
-        "ok": False,
-        "requires_restart": True,
-        "message": "Hot is saved but remains paused until a model is configured.",
-    }
-    assert "hot" not in manager.channels
-
-
-@pytest.mark.asyncio
 async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_fails(monkeypatch):
     enabled = Config.model_validate({
         "channels": {
