@@ -169,6 +169,11 @@ class ContextBuilder:
             file_path = root / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
+                if filename == "SOUL.md" and self._is_template_content(
+                    content,
+                    "legacy/SOUL.md",
+                ):
+                    content = load_bundled_template("SOUL.md") or content
                 if not content.strip():
                     continue
                 if filename in self._SKIPPABLE_DEFAULTS and self._is_template_content(

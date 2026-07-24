@@ -226,7 +226,9 @@ class TestBundledToolContract:
         assert "apply_patch" in content
         assert "acceptance criteria into concrete checks" in content
         assert "visual evidence reaches the model" in content
-        assert "precision/coverage trade-offs" in content
+        assert "clear user request as authorization" in content
+        assert "Never invent missing records or measurements" in content
+        assert "scientific fitting" not in content
         assert "## Web and External Information" in content
         assert "## Messaging and Media" in content
         assert "## Scheduling and Background Work" in content

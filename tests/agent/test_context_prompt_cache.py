@@ -214,7 +214,7 @@ def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
 
 
 def test_execution_rules_in_system_prompt(tmp_path) -> None:
-    """Execution rules should appear in the system prompt via default SOUL.md."""
+    """Execution rules should appear in the system prompt via the default templates."""
     from nanobot.utils.helpers import sync_workspace_templates
 
     workspace = _make_workspace(tmp_path)
@@ -224,8 +224,27 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
     prompt = builder.build_system_prompt()
     assert "clear user request" in prompt
     assert "multi-step tasks" in prompt
-    assert "Read before you write" in prompt
+    assert "read-only discovery before writes" in prompt
     assert "verify the result" in prompt
+
+
+def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
+    """An untouched legacy SOUL is upgraded in memory without overwriting the file."""
+    workspace = _make_workspace(tmp_path)
+    legacy_soul = (
+        pkg_files("nanobot") / "templates" / "legacy" / "SOUL.md"
+    ).read_text(encoding="utf-8")
+    legacy_rule = "For multi-step tasks, outline the plan first and wait for user confirmation."
+    soul_path = workspace / "SOUL.md"
+    soul_path.write_text(legacy_soul, encoding="utf-8")
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+    current_rule = "Treat a clear user request as authorization"
+
+    assert legacy_rule not in prompt
+    assert current_rule in prompt
+    assert soul_path.read_text(encoding="utf-8") == legacy_soul
 
 
 def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
@@ -250,13 +269,18 @@ def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> Non
     assert "Message Time" not in prompt
 
 
-def test_default_soul_template_contains_execution_rules() -> None:
-    """Default SOUL.md template must contain execution rules with act/plan layering."""
+def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
+    """SOUL owns personality while the always-injected contract owns execution policy."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
-    assert "## Execution Rules" in soul
-    assert "clear user request" in soul
-    assert "multi-step tasks" in soul
-    assert "irreversible action needs confirmation" in soul
+    contract = (
+        pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
+    ).read_text(encoding="utf-8")
+
+    assert "## Execution Rules" not in soul
+    assert "clear user request" not in soul
+    assert "clear user request" in contract
+    assert "multi-step tasks" in contract
+    assert "irreversible action needs confirmation" in contract
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
