@@ -73,9 +73,7 @@ def test_run_webui_dev_server_installs_starts_and_stops_vite(
         subprocess_run=_fake_run,
         sleep=lambda _seconds: None,
         platform="win32",
-    ) as server:
-        assert server.url == "http://127.0.0.1:5173"
-        assert server.source_dir == source
+    ):
         assert process.stopped is False
 
     assert installs == [(["bun", "install"], source, True)]

@@ -10,10 +10,9 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import SplitResult, urlsplit
 
 from nanobot.webui.build import default_webui_source_dir, pick_webui_build_runner
 
@@ -25,15 +24,6 @@ class WebUIDevServerError(RuntimeError):
     """Raised when the Vite development server cannot be started."""
 
 
-@dataclass(frozen=True)
-class WebUIDevServer:
-    """A running local WebUI development server."""
-
-    process: Any
-    source_dir: Path
-    url: str
-
-
 def webui_dev_browser_url(
     gateway_webui_url: str,
     *,
@@ -41,26 +31,25 @@ def webui_dev_browser_url(
     port: int = WEBUI_DEV_PORT,
 ) -> str:
     """Move a gateway WebUI URL, including its bootstrap fragment, to Vite."""
-    parsed = urlsplit(gateway_webui_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise WebUIDevServerError(f"invalid gateway WebUI URL: {gateway_webui_url}")
-    return urlunsplit(
-        (
-            "http",
-            f"{host}:{port}",
-            parsed.path or "/",
-            parsed.query,
-            parsed.fragment,
-        )
-    )
+    parsed = _parse_gateway_url(gateway_webui_url)
+    return parsed._replace(
+        scheme="http",
+        netloc=f"{host}:{port}",
+        path=parsed.path or "/",
+    ).geturl()
 
 
 def gateway_origin(gateway_webui_url: str) -> str:
     """Return the HTTP origin Vite should use for API proxying."""
+    parsed = _parse_gateway_url(gateway_webui_url)
+    return parsed._replace(path="", query="", fragment="").geturl()
+
+
+def _parse_gateway_url(gateway_webui_url: str) -> SplitResult:
     parsed = urlsplit(gateway_webui_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise WebUIDevServerError(f"invalid gateway WebUI URL: {gateway_webui_url}")
-    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    return parsed
 
 
 @contextmanager
@@ -76,7 +65,7 @@ def run_webui_dev_server(
     sleep: Callable[[float], None] = time.sleep,
     startup_timeout_s: float = 15.0,
     platform: str | None = None,
-) -> Iterator[WebUIDevServer]:
+) -> Iterator[None]:
     """Start Vite for a source checkout and stop its process tree on exit."""
     resolved_source = (source_dir or default_webui_source_dir()).resolve(strict=False)
     if not (resolved_source / "package.json").is_file():
@@ -99,22 +88,33 @@ def run_webui_dev_server(
 
     if not (resolved_source / "node_modules" / "vite").is_dir():
         _emit(output, f"Installing WebUI dependencies with `{command_runner}`...")
-        _run_checked(
-            [command_runner, "install"],
-            cwd=resolved_source,
-            subprocess_run=subprocess_run,
-        )
+        install_command = [command_runner, "install"]
+        try:
+            subprocess_run(install_command, cwd=resolved_source, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise WebUIDevServerError(
+                f"command failed ({exc.returncode}): {' '.join(install_command)}"
+            ) from exc
+        except OSError as exc:
+            raise WebUIDevServerError(
+                f"command failed: {' '.join(install_command)} ({exc})"
+            ) from exc
 
     child_env = dict(os.environ if environ is None else environ)
     child_env["NANOBOT_API_URL"] = gateway_origin(gateway_webui_url)
     command = [command_runner, "run", "dev"]
     child_platform = platform or sys.platform
+    popen_kwargs = (
+        {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        if child_platform == "win32"
+        else {"start_new_session": True}
+    )
     try:
         process = popen(
             command,
             cwd=resolved_source,
             env=child_env,
-            **_popen_platform_kwargs(child_platform),
+            **popen_kwargs,
         )
     except OSError as exc:
         raise WebUIDevServerError(
@@ -138,45 +138,13 @@ def run_webui_dev_server(
             )
 
         _emit(output, f"Vite HMR is ready at {dev_url}")
-        yield WebUIDevServer(
-            process=process,
-            source_dir=resolved_source,
-            url=dev_url,
-        )
+        yield
     finally:
         _stop_process_tree(
             process,
             platform=child_platform,
             subprocess_run=subprocess_run,
         )
-
-
-def _run_checked(
-    command: list[str],
-    *,
-    cwd: Path,
-    subprocess_run: Callable[..., Any],
-) -> None:
-    try:
-        subprocess_run(command, cwd=cwd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise WebUIDevServerError(
-            f"command failed ({exc.returncode}): {' '.join(command)}"
-        ) from exc
-    except OSError as exc:
-        raise WebUIDevServerError(
-            f"command failed: {' '.join(command)} ({exc})"
-        ) from exc
-
-
-def _popen_platform_kwargs(platform: str) -> dict[str, Any]:
-    if platform == "win32":
-        return {
-            "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-        }
-    return {"start_new_session": True}
-
-
 def _stop_process_tree(
     process: Any,
     *,
@@ -189,46 +157,35 @@ def _stop_process_tree(
     if platform == "win32":
         ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
         if ctrl_break is not None:
-            with suppress(OSError):
+            try:
                 process.send_signal(ctrl_break)
-            if _wait_for_process(process, timeout_s=3.0):
+            except OSError:
+                pass
+            else:
+                if _wait_for_process(process, timeout_s=3):
+                    return
+        for force in (False, True):
+            command = ["taskkill", "/PID", str(process.pid), "/T"]
+            if force:
+                command.append("/F")
+            subprocess_run(
+                command,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if _wait_for_process(process, timeout_s=2):
                 return
-        subprocess_run(
-            ["taskkill", "/PID", str(process.pid), "/T"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if _wait_for_process(process, timeout_s=2.0):
+        return
+    else:
+        # start_new_session makes the child PID its process-group ID.
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        if _wait_for_process(process, timeout_s=3):
             return
-        subprocess_run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _wait_for_process(process, timeout_s=2.0)
-        return
-
-    try:
-        process_group = os.getpgid(process.pid)
-    except OSError:
-        process_group = None
-    try:
-        if process_group is None:
-            process.terminate()
-        else:
-            os.killpg(process_group, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    if _wait_for_process(process, timeout_s=3.0):
-        return
-    with suppress(OSError):
-        if process_group is None:
-            process.kill()
-        else:
-            os.killpg(process_group, signal.SIGKILL)
-    _wait_for_process(process, timeout_s=2.0)
+        with suppress(OSError):
+            os.killpg(process.pid, signal.SIGKILL)
+    _wait_for_process(process, timeout_s=2)
 
 
 def _wait_for_process(process: Any, *, timeout_s: float) -> bool:

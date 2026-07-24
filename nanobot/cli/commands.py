@@ -1035,13 +1035,6 @@ def _webui_browser_url(config: Config) -> str:
     return f"{base_url}/#/?bootstrapSecret={quote(secret, safe='')}"
 
 
-def _webui_dev_browser_url(gateway_webui_url: str) -> str:
-    """Return the Vite URL while preserving the one-time bootstrap fragment."""
-    from nanobot.webui.dev import webui_dev_browser_url
-
-    return webui_dev_browser_url(gateway_webui_url)
-
-
 @contextmanager
 def _webui_dev_server_context(gateway_webui_url: str) -> Iterator[None]:
     """Run Vite beside the gateway and translate startup failures into CLI errors."""
@@ -1472,6 +1465,7 @@ def webui(
     """Prepare the WebUI, start the gateway, and open the browser workbench."""
     from nanobot.config.loader import save_config
     from nanobot.gateway import GatewayRuntime, GatewayRuntimePaths, GatewayStartOptions
+    from nanobot.webui.dev import webui_dev_browser_url
 
     _ensure_interactive_tty_mode()
     if dev and background:
@@ -1509,7 +1503,7 @@ def webui(
     except ValueError as exc:
         console.print(f"[red]Error: invalid WebUI channel config: {exc}[/red]")
         raise typer.Exit(1) from exc
-    browser_url = _webui_dev_browser_url(webui_url) if dev else webui_url
+    browser_url = webui_dev_browser_url(webui_url) if dev else webui_url
 
     if created_config or provider_error or changed_webui or workspace:
         save_config(setup_config, config_path)
@@ -1605,22 +1599,21 @@ def webui(
     webui_ready = _webui_endpoint_reachable(webui_url)
     if gateway_ready and webui_ready:
         console.print("[yellow]Gateway is already running; attaching to the existing WebUI.[/yellow]")
-        if dev:
-            with _webui_dev_server_context(webui_url):
-                if not no_open:
-                    _open_webui_browser(browser_url, wait=False)
-                _attach_dev_server_to_existing_gateway(
-                    runtime_config.gateway.host,
-                    effective_gateway_port,
-                )
-        else:
+        if not dev:
             console.print(
                 "Restart the gateway if you need it to pick up local source changes: "
                 f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
             )
+        dev_server = _webui_dev_server_context(webui_url) if dev else nullcontext()
+        with dev_server:
             if not no_open:
                 _open_webui_browser(browser_url, wait=False)
-            if runtime.status().running:
+            if dev:
+                _attach_dev_server_to_existing_gateway(
+                    runtime_config.gateway.host,
+                    effective_gateway_port,
+                )
+            elif runtime.status().running:
                 _attach_to_background_gateway(runtime)
             else:
                 console.print(
@@ -1643,21 +1636,14 @@ def webui(
         raise typer.Exit(1)
 
     _print_webui_foreground_lifecycle(attached=False)
-    if dev:
-        with _webui_dev_server_context(webui_url):
-            _run_gateway(
-                runtime_config,
-                port=effective_gateway_port,
-                open_browser_url=None if no_open else browser_url,
-                open_browser_ready_url=webui_url,
-                webui_static_dist=False,
-                webui_bundle_mode=webui_bundle_mode,
-            )
-    else:
+    dev_server = _webui_dev_server_context(webui_url) if dev else nullcontext()
+    with dev_server:
         _run_gateway(
             runtime_config,
             port=effective_gateway_port,
             open_browser_url=None if no_open else browser_url,
+            open_browser_ready_url=webui_url if dev else None,
+            webui_static_dist=not dev,
             webui_bundle_mode=webui_bundle_mode,
         )
 

@@ -1821,6 +1821,15 @@ def _patch_gateway_ports_free(monkeypatch) -> None:
     monkeypatch.setattr("nanobot.cli.commands._webui_endpoint_reachable", lambda *_a, **_kw: False)
 
 
+def _patch_webui_dev_server(monkeypatch, seen: dict[str, object]) -> None:
+    @contextmanager
+    def _fake_dev_server(gateway_url: str):
+        seen["dev_gateway_url"] = gateway_url
+        yield
+
+    monkeypatch.setattr("nanobot.cli.commands._webui_dev_server_context", _fake_dev_server)
+
+
 def _patch_cli_command_runtime(
     monkeypatch,
     config: Config,
@@ -2022,6 +2031,8 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert seen["gateway_kwargs"] == {
         "port": 18888,
         "open_browser_url": None,
+        "open_browser_ready_url": None,
+        "webui_static_dist": True,
         "webui_bundle_mode": "auto",
     }
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
@@ -2056,33 +2067,12 @@ def test_webui_dev_runs_vite_against_gateway_without_building_bundle(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    config_file = tmp_path / "config.json"
-    config_file.write_text("{}", encoding="utf-8")
+    config_file = _write_instance_config(tmp_path)
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._gateway_health_ready",
-        lambda *_args, **_kwargs: False,
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._webui_endpoint_reachable",
-        lambda *_args, **_kwargs: False,
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._tcp_endpoint_reachable",
-        lambda *_args, **_kwargs: False,
-    )
-
-    @contextmanager
-    def _fake_dev_server(gateway_url: str):
-        seen["dev_gateway_url"] = gateway_url
-        yield
-
-    monkeypatch.setattr(
-        "nanobot.cli.commands._webui_dev_server_context",
-        _fake_dev_server,
-    )
+    _patch_gateway_ports_free(monkeypatch)
+    _patch_webui_dev_server(monkeypatch, seen)
 
     def _fake_run_gateway(config: Config, **kwargs) -> None:
         seen["gateway_config"] = config
@@ -2128,8 +2118,7 @@ def test_webui_dev_reuses_existing_gateway_without_taking_ownership(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    config_file = tmp_path / "config.json"
-    config_file.write_text("{}", encoding="utf-8")
+    config_file = _write_instance_config(tmp_path)
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
@@ -2146,15 +2135,7 @@ def test_webui_dev_reuses_existing_gateway_without_taking_ownership(
         lambda *_args, **_kwargs: pytest.fail("existing gateway should be reused"),
     )
 
-    @contextmanager
-    def _fake_dev_server(gateway_url: str):
-        seen["dev_gateway_url"] = gateway_url
-        yield
-
-    monkeypatch.setattr(
-        "nanobot.cli.commands._webui_dev_server_context",
-        _fake_dev_server,
-    )
+    _patch_webui_dev_server(monkeypatch, seen)
     monkeypatch.setattr(
         "nanobot.cli.commands._open_webui_browser",
         lambda url, **kwargs: seen.update({"opened_url": url, "open_kwargs": kwargs}),
