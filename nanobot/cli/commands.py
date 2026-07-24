@@ -1854,6 +1854,12 @@ def _run_gateway(
             if channel == "cli":
                 return None
 
+            # Use an isolated session by default; opt into shared sessions.
+            hb_session_key = (
+                "heartbeat" if hb_cfg.isolated_session
+                else f"{channel}:{chat_id}"
+            )
+
             prompt = (
                 _HEARTBEAT_PREAMBLE
                 + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
@@ -1867,7 +1873,7 @@ def _run_gateway(
             try:
                 resp = await agent.process_direct(
                     prompt,
-                    session_key="heartbeat",
+                    session_key=hb_session_key,
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,
@@ -1877,9 +1883,12 @@ def _run_gateway(
                     message_tool.reset_suppress_delivery(suppress_token)
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
+            # Only prune when using a dedicated heartbeat session — skip when
+            # sharing the user's conversation session to avoid truncating their history.
+            if hb_cfg.isolated_session:
+                session = agent.sessions.get_or_create(hb_session_key)
+                session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+                agent.sessions.save(session)
 
             if not resp or not resp.content:
                 return
