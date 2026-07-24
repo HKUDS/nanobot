@@ -1117,6 +1117,42 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
     assert config.get_api_base() == "http://localhost:8000"
 
 
+def test_config_cloud_nemotron_is_not_hijacked_by_unconfigured_ollama():
+    """`nvidia/nemotron-*` via a gateway must not route to Ollama when no
+    Ollama endpoint is configured. Ollama keeps "nemotron" in its keywords
+    for bare-model auto-routing (PR #1863), which previously hijacked
+    cloud-hosted nemotron variants and silently sent traffic to
+    http://localhost:11434/v1."""
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "auto",
+                    "model": "nvidia/nemotron-3-super-120b-a12b",
+                }
+            },
+            "providers": {"openrouter": {"apiKey": "sk-or-test"}},
+        }
+    )
+
+    assert config.get_provider_name() == "openrouter"
+    assert config.get_api_base() == "https://openrouter.ai/api/v1"
+
+
+def test_config_bare_nemotron_still_auto_routes_to_configured_ollama():
+    """Preserves PR #1863 intent: when the user has actually configured an
+    Ollama endpoint, a bare nemotron model still auto-routes there."""
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "nemotron-3-nano"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434/v1"}},
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434/v1"
+
+
 def test_openai_compat_provider_passes_model_through():
     from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
