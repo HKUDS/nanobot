@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -41,6 +42,7 @@ class FeishuConnectStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, FeishuConnectSession] = {}
+        self._completion_lock = threading.Lock()
 
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         """Handle one generic settings connection action."""
@@ -58,7 +60,7 @@ class FeishuConnectStore:
         if action == "poll":
             return await asyncio.to_thread(self.poll, session_id)
         if action == "cancel":
-            return self.cancel(session_id)
+            return await asyncio.to_thread(self.cancel, session_id)
         raise ChannelConnectError(f"unsupported Feishu connect action: {action}", status=404)
 
     def start(
@@ -127,24 +129,33 @@ class FeishuConnectStore:
             session.last_error = str(exc)
             return _pending_payload(session)
 
-        session.domain = str(result.get("domain") or session.domain)
         status = result.get("status")
         if status == "succeeded":
-            session.instance_id = feishu.save_registration_result(
-                result,
-                instance_id=session.instance_id,
-                name=session.instance_name,
-            )
-            self._sessions.pop(session_id, None)
-            return {
-                "session_id": session_id,
-                "instance_id": session.instance_id,
-                "status": "succeeded",
-                "message": "Feishu is connected.",
-                "domain": session.domain,
-                "app_id": result.get("app_id"),
-            }
+            with self._completion_lock:
+                if self._sessions.get(session_id) is not session:
+                    return {
+                        "session_id": session_id,
+                        "instance_id": session.instance_id,
+                        "status": "cancelled",
+                        "message": "Feishu connection cancelled.",
+                    }
+                session.domain = str(result.get("domain") or session.domain)
+                session.instance_id = feishu.save_registration_result(
+                    result,
+                    instance_id=session.instance_id,
+                    name=session.instance_name,
+                )
+                self._sessions.pop(session_id, None)
+                return {
+                    "session_id": session_id,
+                    "instance_id": session.instance_id,
+                    "status": "succeeded",
+                    "message": "Feishu is connected.",
+                    "domain": session.domain,
+                    "app_id": result.get("app_id"),
+                }
 
+        session.domain = str(result.get("domain") or session.domain)
         if status == "failed":
             self._sessions.pop(session_id, None)
             return {
@@ -158,7 +169,8 @@ class FeishuConnectStore:
         return _pending_payload(session)
 
     def cancel(self, session_id: str) -> dict[str, Any]:
-        session = self._sessions.pop(session_id, None)
+        with self._completion_lock:
+            session = self._sessions.pop(session_id, None)
         return {
             "session_id": session_id,
             "instance_id": session.instance_id if session else DEFAULT_INSTANCE_ID,
