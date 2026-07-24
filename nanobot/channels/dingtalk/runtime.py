@@ -175,6 +175,7 @@ class DingTalkConfig(Base):
     allow_remote_media_redirects: bool = False
     remote_media_redirect_allowed_hosts: list[str] = Field(default_factory=list)
     group_user_isolation: bool = False  # If True, each user in group chat gets their own session
+    disable_private_chat: bool = False  # If True, reject 1:1 DMs with a notice; group chats only
 
 
 class DingTalkChannel(BaseChannel):
@@ -712,8 +713,15 @@ class DingTalkChannel(BaseChannel):
         if not token:
             raise RuntimeError("DingTalk access token unavailable")
 
-        if msg.content and msg.content.strip():
-            if not await self._send_markdown_text(token, msg.chat_id, msg.content.strip()):
+        content = msg.content.strip() if msg.content else ""
+        if content:
+            # In group chats, prefix the reply with a markdown header naming the
+            # sender so the addressed user can spot the reply. Visual only —
+            # DingTalk's markdown robot messages do not push real @ notifications.
+            sender_name = msg.metadata.get("sender_name") if msg.metadata else None
+            if msg.chat_id.startswith("group:") and sender_name:
+                content = f"# @{sender_name}\n\n{content}"
+            if not await self._send_markdown_text(token, msg.chat_id, content):
                 raise RuntimeError("DingTalk text message was not delivered")
 
         for media_ref in msg.media or []:
@@ -750,6 +758,22 @@ class DingTalkChannel(BaseChannel):
             session_key = None
             if is_group and self.config.group_user_isolation:
                 session_key = f"{self.name}:group:{conversation_id}:{sender_id}"
+
+            if not is_group and self.config.disable_private_chat:
+                # Group-only kill switch: drop DMs with a notice *before* any
+                # allow_from / pairing check, so even allowlisted senders are
+                # redirected — intentional, this is a hard private-chat guard
+                # rather than an authorization decision. No session is created.
+                self.logger.info("private chat disabled; rejecting DM from {}", sender_name)
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(chat_id),  # str() guards a None sender_id
+                        content="该机器人未开启私聊，请在群聊中与我对话。",
+                    )
+                )
+                return
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
