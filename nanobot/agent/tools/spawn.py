@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_context
-from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    NumberSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.security.workspace_access import current_workspace_scope
 
 if TYPE_CHECKING:
@@ -25,6 +30,14 @@ if TYPE_CHECKING:
             ),
             minimum=0.0,
             maximum=2.0,
+        ),
+        wait=BooleanSchema(
+            description=(
+                "Wait for the subagent and return its result directly. Use this for a "
+                "blocking consultation that must inform the current turn. Defaults to "
+                "false for background execution."
+            ),
+            default=False,
         ),
         required=["task"],
     )
@@ -48,6 +61,7 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
+            "Set wait=true for a consultation whose result must inform the current turn. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
@@ -58,6 +72,7 @@ class SpawnTool(Tool):
         task: str,
         label: str | None = None,
         temperature: float | None = None,
+        wait: bool = False,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -75,7 +90,8 @@ class SpawnTool(Tool):
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
         session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
-        return await self._manager.spawn(
+        method = self._manager.run_inline if wait else self._manager.spawn
+        return await method(
             task=task,
             runtime=request_ctx.runtime,
             label=label,
