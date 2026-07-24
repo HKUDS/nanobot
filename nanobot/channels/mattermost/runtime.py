@@ -533,7 +533,11 @@ class MattermostChannel(BaseChannel):
                 final += delta
 
             if resuming:
-                self._clear_stream_state(stream_id)
+                if merge_next:
+                    self._stream_buffers[stream_id] = final
+                    self._stream_committed[stream_id] = final
+                else:
+                    self._clear_stream_state(stream_id)
                 return
 
             if final and not meta.get("_progress"):
