@@ -469,6 +469,100 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_MESSAGE_META,
+        RuntimeContextBlock,
+        public_history_message,
+        wrap_runtime_context_lines,
+    )
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="first answer", tool_calls=[], usage={}),
+        LLMResponse(content="second answer", tool_calls=[], usage={}),
+    ])
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    seen_contexts = []
+
+    async def provide_identity(request):
+        seen_contexts.append((
+            request.channel,
+            request.chat_id,
+            request.sender_id,
+            request.message_id,
+            request.session_key,
+            request.original_user_text,
+            request.metadata["sender_name"],
+            request.metadata["thread_id"],
+        ))
+        return RuntimeContextBlock(
+            source="identity",
+            content=wrap_runtime_context_lines([
+                " | ".join(str(value) for value in seen_contexts[-1]),
+            ]),
+        )
+
+    loop.register_runtime_context_provider(provide_identity)
+    session = loop.sessions.get_or_create("telegram:group-1")
+    pending_queue = asyncio.Queue()
+    await pending_queue.put(InboundMessage(
+        channel="telegram",
+        sender_id="user-b",
+        chat_id="group-1",
+        content="follow-up from the second speaker",
+        metadata={
+            "message_id": "message-2",
+            "sender_name": "Bob",
+            "thread_id": "topic-7",
+        },
+    ))
+
+    _, _, all_messages, _, _ = await loop._run_agent_loop(
+        [{"role": "user", "content": "initial message from user A"}],
+        runtime=loop.llm_runtime(),
+        session=session,
+        channel="telegram",
+        chat_id="group-1",
+        session_key=session.key,
+        pending_queue=pending_queue,
+    )
+
+    assert seen_contexts == [(
+        "telegram",
+        "group-1",
+        "user-b",
+        "message-2",
+        session.key,
+        "follow-up from the second speaker",
+        "Bob",
+        "topic-7",
+    )]
+
+    injected = [message for message in all_messages if message.get("role") == "user"][-1]
+    assert "follow-up from the second speaker" in str(injected["content"])
+    model_messages = provider.chat_with_retry.await_args_list[-1].kwargs["messages"]
+    assert "telegram | group-1 | user-b | message-2" in str(model_messages)
+    assert "Bob | topic-7" in str(model_messages)
+    assert injected["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["identity"]
+
+    loop._save_turn(session, all_messages, skip=1)
+    persisted = [message for message in session.messages if message.get("role") == "user"][-1]
+    assert "telegram | group-1 | user-b | message-2" in str(persisted["content"])
+    assert public_history_message(persisted)["content"] == "follow-up from the second speaker"
+
+
+@pytest.mark.asyncio
 async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage

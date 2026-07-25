@@ -745,14 +745,23 @@ class AgentLoop:
         self,
         ctx: TurnContext,
     ) -> list[RuntimeContextBlock]:
-        tools = ctx.tools or self.tools
+        assert ctx.request_context is not None
+        return await self._resolve_runtime_context_for_request(
+            ctx.request_context,
+            ctx.tools or self.tools,
+        )
+
+    async def _resolve_runtime_context_for_request(
+        self,
+        request: RequestContext,
+        tools: ToolRegistry,
+    ) -> list[RuntimeContextBlock]:
         providers = [
             *tools.get_runtime_context_providers(),
             *self._runtime_context_providers,
         ]
-        assert ctx.request_context is not None
-        blocks = runtime_context_blocks_from_metadata(ctx.request_context.metadata)
-        blocks.extend(await resolve_runtime_context(providers, ctx.request_context))
+        blocks = runtime_context_blocks_from_metadata(request.metadata)
+        blocks.extend(await resolve_runtime_context(providers, request))
         return blocks
 
     async def _dispatch_command_inline(
@@ -855,7 +864,7 @@ class AgentLoop:
             if pending_queue is None:
                 return []
 
-            def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+            async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
@@ -864,6 +873,31 @@ class AgentLoop:
                 user_content = self.context._build_user_content(content, media)
                 row: dict[str, Any] = {"role": "user", "content": user_content}
                 metadata = pending_msg.metadata if isinstance(pending_msg.metadata, dict) else {}
+                if pending_msg.channel != "system":
+                    scope = self.workspace_scopes.for_turn(
+                        channel=pending_msg.channel,
+                        message_metadata=metadata,
+                        session_metadata=session.metadata if session is not None else None,
+                    )
+                    pending_request = RequestContext(
+                        channel=pending_msg.channel,
+                        chat_id=pending_msg.chat_id,
+                        message_id=metadata.get("message_id"),
+                        session_key=active_session_key,
+                        original_user_text=pending_msg.content,
+                        runtime=runtime,
+                        metadata=dict(metadata),
+                        sender_id=pending_msg.sender_id,
+                        turn_id=request_ctx.turn_id,
+                        workspace=scope.project_path,
+                    )
+                    blocks = await self._resolve_runtime_context_for_request(
+                        pending_request,
+                        effective_tools,
+                    )
+                    row["content"], marker = append_runtime_context(user_content, blocks)
+                    if marker is not None:
+                        row["_meta"] = {RUNTIME_CONTEXT_MESSAGE_META: marker}
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"
@@ -880,7 +914,7 @@ class AgentLoop:
             items: list[dict[str, Any]] = []
             while len(items) < limit:
                 try:
-                    items.append(_to_user_message(pending_queue.get_nowait()))
+                    items.append(await _to_user_message(pending_queue.get_nowait()))
                 except asyncio.QueueEmpty:
                     break
 
@@ -898,10 +932,10 @@ class AgentLoop:
                         session.key,
                     )
                     return items
-                items.append(_to_user_message(msg))
+                items.append(await _to_user_message(msg))
                 while len(items) < limit:
                     try:
-                        items.append(_to_user_message(pending_queue.get_nowait()))
+                        items.append(await _to_user_message(pending_queue.get_nowait()))
                     except asyncio.QueueEmpty:
                         break
 
