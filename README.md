@@ -46,18 +46,7 @@
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
-| Deploy to the cloud in one click | [Deploy to Render](#deploy-to-render) |
-
-## Deploy to Render
-
-Run nanobot online without managing a server. The blueprint deploys the gateway and bundled WebUI together, with a persistent disk so sessions, memory, and chat history survive restarts.
-
-> [!IMPORTANT]
-> This setup requires a paid Render service because persistent disks are not available on the free tier. During setup, provide `ANTHROPIC_API_KEY` and set `NANOBOT_WEB_TOKEN` to a strong private password (for example, generate one with `openssl rand -hex 32`).
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
-
-[Review the deployment blueprint](./render.yaml)
+| Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md), including [one-click Render setup](./docs/deployment.md#render) |
 
 ## What can nanobot do?
 
