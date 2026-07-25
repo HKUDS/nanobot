@@ -16,6 +16,7 @@ import { PromptRail } from "@/components/thread/PromptRail";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
+import { ThreadWheelController } from "@/components/thread/thread-wheel";
 import {
   ThreadMotionCoordinator,
   type ThreadMotionGeometry,
@@ -193,6 +194,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const [visibleMessageCount, setVisibleMessageCount] =
     useState(INITIAL_HISTORY_WINDOW);
   const threadMotionRef = useRef<ThreadMotionCoordinator | null>(null);
+  const threadWheelRef = useRef<ThreadWheelController | null>(null);
   if (threadMotionRef.current === null) {
     const camera = new ThreadCameraController(() => scrollRef.current);
     threadMotionRef.current = new ThreadMotionCoordinator({
@@ -235,6 +237,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       onAutoFollow: () => setAtBottom(true),
     });
   }
+  if (threadWheelRef.current === null) {
+    threadWheelRef.current = new ThreadWheelController({
+      getViewport: () => scrollRef.current,
+      onUserIntent: (canScroll) => {
+        threadMotionRef.current?.handleUserScrollIntent(canScroll);
+      },
+    });
+  }
   const hasMessages = messages.length > 0;
   const visibleMessages = useMemo(
     () => windowMessages(messages, visibleMessageCount),
@@ -259,10 +269,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     keyboardInsetBottom > 0 ? { bottom: keyboardInsetBottom } : undefined;
 
   const yieldCameraToUser = useCallback(() => {
+    threadWheelRef.current?.cancel();
     threadMotionRef.current?.takeUserControl();
   }, []);
 
   const scrollToBottomNow = useCallback((smooth = false) => {
+    threadWheelRef.current?.cancel();
     const el = scrollRef.current;
     const marker = bottomRef.current;
     const behavior: ScrollBehavior = smooth ? "smooth" : "auto";
@@ -290,6 +302,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   );
 
   const loadEarlierMessages = useCallback(() => {
+    threadWheelRef.current?.cancel();
     const el = scrollRef.current;
     if (el) {
       restoreScrollAfterPrependRef.current = {
@@ -324,6 +337,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const scrollEl = scrollRef.current;
     const prompt = scrollEl ? findPromptElement(scrollEl, promptId) : null;
     if (!scrollEl || !prompt) return false;
+    threadWheelRef.current?.cancel();
     setAtBottom(false);
     const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
     threadMotionRef.current?.navigateHistoryTo(
@@ -339,6 +353,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (navigateToVisiblePrompt(promptId)) return;
     const index = messages.findIndex((message) => message.id === promptId);
     if (index < 0) return;
+    threadWheelRef.current?.cancel();
     threadMotionRef.current?.takeUserControl();
     pendingPromptJumpRef.current = promptId;
     setAtBottom(false);
@@ -403,6 +418,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (lastConversationKeyRef.current === conversationKey) return;
     lastConversationKeyRef.current = conversationKey;
     pendingConversationScrollRef.current = true;
+    threadWheelRef.current?.cancel();
     threadMotionRef.current?.reset();
     setAtBottom(true);
     setVisibleMessageCount(INITIAL_HISTORY_WINDOW);
@@ -410,6 +426,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   useLayoutEffect(() => {
     if (!conversationReady) {
+      threadWheelRef.current?.cancel();
       threadMotionRef.current?.reset();
       return;
     }
@@ -421,14 +438,18 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const promptIndex = messages.findIndex(
       (message) => message.role === "user" && message.turnId === activeTurnId,
     );
+    const previousTurnId = threadMotionRef.current?.snapshot().turnId;
     if (
       activeTurnStartedHere
       && promptIndex >= 0
-      && threadMotionRef.current?.snapshot().turnId !== activeTurnId
+      && previousTurnId !== activeTurnId
     ) {
       // A turn submitted in this mounted viewport establishes a new prompt
       // origin. A restored turn must first complete open-at-bottom instead.
       pendingConversationScrollRef.current = false;
+    }
+    if (previousTurnId !== activeTurnId) {
+      threadWheelRef.current?.cancel();
     }
     const prompt = promptIndex >= 0 ? messages[promptIndex] : null;
     const hasOutput = promptIndex >= 0
@@ -497,7 +518,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     threadMotionRef.current?.invalidateGeometry();
   }, [composer, hasMessages, visibleMessages.length]);
 
-  useEffect(() => () => threadMotionRef.current?.dispose(), []);
+  useEffect(() => () => {
+    threadWheelRef.current?.dispose();
+    threadMotionRef.current?.dispose();
+  }, []);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -534,6 +558,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
       const owner = threadMotionRef.current?.observeScroll(near) ?? "automatic";
+      if (owner === "automatic") {
+        threadWheelRef.current?.cancel();
+      }
       const logicallyAtBottom = owner === "automatic" || near;
       setAtBottom((current) =>
         current === logicallyAtBottom ? current : logicallyAtBottom,
@@ -547,25 +574,20 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       direction: ThreadScrollDirection | null,
     ) => {
       if (!direction) return;
+      threadWheelRef.current?.cancel();
       threadMotionRef.current?.handleUserScrollIntent(
         canScrollInDirection(el, direction),
       );
     };
     const handleWheel = (event: WheelEvent) => {
-      if (
-        event.defaultPrevented
-        || event.ctrlKey
-        || Math.abs(event.deltaY) <= Math.abs(event.deltaX)
-      ) {
-        return;
-      }
-      handleDirectionalInput(directionFromDelta(event.deltaY));
+      threadWheelRef.current?.handle(event);
     };
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button === 0 && event.target === el) yieldCameraToUser();
     };
     let touchStartY: number | null = null;
     const handleTouchStart = (event: TouchEvent) => {
+      threadWheelRef.current?.cancel();
       touchStartY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
@@ -592,7 +614,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       handleDirectionalInput(keyboardScrollDirection(event));
     };
     el.addEventListener("scroll", handleScroll, { passive: true });
-    el.addEventListener("wheel", handleWheel, { passive: true });
+    el.addEventListener("wheel", handleWheel, { passive: false });
     el.addEventListener("touchstart", handleTouchStart, { passive: true });
     el.addEventListener("touchmove", handleTouchMove, { passive: true });
     el.addEventListener("touchend", handleTouchEnd, { passive: true });
