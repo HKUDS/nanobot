@@ -436,3 +436,134 @@ def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
     assert meta.get("always") is True
     # metadata is a parsed dict, not a JSON string
     assert isinstance(meta.get("metadata"), dict)
+
+
+def test_list_skills_cache_reuses_scan_until_snapshot_changes_or_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    alpha_path = _write_skill(ws_skills, "alpha", body="# Alpha")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    original_scan = loader._skill_entries_from_dir
+    scan_calls = 0
+
+    def scan_with_count(*args: object, **kwargs: object) -> list[dict[str, str]]:
+        nonlocal scan_calls
+        scan_calls += 1
+        return original_scan(*args, **kwargs)
+
+    monkeypatch.setattr(loader, "_skill_entries_from_dir", scan_with_count)
+
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "alpha", "path": str(alpha_path), "source": "workspace"},
+    ]
+    calls_after_first_list = scan_calls
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "alpha", "path": str(alpha_path), "source": "workspace"},
+    ]
+    assert scan_calls == calls_after_first_list
+
+    beta_path = _write_skill(ws_skills, "beta", body="# Beta")
+    entries = sorted(loader.list_skills(filter_unavailable=False), key=lambda item: item["name"])
+    assert entries == [
+        {"name": "alpha", "path": str(alpha_path), "source": "workspace"},
+        {"name": "beta", "path": str(beta_path), "source": "workspace"},
+    ]
+    assert scan_calls > calls_after_first_list
+    calls_after_add = scan_calls
+
+    alpha_path.unlink()
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "beta", "path": str(beta_path), "source": "workspace"},
+    ]
+    assert scan_calls > calls_after_add
+    calls_after_delete = scan_calls
+
+    loader.reload()
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "beta", "path": str(beta_path), "source": "workspace"},
+    ]
+    assert scan_calls > calls_after_delete
+
+
+def test_skill_metadata_cache_reuses_parse_until_signature_changes_or_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    skill_path = _write_skill(ws_skills, "meta", metadata_json={"always": True}, body="# Meta")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    original_parse = loader._parse_skill_frontmatter
+    parse_calls = 0
+
+    def parse_with_count(content: str) -> dict | None:
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(content)
+
+    monkeypatch.setattr(loader, "_parse_skill_frontmatter", parse_with_count)
+
+    assert loader.get_skill_metadata("meta") is not None
+    assert loader.get_skill_metadata("meta") is not None
+    assert parse_calls == 1
+
+    skill_path.write_text(
+        "---\n"
+        "description: Updated description with a different size.\n"
+        "---\n\n# Meta\n",
+        encoding="utf-8",
+    )
+    assert (loader.get_skill_metadata("meta") or {}).get("description") == (
+        "Updated description with a different size."
+    )
+    assert parse_calls == 2
+
+    loader.reload()
+    assert (loader.get_skill_metadata("meta") or {}).get("description") == (
+        "Updated description with a different size."
+    )
+    assert parse_calls == 3
+
+
+def test_metadata_cache_does_not_survive_workspace_shadowing_builtin(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    builtin = tmp_path / "builtin"
+    builtin_path = _write_skill(builtin, "dup", body="# Builtin")
+    builtin_path.write_text(
+        "---\n"
+        "description: Builtin description.\n"
+        "---\n\n# Builtin\n",
+        encoding="utf-8",
+    )
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "dup", "path": str(builtin_path), "source": "builtin"},
+    ]
+    assert (loader.get_skill_metadata("dup") or {}).get("description") == "Builtin description."
+
+    workspace_path = _write_skill(ws_skills, "dup", body="# Workspace")
+    workspace_path.write_text(
+        "---\n"
+        "description: Workspace description wins over builtin.\n"
+        "---\n\n# Workspace\n",
+        encoding="utf-8",
+    )
+
+    assert loader.list_skills(filter_unavailable=False) == [
+        {"name": "dup", "path": str(workspace_path), "source": "workspace"},
+    ]
+    assert (loader.get_skill_metadata("dup") or {}).get("description") == (
+        "Workspace description wins over builtin."
+    )
