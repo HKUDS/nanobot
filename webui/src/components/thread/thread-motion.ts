@@ -3,7 +3,7 @@ import type {
   ThreadCameraFollowResult,
 } from "@/components/thread/thread-camera";
 
-export type ThreadMotionMode =
+type ThreadMotionMode =
   | "idle"
   | "anchor-prompt"
   | "follow-output"
@@ -72,14 +72,14 @@ export interface ThreadMotionGeometry {
   promptTop: number | null;
 }
 
-export interface ThreadMotionTurn {
+interface ThreadMotionTurn {
   id: string | null;
   promptId: string | null;
   hasOutput: boolean;
   entry?: "submitted" | "restored";
 }
 
-export interface ThreadMotionSnapshot {
+interface ThreadMotionSnapshot {
   mode: ThreadMotionMode;
   turnId: string | null;
   promptId: string | null;
@@ -106,13 +106,13 @@ interface ThreadMotionCoordinatorOptions {
   camera: ThreadMotionCamera;
   measure: (promptId: string | null) => ThreadMotionGeometry | null;
   onGeometry?: (geometry: ThreadMotionGeometry) => void;
-  onAutoFollow?: (result: ThreadCameraFollowResult) => void;
+  onAutoFollow?: () => void;
   scheduler?: ThreadMotionScheduler;
 }
 
 const GEOMETRY_EPSILON_PX = 0.5;
 
-export type ThreadScrollOwner = "automatic" | "navigation" | "user";
+type ThreadScrollOwner = "automatic" | "navigation" | "user";
 
 function defaultScheduler(): ThreadMotionScheduler {
   return {
@@ -229,7 +229,7 @@ export class ThreadMotionCoordinator {
     this.camera.cancel();
     this.transition("navigate-history");
     const result = this.camera.navigateTo(top);
-    if (!result || result.kind === "settled") {
+    if (!result || result === "settled") {
       this.transition("navigation-settled");
     }
     return result;
@@ -317,10 +317,10 @@ export class ThreadMotionCoordinator {
       result
       && (
         Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
-        || result.kind === "retargeted"
+        || result === "retargeted"
       )
     ) {
-      this.onAutoFollow?.(result);
+      this.onAutoFollow?.();
     }
   }
 

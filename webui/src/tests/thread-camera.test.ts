@@ -57,20 +57,18 @@ describe("ThreadCameraController", () => {
     expect(thirdStep).toBeLessThan(secondStep);
   });
 
-  it("retargets an active follow without resetting velocity or adding another loop", () => {
-    const { camera, frames, advance } = cameraHarness();
+  it("retargets an active follow without adding another loop", () => {
+    const { camera, viewport, frames, advance } = cameraHarness();
 
-    expect(camera.followTo(100)?.kind).toBe("started");
+    expect(camera.followTo(100)).toBe("started");
     expect(frames).toHaveLength(1);
     advance(16);
-    const moving = camera.snapshot();
-    expect(moving.velocity).toBeGreaterThan(0);
     expect(frames).toHaveLength(1);
 
-    expect(camera.followTo(180)?.kind).toBe("retargeted");
-    expect(camera.snapshot().velocity).toBe(moving.velocity);
-    expect(camera.snapshot().target).toBe(180);
+    expect(camera.followTo(180)).toBe("retargeted");
     expect(frames).toHaveLength(1);
+    for (let frame = 0; frame < 120; frame += 1) advance(16);
+    expect(viewport.scrollTop).toBe(180);
   });
 
   it("tracks repeated target growth as one monotonic camera movement", () => {
@@ -112,11 +110,7 @@ describe("ThreadCameraController", () => {
     expect(frames).toHaveLength(1);
     camera.jumpTo(40);
 
-    expect(camera.snapshot()).toMatchObject({
-      phase: "idle",
-      target: 40,
-      velocity: 0,
-    });
+    expect(camera.isFollowing()).toBe(false);
     expect(viewport.scrollTop).toBe(40);
     expect(scheduler.cancel).toHaveBeenCalledTimes(1);
     expect(frames).toHaveLength(0);
@@ -126,8 +120,8 @@ describe("ThreadCameraController", () => {
     const regular = cameraHarness();
     const reduced = cameraHarness(true);
 
-    expect(regular.camera.followTo(240)?.kind).toBe("started");
-    expect(reduced.camera.followTo(240)?.kind).toBe("started");
+    expect(regular.camera.followTo(240)).toBe("started");
+    expect(reduced.camera.followTo(240)).toBe("started");
 
     regular.advance(16);
     reduced.advance(16);

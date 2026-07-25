@@ -1,4 +1,4 @@
-export interface ThreadCameraMotionProfile {
+interface ThreadCameraMotionProfile {
   /**
    * Time constant for the ease-out chase. Smaller values react faster; the
    * camera closes roughly 95% of an uncapped distance in three time constants.
@@ -12,14 +12,14 @@ export interface ThreadCameraMotionProfile {
   maxFrameDeltaMs: number;
 }
 
-export const THREAD_CAMERA_FOLLOW_MOTION: Readonly<ThreadCameraMotionProfile> = {
+const THREAD_CAMERA_FOLLOW_MOTION: Readonly<ThreadCameraMotionProfile> = {
   responseTimeMs: 90,
   maxSpeedPxPerSecond: 1_200,
   settleDistancePx: 0.5,
   maxFrameDeltaMs: 50,
 };
 
-export const THREAD_CAMERA_NAVIGATION_MOTION: Readonly<ThreadCameraMotionProfile> = {
+const THREAD_CAMERA_NAVIGATION_MOTION: Readonly<ThreadCameraMotionProfile> = {
   responseTimeMs: 110,
   maxSpeedPxPerSecond: 12_000,
   settleDistancePx: 0.5,
@@ -31,14 +31,14 @@ export const THREAD_CAMERA_NAVIGATION_MOTION: Readonly<ThreadCameraMotionProfile
  * to its destination removes the very context that helps users understand
  * where the viewport moved; this profile shortens that motion instead.
  */
-export const THREAD_CAMERA_REDUCED_MOTION: Readonly<ThreadCameraMotionProfile> = {
+const THREAD_CAMERA_REDUCED_MOTION: Readonly<ThreadCameraMotionProfile> = {
   responseTimeMs: 55,
   maxSpeedPxPerSecond: 2_400,
   settleDistancePx: 0.5,
   maxFrameDeltaMs: 50,
 };
 
-export const THREAD_CAMERA_REDUCED_NAVIGATION_MOTION: Readonly<ThreadCameraMotionProfile> = {
+const THREAD_CAMERA_REDUCED_NAVIGATION_MOTION: Readonly<ThreadCameraMotionProfile> = {
   responseTimeMs: 45,
   maxSpeedPxPerSecond: 24_000,
   settleDistancePx: 0.5,
@@ -56,23 +56,10 @@ export interface ThreadCameraScheduler {
   now: () => number;
 }
 
-export interface ThreadCameraSnapshot {
-  phase: "idle" | "following";
-  target: number;
-  velocity: number;
-}
+export type ThreadCameraFollowResult = "started" | "retargeted" | "settled";
 
-export type ThreadCameraFollowResult =
-  | { kind: "started"; from: number; target: number }
-  | { kind: "retargeted"; from: number; target: number }
-  | { kind: "settled"; from: number; target: number };
-
-export interface ThreadCameraOptions {
+interface ThreadCameraOptions {
   scheduler?: ThreadCameraScheduler;
-  motion?: Partial<ThreadCameraMotionProfile>;
-  navigationMotion?: Partial<ThreadCameraMotionProfile>;
-  reducedMotion?: Partial<ThreadCameraMotionProfile>;
-  reducedNavigationMotion?: Partial<ThreadCameraMotionProfile>;
   prefersReducedMotion?: () => boolean;
 }
 
@@ -80,15 +67,14 @@ type ThreadCameraMotionKind = "follow" | "navigation";
 
 /**
  * A time-based ease-out chase rather than a start/end tween. The target can
- * move on every streamed line without restarting a duration or clearing the
- * controller's velocity.
+ * move on every streamed line without restarting a duration or adding another
+ * frame loop.
  */
-export function easeOutChase(
+function easeOutChase(
   current: number,
   target: number,
   deltaSeconds: number,
-  profile: Pick<ThreadCameraMotionProfile, "responseTimeMs" | "maxSpeedPxPerSecond"> =
-    THREAD_CAMERA_FOLLOW_MOTION,
+  profile: Pick<ThreadCameraMotionProfile, "responseTimeMs" | "maxSpeedPxPerSecond">,
 ): number {
   const distance = target - current;
   const responseSeconds = Math.max(0.001, profile.responseTimeMs / 1000);
@@ -117,15 +103,10 @@ function defaultPrefersReducedMotion(): boolean {
 export class ThreadCameraController {
   private readonly getViewport: () => ThreadCameraViewport | null;
   private readonly scheduler: ThreadCameraScheduler;
-  private readonly motion: ThreadCameraMotionProfile;
-  private readonly navigationMotion: ThreadCameraMotionProfile;
-  private readonly reducedMotion: ThreadCameraMotionProfile;
-  private readonly reducedNavigationMotion: ThreadCameraMotionProfile;
   private readonly prefersReducedMotion: () => boolean;
   private frameId: number | null = null;
-  private phase: ThreadCameraSnapshot["phase"] = "idle";
+  private phase: "idle" | "following" = "idle";
   private target = 0;
-  private velocity = 0;
   private lastTimestamp: number | null = null;
   private motionKind: ThreadCameraMotionKind = "follow";
 
@@ -135,31 +116,7 @@ export class ThreadCameraController {
   ) {
     this.getViewport = getViewport;
     this.scheduler = options.scheduler ?? defaultScheduler();
-    this.motion = normalizeMotionProfile(
-      THREAD_CAMERA_FOLLOW_MOTION,
-      options.motion,
-    );
-    this.navigationMotion = normalizeMotionProfile(
-      THREAD_CAMERA_NAVIGATION_MOTION,
-      options.navigationMotion,
-    );
-    this.reducedMotion = normalizeMotionProfile(
-      THREAD_CAMERA_REDUCED_MOTION,
-      options.reducedMotion,
-    );
-    this.reducedNavigationMotion = normalizeMotionProfile(
-      THREAD_CAMERA_REDUCED_NAVIGATION_MOTION,
-      options.reducedNavigationMotion,
-    );
     this.prefersReducedMotion = options.prefersReducedMotion ?? defaultPrefersReducedMotion;
-  }
-
-  snapshot(): ThreadCameraSnapshot {
-    return {
-      phase: this.phase,
-      target: this.target,
-      velocity: this.velocity,
-    };
   }
 
   isFollowing(): boolean {
@@ -188,24 +145,23 @@ export class ThreadCameraController {
   ): ThreadCameraFollowResult | null {
     const viewport = this.getViewport();
     if (!viewport) return null;
-    const from = viewport.scrollTop;
+    const current = viewport.scrollTop;
     this.target = Math.max(0, top);
     this.motionKind = motionKind;
 
     const motion = this.currentMotion(motionKind);
     if (this.phase === "following") {
-      return { kind: "retargeted", from, target: this.target };
+      return "retargeted";
     }
-    if (Math.abs(this.target - from) <= motion.settleDistancePx) {
+    if (Math.abs(this.target - current) <= motion.settleDistancePx) {
       this.write(viewport, this.target);
-      return { kind: "settled", from, target: this.target };
+      return "settled";
     }
 
     this.phase = "following";
-    this.velocity = 0;
     this.lastTimestamp = this.scheduler.now();
     this.frameId = this.scheduler.request(this.advance);
-    return { kind: "started", from, target: this.target };
+    return "started";
   }
 
   cancel(): void {
@@ -214,7 +170,6 @@ export class ThreadCameraController {
       this.frameId = null;
     }
     this.phase = "idle";
-    this.velocity = 0;
     this.lastTimestamp = null;
     this.motionKind = "follow";
   }
@@ -243,7 +198,6 @@ export class ThreadCameraController {
     if (Math.abs(remainingDistance) <= motion.settleDistancePx) {
       this.write(viewport, this.target);
       this.phase = "idle";
-      this.velocity = 0;
       this.lastTimestamp = null;
       return;
     }
@@ -255,13 +209,11 @@ export class ThreadCameraController {
       deltaSeconds,
       motion,
     );
-    this.velocity = (nextTop - current) / deltaSeconds;
     const settled = Math.abs(this.target - nextTop) <= motion.settleDistancePx;
     this.write(viewport, settled ? this.target : nextTop);
 
     if (settled) {
       this.phase = "idle";
-      this.velocity = 0;
       this.lastTimestamp = null;
       return;
     }
@@ -271,10 +223,12 @@ export class ThreadCameraController {
   private currentMotion(kind: ThreadCameraMotionKind): ThreadCameraMotionProfile {
     if (kind === "navigation") {
       return this.prefersReducedMotion()
-        ? this.reducedNavigationMotion
-        : this.navigationMotion;
+        ? THREAD_CAMERA_REDUCED_NAVIGATION_MOTION
+        : THREAD_CAMERA_NAVIGATION_MOTION;
     }
-    return this.prefersReducedMotion() ? this.reducedMotion : this.motion;
+    return this.prefersReducedMotion()
+      ? THREAD_CAMERA_REDUCED_MOTION
+      : THREAD_CAMERA_FOLLOW_MOTION;
   }
 
   private write(viewport: ThreadCameraViewport, top: number): void {
@@ -288,28 +242,4 @@ export class ThreadCameraController {
       }
     }
   }
-}
-
-function normalizeMotionProfile(
-  defaults: Readonly<ThreadCameraMotionProfile>,
-  overrides?: Partial<ThreadCameraMotionProfile>,
-): ThreadCameraMotionProfile {
-  return {
-    responseTimeMs: Math.max(
-      1,
-      overrides?.responseTimeMs ?? defaults.responseTimeMs,
-    ),
-    maxSpeedPxPerSecond: Math.max(
-      0,
-      overrides?.maxSpeedPxPerSecond ?? defaults.maxSpeedPxPerSecond,
-    ),
-    settleDistancePx: Math.max(
-      0,
-      overrides?.settleDistancePx ?? defaults.settleDistancePx,
-    ),
-    maxFrameDeltaMs: Math.max(
-      1,
-      overrides?.maxFrameDeltaMs ?? defaults.maxFrameDeltaMs,
-    ),
-  };
 }

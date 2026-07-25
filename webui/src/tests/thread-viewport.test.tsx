@@ -445,7 +445,7 @@ describe("ThreadViewport", () => {
   it("drives the camera from a message commit when canonical replay replaces the prompt DOM id", async () => {
     const resizeObserver = stubResizeObserver();
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
-      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+      .mockReturnValue("started");
 
     try {
       const optimistic: UIMessage[] = [
@@ -557,7 +557,7 @@ describe("ThreadViewport", () => {
   it("coalesces streamed layout growth into frame-driven camera targets", async () => {
     const resizeObserver = stubResizeObserver();
     const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
-      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+      .mockReturnValue("started");
 
     try {
       const threaded: UIMessage[] = [
@@ -1173,7 +1173,7 @@ describe("ThreadViewport", () => {
 
   it("renders a prompt rail that jumps to user messages", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
-      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+      .mockReturnValue("started");
     const scrollTo = vi.fn();
     const { promptEls } = await renderPromptRailViewport({ scrollTo });
 
@@ -1213,7 +1213,7 @@ describe("ThreadViewport", () => {
 
   it("lets direct paging input interrupt prompt rail navigation", async () => {
     vi.spyOn(ThreadCameraController.prototype, "navigateTo")
-      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+      .mockReturnValue("started");
     const cancel = vi.spyOn(ThreadCameraController.prototype, "cancel");
     const { scroller } = await renderPromptRailViewport();
     const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
@@ -1252,7 +1252,7 @@ describe("ThreadViewport", () => {
 
   it("opens a prompt navigator list and jumps to a selected prompt", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
-      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+      .mockReturnValue("started");
     const promptMessages = makeLongMessages(5);
     const { container } = render(<ViewportWithPromptNavigator messages={promptMessages} />);
 
@@ -1341,7 +1341,7 @@ describe("ThreadViewport", () => {
 
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
-      .mockImplementation((target) => ({ kind: "started", from: 0, target }));
+      .mockReturnValue("started");
     const promptMessages = makeLongMessages(100);
     const { container } = render(
       <ThreadViewport

@@ -36,19 +36,11 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     }),
     dispose: vi.fn(),
     jumpTo: vi.fn(),
-    followTo: vi.fn((target: number) => ({
-      kind: "started" as const,
-      from: geometry.scrollTop,
-      target,
-    })),
+    followTo: vi.fn(() => "started" as const),
     isFollowing: vi.fn(() => cameraFollowing),
-    navigateTo: vi.fn((target: number) => {
+    navigateTo: vi.fn(() => {
       cameraFollowing = true;
-      return {
-        kind: "started" as const,
-        from: geometry.scrollTop,
-        target,
-      };
+      return "started" as const;
     }),
   };
   const onGeometry = vi.fn();
