@@ -410,19 +410,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   useLayoutEffect(() => {
     if (!conversationReady) {
-      threadMotionRef.current?.updateTurn({
-        id: null,
-        promptId: null,
-        hasOutput: false,
-      });
+      threadMotionRef.current?.reset();
       return;
     }
     if (!activeTurnId) {
-      threadMotionRef.current?.updateTurn({
-        id: null,
-        promptId: null,
-        hasOutput: false,
-      });
+      threadMotionRef.current?.completeTurn();
       return;
     }
 

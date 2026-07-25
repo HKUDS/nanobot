@@ -7,6 +7,7 @@ export type ThreadMotionMode =
   | "idle"
   | "anchor-prompt"
   | "follow-output"
+  | "follow-completion"
   | "navigating-history"
   | "browsing-history";
 
@@ -20,6 +21,7 @@ type ThreadMotionEvent =
   | "navigation-settled"
   | "user-scroll"
   | "boundary-scroll"
+  | "turn-completed"
   | "resume-follow";
 
 type ThreadMotionTransition = ThreadMotionMode | "current-automatic-mode";
@@ -37,8 +39,14 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
   "anchor-prompt": {
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
+    "turn-completed": "follow-completion",
   },
   "follow-output": {
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+    "turn-completed": "follow-completion",
+  },
+  "follow-completion": {
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },
@@ -154,8 +162,7 @@ export class ThreadMotionCoordinator {
 
   updateTurn(turn: ThreadMotionTurn): void {
     if (!turn.id) {
-      this.clearTurn();
-      this.invalidateGeometry();
+      this.completeTurn();
       return;
     }
 
@@ -170,6 +177,21 @@ export class ThreadMotionCoordinator {
     } else if (!this.isHistoryMode() && this.promptPositioned) {
       this.mode = turn.hasOutput ? "follow-output" : "anchor-prompt";
     }
+    this.invalidateGeometry();
+  }
+
+  completeTurn(): void {
+    if (!this.turn.id) {
+      this.invalidateGeometry();
+      return;
+    }
+    // Protocol completion can share a React commit with the last large text
+    // batch and begins the run-drawer exit. Keep camera ownership through
+    // those final layout changes; only a new turn or explicit user navigation
+    // may end completion follow.
+    this.transition("turn-completed");
+    this.turn = { id: null, promptId: null, hasOutput: false };
+    this.promptPositioned = false;
     this.invalidateGeometry();
   }
 
@@ -262,17 +284,6 @@ export class ThreadMotionCoordinator {
     this.camera.dispose();
   }
 
-  private clearTurn(): void {
-    const hadActiveTurn = this.turn.id !== null;
-    if (hadActiveTurn) {
-      this.camera.cancel();
-      this.transition("navigation-settled");
-    }
-    this.turn = { id: null, promptId: null, hasOutput: false };
-    if (!this.isHistoryMode()) this.mode = "idle";
-    this.promptPositioned = false;
-  }
-
   private isHistoryMode(): boolean {
     return (
       this.mode === "navigating-history"
@@ -299,6 +310,20 @@ export class ThreadMotionCoordinator {
     return true;
   }
 
+  private followGeometry(geometry: ThreadMotionGeometry): void {
+    const target = geometry.maxScrollTop;
+    const result = this.camera.followTo(target);
+    if (
+      result
+      && (
+        Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
+        || result.kind === "retargeted"
+      )
+    ) {
+      this.onAutoFollow?.(result);
+    }
+  }
+
   private readonly flushGeometry = (): void => {
     this.measurementFrameId = null;
     if (!this.geometryDirty) return;
@@ -312,6 +337,10 @@ export class ThreadMotionCoordinator {
     if (!geometry) return;
     this.onGeometry?.(geometry);
 
+    if (this.mode === "follow-completion") {
+      this.followGeometry(geometry);
+      return;
+    }
     if (this.isHistoryMode() || !this.turn.id) return;
     if (!this.turn.promptId && this.turn.entry !== "restored") {
       this.mode = "anchor-prompt";
@@ -348,16 +377,6 @@ export class ThreadMotionCoordinator {
     }
 
     this.mode = "follow-output";
-    const target = geometry.maxScrollTop;
-    const result = this.camera.followTo(target);
-    if (
-      result
-      && (
-        Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
-        || result.kind === "retargeted"
-      )
-    ) {
-      this.onAutoFollow?.(result);
-    }
+    this.followGeometry(geometry);
   };
 }

@@ -156,6 +156,50 @@ describe("ThreadMotionCoordinator", () => {
     expect(camera.cancel).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "geometry-before-completion",
+    "completion-before-geometry",
+  ] as const)("keeps following final layout for %s ordering", (ordering) => {
+    const {
+      camera,
+      coordinator,
+      advanceFrame,
+      setGeometry,
+    } = motionHarness();
+    coordinator.updateTurn({
+      id: "turn-1",
+      promptId: "prompt-1",
+      hasOutput: true,
+    });
+    advanceFrame();
+    camera.cancel.mockClear();
+    camera.followTo.mockClear();
+
+    const applyFinalGeometry = () => {
+      setGeometry({
+        scrollTop: 1_400,
+        scrollHeight: 2_400,
+      });
+      coordinator.invalidateGeometry();
+    };
+    if (ordering === "geometry-before-completion") applyFinalGeometry();
+    coordinator.completeTurn();
+    if (ordering === "completion-before-geometry") applyFinalGeometry();
+
+    expect(coordinator.snapshot().mode).toBe("follow-completion");
+    expect(camera.cancel).not.toHaveBeenCalled();
+    advanceFrame();
+    expect(camera.followTo).toHaveBeenLastCalledWith(1_900);
+
+    setGeometry({
+      scrollTop: 1_900,
+      scrollHeight: 2_450,
+    });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+    expect(camera.followTo).toHaveBeenLastCalledWith(1_950);
+  });
+
   it("keeps turn identity stable when canonical replay replaces DOM ids", () => {
     const {
       camera,
@@ -305,8 +349,9 @@ describe("ThreadMotionCoordinator", () => {
     expect(camera.followTo).not.toHaveBeenCalled();
   });
 
-  it("settles history navigation when clearing its active turn cancels the camera", () => {
+  it("keeps history navigation independent from active turn completion", () => {
     const {
+      camera,
       coordinator,
       advanceFrame,
     } = motionHarness();
@@ -317,14 +362,12 @@ describe("ThreadMotionCoordinator", () => {
     });
     advanceFrame();
     coordinator.navigateHistoryTo(900);
+    camera.cancel.mockClear();
 
-    coordinator.updateTurn({
-      id: null,
-      promptId: null,
-      hasOutput: false,
-    });
+    coordinator.completeTurn();
 
-    expect(coordinator.snapshot().mode).toBe("browsing-history");
+    expect(camera.cancel).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("navigating-history");
   });
 
   it("moves from rail navigation to history browsing on user intent", () => {

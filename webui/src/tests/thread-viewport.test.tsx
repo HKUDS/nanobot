@@ -666,7 +666,6 @@ describe("ThreadViewport", () => {
             ]}
             isStreaming={false}
             composer={<div>composer</div>}
-            activeTurnId="turn-2"
           />,
         );
       });
