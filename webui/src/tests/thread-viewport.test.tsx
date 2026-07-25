@@ -997,6 +997,10 @@ describe("ThreadViewport", () => {
     });
 
     await waitFor(() => expect(scroller).toHaveClass("overflow-y-auto"));
+    expect(scroller).toHaveClass(
+      "[scrollbar-width:none]",
+      "[&::-webkit-scrollbar]:hidden",
+    );
   });
 
   it("scrolls recent messages into view when the composer receives focus", async () => {
