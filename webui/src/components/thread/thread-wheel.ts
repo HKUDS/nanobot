@@ -32,6 +32,13 @@ const THREAD_WHEEL_CAMERA_MOTION = {
   maxFrameDeltaMs: 40,
 } as const;
 
+const THREAD_WHEEL_REDUCED_MOTION = {
+  responseTimeMs: 65,
+  maxSpeedPxPerSecond: 4_800,
+  settleDistancePx: 0.5,
+  maxFrameDeltaMs: 40,
+} as const;
+
 function defaultScheduler(): ThreadCameraScheduler {
   return {
     request: (callback) => window.requestAnimationFrame(callback),
@@ -144,7 +151,7 @@ export class ThreadWheelController {
     this.camera = new ThreadCameraController(this.getViewport, {
       scheduler: this.scheduler,
       motion: THREAD_WHEEL_CAMERA_MOTION,
-      reducedMotion: THREAD_WHEEL_CAMERA_MOTION,
+      reducedMotion: THREAD_WHEEL_REDUCED_MOTION,
       prefersReducedMotion: this.prefersReducedMotion,
     });
   }
@@ -178,11 +185,7 @@ export class ThreadWheelController {
     }
 
     const mode = this.resolveInputMode(event, deltaY, now);
-    if (
-      mode === "native"
-      || !event.cancelable
-      || this.prefersReducedMotion()
-    ) {
+    if (mode === "native" || !event.cancelable) {
       this.useNativeInput(now);
       return false;
     }
