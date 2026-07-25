@@ -50,11 +50,14 @@
 
 ## Deploy to Render
 
-Deploy nanobot's gateway and bundled WebUI as a single web service with persistent memory. Render reads [`render.yaml`](./render.yaml) and prompts for two secrets on deploy: `ANTHROPIC_API_KEY` and `NANOBOT_WEB_TOKEN` (the password that gates the public WebUI — generate a strong random value, e.g. `openssl rand -hex 32`).
+Run nanobot online without managing a server. The blueprint deploys the gateway and bundled WebUI together, with a persistent disk so sessions, memory, and chat history survive restarts.
 
-> **Note:** The blueprint attaches a persistent disk so sessions, memory, and WebUI history survive restarts. Persistent disks require a paid service (they are not available on Render's free tier).
+> [!IMPORTANT]
+> This setup requires a paid Render service because persistent disks are not available on the free tier. During setup, provide `ANTHROPIC_API_KEY` and set `NANOBOT_WEB_TOKEN` to a strong private password (for example, generate one with `openssl rand -hex 32`).
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
+
+[Review the deployment blueprint](./render.yaml)
 
 ## What can nanobot do?
 
@@ -68,19 +71,20 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 - expose a Python SDK and OpenAI-compatible API for integrations
 - deploy as a long-running local or server-side agent gateway
 
-## Latest Release
+## Releases
 
-**v0.2.2 - Durability Release**
+**Coming next: v0.3.0 - The Agency Release**
 
-Highlights:
+The Agency Release turns nanobot from a durable workbench into an agent runtime that can coordinate helpers, switch models per session, and carry authorized work through to completion.
 
-- Segmented WebUI transcripts
-- Python SDK runtime controls
-- Automation management
-- Search/STT provider improvements
-- Gateway/session/provider reliability
+- Consult inline subagents without leaving the current task
+- Switch model presets per session directly from the composer
+- Start from a guided WebUI setup with clearer execution controls
+- Apply configuration changes live across a more reliable provider, channel, and tool runtime
 
-[See full changelog](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2)
+[Follow the v0.3.0 release candidate](https://github.com/HKUDS/nanobot/pull/5081)
+
+**Current stable:** [v0.2.2 - The Durability Release](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2)
 
 ## Open Source Partners
 
@@ -91,11 +95,11 @@ Highlights:
 
 ## Recent Updates
 
-- **2026-07-12** Explicit `/goal` activation, safer runtime and workspace access.
-- **2026-07-11** Syntax-highlighted previews and diffs, queued prompts, safer edits.
-- **2026-07-10** Stable model routing, multiline CLI input, new automation guide.
-- **2026-07-09** Live file-edit diffs, safer localhost setup, Matrix image fixes.
-- **2026-07-08** Safer WebUI/API setup, onboard refresh, responsive prompt rail.
+- **2026-07-24** Guided first-run setup, inline subagents, and model switching from the composer.
+- **2026-07-23** Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
+- **2026-07-22** Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
+- **2026-07-21** Codex fast mode, visible skill references, safer configuration saves, and sturdier task cleanup.
+- **2026-07-20** Cleaner code blocks and copy actions, self-contained channels, and steadier QQ reconnects.
 
 For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
 
