@@ -327,7 +327,7 @@ describe("MessageBubble", () => {
     );
   });
 
-  it("approximates replayed completion time from existing message timing", () => {
+  it("does not infer completion time from the assistant creation timestamp", () => {
     const createdAt = Date.UTC(2026, 6, 25, 12, 34, 0);
     const latencyMs = 13_000;
     const { container } = render(
@@ -342,8 +342,7 @@ describe("MessageBubble", () => {
       />,
     );
 
-    expect(container.querySelector("[data-assistant-completed-at]"))
-      .toHaveTextContent(formatMessageEndTime(createdAt + latencyMs));
+    expect(container.querySelector("[data-assistant-completed-at]")).not.toBeInTheDocument();
   });
 
   it("renders installed CLI app mentions inside sent user messages", () => {

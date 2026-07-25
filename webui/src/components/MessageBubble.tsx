@@ -239,13 +239,7 @@ export function MessageBubble({
   const showCopyButton = showCopyAction && showAssistantActions;
   const showForkButton = showAssistantActions && !!onForkFromHere;
   const forkLabel = t("message.forkFromHere");
-  const completedAt =
-    message.completedAt
-    ?? (
-      message.latencyMs !== undefined
-        ? message.createdAt + message.latencyMs
-        : undefined
-    );
+  const completedAt = message.completedAt;
   const completedAtLabel =
     message.role === "assistant" && !message.isStreaming
       ? formatMessageEndTime(completedAt)
