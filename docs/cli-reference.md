@@ -95,7 +95,7 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
 | `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
 | `nanobot webui --gateway-port <port>` | Override the gateway health port |
-| `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; provider credentials still require interactive setup |
+| `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; configure provider credentials in **Settings → Models** |
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 

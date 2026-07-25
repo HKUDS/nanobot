@@ -201,7 +201,7 @@ These variables are process-level switches. Set them in the same terminal, servi
 |----------|---------|-------------|
 | `NANOBOT_BIN_DIR` | `$HOME/.local/bin` | Installer launcher directory on macOS/Linux. |
 | `NANOBOT_VENV` | `$HOME/.nanobot/venv` | Managed virtual environment path used by the installer fallback. |
-| `NANOBOT_SKIP_WIZARD` | unset | Set to `1` to skip `nanobot onboard --wizard` after one-command install. |
+| `NANOBOT_SKIP_WIZARD` | unset | Set to `1` to skip automatic WebUI or wizard setup after one-command install. |
 | `NANOBOT_SKIP_WEBUI_BUILD` | unset | Set to `1` to skip bundling the WebUI during package builds. |
 | `NANOBOT_FORCE_WEBUI_BUILD` | unset | Set to `1` to rebuild the bundled WebUI even when `nanobot/web/dist/index.html` already exists. |
 | `NANOBOT_EXTRAS` | unset | Docker build argument containing comma-separated Python extras such as `bedrock`. |

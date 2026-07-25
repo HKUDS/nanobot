@@ -125,7 +125,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. When Quick Start finishes, run `nanobot webui`. The installer also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
+The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -240,7 +240,7 @@ For one request and an immediate exit, use:
 nanobot agent -m "Hello!"
 ```
 
-The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot onboard --wizard` first.
+The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot webui` and open **Settings → Models** first.
 
 Need manual JSON, another device on your LAN, or help with provider/model matching? Continue with [Install and Quick Start](./docs/quick-start.md), [WebUI](./docs/webui.md), or [Troubleshooting](./docs/troubleshooting.md).
 
