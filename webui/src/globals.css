@@ -401,11 +401,14 @@
     animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
+    --composer-status-drawer-duration: 600ms;
+
     display: grid;
     grid-template-rows: 0fr;
     pointer-events: none;
     transition:
-      grid-template-rows 420ms cubic-bezier(0.16, 1, 0.3, 1);
+      grid-template-rows var(--composer-status-drawer-duration)
+        cubic-bezier(0.16, 1, 0.3, 1);
   }
   .composer-status-drawer[data-state="open"] {
     grid-template-rows: 1fr;
@@ -420,8 +423,10 @@
     transform: translateY(8px);
     transform-origin: bottom center;
     transition:
-      opacity 280ms cubic-bezier(0.16, 1, 0.3, 1),
-      transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+      opacity var(--composer-status-drawer-duration)
+        cubic-bezier(0.16, 1, 0.3, 1),
+      transform var(--composer-status-drawer-duration)
+        cubic-bezier(0.16, 1, 0.3, 1);
   }
   .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
     opacity: 1;
