@@ -125,7 +125,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps below and go straight to **Open the WebUI**. The installer also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. When Quick Start finishes, run `nanobot webui`. The installer also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -185,97 +185,64 @@ If `nanobot` is not on `PATH`, invoke it through the method that installed it: r
 
 ## 🚀 Quick Start
 
-**1. Initialize**
-
-Skip this step if the one-command setup already started the wizard and Quick Start finished there.
+**Open nanobot in your browser**
 
 ```bash
-nanobot onboard
+nanobot webui
 ```
 
-Use `nanobot onboard --wizard` if you prefer an interactive setup.
+This is the recommended first run. The launcher creates the config and workspace when needed, safely enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). A fresh install can open before a model is configured, so setup continues in the browser instead of beginning in a JSON file. The first-run WebUI binds to localhost by default and is not exposed to your LAN.
 
-**2. Configure** (`~/.nanobot/config.json`)
+**Your first three steps**
 
-Skip this step if you already configured provider and model settings in the wizard.
+1. Open **Settings → Models** and choose a provider, credential, and model.
+2. Start a new topic and send `Hello!` to verify the connection.
+3. Before project work, choose the intended workspace and access mode from the composer.
 
-`nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
+Any normal reply means the provider, model, workspace, and browser gateway are working together.
 
-The example below uses a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service. Provider examples are recipes, not rankings or endorsements. For copyable provider-specific setup, see [Provider Cookbook](./docs/provider-cookbook.md).
+**Keep nanobot running after you close the terminal**
 
-*Set your API key*:
-
-```json
-{
-  "providers": {
-    "custom": {
-      "apiKey": "your-api-key",
-      "apiBase": "https://api.example.com/v1"
-    }
-  }
-}
+```bash
+nanobot webui --background
 ```
 
-*Set a model preset and make it active*:
+This starts the same full gateway as `nanobot webui`, opens the browser, and leaves channels and automations running after the launcher exits. Complete first-time model setup with foreground `nanobot webui` before switching to background mode.
 
-```json
-{
-  "modelPresets": {
-    "primary": {
-      "label": "Primary",
-      "provider": "custom",
-      "model": "model-id-from-your-provider",
-      "maxTokens": 8192,
-      "contextWindowTokens": 200000,
-      "temperature": 0.1
-    }
-  },
-  "agents": {
-    "defaults": {
-      "modelPreset": "primary"
-    }
-  }
-}
+```bash
+nanobot gateway status
+nanobot gateway logs
+nanobot gateway restart
+nanobot gateway stop
 ```
 
-Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and `fallbackModels`.
-
-For another provider, the same config shape still applies:
-
-| Replace | Where |
-|---|---|
-| Provider config key | `providers.<provider>` |
-| API key | `providers.<provider>.apiKey` |
-| Preset provider name | `modelPresets.primary.provider` |
-| Model ID | `modelPresets.primary.model` |
-| Endpoint URL, only when needed | `providers.<provider>.apiBase` |
-
-**3. Open the WebUI**
-
-The stable-compatible path is:
+**Prefer a gateway-first workflow?**
 
 ```bash
 nanobot gateway
 ```
 
-Leave the terminal open and visit `http://127.0.0.1:8765`. Current source versions also provide `nanobot webui`, which prepares the local WebSocket channel if needed, starts the gateway, and opens the browser automatically. The first-run WebUI binds to `127.0.0.1` by default, so it is not exposed to your LAN. Prefer not to keep a terminal open? Use `nanobot gateway --background`, then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+This skips WebUI setup and browser opening, then runs the same complete gateway in the current terminal. It is the familiar entry point if you are coming from OpenClaw or already operate agents as long-lived services. The WebUI remains available when its channel is configured; open it manually when needed.
 
-For manual or terminal-only setup, test one CLI message:
+Use `nanobot gateway --background` for the same direct entry point without keeping the terminal attached. For automatic startup and supervision by the operating system, see [Deployment](./docs/deployment.md).
 
-```bash
-nanobot status
-nanobot agent -m "Hello!"
-```
-
-In `nanobot status`, it is normal for most providers to say `not set`. The active preset's provider should be configured, and `Config` plus `Workspace` should show check marks.
-
-If that works, start an interactive chat:
+**Prefer to work entirely in the terminal?**
 
 ```bash
 nanobot agent
 ```
 
-Need help with `PATH`, API keys, provider/model matching, or JSON errors? See the fuller [Install and Quick Start](./docs/quick-start.md) and [Troubleshooting](./docs/troubleshooting.md).
+This opens an interactive terminal chat with the same configured model, workspace, and tools while keeping its own CLI session history. It does not open a browser or keep chat channels and automations running after you exit. Type `exit` or press `Ctrl+C` when you are done.
+
+For one request and an immediate exit, use:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot onboard --wizard` first.
+
+Need manual JSON, another device on your LAN, or help with provider/model matching? Continue with [Install and Quick Start](./docs/quick-start.md), [WebUI](./docs/webui.md), or [Troubleshooting](./docs/troubleshooting.md).
 
 - Want a pasteable provider setup? See [Provider Cookbook](./docs/provider-cookbook.md)
 - Want to understand provider/model matching? See [Providers and Models](./docs/providers.md)
@@ -286,24 +253,20 @@ Need help with `PATH`, API keys, provider/model matching, or JSON errors? See th
 
 ## 🌐 WebUI
 
-The WebUI ships **inside the published wheel** — no extra build step. It is the browser workbench for topics, workspace controls, Apps, Skills, Automations, and settings. For the full user guide, see [`docs/webui.md`](./docs/webui.md).
+The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, visible agent activity, workspace controls, Apps, Skills, Automations, and settings.
 
 <p align="center">
   <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
 </p>
 
-**Open it**
+Use it to:
 
-```bash
-nanobot webui
-```
+- keep separate topics for different tasks and projects;
+- inspect reasoning, tool calls, file edits, diffs, command output, and generated artifacts;
+- switch models and workspaces without leaving the conversation;
+- configure providers, chat channels, Apps, Skills, and Automations from one place.
 
-On current source versions, the command enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). If your installed stable release does not include `nanobot webui`, run `nanobot gateway` and open that address manually. To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
-
-The WebUI is served by the WebSocket channel on port `8765` by default. The gateway's `18790` port is for the health endpoint, not the browser UI.
-
-> [!TIP]
-> Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the source-tree, Vite dev server, build, and test workflow.
+See the [WebUI guide](./docs/webui.md) for LAN access, background operation, workspace controls, and the full feature tour. Working on the frontend itself? Use [`webui/README.md`](./webui/README.md).
 
 ## 🏗️ Architecture
 
