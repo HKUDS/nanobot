@@ -753,7 +753,7 @@ function RunElapsedStrip({
       <div className="composer-status-drawer-clip">
         {display ? (
           <div
-            className="composer-status-drawer-content flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+            className="composer-status-drawer-content flex min-h-[36px] items-center gap-2 px-3 py-2"
             role="status"
             aria-label={ariaLabel}
           >
